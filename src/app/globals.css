@@ -90,11 +90,15 @@ main {
 /* --- En-tête ------------------------------------------------------------ */
 header.app {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 18px;
+  gap: 12px;
+  flex-wrap: nowrap; /* les icônes restent sur la ligne du titre */
+  margin-bottom: 6px;
+}
+
+.brand {
+  min-width: 0; /* laisse le titre/sous-titre rétrécir plutôt que pousser les icônes */
 }
 
 header.app h1 {
@@ -108,13 +112,17 @@ header.app .sub {
   font-size: 0.82rem;
 }
 
-.userbar {
+.hello {
+  margin: 0 0 16px;
+  font-size: 1.1rem;
+  font-weight: 500;
+}
+
+.actions {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  font-size: 0.85rem;
-  color: var(--pico-muted-color);
+  gap: 8px;
+  flex-shrink: 0; /* les icônes ne se compressent pas */
 }
 
 /* Bouton-icône compact (thème, etc.), même gabarit que la déconnexion en icône */
@@ -131,7 +139,7 @@ header.app .sub {
   display: block;
 }
 
-.userbar button {
+.actions button {
   margin: 0;
   padding: 6px 12px;
   font-size: 0.82rem;

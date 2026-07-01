@@ -337,12 +337,11 @@ export default function Home() {
   return (
     <main>
       <header className="app">
-        <div>
+        <div className="brand">
           <h1>🎾 Squash de l'Yvette</h1>
           <div className="sub">Planning Terrains, Le Complexe, Bures</div>
         </div>
-        <div className="userbar">
-          <span>Bonjour {me.split(" ")[0]}</span>
+        <div className="actions">
           <ThemeToggle />
           <button
             className="secondary logout"
@@ -355,6 +354,8 @@ export default function Home() {
           </button>
         </div>
       </header>
+
+      <p className="hello">Bonjour {me.split(" ")[0]} 👋</p>
 
       <div className="toolbar">
         <button className="secondary" onClick={() => setDate(addDays(date, -1))}>←</button>
