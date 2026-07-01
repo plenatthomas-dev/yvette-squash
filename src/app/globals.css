@@ -27,8 +27,6 @@
   --booked-fg: #9c2f56;
   --group: #dbe7ff;
   --group-fg: #29508f;
-  --mine: #fff2cf;
-  --mine-fg: #8a6a12;
   --closed: #eceef2;
   --accent: #2f6fe0;
   --notice-bg: #eef2f8;
@@ -50,8 +48,6 @@
     --booked-fg: #d79ab0;
     --group: #1b2a4a;
     --group-fg: #bcd2ff;
-    --mine: #3c3413;
-    --mine-fg: #ffdf8a;
     --closed: #14171d;
     --accent: #4f8cff;
     --notice-bg: #1d2330;
@@ -70,8 +66,6 @@
   --booked-fg: #d79ab0;
   --group: #1b2a4a;
   --group-fg: #bcd2ff;
-  --mine: #3c3413;
-  --mine-fg: #ffdf8a;
   --closed: #14171d;
   --accent: #4f8cff;
   --notice-bg: #1d2330;
@@ -344,11 +338,15 @@ td.cell.closed {
   background: var(--closed);
 }
 
+/* Mes créneaux : même bleu que l'asso ; seule l'étoile (★) dans le contenu me distingue. */
 td.cell.mine {
-  background: var(--mine);
-  color: var(--mine-fg);
-  font-weight: 700;
-  font-size: 0.75rem;
+  background: var(--group);
+  color: var(--group-fg);
+  font-weight: 600;
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 td.cell.past {
