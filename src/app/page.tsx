@@ -23,6 +23,54 @@ function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 }
 
+// --- Filtre de plage horaire -------------------------------------------------
+type Range = "all" | "morning" | "afternoon" | "evening";
+const RANGES: { key: Range; label: string }[] = [
+  { key: "all", label: "Journée" },
+  { key: "morning", label: "Matin" },
+  { key: "afternoon", label: "Après-midi" },
+  { key: "evening", label: "Soir" },
+];
+// Minutes depuis minuit lues directement dans l'ISO (évite tout décalage de fuseau).
+function slotMinutes(iso: string): number {
+  const m = iso.match(/T(\d{2}):(\d{2})/);
+  return m ? +m[1] * 60 + +m[2] : 0;
+}
+function inRange(iso: string, r: Range): boolean {
+  const t = slotMinutes(iso);
+  switch (r) {
+    case "morning": // 9h00 → 12h00 inclus
+      return t >= 9 * 60 && t <= 12 * 60;
+    case "afternoon": // 12h30 → 17h30 inclus
+      return t >= 12 * 60 + 30 && t <= 17 * 60 + 30;
+    case "evening": // à partir de 18h00
+      return t >= 18 * 60;
+    default:
+      return true;
+  }
+}
+
+// Icône « déconnexion » (flèche sortant d'une porte)
+function LogoutIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
+  );
+}
+
 interface JournalEntry {
   id: string;
   displayName: string;
@@ -39,6 +87,7 @@ export default function Home() {
   const [journal, setJournal] = useState<JournalEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [range, setRange] = useState<Range>("all");
 
   const checkMe = useCallback(async () => {
     const res = await fetch("/api/auth/me");
@@ -54,10 +103,9 @@ export default function Home() {
       setLoading(true);
       setError(null);
       try {
-        const [pr, jr] = await Promise.all([
-          fetch(`/api/planning?date=${d}`),
-          fetch(`/api/bookings?date=${d}`),
-        ]);
+        // Séquentiel à dessein : /api/planning réconcilie la base (résas annulées ailleurs),
+        // puis /api/bookings lit un journal déjà à jour.
+        const pr = await fetch(`/api/planning?date=${d}`);
         if (pr.status === 401) {
           setMe(null);
           return;
@@ -65,6 +113,7 @@ export default function Home() {
         const pdata = await pr.json();
         if (!pr.ok) throw new Error(pdata.error ?? `Erreur ${pr.status}`);
         setPlanning(pdata);
+        const jr = await fetch(`/api/bookings?date=${d}`);
         setJournal(jr.ok ? await jr.json() : []);
       } catch (e) {
         setError((e as Error).message);
@@ -140,7 +189,15 @@ export default function Home() {
         </div>
         <div className="userbar">
           <span>Bonjour {me}</span>
-          <button className="secondary" onClick={logout}>Déconnexion</button>
+          <button
+            className="secondary logout"
+            onClick={logout}
+            aria-label="Déconnexion"
+            title="Déconnexion"
+          >
+            <LogoutIcon />
+            <span className="label">Déconnexion</span>
+          </button>
         </div>
       </header>
 
@@ -152,6 +209,19 @@ export default function Home() {
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
       </div>
 
+      <div className="filters" role="group" aria-label="Plage horaire">
+        {RANGES.map((r) => (
+          <button
+            key={r.key}
+            className={range === r.key ? "active" : ""}
+            aria-pressed={range === r.key}
+            onClick={() => setRange(r.key)}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+
       <div className="legend">
         <span><i style={{ background: "var(--free)" }} /> Libre</span>
         <span><i style={{ background: "var(--accent)" }} /> Réservé par le groupe</span>
@@ -160,7 +230,14 @@ export default function Home() {
 
       {error && <div className="notice error">⚠️ {error}</div>}
       {loading && <p className="muted">Chargement du planning…</p>}
-      {planning && <PlanningGrid planning={planning} onBook={onBook} />}
+      {planning &&
+        (() => {
+          const slots = planning.slots.filter((s) => inRange(s.startsAt, range));
+          if (slots.length === 0) {
+            return <p className="muted">Aucun créneau sur cette plage horaire.</p>;
+          }
+          return <PlanningGrid planning={{ ...planning, slots }} onBook={onBook} />;
+        })()}
 
       <section className="journal">
         <h2>👥 Réservations du groupe — {prettyDate(date)}</h2>

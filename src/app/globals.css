@@ -80,6 +80,17 @@ header.app .sub {
   width: auto;
 }
 
+/* Bouton déconnexion : icône + libellé (libellé masqué sur mobile) */
+.logout {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.logout svg {
+  display: block;
+}
+
 /* --- Barre d'outils (navigation de date) -------------------------------- */
 .toolbar {
   display: flex;
@@ -107,16 +118,53 @@ header.app .sub {
   min-width: 160px;
   text-align: center;
   font-weight: 600;
-  font-size: 1rem;
+  font-size: 1.1rem;
   text-transform: capitalize;
 }
 
-/* Sur téléphone : boutons + sélecteur sur une ligne, date en dessous */
+/* Sur téléphone : boutons + sélecteur sur une ligne, date bien visible en dessous,
+   et déconnexion réduite à son icône. */
 @media (max-width: 560px) {
   .toolbar .date {
     order: 10;
     flex-basis: 100%;
+    font-size: 1.4rem;
+    margin-top: 4px;
   }
+
+  .logout .label {
+    display: none;
+  }
+
+  .logout {
+    padding: 7px 9px;
+  }
+}
+
+/* --- Filtre de plage horaire (segmenté) --------------------------------- */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.filters button {
+  margin: 0;
+  width: auto;
+  flex: 1 1 auto;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  background: var(--pico-card-background-color);
+  color: var(--pico-muted-color);
+  border: 1px solid var(--pico-card-border-color);
+}
+
+.filters button.active {
+  background: var(--pico-primary);
+  color: #fff;
+  border-color: var(--pico-primary);
+  font-weight: 600;
 }
 
 /* --- Légende ------------------------------------------------------------ */

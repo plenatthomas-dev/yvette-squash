@@ -38,9 +38,38 @@ export async function GET(req: NextRequest) {
       },
       include: { user: true },
     });
-    const byEvent = new Map(bookings.map((b) => [b.classEventId, b.user.displayName]));
+
+    // Auto-réconciliation : on confronte le journal local à l'état RÉEL de ResaMania.
+    // Une résa dont le créneau est redevenu libre — ou est désormais pris par quelqu'un
+    // d'autre — a été annulée ailleurs : on la marque "cancelled" (fini les fantômes).
+    // On reste prudent : si le créneau est absent du planning ou pris par un booker
+    // inconnu, on ne juge pas.
+    const slotById = new Map(planning.slots.map((s) => [s.id, s]));
+    const stale: string[] = [];
+    const active = bookings.filter((b) => {
+      const slot = slotById.get(b.classEventId);
+      if (!slot) return true; // hors planning courant
+      if (slot.bookable) {
+        stale.push(b.id); // redevenu libre → annulé
+        return false;
+      }
+      if (slot.bookerContactId && slot.bookerContactId !== b.user.contactId) {
+        stale.push(b.id); // pris par quelqu'un d'autre → notre résa a sauté
+        return false;
+      }
+      return true; // pris par nous (ou booker inconnu) → on garde
+    });
+    if (stale.length) {
+      await prisma.booking.updateMany({
+        where: { id: { in: stale } },
+        data: { status: "cancelled" },
+      });
+    }
+    const byEvent = new Map(active.map((b) => [b.classEventId, b.user.displayName]));
 
     for (const s of planning.slots) {
+      // ResaMania fait foi : un créneau libre reste libre et cliquable, quoi qu'en dise le journal.
+      if (s.bookable) continue;
       if (s.bookerContactId && byContact.has(s.bookerContactId)) {
         s.bookedBy = byContact.get(s.bookerContactId);
       } else {
