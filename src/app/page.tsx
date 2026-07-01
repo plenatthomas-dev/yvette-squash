@@ -412,9 +412,9 @@ export default function Home() {
         })()}
 
       <section className="journal">
-        <h2>👥 Réservations du groupe — {prettyDate(date)}</h2>
+        <h2>👥 Réservations des membres de l'asso — {prettyDate(date)}</h2>
         {journal.length === 0 ? (
-          <p className="muted">Personne du groupe n'a (encore) réservé ce jour-là.</p>
+          <p className="muted">Aucun membre de l'asso n'a (encore) réservé ce jour-là.</p>
         ) : (
           <ul>
             {journal.map((b) => (
