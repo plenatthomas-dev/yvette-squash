@@ -73,6 +73,35 @@ fonctionnelle pour le développement, sans toucher à ResaMania.
 
 ---
 
+## Notifications « créneau libéré » (Web Push)
+
+Depuis la vue **Jour**, toucher un créneau **Réservé** propose « M'alerter 🔔 » : dès qu'un
+terrain se libère à cet horaire, le joueur reçoit une **notification push** (même appli fermée).
+La cloche du header liste/retire les alertes en cours.
+
+Comment ça marche : une alerte (`SlotAlert`) est enregistrée en base ; un **cron** interroge
+périodiquement le planning ResaMania (via la session du joueur) et pousse une notif quand le
+créneau redevient réservable, puis désactive l'alerte. L'abonnement de l'appareil est un
+`PushSubscription` (service worker `public/sw.js`).
+
+### Mise en place
+
+1. **Générer les clés VAPID** (une fois) :
+   ```bash
+   npx web-push generate-vapid-keys
+   ```
+   Renseigner dans `.env` (et les Environment Variables Vercel) :
+   `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (mailto).
+   Sans ces clés, la fonctionnalité se **désactive proprement** (pas de cloche, pas d'erreur).
+2. **Secret du cron** : `CRON_SECRET` (`openssl rand -hex 24`), pour protéger l'endpoint.
+3. **Planifier le cron** — `vercel.json` déclare `/api/cron/check-alerts` toutes les 5 min.
+   > ⚠️ Les crons Vercel **Hobby** sont limités à ~1×/jour. Pour un vrai « toutes les 5 min »,
+   > il faut le plan **Pro**, **ou** un cron externe gratuit (ex. cron-job.org) appelant
+   > `https://<app>/api/cron/check-alerts?token=$CRON_SECRET`.
+4. `npm run db:push` (ou le build) crée les tables `PushSubscription` / `SlotAlert`.
+
+---
+
 ## Roadmap
 
 - [x] Squelette : stack, schéma BDD, adaptateur, planning factice, UI grille

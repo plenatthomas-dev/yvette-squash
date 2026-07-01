@@ -4,6 +4,11 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { PlanningGrid } from "@/components/PlanningGrid";
 import { WeekGrid } from "@/components/WeekGrid";
+import {
+  ensurePushSubscribed,
+  pushSupported,
+  pushEnabledOnServer,
+} from "@/lib/pushClient";
 
 function toISODate(d: Date): string {
   return d.toLocaleDateString("en-CA"); // YYYY-MM-DD local
@@ -241,6 +246,15 @@ function ShareIcon() {
     </svg>
   );
 }
+// Icône « cloche » (alertes)
+function BellIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+    </svg>
+  );
+}
 // Icône « rafraîchir »
 function RefreshIcon() {
   return (
@@ -313,6 +327,12 @@ interface JournalEntry {
   mine: boolean;
 }
 
+interface AlertItem {
+  id: string;
+  date: string; // YYYY-MM-DD
+  hm: string; // HH:MM
+}
+
 export default function Home() {
   const [me, setMe] = useState<string | null | undefined>(undefined); // undefined = chargement
   const [date, setDate] = useState<string>(() => toISODate(new Date()));
@@ -330,7 +350,12 @@ export default function Home() {
   // l'état initial (URL puis localStorage). Évite un double chargement au premier rendu.
   const [hydrated, setHydrated] = useState(false);
   const lastFocusRef = useRef(0);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  const [alertsOpen, setAlertsOpen] = useState(false);
   const today = toISODate(new Date());
+  // Notifications disponibles seulement une fois monté (évite un décalage d'hydratation)
+  // ET si le navigateur les supporte ET si les clés VAPID sont configurées côté serveur.
+  const canNotify = hydrated && pushSupported() && pushEnabledOnServer();
 
   const toast = useCallback((type: "ok" | "err", msg: string) => {
     const id = Date.now() + Math.random();
@@ -356,6 +381,14 @@ export default function Home() {
   useEffect(() => {
     checkMe();
   }, [checkMe]);
+
+  const loadAlerts = useCallback(async () => {
+    const r = await fetch("/api/alerts");
+    if (r.ok) setAlerts(await r.json());
+  }, []);
+  useEffect(() => {
+    if (me && canNotify) loadAlerts();
+  }, [me, canNotify, loadAlerts]);
 
   const load = useCallback(
     async (d: string) => {
@@ -576,6 +609,47 @@ export default function Home() {
     }
   };
 
+  // « Préviens-moi si un terrain se libère » sur un créneau réservé.
+  const onWatch = async (slot: Slot) => {
+    if (busy || confirmState) return;
+    if (!canNotify) {
+      toast("err", "Notifications indisponibles sur cet appareil.");
+      return;
+    }
+    const day = slot.startsAt.slice(0, 10);
+    const hm = slot.startsAt.slice(11, 16);
+    const ok = await askConfirm({
+      title: "Être alerté si ça se libère ?",
+      body: `${fmtTime(slot.startsAt)} le ${prettyDate(day)} — on te notifie dès qu'un terrain se libère à cet horaire.`,
+      confirmLabel: "M'alerter 🔔",
+    });
+    if (!ok) return;
+    const subscribed = await ensurePushSubscribed();
+    if (!subscribed) {
+      toast("err", "Autorise les notifications pour recevoir l'alerte.");
+      return;
+    }
+    try {
+      const res = await fetch("/api/alerts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: day, hm }),
+      });
+      if (handleExpired(res.status)) return;
+      if (!res.ok) throw new Error();
+      toast("ok", "Alerte activée 🔔");
+      loadAlerts();
+    } catch {
+      toast("err", "Impossible d'activer l'alerte.");
+    }
+  };
+
+  const cancelAlert = async (id: string) => {
+    setAlerts((a) => a.filter((x) => x.id !== id)); // retrait optimiste
+    await fetch(`/api/alerts/${id}`, { method: "DELETE" }).catch(() => {});
+    loadAlerts();
+  };
+
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     setMe(null);
@@ -601,6 +675,17 @@ export default function Home() {
           <div className="sub">Planning Terrains, Le Complexe, Bures</div>
         </div>
         <div className="actions">
+          {canNotify && (
+            <button
+              className="secondary icon-btn alerts-btn"
+              onClick={() => setAlertsOpen(true)}
+              aria-label={`Mes alertes${alerts.length ? ` (${alerts.length})` : ""}`}
+              title="Mes alertes"
+            >
+              <BellIcon />
+              {alerts.length > 0 && <span className="badge">{alerts.length}</span>}
+            </button>
+          )}
           <ShareButton onCopied={() => toast("ok", "Lien copié ✅")} />
           <ThemeToggle />
           <button
@@ -699,6 +784,8 @@ export default function Home() {
                   planning={{ ...planning, slots }}
                   onBook={onBook}
                   onCancelMine={onCancelMine}
+                  onWatch={onWatch}
+                  canWatch={canNotify}
                 />
               );
             })()
@@ -734,6 +821,44 @@ export default function Home() {
             </ul>
           )}
         </section>
+      )}
+
+      {alertsOpen && (
+        <div className="modal-overlay" onClick={() => setAlertsOpen(false)}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Mes alertes"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>🔔 Mes alertes</h3>
+            {alerts.length === 0 ? (
+              <p className="muted">
+                Aucune alerte pour le moment. Dans la vue Jour, touche un créneau
+                « Réservé » pour être prévenu s'il se libère.
+              </p>
+            ) : (
+              <ul className="alerts-list">
+                {alerts.map((a) => (
+                  <li key={a.id}>
+                    <span>
+                      {prettyDate(a.date)} · <strong>{a.hm}</strong>
+                    </span>
+                    <button className="cancel" onClick={() => cancelAlert(a.id)}>
+                      Retirer
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="modal-actions">
+              <button className="secondary" onClick={() => setAlertsOpen(false)}>
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <Toasts items={toasts} />

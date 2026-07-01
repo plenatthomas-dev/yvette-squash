@@ -23,11 +23,16 @@ export function PlanningGrid({
   planning,
   onBook,
   onCancelMine,
+  onWatch,
+  canWatch,
 }: {
   planning: PlanningDay;
   onBook: (slot: Slot) => void;
   onCancelMine: (slot: Slot) => void;
+  onWatch?: (slot: Slot) => void;
+  canWatch?: boolean;
 }) {
+  const watchable = !!(canWatch && onWatch);
   // Lignes = horaires distincts triés ; colonnes = terrains.
   const times = [...new Set(planning.slots.map((s) => s.startsAt))].sort();
   const byKey = new Map(
@@ -80,8 +85,21 @@ export function PlanningGrid({
                     );
                   }
                   if (slot.bookedBy) {
+                    const watch = watchable ? () => onWatch!(slot) : undefined;
                     return (
-                      <td key={c.id} className="cell group" title={`Réservé par ${slot.bookedBy} (asso)`}>
+                      <td
+                        key={c.id}
+                        className={"cell group" + (watch ? " watchable" : "")}
+                        title={
+                          watch
+                            ? `Réservé par ${slot.bookedBy} — cliquer pour être alerté si ça se libère`
+                            : `Réservé par ${slot.bookedBy} (asso)`
+                        }
+                        role={watch ? "button" : undefined}
+                        tabIndex={watch ? 0 : undefined}
+                        onClick={watch}
+                        onKeyDown={watch ? onKey(watch) : undefined}
+                      >
                         👥 {slot.bookedBy}
                       </td>
                     );
@@ -109,11 +127,26 @@ export function PlanningGrid({
                       </td>
                     );
                   }
-                  return (
-                    <td key={c.id} className="cell booked" title="Réservé (hors groupe)">
-                      Réservé
-                    </td>
-                  );
+                  {
+                    const watch = watchable ? () => onWatch!(slot) : undefined;
+                    return (
+                      <td
+                        key={c.id}
+                        className={"cell booked" + (watch ? " watchable" : "")}
+                        title={
+                          watch
+                            ? "Réservé — cliquer pour être alerté si ça se libère"
+                            : "Réservé (hors groupe)"
+                        }
+                        role={watch ? "button" : undefined}
+                        tabIndex={watch ? 0 : undefined}
+                        onClick={watch}
+                        onKeyDown={watch ? onKey(watch) : undefined}
+                      >
+                        Réservé
+                      </td>
+                    );
+                  }
                 })}
               </tr>
             );

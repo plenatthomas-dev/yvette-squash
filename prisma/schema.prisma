@@ -14,13 +14,15 @@ datasource db {
 
 // Un joueur de l'appli, identifié par son compte ResaMania (contactId).
 model User {
-  id          String    @id @default(cuid())
-  contactId   String    @unique // ex. "/lecomplexbures/contacts/12685397"
-  displayName String
-  email       String?
-  createdAt   DateTime  @default(now())
-  sessions    Session[]
-  bookings    Booking[]
+  id            String             @id @default(cuid())
+  contactId     String             @unique // ex. "/lecomplexbures/contacts/12685397"
+  displayName   String
+  email         String?
+  createdAt     DateTime           @default(now())
+  sessions      Session[]
+  bookings      Booking[]
+  pushSubs      PushSubscription[]
+  slotAlerts    SlotAlert[]
 }
 
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
@@ -54,4 +56,33 @@ model Booking {
 
   @@index([startsAt])
   @@index([userId])
+}
+
+// Abonnement Web Push (un par appareil/navigateur). Sert à envoyer les alertes.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  endpoint  String   @unique
+  p256dh    String // clé publique du client (chiffrement Web Push)
+  auth      String // secret d'authentification
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Alerte « préviens-moi si un terrain se libère » pour une date + un horaire (HH:MM).
+// Le cron interroge ResaMania et pousse une notif dès qu'un créneau redevient réservable.
+model SlotAlert {
+  id         String    @id @default(cuid())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  date       String // "YYYY-MM-DD" (jour visé)
+  hm         String // "HH:MM" (début du créneau visé)
+  active     Boolean   @default(true)
+  notifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@unique([userId, date, hm]) // une seule alerte par créneau et par joueur
+  @@index([active, date])
 }

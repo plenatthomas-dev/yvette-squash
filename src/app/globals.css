@@ -187,6 +187,59 @@ header.app .sub {
   width: auto;
 }
 
+/* Cloche « alertes » + pastille de compteur */
+.alerts-btn {
+  position: relative;
+}
+
+.alerts-btn .badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--error-accent);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* Liste des alertes dans la modale « Mes alertes » */
+.alerts-list {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 16px;
+}
+
+.alerts-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  font-size: 0.88rem;
+  text-transform: capitalize;
+}
+
+.alerts-list li button.cancel {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  width: auto;
+  text-transform: none;
+  background: transparent;
+  color: var(--danger-fg);
+  border: 1px solid var(--danger-border);
+}
+
 /* Bouton déconnexion : icône + libellé (libellé masqué sur mobile) */
 .logout {
   display: inline-flex;
@@ -489,6 +542,15 @@ td.cell[role="button"]:focus-visible {
 td.cell.booked {
   background: var(--booked);
   color: var(--booked-fg);
+}
+
+/* Cases réservées « alertables » : on signale qu'un clic crée une alerte. */
+td.cell.watchable {
+  cursor: pointer;
+}
+
+td.cell.watchable:hover {
+  filter: brightness(0.97);
 }
 
 td.cell.group {
