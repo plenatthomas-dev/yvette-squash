@@ -1,0 +1,29 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# typescript build info
+*.tsbuildinfo
+
+# production
+/build
+
+# env & secrets — NE JAMAIS committer
+.env
+.env*.local
+
+# captures réseau (contiennent mot de passe + jetons)
+*.har
+
+# base de données locale
+/prisma/dev.db
+/prisma/dev.db-journal
+
+# logs / divers
+npm-debug.log*
+*.log
+.DS_Store

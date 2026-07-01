@@ -1,0 +1,53 @@
+// Schéma de la base. Dev = SQLite. Pour la prod (Neon), passer provider = "postgresql".
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Un joueur de l'appli, identifié par son compte ResaMania (contactId).
+model User {
+  id          String    @id @default(cuid())
+  contactId   String    @unique // ex. "/lecomplexbures/contacts/12685397"
+  displayName String
+  email       String?
+  createdAt   DateTime  @default(now())
+  sessions    Session[]
+  bookings    Booking[]
+}
+
+// Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
+// des access tokens sans redemander le mot de passe tant que la session est valide.
+model Session {
+  id              String   @id // jeton aléatoire (valeur du cookie)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId          String
+  accessToken     String // token Bearer (court, ~1h)
+  refreshTokenEnc String // refresh token chiffré (AES-256-GCM)
+  tokenExpiresAt  DateTime
+  identityJson    String // ResaIdentity sérialisée (contactId, clubId, nom…)
+  expiresAt       DateTime // expiration de la session applicative
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Journal partagé : chaque réservation faite via l'appli (alimente « qui a réservé quoi »).
+model Booking {
+  id           String   @id @default(cuid())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       String
+  attendeeId   String? // IRI de l'attendee ResaMania (pour annuler)
+  classEventId String // IRI du class_event réservé
+  courtName    String
+  startsAt     DateTime
+  endsAt       DateTime
+  status       String   @default("booked") // booked | cancelled
+  createdAt    DateTime @default(now())
+
+  @@index([startsAt])
+  @@index([userId])
+}

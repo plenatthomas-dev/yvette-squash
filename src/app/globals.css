@@ -1,0 +1,319 @@
+/* ============================================================================
+ *  Yvette Squash — couche fine au-dessus de Pico CSS.
+ *  Pico gère la base (typo, formulaires, boutons, dark mode, responsive).
+ *  Ici : palette « squash », grille de planning, journal, barre d'outils.
+ *  Chargé APRÈS pico.min.css → nos règles l'emportent à spécificité égale.
+ * ========================================================================== */
+
+:root {
+  /* accent = vert « squash » repris comme couleur primaire Pico */
+  --pico-primary: #1f9d57;
+  --pico-primary-hover: #24b365;
+  --pico-primary-background: #1f9d57;
+  --pico-primary-hover-background: #24b365;
+  --pico-primary-focus: rgba(31, 157, 87, 0.3);
+  --pico-primary-inverse: #ffffff;
+
+  /* jetons propres à la grille */
+  --free: #1f9d57;
+  --free-hover: #24b365;
+  --booked: #3a2030;
+  --group: #1b2a4a;
+  --closed: #14171d;
+  --accent: #4f8cff;
+}
+
+[data-theme="dark"] {
+  --pico-background-color: #0f1115;
+  --pico-color: #e6e8ec;
+  --pico-muted-color: #9aa0ac;
+  --pico-card-background-color: #181b22;
+  --pico-card-sectioning-background-color: #181b22;
+  --pico-card-border-color: #272b34;
+  --pico-border-radius: 10px;
+}
+
+/* --- Enveloppe : conteneur centré, marges maîtrisées sur mobile --------- */
+body {
+  min-height: 100dvh;
+}
+
+main {
+  max-width: 900px;
+  margin-inline: auto;
+  padding: clamp(14px, 4vw, 28px) clamp(12px, 4vw, 20px) 64px;
+}
+
+/* --- En-tête ------------------------------------------------------------ */
+header.app {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+header.app h1 {
+  font-size: clamp(1.25rem, 5vw, 1.5rem);
+  margin: 0;
+  line-height: 1.15;
+}
+
+header.app .sub {
+  color: var(--pico-muted-color);
+  font-size: 0.82rem;
+}
+
+.userbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.85rem;
+  color: var(--pico-muted-color);
+}
+
+.userbar button {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 0.82rem;
+  width: auto;
+}
+
+/* --- Barre d'outils (navigation de date) -------------------------------- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.toolbar button {
+  margin: 0;
+  width: auto;
+  padding: 8px 14px;
+}
+
+.toolbar input[type="date"] {
+  margin: 0;
+  width: auto;
+  padding: 7px 10px;
+  font-size: 0.85rem;
+}
+
+.toolbar .date {
+  flex: 1;
+  min-width: 160px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 1rem;
+  text-transform: capitalize;
+}
+
+/* Sur téléphone : boutons + sélecteur sur une ligne, date en dessous */
+@media (max-width: 560px) {
+  .toolbar .date {
+    order: 10;
+    flex-basis: 100%;
+  }
+}
+
+/* --- Légende ------------------------------------------------------------ */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  margin: 10px 2px 14px;
+  font-size: 0.78rem;
+  color: var(--pico-muted-color);
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend i {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+/* --- Grille de planning ------------------------------------------------- */
+.grid-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 12px;
+  -webkit-overflow-scrolling: touch;
+}
+
+table.planning {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0;
+  table-layout: fixed;
+}
+
+table.planning th,
+table.planning td {
+  border: 1px solid var(--pico-card-border-color);
+  padding: 0;
+  text-align: center;
+  margin: 0;
+}
+
+table.planning thead th {
+  background: var(--pico-card-background-color);
+  padding: 10px 6px;
+  font-size: 0.82rem;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+table.planning th.time {
+  width: 68px;
+  background: var(--pico-card-background-color);
+  color: var(--pico-muted-color);
+  font-weight: 500;
+  font-size: 0.78rem;
+  padding: 6px 8px;
+  white-space: nowrap;
+}
+
+td.cell {
+  height: 46px;
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+  user-select: none;
+}
+
+td.cell.free {
+  background: var(--free);
+  color: #eafff3;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+td.cell.free:hover,
+td.cell.free:active {
+  background: var(--free-hover);
+}
+
+td.cell.booked {
+  background: var(--booked);
+  color: #d79ab0;
+}
+
+td.cell.group {
+  background: var(--group);
+  color: #bcd2ff;
+  font-weight: 600;
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+td.cell.closed {
+  background: var(--closed);
+}
+
+/* --- Notices ------------------------------------------------------------ */
+.notice {
+  background: #1d2330;
+  border: 1px solid var(--pico-card-border-color);
+  border-left: 3px solid var(--accent);
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: var(--pico-muted-color);
+  margin-bottom: 16px;
+}
+
+.error {
+  color: #ff9a9a;
+  border-left-color: #ff6b6b;
+}
+
+.muted {
+  color: var(--pico-muted-color);
+}
+
+.tiny {
+  font-size: 0.75rem;
+  margin-top: 14px;
+}
+
+/* --- Journal du groupe -------------------------------------------------- */
+.journal {
+  margin-top: 28px;
+}
+
+.journal h2 {
+  font-size: 1.05rem;
+  margin-bottom: 10px;
+}
+
+.journal ul {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0;
+}
+
+.journal li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  font-size: 0.88rem;
+  background: var(--pico-card-background-color);
+}
+
+.journal li.mine {
+  border-left: 3px solid var(--pico-primary);
+}
+
+.journal li button.cancel {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  width: auto;
+  background: transparent;
+  color: #ff9a9a;
+  border: 1px solid #5a2a2a;
+}
+
+.journal li button.cancel:hover {
+  border-color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.08);
+}
+
+/* --- Écran de connexion ------------------------------------------------- */
+.login {
+  max-width: 400px;
+}
+
+.login form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.login form input {
+  margin: 0;
+}
+
+.login button[type="submit"] {
+  width: 100%;
+  margin-top: 4px;
+}
