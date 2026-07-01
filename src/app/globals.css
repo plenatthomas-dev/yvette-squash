@@ -301,7 +301,7 @@ header.app .sub {
 /* --- Barre vue (Jour/Semaine) + rafraîchir ------------------------------ */
 .viewbar {
   display: flex;
-  align-items: center;
+  align-items: stretch; /* refresh à la même hauteur que les onglets Jour/Semaine */
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 12px;
