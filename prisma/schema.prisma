@@ -1,11 +1,15 @@
-// Schéma de la base. Dev = SQLite. Pour la prod (Neon), passer provider = "postgresql".
+// Schéma de la base. Prod + dev = PostgreSQL (Neon).
+// DATABASE_URL = connexion « pooled » (runtime serverless) ; DIRECT_URL = connexion directe
+// (utilisée par prisma db push / migrations). Les deux sont fournies par le dashboard Neon.
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"] // rhel = runtime des fonctions Vercel
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // Un joueur de l'appli, identifié par son compte ResaMania (contactId).
