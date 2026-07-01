@@ -338,7 +338,10 @@ export default function Home() {
     <main>
       <header className="app">
         <div className="brand">
-          <h1>🎾 Squash de l'Yvette</h1>
+          <h1>
+            <img src="/logo_squash.jpeg" alt="" className="logo-mark" />
+            Squash de l'Yvette
+          </h1>
           <div className="sub">Planning Terrains, Le Complexe, Bures</div>
         </div>
         <div className="actions">
@@ -465,7 +468,12 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
 
   return (
     <main className="login">
-      <h1>🎾 Squash de l'Yvette</h1>
+      <h1 className="sr-only">Squash de l'Yvette</h1>
+      <img
+        src="/logo_squash.jpeg"
+        alt="Squash de l'Yvette"
+        className="logo-hero"
+      />
       <p className="muted">
         Connecte-toi avec ton compte ResaMania (Le Complexe Bures).
       </p>

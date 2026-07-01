@@ -10,20 +10,20 @@ export default function manifest(): MetadataRoute.Manifest {
       "Planning et réservation des terrains de squash (Le Complexe, Bures)",
     start_url: "/",
     display: "standalone",
-    background_color: "#0f1115",
+    background_color: "#ffffff", // fond blanc = se fond avec le logo (fond blanc)
     theme_color: "#0f1115",
     icons: [
       {
-        src: "/icon.svg",
-        sizes: "any",
-        type: "image/svg+xml",
+        src: "/logo_squash.jpeg",
+        sizes: "512x512",
+        type: "image/jpeg",
         purpose: "any",
       },
       {
-        src: "/icon.svg",
-        sizes: "any",
-        type: "image/svg+xml",
-        purpose: "maskable",
+        src: "/logo_squash.jpeg",
+        sizes: "192x192",
+        type: "image/jpeg",
+        purpose: "any",
       },
     ],
   };

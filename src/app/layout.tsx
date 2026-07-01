@@ -5,7 +5,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Squash de l'Yvette — Réservations",
   description: "Planning et réservations de squash (Le Complexe, Bures)",
-  icons: { icon: "/icon.svg" },
+  icons: {
+    icon: "/logo_squash.jpeg",
+    apple: "/logo_squash.jpeg",
+  },
   appleWebApp: {
     capable: true,
     title: "Squash Yvette",
