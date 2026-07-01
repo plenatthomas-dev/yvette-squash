@@ -48,7 +48,7 @@ export function PlanningGrid({
                 if (slot.mine) {
                   return (
                     <td key={c.id} className="cell mine" title="Ta réservation (annulable depuis le journal)">
-                      ★ Toi
+                      ★ {slot.bookedBy}
                     </td>
                   );
                 }
