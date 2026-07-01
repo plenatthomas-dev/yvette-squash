@@ -667,37 +667,41 @@ export default function Home() {
   return (
     <main>
       <header className="app">
-        <div className="brand">
-          <h1>
-            <img src="/logo_squash.jpeg" alt="" className="logo-mark" />
-            Squash de l'Yvette
-          </h1>
-          <div className="sub">Planning Terrains, Le Complexe, Bures</div>
-        </div>
-        <div className="actions">
-          {canNotify && (
+        <div className="app-top">
+          <div className="brand">
+            <h1>
+              <img src="/logo_squash.jpeg" alt="" className="logo-mark" />
+              Squash de l'Yvette
+            </h1>
+          </div>
+          <div className="actions">
+            {canNotify && (
+              <button
+                className="secondary icon-btn alerts-btn"
+                onClick={() => setAlertsOpen(true)}
+                aria-label={`Mes alertes${alerts.length ? ` (${alerts.length})` : ""}`}
+                title="Mes alertes"
+              >
+                <BellIcon />
+                {alerts.length > 0 && <span className="badge">{alerts.length}</span>}
+              </button>
+            )}
+            <ShareButton onCopied={() => toast("ok", "Lien copié ✅")} />
+            <ThemeToggle />
             <button
-              className="secondary icon-btn alerts-btn"
-              onClick={() => setAlertsOpen(true)}
-              aria-label={`Mes alertes${alerts.length ? ` (${alerts.length})` : ""}`}
-              title="Mes alertes"
+              className="secondary logout"
+              onClick={logout}
+              aria-label="Déconnexion"
+              title="Déconnexion"
             >
-              <BellIcon />
-              {alerts.length > 0 && <span className="badge">{alerts.length}</span>}
+              <LogoutIcon />
+              <span className="label">Déconnexion</span>
             </button>
-          )}
-          <ShareButton onCopied={() => toast("ok", "Lien copié ✅")} />
-          <ThemeToggle />
-          <button
-            className="secondary logout"
-            onClick={logout}
-            aria-label="Déconnexion"
-            title="Déconnexion"
-          >
-            <LogoutIcon />
-            <span className="label">Déconnexion</span>
-          </button>
+          </div>
         </div>
+        {/* Sous-titre sur sa propre ligne pleine largeur → tient sur une seule ligne
+            même sur mobile (sinon coincé dans la colonne titre étroite). */}
+        <div className="sub">Planning Terrains, Le Complexe, Bures</div>
       </header>
 
       <p className="hello">Bonjour {me.split(" ")[0]} 👋</p>
