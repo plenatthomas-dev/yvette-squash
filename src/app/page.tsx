@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { PlanningGrid } from "@/components/PlanningGrid";
+import { WeekGrid } from "@/components/WeekGrid";
 
 function toISODate(d: Date): string {
   return d.toLocaleDateString("en-CA"); // YYYY-MM-DD local
@@ -21,6 +22,25 @@ function prettyDate(date: string): string {
 }
 function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+}
+
+// --- Semaine -----------------------------------------------------------------
+function mondayOf(date: string): string {
+  const d = new Date(`${date}T12:00:00`);
+  const off = (d.getDay() + 6) % 7; // 0 = lundi
+  d.setDate(d.getDate() - off);
+  return toISODate(d);
+}
+function weekDates(date: string): string[] {
+  const mon = mondayOf(date);
+  return Array.from({ length: 7 }, (_, i) => addDays(mon, i));
+}
+function weekLabel(date: string): string {
+  const mon = mondayOf(date);
+  const sun = addDays(mon, 6);
+  const f = (d: string) =>
+    new Date(`${d}T12:00:00`).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+  return `${f(mon)} – ${f(sun)}`;
 }
 
 // --- Filtre de plage horaire -------------------------------------------------
@@ -198,6 +218,70 @@ function ConfirmDialog({
   );
 }
 
+// Icône « partager »
+function ShareIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="18" cy="5" r="3" />
+      <circle cx="6" cy="12" r="3" />
+      <circle cx="18" cy="19" r="3" />
+      <line x1="8.6" y1="13.5" x2="15.4" y2="17.5" />
+      <line x1="15.4" y1="6.5" x2="8.6" y2="10.5" />
+    </svg>
+  );
+}
+// Icône « rafraîchir »
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="23 4 23 10 17 10" />
+      <polyline points="1 20 1 14 7 14" />
+      <path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15" />
+    </svg>
+  );
+}
+
+// Bouton « partager » : Web Share natif (mobile) sinon copie du lien.
+function ShareButton({ onCopied }: { onCopied: () => void }) {
+  const share = async () => {
+    const url = typeof window !== "undefined" ? window.location.origin : "";
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: "Squash de l'Yvette",
+          text: "Réserve un terrain de squash 🎾",
+          url,
+        });
+      } else {
+        await navigator.clipboard.writeText(url);
+        onCopied();
+      }
+    } catch {
+      /* partage annulé par l'utilisateur */
+    }
+  };
+  return (
+    <button className="secondary icon-btn" onClick={share} aria-label="Partager l'appli" title="Partager l'appli">
+      <ShareIcon />
+    </button>
+  );
+}
+
+// Squelette de chargement (à la place du texte « Chargement… »)
+function Skeleton() {
+  return (
+    <div className="grid-wrap skel" aria-hidden="true">
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div className="skel-row" key={i}>
+          <span className="skel-cell time" />
+          <span className="skel-cell" />
+          <span className="skel-cell" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 interface JournalEntry {
   id: string;
   displayName: string;
@@ -217,6 +301,10 @@ export default function Home() {
   const [range, setRange] = useState<Range>("all");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
+  const [view, setView] = useState<"day" | "week">("day");
+  const [week, setWeek] = useState<{ date: string; planning: PlanningDay }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const today = toISODate(new Date());
 
   const toast = useCallback((type: "ok" | "err", msg: string) => {
     const id = Date.now() + Math.random();
@@ -270,17 +358,63 @@ export default function Home() {
     [],
   );
 
+  const loadWeek = useCallback(async (d: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const results = await Promise.all(
+        weekDates(d).map(async (dd) => {
+          const r = await fetch(`/api/planning?date=${dd}`);
+          if (r.status === 401) throw new Error("__401__");
+          const j = await r.json();
+          if (!r.ok) throw new Error(j.error ?? `Erreur ${r.status}`);
+          return { date: dd, planning: j as PlanningDay };
+        }),
+      );
+      setWeek(results);
+    } catch (e) {
+      if ((e as Error).message === "__401__") {
+        setMe(null);
+        return;
+      }
+      setError((e as Error).message);
+      setWeek([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (me) load(date);
-  }, [me, date, load]);
+    if (!me) return;
+    if (view === "week") loadWeek(date);
+    else load(date);
+  }, [me, date, view, load, loadWeek]);
+
+  const reload = () => (view === "week" ? loadWeek(date) : load(date));
+  const pickDay = (d: string) => {
+    setView("day");
+    setDate(d);
+  };
+
+  // Détecte une session expirée (401) et renvoie vers le login proprement.
+  const handleExpired = (status: number): boolean => {
+    if (status === 401) {
+      setMe(null);
+      toast("err", "Session expirée — reconnecte-toi.");
+      return true;
+    }
+    return false;
+  };
 
   const onBook = async (slot: Slot) => {
+    if (busy || confirmState) return; // anti double-clic / double-modale
     const ok = await askConfirm({
       title: "Réserver ce créneau ?",
       body: `${slot.courtName} — ${fmtTime(slot.startsAt)} le ${prettyDate(date)}`,
       confirmLabel: "Réserver",
     });
     if (!ok) return;
+    setBusy(true);
     try {
       const res = await fetch("/api/book", {
         method: "POST",
@@ -292,16 +426,20 @@ export default function Home() {
           endsAt: slot.endsAt,
         }),
       });
+      if (handleExpired(res.status)) return;
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
       toast("ok", "Réservation confirmée");
       load(date);
     } catch (e) {
       toast("err", "Réservation impossible : " + (e as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
 
   const onCancel = async (b: JournalEntry) => {
+    if (busy || confirmState) return;
     const ok = await askConfirm({
       title: "Annuler la réservation ?",
       body: `${b.courtName} — ${fmtTime(b.startsAt)} le ${prettyDate(date)}`,
@@ -309,14 +447,47 @@ export default function Home() {
       danger: true,
     });
     if (!ok) return;
+    setBusy(true);
     try {
       const res = await fetch(`/api/bookings/${b.id}`, { method: "DELETE" });
+      if (handleExpired(res.status)) return;
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
       toast("ok", "Réservation annulée");
       load(date);
     } catch (e) {
       toast("err", "Annulation impossible : " + (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Annulation directement depuis la grille (clic sur son créneau « ★ »).
+  const onCancelMine = async (slot: Slot) => {
+    if (busy || confirmState) return;
+    const ok = await askConfirm({
+      title: "Annuler ta réservation ?",
+      body: `${slot.courtName} — ${fmtTime(slot.startsAt)} le ${prettyDate(date)}`,
+      confirmLabel: "Annuler la résa",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/cancel-slot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classEventId: slot.id }),
+      });
+      if (handleExpired(res.status)) return;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      toast("ok", "Réservation annulée");
+      load(date);
+    } catch (e) {
+      toast("err", "Annulation impossible : " + (e as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -345,6 +516,7 @@ export default function Home() {
           <div className="sub">Planning Terrains, Le Complexe, Bures</div>
         </div>
         <div className="actions">
+          <ShareButton onCopied={() => toast("ok", "Lien copié ✅")} />
           <ThemeToggle />
           <button
             className="secondary logout"
@@ -361,10 +533,10 @@ export default function Home() {
       <p className="hello">Bonjour {me.split(" ")[0]} 👋</p>
 
       <div className="toolbar">
-        <button className="secondary" onClick={() => setDate(addDays(date, -1))}>←</button>
-        <button className="secondary" onClick={() => setDate(toISODate(new Date()))}>Aujourd'hui</button>
-        <button className="secondary" onClick={() => setDate(addDays(date, 1))}>→</button>
-        <span className="date">{prettyDate(date)}</span>
+        <button className="secondary" aria-label="Précédent" onClick={() => setDate(addDays(date, view === "week" ? -7 : -1))}>←</button>
+        <button className="secondary" onClick={() => setDate(today)} disabled={date === today}>Aujourd'hui</button>
+        <button className="secondary" aria-label="Suivant" onClick={() => setDate(addDays(date, view === "week" ? 7 : 1))}>→</button>
+        <span className="date">{view === "week" ? weekLabel(date) : prettyDate(date)}</span>
         <input
           type="date"
           className="datepick"
@@ -381,6 +553,22 @@ export default function Home() {
         />
       </div>
 
+      <div className="viewbar">
+        <div className="viewtabs" role="group" aria-label="Vue">
+          <button className={view === "day" ? "active" : ""} aria-pressed={view === "day"} onClick={() => setView("day")}>Jour</button>
+          <button className={view === "week" ? "active" : ""} aria-pressed={view === "week"} onClick={() => setView("week")}>Semaine</button>
+        </div>
+        <button
+          className={"secondary icon-btn refresh" + (loading ? " spin" : "")}
+          onClick={reload}
+          disabled={loading}
+          aria-label="Rafraîchir"
+          title="Rafraîchir"
+        >
+          <RefreshIcon />
+        </button>
+      </div>
+
       <div className="filters" role="group" aria-label="Plage horaire">
         {RANGES.map((r) => (
           <button
@@ -394,45 +582,69 @@ export default function Home() {
         ))}
       </div>
 
-      <div className="legend">
-        <span><i style={{ background: "var(--free)" }} /> Libre</span>
-        <span><i style={{ background: "var(--accent)" }} /> Réservé (asso)</span>
-        <span><i style={{ background: "var(--booked)" }} /> Réservé (autre)</span>
-      </div>
+      {view === "day" && (
+        <div className="legend">
+          <span><i style={{ background: "var(--free)" }} /> Libre</span>
+          <span><i style={{ background: "var(--accent)" }} /> Réservé (asso)</span>
+          <span><i style={{ background: "var(--booked)" }} /> Réservé (autre)</span>
+        </div>
+      )}
+      {view === "week" && (
+        <p className="muted week-hint">
+          Chiffre = terrains libres. Touche une case (ou un jour) pour ouvrir la journée et réserver.
+        </p>
+      )}
 
       {error && <div className="notice error">⚠️ {error}</div>}
-      {loading && <p className="muted">Chargement du planning…</p>}
-      {planning &&
-        (() => {
-          const slots = planning.slots.filter((s) => inRange(s.startsAt, range));
-          if (slots.length === 0) {
-            return <p className="muted">Aucun créneau sur cette plage horaire.</p>;
-          }
-          return <PlanningGrid planning={{ ...planning, slots }} onBook={onBook} />;
-        })()}
 
-      <section className="journal">
-        <h2>👥 Réservations des membres de l'asso — {prettyDate(date)}</h2>
-        {journal.length === 0 ? (
-          <p className="muted">Aucun membre de l'asso n'a (encore) réservé ce jour-là.</p>
-        ) : (
-          <ul>
-            {journal.map((b) => (
-              <li key={b.id} className={b.mine ? "mine" : ""}>
-                <span>
-                  <strong>{fmtTime(b.startsAt)}</strong> · {b.courtName} ·{" "}
-                  {b.displayName} {b.mine && "(toi)"}
-                </span>
-                {b.mine && (
-                  <button className="cancel" onClick={() => onCancel(b)}>
-                    Annuler
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      {view === "day"
+        ? planning
+          ? (() => {
+              const slots = planning.slots.filter((s) => inRange(s.startsAt, range));
+              if (slots.length === 0) {
+                return <p className="muted">Aucun créneau sur cette plage horaire.</p>;
+              }
+              return (
+                <PlanningGrid
+                  planning={{ ...planning, slots }}
+                  onBook={onBook}
+                  onCancelMine={onCancelMine}
+                />
+              );
+            })()
+          : loading
+            ? <Skeleton />
+            : null
+        : week.length
+          ? <WeekGrid days={week} filter={(iso) => inRange(iso, range)} onPick={pickDay} />
+          : loading
+            ? <Skeleton />
+            : null}
+
+      {view === "day" && (
+        <section className="journal">
+          <h2>👥 Réservations des membres de l'asso — {prettyDate(date)}</h2>
+          {journal.length === 0 ? (
+            <p className="muted">Aucun membre de l'asso n'a (encore) réservé ce jour-là.</p>
+          ) : (
+            <ul>
+              {journal.map((b) => (
+                <li key={b.id} className={b.mine ? "mine" : ""}>
+                  <span>
+                    <strong>{fmtTime(b.startsAt)}</strong> · {b.courtName} ·{" "}
+                    {b.displayName} {b.mine && "(toi)"}
+                  </span>
+                  {b.mine && (
+                    <button className="cancel" onClick={() => onCancel(b)}>
+                      Annuler
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       <Toasts items={toasts} />
       <ConfirmDialog state={confirmState} onResolve={resolveConfirm} />
