@@ -193,6 +193,22 @@ header.app .sub {
 /* Sur téléphone : boutons + sélecteur sur une ligne, date bien visible en dessous,
    et déconnexion réduite à son icône. */
 @media (max-width: 560px) {
+  .toolbar {
+    gap: 6px;
+  }
+
+  /* ← Aujourd'hui → et le champ date tiennent sur UNE ligne ; la date en toutes lettres
+     passe seule en dessous. */
+  .toolbar button {
+    padding-inline: 12px;
+  }
+
+  .toolbar input[type="date"] {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-inline: 8px;
+  }
+
   .toolbar .date {
     order: 10;
     flex-basis: 100%;
