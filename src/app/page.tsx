@@ -39,12 +39,12 @@ function slotMinutes(iso: string): number {
 function inRange(iso: string, r: Range): boolean {
   const t = slotMinutes(iso);
   switch (r) {
-    case "morning": // 9h00 → 12h00 inclus
-      return t >= 9 * 60 && t <= 12 * 60;
-    case "afternoon": // 12h30 → 17h30 inclus
-      return t >= 12 * 60 + 30 && t <= 17 * 60 + 30;
-    case "evening": // à partir de 18h00
-      return t >= 18 * 60;
+    case "morning": // 9h00 → 12h30 inclus
+      return t >= 9 * 60 && t <= 12 * 60 + 30;
+    case "afternoon": // 13h00 → 16h30 inclus
+      return t >= 13 * 60 && t <= 16 * 60 + 30;
+    case "evening": // à partir de 17h00
+      return t >= 17 * 60;
     default:
       return true;
   }
