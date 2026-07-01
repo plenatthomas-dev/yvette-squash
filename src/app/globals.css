@@ -27,6 +27,8 @@
   --booked-fg: #9c2f56;
   --group: #dbe7ff;
   --group-fg: #29508f;
+  --mine: #fff2cf;
+  --mine-fg: #8a6a12;
   --closed: #eceef2;
   --accent: #2f6fe0;
   --notice-bg: #eef2f8;
@@ -48,6 +50,8 @@
     --booked-fg: #d79ab0;
     --group: #1b2a4a;
     --group-fg: #bcd2ff;
+    --mine: #3c3413;
+    --mine-fg: #ffdf8a;
     --closed: #14171d;
     --accent: #4f8cff;
     --notice-bg: #1d2330;
@@ -66,6 +70,8 @@
   --booked-fg: #d79ab0;
   --group: #1b2a4a;
   --group-fg: #bcd2ff;
+  --mine: #3c3413;
+  --mine-fg: #ffdf8a;
   --closed: #14171d;
   --accent: #4f8cff;
   --notice-bg: #1d2330;
@@ -164,11 +170,21 @@ header.app .sub {
   padding: 8px 14px;
 }
 
+/* Champ date : cible plus large + tout le champ ouvre le calendrier (onClick showPicker). */
 .toolbar input[type="date"] {
   margin: 0;
   width: auto;
-  padding: 7px 10px;
-  font-size: 0.85rem;
+  min-width: 158px;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+/* L'indicateur calendrier natif reste visible mais cliquable sur toute sa hauteur. */
+.toolbar input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  padding: 4px;
+  margin-left: 4px;
 }
 
 .toolbar .date {
@@ -328,6 +344,20 @@ td.cell.closed {
   background: var(--closed);
 }
 
+td.cell.mine {
+  background: var(--mine);
+  color: var(--mine-fg);
+  font-weight: 700;
+  font-size: 0.75rem;
+}
+
+td.cell.past {
+  background: var(--closed);
+  color: var(--pico-muted-color);
+  opacity: 0.55;
+  cursor: default;
+}
+
 /* --- Notices ------------------------------------------------------------ */
 .notice {
   background: var(--notice-bg);
@@ -422,4 +452,122 @@ td.cell.closed {
 .login button[type="submit"] {
   width: 100%;
   margin-top: 4px;
+}
+
+/* --- Toasts (notifications) --------------------------------------------- */
+.toasts {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 1000;
+  width: max-content;
+  max-width: 92vw;
+  pointer-events: none;
+}
+
+.toast {
+  padding: 11px 16px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  background: var(--pico-card-background-color);
+  color: var(--pico-color);
+  border: 1px solid var(--pico-card-border-color);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  animation: toast-in 0.18s ease-out;
+}
+
+.toast.ok {
+  border-left: 4px solid var(--free);
+}
+
+.toast.err {
+  border-left: 4px solid var(--error-accent);
+  color: var(--error-fg);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --- Modale de confirmation --------------------------------------------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1000;
+  animation: fade-in 0.15s ease-out;
+}
+
+.modal {
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 14px;
+  padding: 20px 20px 18px;
+  width: 100%;
+  max-width: 380px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  animation: modal-in 0.18s ease-out;
+}
+
+.modal h3 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+
+.modal p {
+  margin: 0 0 18px;
+  color: var(--pico-muted-color);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.modal-actions button {
+  margin: 0;
+  width: auto;
+}
+
+.modal-actions button.danger {
+  background: var(--error-accent);
+  border-color: var(--error-accent);
+  color: #fff;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }

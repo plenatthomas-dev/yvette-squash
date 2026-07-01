@@ -66,11 +66,15 @@ export async function GET(req: NextRequest) {
       });
     }
     const byEvent = new Map(active.map((b) => [b.classEventId, b.user.displayName]));
+    const myContactId = session.resa.identity.contactId;
 
     for (const s of planning.slots) {
       // ResaMania fait foi : un créneau libre reste libre et cliquable, quoi qu'en dise le journal.
       if (s.bookable) continue;
-      if (s.bookerContactId && byContact.has(s.bookerContactId)) {
+      if (s.bookerContactId && s.bookerContactId === myContactId) {
+        s.mine = true;
+        s.bookedBy = "Toi";
+      } else if (s.bookerContactId && byContact.has(s.bookerContactId)) {
         s.bookedBy = byContact.get(s.bookerContactId);
       } else {
         const who = byEvent.get(s.id);

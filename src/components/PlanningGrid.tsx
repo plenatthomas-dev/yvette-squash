@@ -21,6 +21,7 @@ export function PlanningGrid({
   const byKey = new Map(
     planning.slots.map((s) => [s.courtId + "|" + s.startsAt, s]),
   );
+  const now = Date.now();
 
   if (planning.courts.length === 0) {
     return <p className="muted">Aucun créneau ce jour-là.</p>;
@@ -44,6 +45,13 @@ export function PlanningGrid({
               {planning.courts.map((c) => {
                 const slot = byKey.get(c.id + "|" + t);
                 if (!slot) return <td key={c.id} className="cell closed" />;
+                if (slot.mine) {
+                  return (
+                    <td key={c.id} className="cell mine" title="Ta réservation (annulable depuis le journal)">
+                      ★ Toi
+                    </td>
+                  );
+                }
                 if (slot.bookedBy) {
                   return (
                     <td key={c.id} className="cell group" title={`Réservé par ${slot.bookedBy} (asso)`}>
@@ -52,6 +60,14 @@ export function PlanningGrid({
                   );
                 }
                 if (slot.bookable) {
+                  const past = new Date(slot.startsAt).getTime() < now;
+                  if (past) {
+                    return (
+                      <td key={c.id} className="cell past" title="Créneau passé">
+                        —
+                      </td>
+                    );
+                  }
                   return (
                     <td
                       key={c.id}

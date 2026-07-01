@@ -143,6 +143,61 @@ function ThemeToggle() {
   );
 }
 
+// --- Toasts & confirmation (remplacent alert()/confirm() natifs, moches sur mobile) ----
+type Toast = { id: number; type: "ok" | "err"; msg: string };
+function Toasts({ items }: { items: Toast[] }) {
+  return (
+    <div className="toasts" role="status" aria-live="polite">
+      {items.map((t) => (
+        <div key={t.id} className={`toast ${t.type}`}>
+          {t.type === "ok" ? "✅" : "⚠️"} {t.msg}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+type ConfirmOpts = {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  danger?: boolean;
+};
+type ConfirmState = (ConfirmOpts & { resolve: (v: boolean) => void }) | null;
+function ConfirmDialog({
+  state,
+  onResolve,
+}: {
+  state: ConfirmState;
+  onResolve: (v: boolean) => void;
+}) {
+  if (!state) return null;
+  return (
+    <div className="modal-overlay" onClick={() => onResolve(false)}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3>{state.title}</h3>
+        <p>{state.body}</p>
+        <div className="modal-actions">
+          <button className="secondary" onClick={() => onResolve(false)}>
+            Retour
+          </button>
+          <button
+            className={state.danger ? "danger" : ""}
+            onClick={() => onResolve(true)}
+          >
+            {state.confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface JournalEntry {
   id: string;
   displayName: string;
@@ -160,6 +215,24 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [range, setRange] = useState<Range>("all");
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [confirmState, setConfirmState] = useState<ConfirmState>(null);
+
+  const toast = useCallback((type: "ok" | "err", msg: string) => {
+    const id = Date.now() + Math.random();
+    setToasts((t) => [...t, { id, type, msg }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3500);
+  }, []);
+
+  const askConfirm = useCallback(
+    (opts: ConfirmOpts) =>
+      new Promise<boolean>((resolve) => setConfirmState({ ...opts, resolve })),
+    [],
+  );
+  const resolveConfirm = (v: boolean) => {
+    confirmState?.resolve(v);
+    setConfirmState(null);
+  };
 
   const checkMe = useCallback(async () => {
     const res = await fetch("/api/auth/me");
@@ -202,8 +275,12 @@ export default function Home() {
   }, [me, date, load]);
 
   const onBook = async (slot: Slot) => {
-    const when = `${fmtTime(slot.startsAt)} le ${prettyDate(date)}`;
-    if (!confirm(`Réserver ${slot.courtName} à ${when} ?`)) return;
+    const ok = await askConfirm({
+      title: "Réserver ce créneau ?",
+      body: `${slot.courtName} — ${fmtTime(slot.startsAt)} le ${prettyDate(date)}`,
+      confirmLabel: "Réserver",
+    });
+    if (!ok) return;
     try {
       const res = await fetch("/api/book", {
         method: "POST",
@@ -217,24 +294,29 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
-      alert("Réservation confirmée ✅");
+      toast("ok", "Réservation confirmée");
       load(date);
     } catch (e) {
-      alert("Réservation impossible : " + (e as Error).message);
+      toast("err", "Réservation impossible : " + (e as Error).message);
     }
   };
 
   const onCancel = async (b: JournalEntry) => {
-    if (!confirm(`Annuler ta réservation de ${b.courtName} à ${fmtTime(b.startsAt)} ?`))
-      return;
+    const ok = await askConfirm({
+      title: "Annuler la réservation ?",
+      body: `${b.courtName} — ${fmtTime(b.startsAt)} le ${prettyDate(date)}`,
+      confirmLabel: "Annuler la résa",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       const res = await fetch(`/api/bookings/${b.id}`, { method: "DELETE" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
-      alert("Réservation annulée ✅");
+      toast("ok", "Réservation annulée");
       load(date);
     } catch (e) {
-      alert("Annulation impossible : " + (e as Error).message);
+      toast("err", "Annulation impossible : " + (e as Error).message);
     }
   };
 
@@ -279,7 +361,20 @@ export default function Home() {
         <button className="secondary" onClick={() => setDate(toISODate(new Date()))}>Aujourd'hui</button>
         <button className="secondary" onClick={() => setDate(addDays(date, 1))}>→</button>
         <span className="date">{prettyDate(date)}</span>
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <input
+          type="date"
+          className="datepick"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          // Ouvre le calendrier natif au clic n'importe où dans le champ (zone cliquable élargie)
+          onClick={(e) => {
+            try {
+              e.currentTarget.showPicker?.();
+            } catch {
+              /* showPicker non supporté / hors geste utilisateur */
+            }
+          }}
+        />
       </div>
 
       <div className="filters" role="group" aria-label="Plage horaire">
@@ -334,6 +429,9 @@ export default function Home() {
           </ul>
         )}
       </section>
+
+      <Toasts items={toasts} />
+      <ConfirmDialog state={confirmState} onResolve={resolveConfirm} />
     </main>
   );
 }
