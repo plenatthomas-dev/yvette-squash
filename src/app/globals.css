@@ -91,12 +91,16 @@ main {
 
 /* --- En-tête ------------------------------------------------------------ */
 header.app {
+  margin-bottom: 6px;
+}
+
+/* Ligne titre : logo + nom à gauche, icônes à droite (jamais de retour à la ligne). */
+.app-top {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  flex-wrap: nowrap; /* les icônes restent sur la ligne du titre */
-  margin-bottom: 6px;
+  flex-wrap: nowrap;
 }
 
 .brand {
@@ -148,9 +152,13 @@ header.app h1 {
   border: 0;
 }
 
+/* Sous-titre : bloc pleine largeur SOUS la ligne titre → tient sur une seule ligne
+   sur mobile (au lieu d'être coincé dans la colonne titre étroite). */
 header.app .sub {
+  margin-top: 2px;
   color: var(--pico-muted-color);
   font-size: 0.82rem;
+  white-space: nowrap;
 }
 
 .hello {
