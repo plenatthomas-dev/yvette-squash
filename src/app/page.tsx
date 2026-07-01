@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { PlanningGrid } from "@/components/PlanningGrid";
 import { WeekGrid } from "@/components/WeekGrid";
@@ -18,6 +18,14 @@ function prettyDate(date: string): string {
     weekday: "long",
     day: "numeric",
     month: "long",
+  });
+}
+// Format compact pour la barre d'outils (« mer. 1 juil. »), plus économe en largeur.
+function shortPretty(date: string): string {
+  return new Date(`${date}T12:00:00`).toLocaleDateString("fr-FR", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
   });
 }
 function fmtTime(iso: string): string {
@@ -51,6 +59,9 @@ const RANGES: { key: Range; label: string }[] = [
   { key: "afternoon", label: "Après-midi" },
   { key: "evening", label: "Soir" },
 ];
+function isRange(v: unknown): v is Range {
+  return v === "all" || v === "morning" || v === "afternoon" || v === "evening";
+}
 // Minutes depuis minuit lues directement dans l'ISO (évite tout décalage de fuseau).
 function slotMinutes(iso: string): number {
   const m = iso.match(/T(\d{2}):(\d{2})/);
@@ -244,7 +255,8 @@ function RefreshIcon() {
 // Bouton « partager » : Web Share natif (mobile) sinon copie du lien.
 function ShareButton({ onCopied }: { onCopied: () => void }) {
   const share = async () => {
-    const url = typeof window !== "undefined" ? window.location.origin : "";
+    // URL complète (avec ?date=&view=&range=) → on partage exactement la vue affichée.
+    const url = typeof window !== "undefined" ? window.location.href : "";
     try {
       if (navigator.share) {
         await navigator.share({
@@ -282,6 +294,16 @@ function Skeleton() {
   );
 }
 
+// État vide « présentable » (petit visuel + message) plutôt qu'un simple texte gris.
+function EmptyState({ icon, text }: { icon: string; text: string }) {
+  return (
+    <div className="empty">
+      <span className="empty-icon" aria-hidden="true">{icon}</span>
+      <p>{text}</p>
+    </div>
+  );
+}
+
 interface JournalEntry {
   id: string;
   displayName: string;
@@ -304,6 +326,10 @@ export default function Home() {
   const [view, setView] = useState<"day" | "week">("day");
   const [week, setWeek] = useState<{ date: string; planning: PlanningDay }[]>([]);
   const [busy, setBusy] = useState(false);
+  // Hydratation : on ne charge la donnée et on n'écrit l'URL/localStorage qu'après avoir lu
+  // l'état initial (URL puis localStorage). Évite un double chargement au premier rendu.
+  const [hydrated, setHydrated] = useState(false);
+  const lastFocusRef = useRef(0);
   const today = toISODate(new Date());
 
   const toast = useCallback((type: "ok" | "err", msg: string) => {
@@ -384,13 +410,72 @@ export default function Home() {
     }
   }, []);
 
+  // Lecture de l'état initial : URL (?date=&view=&range=) prioritaire, sinon localStorage.
   useEffect(() => {
-    if (!me) return;
+    const p = new URLSearchParams(window.location.search);
+    const d = p.get("date");
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) setDate(d);
+
+    const vParam = p.get("view");
+    const vLS = localStorage.getItem("view");
+    const v =
+      vParam === "week" || vParam === "day"
+        ? vParam
+        : vLS === "week" || vLS === "day"
+          ? vLS
+          : null;
+    if (v) setView(v);
+
+    const rParam = p.get("range");
+    const rLS = localStorage.getItem("range");
+    const r = isRange(rParam) ? rParam : isRange(rLS) ? rLS : null;
+    if (r) setRange(r);
+
+    setHydrated(true);
+  }, []);
+
+  // Reflète l'état dans l'URL (partageable, survit au refresh) et le persiste.
+  useEffect(() => {
+    if (!hydrated) return;
+    const p = new URLSearchParams();
+    p.set("date", date);
+    p.set("view", view);
+    if (range !== "all") p.set("range", range);
+    window.history.replaceState(null, "", `${window.location.pathname}?${p.toString()}`);
+    localStorage.setItem("view", view);
+    localStorage.setItem("range", range);
+  }, [hydrated, date, view, range]);
+
+  useEffect(() => {
+    if (!me || !hydrated) return;
     if (view === "week") loadWeek(date);
     else load(date);
-  }, [me, date, view, load, loadWeek]);
+  }, [me, hydrated, date, view, load, loadWeek]);
 
-  const reload = () => (view === "week" ? loadWeek(date) : load(date));
+  const reload = useCallback(
+    () => (view === "week" ? loadWeek(date) : load(date)),
+    [view, date, load, loadWeek],
+  );
+
+  // Rafraîchit au retour sur l'onglet (throttle 15 s) : le planning peut avoir bougé
+  // pendant l'absence (un autre membre a réservé). Évite de réserver un créneau déjà pris.
+  useEffect(() => {
+    if (!me) return;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastFocusRef.current < 15000) return;
+      lastFocusRef.current = now;
+      reload();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [me, reload]);
+
   const pickDay = (d: string) => {
     setView("day");
     setDate(d);
@@ -410,7 +495,7 @@ export default function Home() {
     if (busy || confirmState) return; // anti double-clic / double-modale
     const ok = await askConfirm({
       title: "Réserver ce créneau ?",
-      body: `${slot.courtName} — ${fmtTime(slot.startsAt)} le ${prettyDate(date)}`,
+      body: `${slot.courtName} — ${fmtTime(slot.startsAt)} le ${prettyDate(slot.startsAt.slice(0, 10))}`,
       confirmLabel: "Réserver",
     });
     if (!ok) return;
@@ -430,7 +515,7 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
       toast("ok", "Réservation confirmée");
-      load(date);
+      reload();
     } catch (e) {
       toast("err", "Réservation impossible : " + (e as Error).message);
     } finally {
@@ -454,7 +539,7 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
       toast("ok", "Réservation annulée");
-      load(date);
+      reload();
     } catch (e) {
       toast("err", "Annulation impossible : " + (e as Error).message);
     } finally {
@@ -467,7 +552,7 @@ export default function Home() {
     if (busy || confirmState) return;
     const ok = await askConfirm({
       title: "Annuler ta réservation ?",
-      body: `${slot.courtName} — ${fmtTime(slot.startsAt)} le ${prettyDate(date)}`,
+      body: `${slot.courtName} — ${fmtTime(slot.startsAt)} le ${prettyDate(slot.startsAt.slice(0, 10))}`,
       confirmLabel: "Annuler la résa",
       danger: true,
     });
@@ -483,7 +568,7 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
       toast("ok", "Réservation annulée");
-      load(date);
+      reload();
     } catch (e) {
       toast("err", "Annulation impossible : " + (e as Error).message);
     } finally {
@@ -536,7 +621,7 @@ export default function Home() {
         <button className="secondary" aria-label="Précédent" onClick={() => setDate(addDays(date, view === "week" ? -7 : -1))}>←</button>
         <button className="secondary" onClick={() => setDate(today)} disabled={date === today}>Aujourd'hui</button>
         <button className="secondary" aria-label="Suivant" onClick={() => setDate(addDays(date, view === "week" ? 7 : 1))}>→</button>
-        <span className="date">{view === "week" ? weekLabel(date) : prettyDate(date)}</span>
+        <span className="date">{view === "week" ? weekLabel(date) : shortPretty(date)}</span>
         <input
           type="date"
           className="datepick"
@@ -595,14 +680,19 @@ export default function Home() {
         </p>
       )}
 
-      {error && <div className="notice error">⚠️ {error}</div>}
+      {/* Annonce discrète pour lecteurs d'écran (chargement / erreur). */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {loading ? "Chargement du planning…" : error ? `Erreur : ${error}` : ""}
+      </p>
+
+      {error && <div className="notice error" role="alert">⚠️ {error}</div>}
 
       {view === "day"
         ? planning
           ? (() => {
               const slots = planning.slots.filter((s) => inRange(s.startsAt, range));
               if (slots.length === 0) {
-                return <p className="muted">Aucun créneau sur cette plage horaire.</p>;
+                return <EmptyState icon="🎾" text="Aucun créneau sur cette plage horaire." />;
               }
               return (
                 <PlanningGrid
@@ -616,7 +706,7 @@ export default function Home() {
             ? <Skeleton />
             : null
         : week.length
-          ? <WeekGrid days={week} filter={(iso) => inRange(iso, range)} onPick={pickDay} />
+          ? <WeekGrid days={week} filter={(iso) => inRange(iso, range)} onPick={pickDay} onBook={onBook} />
           : loading
             ? <Skeleton />
             : null}
@@ -625,7 +715,7 @@ export default function Home() {
         <section className="journal">
           <h2>👥 Réservations des membres de l'asso — {prettyDate(date)}</h2>
           {journal.length === 0 ? (
-            <p className="muted">Aucun membre de l'asso n'a (encore) réservé ce jour-là.</p>
+            <EmptyState icon="👥" text="Aucun membre de l'asso n'a (encore) réservé ce jour-là." />
           ) : (
             <ul>
               {journal.map((b) => (

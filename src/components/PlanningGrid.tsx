@@ -1,5 +1,6 @@
 "use client";
 
+import type { KeyboardEvent } from "react";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 
 function fmtTime(iso: string): string {
@@ -7,6 +8,15 @@ function fmtTime(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+// Déclenche l'action au clavier (Entrée / Espace) sur les cellules cliquables.
+function onKey(fn: () => void) {
+  return (e: KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      fn();
+    }
+  };
 }
 
 export function PlanningGrid({
@@ -59,8 +69,11 @@ export function PlanningGrid({
                       <td
                         key={c.id}
                         className="cell mine"
+                        role="button"
+                        tabIndex={0}
                         title="Ta réservation — cliquer pour annuler"
                         onClick={() => onCancelMine(slot)}
+                        onKeyDown={onKey(() => onCancelMine(slot))}
                       >
                         ★ {slot.bookedBy}
                       </td>
@@ -86,8 +99,11 @@ export function PlanningGrid({
                       <td
                         key={c.id}
                         className="cell free"
+                        role="button"
+                        tabIndex={0}
                         title="Cliquer pour réserver"
                         onClick={() => onBook(slot)}
+                        onKeyDown={onKey(() => onBook(slot))}
                       >
                         Libre
                       </td>
