@@ -301,7 +301,7 @@ header.app .sub {
 /* --- Barre vue (Jour/Semaine) + rafraîchir ------------------------------ */
 .viewbar {
   display: flex;
-  align-items: stretch; /* refresh à la même hauteur que les onglets Jour/Semaine */
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 12px;
@@ -312,10 +312,23 @@ header.app .sub {
   gap: 6px;
 }
 
+/* Onglets Jour/Semaine et bouton rafraîchir : même hauteur, contenu centré,
+   pour un alignement parfait quel que soit le contenu (texte vs icône). */
+.viewtabs button,
+.viewbar .refresh {
+  height: 38px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
 .viewtabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   margin: 0;
   width: auto;
-  padding: 7px 16px;
+  padding-left: 16px;
+  padding-right: 16px;
   font-size: 0.85rem;
   background: var(--pico-card-background-color);
   color: var(--pico-muted-color);
