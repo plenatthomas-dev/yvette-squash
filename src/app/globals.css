@@ -310,6 +310,9 @@ header.app .sub {
 .viewtabs {
   display: flex;
   gap: 6px;
+  /* Pico ajoute margin-bottom:var(--pico-spacing) sur [role="group"] : on l'annule,
+     sinon le flex de .viewbar centre la boîte-marge et décale le refresh vers le bas. */
+  margin: 0;
 }
 
 /* Onglets Jour/Semaine et bouton rafraîchir : même hauteur, contenu centré,
