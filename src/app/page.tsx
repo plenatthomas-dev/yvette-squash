@@ -71,6 +71,78 @@ function LogoutIcon() {
   );
 }
 
+// Thème : bouton-icône qui cycle Système (suit l'OS) → Clair → Sombre. Persisté en localStorage.
+type Theme = "system" | "light" | "dark";
+const THEME_ORDER: Theme[] = ["system", "light", "dark"];
+const THEME_LABEL: Record<Theme, string> = {
+  system: "Système",
+  light: "Clair",
+  dark: "Sombre",
+};
+function applyTheme(t: Theme) {
+  const el = document.documentElement;
+  if (t === "light" || t === "dark") el.setAttribute("data-theme", t);
+  else el.removeAttribute("data-theme"); // "system" → Pico suit prefers-color-scheme
+}
+function ThemeIcon({ theme }: { theme: Theme }) {
+  const p = {
+    width: 18,
+    height: 18,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+  if (theme === "light") {
+    return (
+      <svg {...p}>
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+      </svg>
+    );
+  }
+  if (theme === "dark") {
+    return (
+      <svg {...p}>
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...p}>
+      <rect x="2" y="4" width="20" height="13" rx="2" />
+      <path d="M8 21h8M12 17v4" />
+    </svg>
+  );
+}
+function ThemeToggle() {
+  const [theme, setTheme] = useState<Theme>("system");
+  useEffect(() => {
+    const saved = (localStorage.getItem("theme") as Theme) || "system";
+    setTheme(saved);
+    applyTheme(saved);
+  }, []);
+  const cycle = () => {
+    const next = THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length];
+    setTheme(next);
+    localStorage.setItem("theme", next);
+    applyTheme(next);
+  };
+  return (
+    <button
+      className="secondary icon-btn"
+      onClick={cycle}
+      aria-label={`Thème : ${THEME_LABEL[theme]} (cliquer pour changer)`}
+      title={`Thème : ${THEME_LABEL[theme]} — cliquer pour changer`}
+    >
+      <ThemeIcon theme={theme} />
+    </button>
+  );
+}
+
 interface JournalEntry {
   id: string;
   displayName: string;
@@ -184,11 +256,12 @@ export default function Home() {
     <main>
       <header className="app">
         <div>
-          <h1>🎾 Yvette Squash</h1>
-          <div className="sub">Le Complexe Bures — planning des terrains</div>
+          <h1>🎾 Squash de l'Yvette</h1>
+          <div className="sub">Planning Terrains, Le Complexe, Bures</div>
         </div>
         <div className="userbar">
-          <span>Bonjour {me}</span>
+          <span>Bonjour {me.split(" ")[0]}</span>
+          <ThemeToggle />
           <button
             className="secondary logout"
             onClick={logout}
@@ -224,7 +297,7 @@ export default function Home() {
 
       <div className="legend">
         <span><i style={{ background: "var(--free)" }} /> Libre</span>
-        <span><i style={{ background: "var(--accent)" }} /> Réservé par le groupe</span>
+        <span><i style={{ background: "var(--accent)" }} /> Réservé (asso)</span>
         <span><i style={{ background: "var(--booked)" }} /> Réservé (autre)</span>
       </div>
 
@@ -293,7 +366,7 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
 
   return (
     <main className="login">
-      <h1>🎾 Yvette Squash</h1>
+      <h1>🎾 Squash de l'Yvette</h1>
       <p className="muted">
         Connecte-toi avec ton compte ResaMania (Le Complexe Bures).
       </p>

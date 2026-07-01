@@ -46,7 +46,7 @@ export function PlanningGrid({
                 if (!slot) return <td key={c.id} className="cell closed" />;
                 if (slot.bookedBy) {
                   return (
-                    <td key={c.id} className="cell group" title={`Réservé par ${slot.bookedBy} (groupe)`}>
+                    <td key={c.id} className="cell group" title={`Réservé par ${slot.bookedBy} (asso)`}>
                       👥 {slot.bookedBy}
                     </td>
                   );

@@ -6,31 +6,74 @@
  * ========================================================================== */
 
 :root {
-  /* accent = vert « squash » repris comme couleur primaire Pico */
+  /* accent = vert « squash » repris comme couleur primaire Pico (identique clair/sombre) */
   --pico-primary: #1f9d57;
   --pico-primary-hover: #24b365;
   --pico-primary-background: #1f9d57;
   --pico-primary-hover-background: #24b365;
   --pico-primary-focus: rgba(31, 157, 87, 0.3);
   --pico-primary-inverse: #ffffff;
-
-  /* jetons propres à la grille */
-  --free: #1f9d57;
-  --free-hover: #24b365;
-  --booked: #3a2030;
-  --group: #1b2a4a;
-  --closed: #14171d;
-  --accent: #4f8cff;
+  --pico-border-radius: 10px;
 }
 
+/* Jetons applicatifs (grille, notices…). Pico gère les surfaces de base par thème ;
+   ici on ne themme que nos couleurs maison. THÈME CLAIR = défaut. */
+:root,
+[data-theme="light"] {
+  --free: #1f9d57;
+  --free-fg: #ffffff;
+  --free-hover: #1a8b4c;
+  --booked: #f7dfe6;
+  --booked-fg: #9c2f56;
+  --group: #dbe7ff;
+  --group-fg: #29508f;
+  --closed: #eceef2;
+  --accent: #2f6fe0;
+  --notice-bg: #eef2f8;
+  --error-fg: #b3261e;
+  --error-accent: #e5484d;
+  --danger-fg: #b3261e;
+  --danger-border: #e2b8b8;
+  --danger-hover: #e5484d;
+}
+
+/* THÈME SOMBRE — appliqué si data-theme="dark" OU si l'OS est sombre en mode « système »
+   (aucun data-theme). Même logique que Pico pour rester cohérent. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --free: #1f9d57;
+    --free-fg: #eafff3;
+    --free-hover: #24b365;
+    --booked: #3a2030;
+    --booked-fg: #d79ab0;
+    --group: #1b2a4a;
+    --group-fg: #bcd2ff;
+    --closed: #14171d;
+    --accent: #4f8cff;
+    --notice-bg: #1d2330;
+    --error-fg: #ff9a9a;
+    --error-accent: #ff6b6b;
+    --danger-fg: #ff9a9a;
+    --danger-border: #5a2a2a;
+    --danger-hover: #ff6b6b;
+  }
+}
 [data-theme="dark"] {
-  --pico-background-color: #0f1115;
-  --pico-color: #e6e8ec;
-  --pico-muted-color: #9aa0ac;
-  --pico-card-background-color: #181b22;
-  --pico-card-sectioning-background-color: #181b22;
-  --pico-card-border-color: #272b34;
-  --pico-border-radius: 10px;
+  --free: #1f9d57;
+  --free-fg: #eafff3;
+  --free-hover: #24b365;
+  --booked: #3a2030;
+  --booked-fg: #d79ab0;
+  --group: #1b2a4a;
+  --group-fg: #bcd2ff;
+  --closed: #14171d;
+  --accent: #4f8cff;
+  --notice-bg: #1d2330;
+  --error-fg: #ff9a9a;
+  --error-accent: #ff6b6b;
+  --danger-fg: #ff9a9a;
+  --danger-border: #5a2a2a;
+  --danger-hover: #ff6b6b;
 }
 
 /* --- Enveloppe : conteneur centré, marges maîtrisées sur mobile --------- */
@@ -68,9 +111,24 @@ header.app .sub {
 .userbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   font-size: 0.85rem;
   color: var(--pico-muted-color);
+}
+
+/* Bouton-icône compact (thème, etc.), même gabarit que la déconnexion en icône */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  width: auto;
+  padding: 7px 9px;
+}
+
+.icon-btn svg {
+  display: block;
 }
 
 .userbar button {
@@ -241,7 +299,7 @@ td.cell {
 
 td.cell.free {
   background: var(--free);
-  color: #eafff3;
+  color: var(--free-fg);
   cursor: pointer;
   font-weight: 600;
 }
@@ -253,12 +311,12 @@ td.cell.free:active {
 
 td.cell.booked {
   background: var(--booked);
-  color: #d79ab0;
+  color: var(--booked-fg);
 }
 
 td.cell.group {
   background: var(--group);
-  color: #bcd2ff;
+  color: var(--group-fg);
   font-weight: 600;
   font-size: 0.72rem;
   overflow: hidden;
@@ -272,7 +330,7 @@ td.cell.closed {
 
 /* --- Notices ------------------------------------------------------------ */
 .notice {
-  background: #1d2330;
+  background: var(--notice-bg);
   border: 1px solid var(--pico-card-border-color);
   border-left: 3px solid var(--accent);
   padding: 10px 14px;
@@ -283,8 +341,8 @@ td.cell.closed {
 }
 
 .error {
-  color: #ff9a9a;
-  border-left-color: #ff6b6b;
+  color: var(--error-fg);
+  border-left-color: var(--error-accent);
 }
 
 .muted {
@@ -336,13 +394,13 @@ td.cell.closed {
   white-space: nowrap;
   width: auto;
   background: transparent;
-  color: #ff9a9a;
-  border: 1px solid #5a2a2a;
+  color: var(--danger-fg);
+  border: 1px solid var(--danger-border);
 }
 
 .journal li button.cancel:hover {
-  border-color: #ff6b6b;
-  background: rgba(255, 107, 107, 0.08);
+  border-color: var(--danger-hover);
+  background: color-mix(in srgb, var(--danger-hover) 10%, transparent);
 }
 
 /* --- Écran de connexion ------------------------------------------------- */
