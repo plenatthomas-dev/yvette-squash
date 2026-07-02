@@ -504,9 +504,12 @@ td.cell.group {
   color: var(--group-fg);
   font-weight: 600;
   font-size: 0.72rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding: 4px;
+  white-space: normal; /* autorise le passage à la ligne des présences */
+  line-height: 1.15;
+}
+td.cell.group[role="button"] {
+  cursor: pointer;
 }
 
 td.cell.closed {
@@ -520,10 +523,35 @@ td.cell.mine {
   color: var(--group-fg);
   font-weight: 600;
   font-size: 0.72rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding: 4px;
+  white-space: normal;
+  line-height: 1.15;
   cursor: pointer;
+}
+
+/* Réservataire sur sa propre ligne ; présences « asso » en petites puces dessous. */
+.cell .booker {
+  display: block;
+}
+.cell .attendees {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 3px;
+  margin-top: 3px;
+}
+.cell .att {
+  font-weight: 500;
+  font-size: 0.66rem;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--group-fg) 16%, transparent);
+}
+
+/* Je suis noté présent → liseré accent pour repérer le créneau d'un coup d'œil. */
+td.cell.attending {
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 td.cell.past {
@@ -728,6 +756,10 @@ td.cell.past {
 .toast.err {
   border-left: 4px solid var(--error-accent);
   color: var(--error-fg);
+}
+
+.toast.info {
+  border-left: 4px solid var(--accent);
 }
 
 @keyframes toast-in {

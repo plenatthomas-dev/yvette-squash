@@ -20,6 +20,8 @@ export interface Slot {
   bookerContactId?: string | null; // contactId (opaque) de la personne ayant réservé, si pris
   bookedBy?: string | null; // nom résolu si la personne est un membre connu du groupe
   mine?: boolean; // true si c'est le joueur courant qui a réservé ce créneau
+  attendees?: string[]; // prénoms des membres « présents » (hors réservataire), signal local
+  iAmAttending?: boolean; // true si le joueur courant s'est noté présent sur ce créneau
 }
 
 export interface PlanningDay {

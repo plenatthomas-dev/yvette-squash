@@ -18,8 +18,42 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "classEventId requis" }, { status: 400 });
   }
 
+  // Blocage « même créneau » : ResaMania interdit de réserver 2 terrains au même horaire.
+  // 1) Court-circuit local si on connaît déjà une résa à cet horaire → évite un appel
+  //    voué à échouer et affiche tout de suite une notif d'information.
+  if (startsAt) {
+    const clash = await prisma.booking.findFirst({
+      where: {
+        userId: session.userId,
+        status: "booked",
+        startsAt: new Date(startsAt),
+        NOT: { classEventId },
+      },
+    });
+    if (clash) {
+      return NextResponse.json(
+        {
+          error: `Tu as déjà une réservation sur ce créneau (${clash.courtName}). Un seul terrain par horaire.`,
+          code: "overlap",
+        },
+        { status: 409 },
+      );
+    }
+  }
+
   const r = await book(session.resa, classEventId);
   if (!r.ok) {
+    // 2) Filet de sécurité : ResaMania bloque aussi (has-overlapping-slots) si la résa
+    //    en conflit n'était pas connue en base (faite ailleurs).
+    if (r.error?.includes("has-overlapping-slots")) {
+      return NextResponse.json(
+        {
+          error: "Tu as déjà une réservation sur ce créneau (autre terrain). Un seul terrain par horaire.",
+          code: "overlap",
+        },
+        { status: 409 },
+      );
+    }
     return NextResponse.json({ error: r.error }, { status: 409 });
   }
 

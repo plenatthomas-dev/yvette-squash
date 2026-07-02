@@ -175,13 +175,15 @@ function ThemeToggle() {
 }
 
 // --- Toasts & confirmation (remplacent alert()/confirm() natifs, moches sur mobile) ----
-type Toast = { id: number; type: "ok" | "err"; msg: string };
+type ToastType = "ok" | "err" | "info";
+type Toast = { id: number; type: ToastType; msg: string };
+const TOAST_ICON: Record<ToastType, string> = { ok: "✅", err: "⚠️", info: "ℹ️" };
 function Toasts({ items }: { items: Toast[] }) {
   return (
     <div className="toasts" role="status" aria-live="polite">
       {items.map((t) => (
         <div key={t.id} className={`toast ${t.type}`}>
-          {t.type === "ok" ? "✅" : "⚠️"} {t.msg}
+          {TOAST_ICON[t.type]} {t.msg}
         </div>
       ))}
     </div>
@@ -332,7 +334,7 @@ export default function Home() {
   const lastFocusRef = useRef(0);
   const today = toISODate(new Date());
 
-  const toast = useCallback((type: "ok" | "err", msg: string) => {
+  const toast = useCallback((type: ToastType, msg: string) => {
     const id = Date.now() + Math.random();
     setToasts((t) => [...t, { id, type, msg }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3500);
@@ -493,6 +495,13 @@ export default function Home() {
 
   const onBook = async (slot: Slot) => {
     if (busy || confirmState) return; // anti double-clic / double-modale
+    // Blocage « même créneau » : impossible de réserver 2 terrains au même horaire
+    // (ResaMania le refuse). On prévient tout de suite si on a déjà une résa à cette heure.
+    const clash = planning?.slots.find((s) => s.startsAt === slot.startsAt && s.mine);
+    if (clash) {
+      toast("info", `Tu joues déjà sur ${clash.courtName} à cet horaire — un seul terrain à la fois.`);
+      return;
+    }
     const ok = await askConfirm({
       title: "Réserver ce créneau ?",
       body: `${slot.courtName} — ${fmtTime(slot.startsAt)} le ${prettyDate(slot.startsAt.slice(0, 10))}`,
@@ -513,7 +522,14 @@ export default function Home() {
       });
       if (handleExpired(res.status)) return;
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      if (!res.ok) {
+        // Conflit « même créneau » : notif d'information plutôt qu'une erreur.
+        if (data.code === "overlap") {
+          toast("info", data.error);
+          return;
+        }
+        throw new Error(data.error ?? `Erreur ${res.status}`);
+      }
       toast("ok", "Réservation confirmée");
       reload();
     } catch (e) {
@@ -573,6 +589,53 @@ export default function Home() {
       toast("err", "Annulation impossible : " + (e as Error).message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Signale/retire sa présence sur le créneau d'un autre membre. Pas de confirmation.
+  // Mise à jour optimiste (ton prénom apparaît/disparaît aussitôt), puis re-sync si échec.
+  const onTogglePresence = async (slot: Slot) => {
+    if (!me) return;
+    const myFirst = me.split(" ")[0];
+    const wasAttending = slot.iAmAttending ?? false;
+    setPlanning((p) =>
+      p
+        ? {
+            ...p,
+            slots: p.slots.map((s) => {
+              // Créneau ciblé : on bascule ma présence.
+              if (s.id === slot.id) {
+                const cur = s.attendees ?? [];
+                return {
+                  ...s,
+                  attendees: wasAttending ? cur.filter((n) => n !== myFirst) : [...cur, myFirst],
+                  iAmAttending: !wasAttending,
+                };
+              }
+              // Ajout : je me retire d'un éventuel autre terrain au même horaire (exclusivité).
+              if (!wasAttending && s.startsAt === slot.startsAt && s.iAmAttending) {
+                return {
+                  ...s,
+                  attendees: (s.attendees ?? []).filter((n) => n !== myFirst),
+                  iAmAttending: false,
+                };
+              }
+              return s;
+            }),
+          }
+        : p,
+    );
+    try {
+      const res = await fetch("/api/presence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classEventId: slot.id, startsAt: slot.startsAt }),
+      });
+      if (handleExpired(res.status)) return;
+      if (!res.ok) throw new Error();
+    } catch {
+      toast("err", "Présence non enregistrée");
+      reload(); // resynchronise l'état réel
     }
   };
 
@@ -703,6 +766,7 @@ export default function Home() {
                   planning={{ ...planning, slots }}
                   onBook={onBook}
                   onCancelMine={onCancelMine}
+                  onTogglePresence={onTogglePresence}
                 />
               );
             })()

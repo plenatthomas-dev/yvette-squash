@@ -14,13 +14,14 @@ datasource db {
 
 // Un joueur de l'appli, identifié par son compte ResaMania (contactId).
 model User {
-  id          String    @id @default(cuid())
-  contactId   String    @unique // ex. "/lecomplexbures/contacts/12685397"
+  id          String       @id @default(cuid())
+  contactId   String       @unique // ex. "/lecomplexbures/contacts/12685397"
   displayName String
   email       String?
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime     @default(now())
   sessions    Session[]
   bookings    Booking[]
+  attendances Attendance[]
 }
 
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
@@ -54,4 +55,19 @@ model Booking {
 
   @@index([startsAt])
   @@index([userId])
+}
+
+// Présence « asso » sur un créneau déjà réservé par un membre : signal purement local
+// (ne touche jamais ResaMania ni l'identité du réservataire). Un membre peut se noter
+// présent sur le créneau d'un autre ; un second clic le retire.
+model Attendance {
+  id           String   @id @default(cuid())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       String
+  classEventId String // IRI du class_event concerné (clé de jointure avec le planning)
+  startsAt     DateTime // horaire du créneau : sert à interdire 2 présences au même horaire
+  createdAt    DateTime @default(now())
+
+  @@unique([userId, classEventId]) // une présence par personne et par créneau
+  @@index([classEventId])
 }
