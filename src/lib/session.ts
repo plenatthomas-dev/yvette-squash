@@ -12,6 +12,10 @@ function nameOf(id: ResaIdentity): string {
 
 /** Crée un User (si besoin) + une session applicative. Renvoie l'id de cookie. */
 export async function createSession(resa: ResaSession): Promise<string> {
+  // Purge opportuniste : les sessions expirées ne sont sinon supprimées que si leur
+  // propre cookie revient un jour — elles s'accumuleraient avec leurs refresh tokens.
+  await prisma.session.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+
   const id = randomBytes(24).toString("base64url");
   const user = await prisma.user.upsert({
     where: { contactId: resa.identity.contactId },
