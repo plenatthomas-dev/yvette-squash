@@ -671,9 +671,19 @@ td.cell.past {
   background: transparent;
   border: none;
   box-shadow: none;
-  /* --pico-color = couleur de texte du thème : toujours contrastée sur le fond du champ */
-  color: var(--pico-color);
+  /* Couleur foncée explicite : Pico redéfinit --pico-color en blanc sur les <button>,
+     donc on ne s'appuie pas dessus. Gris ardoise foncé, bien visible sur champ clair. */
+  color: #374151;
   cursor: pointer;
+}
+/* Thème sombre : champ foncé → icône claire pour rester très visible. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .pwd-toggle {
+    color: #e5e7eb;
+  }
+}
+[data-theme="dark"] .pwd-toggle {
+  color: #e5e7eb;
 }
 .pwd-toggle svg {
   display: block;
