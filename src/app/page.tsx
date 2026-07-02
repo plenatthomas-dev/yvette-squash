@@ -746,9 +746,39 @@ export default function Home() {
   );
 }
 
+// Icône « œil » (afficher/masquer le mot de passe). `off` = œil barré (masqué).
+function EyeIcon({ off }: { off: boolean }) {
+  const p = {
+    viewBox: "0 0 24 24",
+    width: 20,
+    height: 20,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+  if (off) {
+    return (
+      <svg {...p}>
+        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20C5 20 1 12 1 12a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+        <line x1="1" y1="1" x2="23" y2="23" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...p}>
+      <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
 function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPwd, setShowPwd] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -791,13 +821,25 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
           onChange={(e) => setUsername(e.target.value)}
           autoComplete="username"
         />
-        <input
-          type="password"
-          placeholder="Mot de passe"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="current-password"
-        />
+        <div className="pwd-field">
+          <input
+            type={showPwd ? "text" : "password"}
+            placeholder="Mot de passe"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+          />
+          <button
+            type="button"
+            className="pwd-toggle"
+            onClick={() => setShowPwd((v) => !v)}
+            aria-label={showPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+            aria-pressed={showPwd}
+            title={showPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+          >
+            <EyeIcon off={showPwd} />
+          </button>
+        </div>
         <button type="submit" disabled={busy}>
           {busy ? "Connexion…" : "Se connecter"}
         </button>

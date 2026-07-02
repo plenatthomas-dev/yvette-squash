@@ -646,6 +646,36 @@ td.cell.past {
   margin: 0;
 }
 
+/* Champ mot de passe : bouton « œil » superposé à droite pour afficher/masquer */
+.pwd-field {
+  position: relative;
+}
+.pwd-field input {
+  padding-right: 46px; /* place réservée au bouton œil */
+}
+.pwd-toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 44px;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--pico-muted-color);
+  cursor: pointer;
+}
+.pwd-toggle:hover {
+  color: var(--pico-color);
+}
+.pwd-toggle svg {
+  display: block;
+}
+
 .login button[type="submit"] {
   width: 100%;
   margin-top: 4px;
