@@ -653,7 +653,10 @@ td.cell.past {
 .pwd-field input {
   padding-right: 46px; /* place réservée au bouton œil */
 }
-.pwd-toggle {
+.pwd-toggle,
+.pwd-toggle:hover,
+.pwd-toggle:focus,
+.pwd-toggle:active {
   position: absolute;
   top: 0;
   right: 0;
@@ -664,13 +667,13 @@ td.cell.past {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* transparent partout : sinon Pico repeint le bouton (fond + texte blanc) au focus/active */
   background: transparent;
   border: none;
-  color: var(--pico-muted-color);
-  cursor: pointer;
-}
-.pwd-toggle:hover {
+  box-shadow: none;
+  /* --pico-color = couleur de texte du thème : toujours contrastée sur le fond du champ */
   color: var(--pico-color);
+  cursor: pointer;
 }
 .pwd-toggle svg {
   display: block;
