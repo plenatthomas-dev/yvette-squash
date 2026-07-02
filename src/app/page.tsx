@@ -846,8 +846,9 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
       </form>
       {err && <div className="notice error">⚠️ {err}</div>}
       <p className="muted tiny">
-        Tes identifiants servent uniquement à te connecter à ResaMania. Le mot de
-        passe n'est pas stocké ; seule une session sécurisée est conservée.
+        Ton mot de passe sert seulement à te connecter à ResaMania ; il n'est
+        jamais conservé. L'appli mémorise uniquement que tu es connecté, de façon
+        sécurisée, pour t'éviter de te reconnecter sans arrêt.
       </p>
     </main>
   );
