@@ -57,6 +57,17 @@ model Booking {
   @@index([userId])
 }
 
+// Tentative de connexion ÉCHOUÉE (rate limiting du login : 5 max / 15 min par IP).
+// Une ligne par échec ; les lignes sont purgées dès qu'elles sortent de la fenêtre,
+// et toutes celles d'une IP sont effacées quand elle réussit à se connecter.
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  ip        String
+  createdAt DateTime @default(now())
+
+  @@index([ip, createdAt])
+}
+
 // Présence « asso » sur un créneau déjà réservé par un membre : signal purement local
 // (ne touche jamais ResaMania ni l'identité du réservataire). Un membre peut se noter
 // présent sur le créneau d'un autre ; un second clic le retire.
