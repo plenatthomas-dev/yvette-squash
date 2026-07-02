@@ -30,7 +30,7 @@ model Session {
   id              String   @id // jeton aléatoire (valeur du cookie)
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId          String
-  accessToken     String // token Bearer (court, ~1h)
+  accessToken     String // token Bearer chiffré (AES-256-GCM, court ~1h)
   refreshTokenEnc String // refresh token chiffré (AES-256-GCM)
   tokenExpiresAt  DateTime
   identityJson    String // ResaIdentity sérialisée (contactId, clubId, nom…)
@@ -70,4 +70,5 @@ model Attendance {
 
   @@unique([userId, classEventId]) // une présence par personne et par créneau
   @@index([classEventId])
+  @@index([startsAt]) // purge des présences anciennes
 }
