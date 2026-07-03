@@ -933,6 +933,15 @@ td.cell.past {
   font-weight: 600;
 }
 
+/* Chip « Short Rose » : dessin (et fond/bordure) rose même quand il n'est pas actif,
+   pour identifier ce thème d'un coup d'œil. Actif → géré par .theme-chip.active (blanc
+   sur fond rose vif, plus spécifique). */
+.theme-chip--rose {
+  color: #e6007e;
+  background: #ffe8f4;
+  border-color: #ff9ecb;
+}
+
 .nick-field {
   display: flex;
   gap: 8px;

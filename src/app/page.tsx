@@ -278,7 +278,11 @@ function SettingsButton({
                 {THEMES.map((t) => (
                   <button
                     key={t.key}
-                    className={"theme-chip" + (theme === t.key ? " active" : "")}
+                    className={
+                      "theme-chip" +
+                      (t.key === "rose" ? " theme-chip--rose" : "") +
+                      (theme === t.key ? " active" : "")
+                    }
                     aria-pressed={theme === t.key}
                     aria-label={t.label}
                     title={t.label}
@@ -463,7 +467,7 @@ function ShareButton({ toast }: { toast: (type: ToastType, msg: string) => void 
       const img = new Image();
       img.onload = () => {
         if (cancelled) return;
-        const s = 66;
+        const s = 86; // taille du logo central (QR en correction « H » → reste scannable)
         const x = (320 - s) / 2;
         const y = (320 - s) / 2;
         const pad = 8;
