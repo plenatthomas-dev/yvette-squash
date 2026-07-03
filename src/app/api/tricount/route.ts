@@ -36,10 +36,14 @@ export async function GET(req: NextRequest) {
     users.map((u) => [u.id, (u.nickname ?? "").trim() || u.displayName]),
   );
   const name = (id: string) => nameOf.get(id) ?? "?";
+  // Remboursements : toujours les prénoms/noms réels (pas de pseudos), pour être
+  // sûr de savoir à QUI donner l'argent.
+  const fullOf = new Map(users.map((u) => [u.id, u.displayName]));
+  const fullName = (id: string) => fullOf.get(id) ?? "?";
 
   return NextResponse.json({
     me: session.userId,
-    members: users.map((u) => ({ id: u.id, name: name(u.id) })),
+    members: users.map((u) => ({ id: u.id, name: name(u.id), fullName: u.displayName })),
     tricounts: tricounts.map((t) => {
       const balances = computeBalances(t.expenses);
       const transfers = settle(balances);
@@ -77,8 +81,8 @@ export async function GET(req: NextRequest) {
           .sort((a, b) => b.cents - a.cents),
         transfers: transfers.map((tr) => ({
           ...tr,
-          fromName: name(tr.fromId),
-          toName: name(tr.toId),
+          fromName: fullName(tr.fromId),
+          toName: fullName(tr.toId),
         })),
       };
     }),

@@ -16,6 +16,34 @@ export function splitEqually(amountCents: number, n: number): number[] {
   return Array.from({ length: n }, (_, i) => base + (i < extra ? 1 : 0));
 }
 
+/**
+ * Répartition égale avec mémoire des arrondis du tricount : les centimes en trop
+ * vont d'abord à ceux qui ont le moins « surpayé » jusqu'ici (`credit` = somme de
+ * (part attribuée − part exacte) sur les dépenses précédentes). Ainsi les erreurs
+ * d'arrondi se compensent d'une dépense à l'autre : 200 € puis 100 € entre 3
+ * donnent bien 100 € chacun, et non 100,01 / 100,00 / 99,99.
+ * Renvoie les parts dans l'ordre de `ids`.
+ */
+export function splitWithCredits(
+  amountCents: number,
+  ids: string[],
+  credit: Map<string, number>,
+): number[] {
+  const n = ids.length;
+  const base = Math.floor(amountCents / n);
+  let extra = amountCents % n;
+  const order = ids
+    .map((id, i) => ({ i, id, c: credit.get(id) ?? 0 }))
+    .sort((a, b) => a.c - b.c || (a.id < b.id ? -1 : 1));
+  const out: number[] = Array(n).fill(base);
+  for (const o of order) {
+    if (extra <= 0) break;
+    out[o.i] = base + 1;
+    extra--;
+  }
+  return out;
+}
+
 export interface ExpenseForBalance {
   payerId: string;
   isRefund?: boolean;

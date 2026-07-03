@@ -1249,7 +1249,8 @@ table.planning.week td.cell {
   min-width: 0;
 }
 .tri-label small {
-  color: var(--pico-muted-color);
+  color: var(--pico-color);
+  opacity: 0.78;
   font-size: 0.78rem;
 }
 .tri-amount {
@@ -1317,7 +1318,15 @@ table.planning.week td.cell {
   margin-bottom: 12px;
   overflow: hidden;
 }
-.tri-card.settled { opacity: 0.75; }
+/* Tricount soldé : TOUTE la carte change de couleur (teinte primaire), bien
+   plus repérable que la seule pastille. */
+.tri-card.settled {
+  background: color-mix(in srgb, var(--pico-primary) 14%, var(--pico-card-background-color));
+  border-color: color-mix(in srgb, var(--pico-primary) 45%, var(--pico-card-border-color));
+}
+.tri-card.settled .tri-card-head:hover {
+  background: color-mix(in srgb, var(--pico-primary) 20%, transparent);
+}
 
 .tri-card-head {
   display: flex;
@@ -1335,7 +1344,10 @@ table.planning.week td.cell {
   min-width: 0;
 }
 .tri-card-title small {
-  color: var(--pico-muted-color);
+  /* Contraste : la couleur du texte courant légèrement atténuée, plutôt que le
+     gris « muted » illisible sur les fonds teintés (cartes soldées, hover…). */
+  color: var(--pico-color);
+  opacity: 0.78;
   font-size: 0.78rem;
 }
 

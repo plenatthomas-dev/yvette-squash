@@ -5,11 +5,12 @@ import { computeBalances, payersOf, MAX_AMOUNT_CENTS } from "@/lib/tricount";
 
 export const runtime = "nodejs";
 
-// POST /api/tricount/{id}/refunds { fromId, toId, amountCents }
-// Enregistre « fromId a remboursé amountCents à toId » dans ce tricount.
-// Règles : tous les payeurs du tricount doivent avoir validé ; fromId doit devoir
-// de l'argent (solde négatif) et toId en attendre (solde positif) ; le montant est
-// plafonné à ce qui reste dû de part et d'autre (les soldes convergent vers zéro).
+// POST /api/tricount/{id}/refunds { toId, amountCents }
+// Enregistre « JE (l'utilisateur connecté) ai remboursé amountCents à toId ».
+// Seul l'intéressé déclare ses propres remboursements. Règles : tous les payeurs
+// du tricount doivent avoir validé ; je dois de l'argent (solde négatif) et toId
+// en attend (solde positif) ; montant plafonné à ce qui reste dû de part et
+// d'autre (les soldes convergent vers zéro).
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -21,13 +22,13 @@ export async function POST(
   const { id } = await params;
 
   const body = await req.json().catch(() => ({}));
-  const { fromId, toId, amountCents } = body as {
-    fromId?: unknown;
+  const { toId, amountCents } = body as {
     toId?: unknown;
     amountCents?: unknown;
   };
-  if (typeof fromId !== "string" || typeof toId !== "string" || fromId === toId) {
-    return NextResponse.json({ error: "Rembourseur/bénéficiaire invalides" }, { status: 400 });
+  const fromId = session.userId; // le rembourseur est TOUJOURS l'utilisateur connecté
+  if (typeof toId !== "string" || fromId === toId) {
+    return NextResponse.json({ error: "Bénéficiaire invalide" }, { status: 400 });
   }
   if (
     typeof amountCents !== "number" ||
@@ -64,7 +65,7 @@ export async function POST(
   const fromBal = balances.get(fromId) ?? 0;
   const toBal = balances.get(toId) ?? 0;
   if (fromBal >= 0) {
-    return NextResponse.json({ error: "Ce membre ne doit rien sur ce tricount" }, { status: 400 });
+    return NextResponse.json({ error: "Tu ne dois rien sur ce tricount" }, { status: 400 });
   }
   if (toBal <= 0) {
     return NextResponse.json(

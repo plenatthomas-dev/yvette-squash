@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { splitEqually, MAX_AMOUNT_CENTS, MAX_LABEL_LEN } from "@/lib/tricount";
+import { splitWithCredits, MAX_AMOUNT_CENTS, MAX_LABEL_LEN } from "@/lib/tricount";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,12 +66,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Membre inconnu" }, { status: 400 });
   }
 
-  const parts = splitEqually(amountCents, uniqueIds.length);
   const tricount = await prisma.tricount.upsert({
     where: { date },
     update: {},
     create: { date, title: cleanTitle },
   });
+  // Mémoire des arrondis du tricount : qui a déjà « surpayé » d'un centime ?
+  // (part attribuée − part exacte, sommée sur les dépenses existantes)
+  const existing = await prisma.expense.findMany({
+    where: { tricountId: tricount.id, isRefund: false },
+    select: { amountCents: true, shares: { select: { userId: true, amountCents: true } } },
+  });
+  const credit = new Map<string, number>();
+  for (const e of existing) {
+    const exact = e.amountCents / e.shares.length;
+    for (const s of e.shares) {
+      credit.set(s.userId, (credit.get(s.userId) ?? 0) + (s.amountCents - exact));
+    }
+  }
+  const parts = splitWithCredits(amountCents, uniqueIds, credit);
   const [expense] = await prisma.$transaction([
     prisma.expense.create({
       data: {

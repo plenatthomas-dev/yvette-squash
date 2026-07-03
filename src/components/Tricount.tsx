@@ -8,7 +8,8 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 
 interface Member {
   id: string;
-  name: string;
+  name: string; // pseudo ou prénom (affichage courant)
+  fullName: string; // prénom + nom réels (feature remboursement)
 }
 interface ExpenseItem {
   id: string;
@@ -105,7 +106,8 @@ export default function Tricount({ toast, onExpired }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [openId, setOpenId] = useState<string | null>(null); // tricount déplié
+  // Tricount déplié (au plus un ; "" = tous repliés, null = pas encore initialisé)
+  const [openId, setOpenId] = useState<string | null>(null);
 
   // Formulaire « nouvelle dépense »
   const [expenseOpen, setExpenseOpen] = useState(false);
@@ -116,9 +118,9 @@ export default function Tricount({ toast, onExpired }: Props) {
   const [payerId, setPayerId] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // Formulaire « j'ai remboursé » (rattaché à UN tricount prêt)
+  // Formulaire « j'ai remboursé » (rattaché à UN tricount prêt ; le rembourseur
+  // est TOUJOURS l'utilisateur connecté)
   const [refundFor, setRefundFor] = useState<TricountItem | null>(null);
-  const [refundFrom, setRefundFrom] = useState("");
   const [refundTo, setRefundTo] = useState("");
   const [refundAmount, setRefundAmount] = useState("");
 
@@ -144,11 +146,12 @@ export default function Tricount({ toast, onExpired }: Props) {
     load();
   }, [load]);
 
-  // Le premier tricount non soldé est déplié par défaut.
+  // Le premier tricount non soldé est déplié au premier chargement UNIQUEMENT :
+  // ensuite on peut tout replier (openId = ""), rien ne se rouvre tout seul.
   useEffect(() => {
     if (data && openId === null) {
       const first = data.tricounts.find((t) => !t.settled) ?? data.tricounts[0];
-      if (first) setOpenId(first.id);
+      setOpenId(first ? first.id : "");
     }
   }, [data, openId]);
 
@@ -232,30 +235,19 @@ export default function Tricount({ toast, onExpired }: Props) {
     }
   };
 
-  // Bénéficiaires possibles pour le rembourseur choisi : ses créanciers dans CE
-  // tricount (issus des virements suggérés), avec le montant conseillé.
+  // Bénéficiaires possibles : MES créanciers dans CE tricount (issus des
+  // virements suggérés), avec le montant conseillé.
   const refundOptions = useMemo(() => {
-    if (!refundFor) return [];
-    return refundFor.transfers.filter((t) => t.fromId === refundFrom);
-  }, [refundFor, refundFrom]);
+    if (!refundFor || !data) return [];
+    return refundFor.transfers.filter((t) => t.fromId === data.me);
+  }, [refundFor, data]);
 
   const openRefund = (t: TricountItem) => {
     if (!data) return;
-    // Rembourseur par défaut : moi si je dois quelque chose, sinon le 1er débiteur.
-    const iOwe = t.transfers.some((tr) => tr.fromId === data.me);
-    const from = iOwe ? data.me : (t.transfers[0]?.fromId ?? "");
-    const first = t.transfers.find((tr) => tr.fromId === from);
-    setRefundFrom(from);
+    const first = t.transfers.find((tr) => tr.fromId === data.me);
     setRefundTo(first?.toId ?? "");
     setRefundAmount(first ? (first.amountCents / 100).toFixed(2).replace(".", ",") : "");
     setRefundFor(t);
-  };
-
-  const pickRefundFrom = (from: string) => {
-    setRefundFrom(from);
-    const first = refundFor?.transfers.find((tr) => tr.fromId === from);
-    setRefundTo(first?.toId ?? "");
-    setRefundAmount(first ? (first.amountCents / 100).toFixed(2).replace(".", ",") : "");
   };
 
   const pickRefundTo = (to: string) => {
@@ -272,8 +264,8 @@ export default function Tricount({ toast, onExpired }: Props) {
       toast("err", "Montant invalide — ex. 12,50");
       return;
     }
-    if (!refundFrom || !refundTo) {
-      toast("err", "Choisis qui rembourse et à qui.");
+    if (!refundTo) {
+      toast("err", "Choisis à qui tu as remboursé.");
       return;
     }
     setBusy(true);
@@ -281,7 +273,7 @@ export default function Tricount({ toast, onExpired }: Props) {
       const res = await fetch(`/api/tricount/${refundFor.id}/refunds`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fromId: refundFrom, toId: refundTo, amountCents: cents }),
+        body: JSON.stringify({ toId: refundTo, amountCents: cents }),
       });
       if (onExpired(res.status)) return;
       const j = await res.json();
@@ -368,11 +360,11 @@ export default function Tricount({ toast, onExpired }: Props) {
               role="button"
               tabIndex={0}
               aria-expanded={open}
-              onClick={() => setOpenId(open ? null : t.id)}
+              onClick={() => setOpenId(open ? "" : t.id)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  setOpenId(open ? null : t.id);
+                  setOpenId(open ? "" : t.id);
                 }
               }}
             >
@@ -451,7 +443,7 @@ export default function Tricount({ toast, onExpired }: Props) {
                   <div className="tri-approvals">
                     <h3>🔒 Avant les remboursements</h3>
                     <p className="muted tiny">
-                      Chaque payeur doit valider ses dépenses.{" "}
+                      Le payeur valide les remboursements reçus.{" "}
                       {pending.length > 0 &&
                         `En attente de : ${pending.map((p) => p.name).join(", ")}.`}
                     </p>
@@ -489,9 +481,11 @@ export default function Tricount({ toast, onExpired }: Props) {
                         </li>
                       ))}
                     </ul>
-                    <button className="secondary" onClick={() => openRefund(t)} disabled={busy}>
-                      💸 J'ai remboursé
-                    </button>
+                    {t.transfers.some((tr) => tr.fromId === data.me) && (
+                      <button className="secondary" onClick={() => openRefund(t)} disabled={busy}>
+                        💸 J'ai remboursé
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -607,25 +601,20 @@ export default function Tricount({ toast, onExpired }: Props) {
             <form onSubmit={submitRefund} className="tri-form">
               <label className="tri-field">
                 Qui a remboursé ?
-                <select value={refundFrom} onChange={(e) => pickRefundFrom(e.target.value)}>
-                  {[...new Set(refundFor.transfers.map((tr) => tr.fromId))].map((id) => {
-                    const m = data.members.find((x) => x.id === id);
-                    return (
-                      <option key={id} value={id}>
-                        {m?.name ?? "?"}
-                        {id === data.me ? " (toi)" : ""}
-                      </option>
-                    );
-                  })}
-                </select>
+                {/* Toujours l'utilisateur connecté : chacun déclare SES remboursements. */}
+                <input
+                  type="text"
+                  value={data.members.find((m) => m.id === data.me)?.fullName ?? ""}
+                  disabled
+                  readOnly
+                />
               </label>
               <label className="tri-field">
                 Remboursé à
                 <select value={refundTo} onChange={(e) => pickRefundTo(e.target.value)}>
                   {refundOptions.map((o) => (
                     <option key={o.toId} value={o.toId}>
-                      {o.toName}
-                      {o.toId === data.me ? " (toi)" : ""} — {fmtEuros(o.amountCents)} suggérés
+                      {o.toName} — {fmtEuros(o.amountCents)} suggérés
                     </option>
                   ))}
                 </select>
