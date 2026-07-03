@@ -1,0 +1,75 @@
+// Logique du partage de frais (type Tricount). Tout est en CENTIMES (entiers) :
+// les euros n'existent qu'à l'affichage, aucune arithmétique flottante ici.
+
+/** Bornes de saisie : 1 centime à 100 000 € — largement assez pour une asso. */
+export const MAX_AMOUNT_CENTS = 10_000_000;
+export const MAX_LABEL_LEN = 80;
+
+/**
+ * Répartition égale de `amountCents` entre `n` participants, ajustée au centime :
+ * les `amountCents % n` premiers reçoivent un centime de plus, la somme des parts
+ * vaut EXACTEMENT le montant (jamais un centime perdu ou inventé).
+ */
+export function splitEqually(amountCents: number, n: number): number[] {
+  const base = Math.floor(amountCents / n);
+  const extra = amountCents % n;
+  return Array.from({ length: n }, (_, i) => base + (i < extra ? 1 : 0));
+}
+
+export interface ExpenseForBalance {
+  payerId: string;
+  shares: { userId: string; amountCents: number }[];
+}
+
+/**
+ * Solde net par joueur : + ce qu'il a avancé, − ce qu'il doit.
+ * Positif = le groupe lui doit de l'argent ; négatif = il doit au groupe.
+ * La somme de tous les soldes vaut toujours 0.
+ */
+export function computeBalances(expenses: ExpenseForBalance[]): Map<string, number> {
+  const bal = new Map<string, number>();
+  const add = (userId: string, cents: number) =>
+    bal.set(userId, (bal.get(userId) ?? 0) + cents);
+  for (const e of expenses) {
+    for (const s of e.shares) {
+      add(e.payerId, s.amountCents);
+      add(s.userId, -s.amountCents);
+    }
+  }
+  return bal;
+}
+
+export interface Transfer {
+  fromId: string;
+  toId: string;
+  amountCents: number;
+}
+
+/**
+ * Suggestion de remboursements « qui rend combien à qui » : glouton, le plus gros
+ * débiteur paie le plus gros créancier jusqu'à épuisement. Au plus n−1 virements.
+ * Tri secondaire par id pour un résultat déterministe entre deux appels.
+ */
+export function settle(balances: Map<string, number>): Transfer[] {
+  const creditors = [...balances].filter(([, c]) => c > 0);
+  const debtors = [...balances].filter(([, c]) => c < 0);
+  const byAmount = (a: [string, number], b: [string, number]) =>
+    Math.abs(b[1]) - Math.abs(a[1]) || (a[0] < b[0] ? -1 : 1);
+  creditors.sort(byAmount);
+  debtors.sort(byAmount);
+
+  const out: Transfer[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < debtors.length && j < creditors.length) {
+    const owe = -debtors[i][1];
+    const due = creditors[j][1];
+    const pay = Math.min(owe, due);
+    out.push({ fromId: debtors[i][0], toId: creditors[j][0], amountCents: pay });
+    debtors[i][1] += pay;
+    creditors[j][1] -= pay;
+    if (debtors[i][1] === 0) i++;
+    if (creditors[j][1] === 0) j++;
+  }
+  return out;
+}

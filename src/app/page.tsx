@@ -5,6 +5,7 @@ import QRCode from "qrcode";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { PlanningGrid } from "@/components/PlanningGrid";
 import { WeekGrid } from "@/components/WeekGrid";
+import Tricount from "@/components/Tricount";
 import { fmtTime, slotMinutes } from "@/lib/time";
 import {
   ensurePushSubscribed,
@@ -671,7 +672,7 @@ export default function Home() {
   const [range, setRange] = useState<Range>("all");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
-  const [view, setView] = useState<"day" | "week">("day");
+  const [view, setView] = useState<"day" | "week" | "money">("day");
   const [week, setWeek] = useState<{ date: string; planning: PlanningDay }[]>([]);
   const [busy, setBusy] = useState(false);
   // Hydratation : on ne charge la donnée et on n'écrit l'URL/localStorage qu'après avoir lu
@@ -781,14 +782,11 @@ export default function Home() {
     const d = p.get("date");
     if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) setDate(d);
 
+    const isView = (x: string | null): x is "day" | "week" | "money" =>
+      x === "day" || x === "week" || x === "money";
     const vParam = p.get("view");
     const vLS = localStorage.getItem("view");
-    const v =
-      vParam === "week" || vParam === "day"
-        ? vParam
-        : vLS === "week" || vLS === "day"
-          ? vLS
-          : null;
+    const v = isView(vParam) ? vParam : isView(vLS) ? vLS : null;
     if (v) setView(v);
 
     const rParam = p.get("range");
@@ -813,14 +811,16 @@ export default function Home() {
 
   useEffect(() => {
     if (!me || !hydrated) return;
+    if (view === "money") return; // la vue Frais charge ses propres données
     if (view === "week") loadWeek(date);
     else load(date);
   }, [me, hydrated, date, view, load, loadWeek]);
 
-  const reload = useCallback(
-    () => (view === "week" ? loadWeek(date) : load(date)),
-    [view, date, load, loadWeek],
-  );
+  const reload = useCallback(() => {
+    if (view === "money") return; // Tricount se recharge tout seul (montage + actions)
+    if (view === "week") loadWeek(date);
+    else load(date);
+  }, [view, date, load, loadWeek]);
 
   // Rafraîchit au retour sur l'onglet (throttle 15 s) : le planning peut avoir bougé
   // pendant l'absence (un autre membre a réservé). Évite de réserver un créneau déjà pris.
@@ -1105,6 +1105,7 @@ export default function Home() {
 
       <p className="hello">Bonjour {nickname || me.split(" ")[0]} 👋</p>
 
+      {view !== "money" && (
       <div className="toolbar">
         <button className="secondary" aria-label="Précédent" onClick={() => setDate(addDays(date, view === "week" ? -7 : -1))}>←</button>
         <button className="secondary" onClick={() => setDate(today)} disabled={date === today}>Aujourd'hui</button>
@@ -1125,23 +1126,28 @@ export default function Home() {
           }}
         />
       </div>
+      )}
 
       <div className="viewbar">
         <div className="viewtabs" role="group" aria-label="Vue">
           <button className={view === "day" ? "active" : ""} aria-pressed={view === "day"} onClick={() => setView("day")}>Jour</button>
           <button className={view === "week" ? "active" : ""} aria-pressed={view === "week"} onClick={() => setView("week")}>Semaine</button>
+          <button className={view === "money" ? "active" : ""} aria-pressed={view === "money"} onClick={() => setView("money")}>💶 Frais</button>
         </div>
-        <button
-          className={"secondary icon-btn refresh" + (loading ? " spin" : "")}
-          onClick={reload}
-          disabled={loading}
-          aria-label="Rafraîchir"
-          title="Rafraîchir"
-        >
-          <RefreshIcon />
-        </button>
+        {view !== "money" && (
+          <button
+            className={"secondary icon-btn refresh" + (loading ? " spin" : "")}
+            onClick={reload}
+            disabled={loading}
+            aria-label="Rafraîchir"
+            title="Rafraîchir"
+          >
+            <RefreshIcon />
+          </button>
+        )}
       </div>
 
+      {view !== "money" && (
       <div className="filters" role="group" aria-label="Plage horaire">
         {RANGES.map((r) => (
           <button
@@ -1154,6 +1160,7 @@ export default function Home() {
           </button>
         ))}
       </div>
+      )}
 
       {view === "day" && (
         <div className="legend">
@@ -1173,9 +1180,13 @@ export default function Home() {
         {loading ? "Chargement du planning…" : error ? `Erreur : ${error}` : ""}
       </p>
 
-      {error && <div className="notice error" role="alert">⚠️ {error}</div>}
+      {error && view !== "money" && <div className="notice error" role="alert">⚠️ {error}</div>}
 
-      {view === "day"
+      {view === "money" && <Tricount toast={toast} onExpired={handleExpired} />}
+
+      {view === "money"
+        ? null
+        : view === "day"
         ? planning
           ? (() => {
               const slots = planning.slots.filter((s) => inRange(s.startsAt, range));

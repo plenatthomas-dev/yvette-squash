@@ -1175,3 +1175,131 @@ table.planning.week td.cell {
     background-position: -200% 0;
   }
 }
+
+/* --- Vue « Frais » (partage de dépenses type Tricount) ------------------- */
+.tricount {
+  margin-top: 4px;
+}
+
+.tri-summary {
+  text-align: center;
+  margin-bottom: 14px;
+}
+
+.tri-me {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 0 0 2px;
+}
+.tri-me.pos { color: var(--pico-primary); }
+.tri-me.neg { color: var(--danger-fg); }
+
+.tri-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.tri-actions button {
+  flex: 1;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.tri-block { margin-top: 22px; }
+.tri-block h2 {
+  font-size: 1.05rem;
+  margin-bottom: 10px;
+}
+
+/* Listes (soldes, virements, dépenses) : mêmes cartes que le journal */
+.tri-block ul {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0;
+}
+.tri-block li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  font-size: 0.88rem;
+  background: var(--pico-card-background-color);
+}
+.tri-block li.mine { border-left: 3px solid var(--pico-primary); }
+.tri-block li.refund { opacity: 0.85; }
+
+.tri-balances strong.pos { color: var(--pico-primary); }
+.tri-balances strong.neg { color: var(--danger-fg); }
+
+/* Ligne de dépense : libellé + méta à gauche, montant + suppr à droite */
+.tri-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+.tri-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.tri-label small {
+  color: var(--pico-muted-color);
+  font-size: 0.78rem;
+}
+.tri-amount {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.tri-amount button.cancel {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  width: auto;
+  background: transparent;
+  color: var(--danger-fg);
+  border: 1px solid var(--danger-border);
+}
+
+/* Formulaire d'ajout (dans la modale) */
+.tri-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tri-form input[type="text"] { margin: 0; }
+.tri-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+.tri-field select { margin: 0; }
+
+.tri-participants {
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.tri-participants legend {
+  font-size: 0.85rem;
+  padding: 0 4px;
+}
+.tri-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  padding: 4px 0;
+}
+.tri-check input { margin: 0; }
