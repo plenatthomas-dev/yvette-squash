@@ -78,36 +78,63 @@
   --danger-hover: #ff6b6b;
 }
 
-/* THÈME « SHORT ROSE » — variante pinky. Base claire (Pico) + surcouche rose.
-   data-theme="rose" n'est pas connu de Pico → il applique sa base claire, puis nos
-   variables ci-dessous colorent tout en rose. */
-[data-theme="rose"] {
-  --pico-primary: #e0559a;
-  --pico-primary-hover: #ec6aa9;
-  --pico-primary-background: #e0559a;
-  --pico-primary-hover-background: #ec6aa9;
-  --pico-primary-focus: rgba(224, 85, 154, 0.3);
-  --pico-primary-inverse: #ffffff;
-  --pico-background-color: #fff0f6;
-  --pico-card-background-color: #ffe3ef;
-  --pico-card-border-color: #f6c3d8;
-  --pico-color: #5b1f3d;
-  --pico-muted-color: #a76b86;
+/* THÈME « SHORT ROSE » — vraie ambiance pinky : fond, cartes, texte, boutons, tout est rose.
+   Sélecteur :root[data-theme="rose"] (spécificité 0,2,0) → bat les défauts clairs de Pico
+   à égalité de spécificité grâce à l'ordre de chargement (globals.css après pico). */
+:root[data-theme="rose"] {
+  color-scheme: light;
 
-  --free: #d63384; /* rose vif = créneau libre */
+  --pico-primary: #e6007e;
+  --pico-primary-hover: #ff2d97;
+  --pico-primary-background: #e6007e;
+  --pico-primary-hover-background: #ff2d97;
+  --pico-primary-focus: rgba(230, 0, 126, 0.3);
+  --pico-primary-inverse: #ffffff;
+  --pico-primary-underline: rgba(230, 0, 126, 0.5);
+
+  /* Boutons secondaires (partage, paramètres, ←/→…) aussi en rose. */
+  --pico-secondary: #c2367f;
+  --pico-secondary-hover: #d44b92;
+  --pico-secondary-background: #c2367f;
+  --pico-secondary-hover-background: #d44b92;
+  --pico-secondary-focus: rgba(194, 54, 127, 0.3);
+  --pico-secondary-inverse: #ffffff;
+
+  /* Surfaces + texte tout en rose. */
+  --pico-background-color: #ffd7ec;
+  --pico-card-background-color: #ffc6e2;
+  --pico-card-sectioning-background-color: #ffc6e2;
+  --pico-card-border-color: #ff9ecb;
+  --pico-color: #7a0f46;
+  --pico-h1-color: #a01060;
+  --pico-h2-color: #a01060;
+  --pico-h3-color: #a01060;
+  --pico-h4-color: #a01060;
+  --pico-muted-color: #ab4a7d;
+  --pico-muted-border-color: #ff9ecb;
+
+  /* Champs de formulaire (login, pseudo) en rose clair. */
+  --pico-form-element-background-color: #ffe8f4;
+  --pico-form-element-border-color: #ff9ecb;
+  --pico-form-element-color: #7a0f46;
+  --pico-form-element-placeholder-color: #c884a4;
+  --pico-form-element-active-background-color: #fff2f8;
+  --pico-form-element-active-border-color: #e6007e;
+
+  --free: #d6006e; /* rose vif = créneau libre */
   --free-fg: #ffffff;
-  --free-hover: #c02a76;
-  --booked: #f9d7e6;
-  --booked-fg: #a83567;
-  --group: #f0d9ff;
-  --group-fg: #7b3fb0;
-  --closed: #f7e0ec;
-  --accent: #c026a3;
-  --notice-bg: #fde3f0;
-  --error-fg: #b3261e;
+  --free-hover: #bd0061;
+  --booked: #ffd0e6;
+  --booked-fg: #a0105a;
+  --group: #e6d4ff; /* lavande = réservé asso (distinct du rose « pris ») */
+  --group-fg: #6b3fa0;
+  --closed: #ffcbe4;
+  --accent: #c8008f;
+  --notice-bg: #ffdcef;
+  --error-fg: #9b1b1b;
   --error-accent: #e5484d;
-  --danger-fg: #b3261e;
-  --danger-border: #e2b8b8;
+  --danger-fg: #9b1b1b;
+  --danger-border: #e2a8b8;
   --danger-hover: #e5484d;
 }
 
@@ -881,21 +908,29 @@ td.cell.past {
   gap: 8px;
 }
 
+/* Couleur de texte EXPLICITE (var(--pico-muted-color)) : Pico redéfinit --pico-color en
+   blanc sur les <button>, ce qui rendait les libellés invisibles. On force donc une teinte
+   lisible, comme les filtres Journée/Matin. */
 .theme-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   margin: 0;
   width: auto;
-  padding: 7px 14px;
+  flex: 1 1 auto;
+  padding: 10px 12px;
   font-size: 0.85rem;
-  background: transparent;
-  color: var(--pico-color);
+  background: var(--pico-card-background-color);
+  color: var(--pico-muted-color);
   border: 1px solid var(--pico-card-border-color);
-  border-radius: 999px;
+  border-radius: 10px;
 }
 
 .theme-chip.active {
   background: var(--pico-primary);
+  color: #fff;
   border-color: var(--pico-primary);
-  color: var(--pico-primary-inverse);
+  font-weight: 600;
 }
 
 .nick-field {
@@ -970,6 +1005,10 @@ table.planning.week thead th {
   cursor: pointer;
   font-size: 0.7rem;
   text-transform: capitalize;
+  /* Couleur EXPLICITE : ces <th role="button"> héritaient du texte blanc que Pico applique
+     aux [role="button"] → les jours (sauf aujourd'hui) étaient invisibles. */
+  color: var(--pico-muted-color);
+  font-weight: 600;
   /* Autorise « lun. » / « 29 » à passer sur 2 lignes dans une colonne étroite. */
   white-space: normal;
   line-height: 1.15;
