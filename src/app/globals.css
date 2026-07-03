@@ -958,6 +958,18 @@ td.cell.past {
   white-space: nowrap;
 }
 
+.comment-field {
+  width: 100%;
+  margin: 0 0 10px;
+  resize: vertical;
+}
+
+/* Bouton « Envoyer » du commentaire : largeur auto (Pico met 100% par défaut). */
+.setting > button {
+  margin: 0;
+  width: auto;
+}
+
 /* --- Partage : QR code ------------------------------------------------- */
 .qr-wrap {
   display: flex;

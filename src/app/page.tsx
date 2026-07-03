@@ -206,6 +206,8 @@ function SettingsButton({
   const [theme, setTheme] = useState<Theme>("system");
   const [nick, setNick] = useState(nickname ?? "");
   const [saving, setSaving] = useState(false);
+  const [comment, setComment] = useState("");
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("theme");
@@ -249,6 +251,26 @@ function SettingsButton({
   const clearNick = () => {
     setNick("");
     persist(null, false); // RAZ : efface le pseudo, panneau ouvert pour resaisir
+  };
+
+  const sendComment = async () => {
+    if (!comment.trim()) return;
+    setSending(true);
+    try {
+      const res = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: comment }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      toast("ok", "Merci ! Ton message a été envoyé.");
+      setComment("");
+    } catch (e) {
+      toast("err", (e as Error).message);
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -325,6 +347,24 @@ function SettingsButton({
                   </button>
                 )}
               </div>
+            </section>
+
+            <section className="setting">
+              <h4>Un commentaire ?</h4>
+              <p className="muted tiny">
+                Une question, une idée, un bug ? Écris-le ici, ça m'est envoyé par e-mail.
+              </p>
+              <textarea
+                className="comment-field"
+                value={comment}
+                maxLength={2000}
+                rows={3}
+                placeholder="Ton message…"
+                onChange={(e) => setComment(e.target.value)}
+              />
+              <button onClick={sendComment} disabled={sending || !comment.trim()}>
+                {sending ? "Envoi…" : "Envoyer"}
+              </button>
             </section>
 
             <div className="modal-actions">
