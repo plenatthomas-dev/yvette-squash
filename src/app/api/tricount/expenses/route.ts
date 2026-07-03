@@ -6,11 +6,11 @@ import { splitEqually, MAX_AMOUNT_CENTS, MAX_LABEL_LEN } from "@/lib/tricount";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// POST /api/tricount/expenses -> enregistre une dépense (ou un remboursement).
-// { label, amountCents, payerId, participantIds: string[], isRefund?, spentAt? }
-// - dépense : répartie à parts égales entre participantIds (payeur inclus ou non).
-// - remboursement (isRefund) : exactement UN participant (le bénéficiaire), la part
-//   entière est pour lui — le solde du payeur remonte, celui du bénéficiaire descend.
+// POST /api/tricount/expenses -> ajoute une dépense au tricount du jour choisi.
+// { date: "YYYY-MM-DD", label, amountCents, payerId, participantIds, title? }
+// Le tricount de cette date est créé s'il n'existe pas (title optionnel, pris en
+// compte uniquement à la création). Toute modification des dépenses remet à zéro
+// les validations « OK pour rembourser » du tricount.
 export async function POST(req: NextRequest) {
   const session = await getSession(req.cookies.get("sid")?.value);
   if (!session) {
@@ -18,20 +18,24 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}));
-  const { label, amountCents, payerId, participantIds, isRefund, spentAt } = body as {
+  const { date, title, label, amountCents, payerId, participantIds } = body as {
+    date?: unknown;
+    title?: unknown;
     label?: unknown;
     amountCents?: unknown;
     payerId?: unknown;
     participantIds?: unknown;
-    isRefund?: unknown;
-    spentAt?: unknown;
   };
 
-  const refund = isRefund === true;
+  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return NextResponse.json({ error: "Date invalide" }, { status: 400 });
+  }
   const cleanLabel = typeof label === "string" ? label.trim() : "";
-  if (!refund && (cleanLabel.length === 0 || cleanLabel.length > MAX_LABEL_LEN)) {
+  if (cleanLabel.length === 0 || cleanLabel.length > MAX_LABEL_LEN) {
     return NextResponse.json({ error: "Libellé invalide (1 à 80 caractères)" }, { status: 400 });
   }
+  const cleanTitle =
+    typeof title === "string" && title.trim() ? title.trim().slice(0, MAX_LABEL_LEN) : null;
   if (
     typeof amountCents !== "number" ||
     !Number.isInteger(amountCents) ||
@@ -48,26 +52,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Participants invalides" }, { status: 400 });
   }
   const uniqueIds = [...new Set(participantIds as string[])];
-  if (refund && uniqueIds.length !== 1) {
-    return NextResponse.json(
-      { error: "Un remboursement vise un seul bénéficiaire" },
-      { status: 400 },
-    );
-  }
   if (typeof payerId !== "string" || payerId.length === 0) {
     return NextResponse.json({ error: "Payeur invalide" }, { status: 400 });
-  }
-  if (refund && uniqueIds[0] === payerId) {
-    return NextResponse.json({ error: "On ne se rembourse pas soi-même" }, { status: 400 });
-  }
-  // Date optionnelle (défaut : maintenant), bornée pour éviter les valeurs absurdes.
-  let spent = new Date();
-  if (spentAt !== undefined) {
-    const d = new Date(String(spentAt));
-    if (Number.isNaN(d.getTime())) {
-      return NextResponse.json({ error: "Date invalide" }, { status: 400 });
-    }
-    spent = d;
   }
 
   // Payeur + participants doivent être des membres connus (l'IHM liste les mêmes).
@@ -81,18 +67,27 @@ export async function POST(req: NextRequest) {
   }
 
   const parts = splitEqually(amountCents, uniqueIds.length);
-  const expense = await prisma.expense.create({
-    data: {
-      payerId,
-      creatorId: session.userId,
-      label: refund ? "Remboursement" : cleanLabel,
-      amountCents,
-      isRefund: refund,
-      spentAt: spent,
-      shares: {
-        create: uniqueIds.map((userId, i) => ({ userId, amountCents: parts[i] })),
-      },
-    },
+  const tricount = await prisma.tricount.upsert({
+    where: { date },
+    update: {},
+    create: { date, title: cleanTitle },
   });
-  return NextResponse.json({ id: expense.id }, { status: 201 });
+  const [expense] = await prisma.$transaction([
+    prisma.expense.create({
+      data: {
+        tricountId: tricount.id,
+        payerId,
+        creatorId: session.userId,
+        label: cleanLabel,
+        amountCents,
+        spentAt: new Date(`${date}T12:00:00`),
+        shares: {
+          create: uniqueIds.map((userId, i) => ({ userId, amountCents: parts[i] })),
+        },
+      },
+    }),
+    // Les montants ont changé : chaque payeur devra re-valider avant remboursements.
+    prisma.tricountApproval.deleteMany({ where: { tricountId: tricount.id } }),
+  ]);
+  return NextResponse.json({ id: expense.id, tricountId: tricount.id }, { status: 201 });
 }

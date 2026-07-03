@@ -18,7 +18,16 @@ export function splitEqually(amountCents: number, n: number): number[] {
 
 export interface ExpenseForBalance {
   payerId: string;
+  isRefund?: boolean;
   shares: { userId: string; amountCents: number }[];
+}
+
+/**
+ * Payeurs d'un tricount = ceux qui ont réglé au moins une VRAIE dépense (pas un
+ * remboursement). Ce sont eux qui doivent tous valider avant les remboursements.
+ */
+export function payersOf(expenses: ExpenseForBalance[]): string[] {
+  return [...new Set(expenses.filter((e) => !e.isRefund).map((e) => e.payerId))];
 }
 
 /**

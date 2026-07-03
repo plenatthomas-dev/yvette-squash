@@ -4,9 +4,10 @@ import { prisma } from "@/lib/db";
 
 export const runtime = "nodejs";
 
-// DELETE /api/tricount/expenses/{id} -> supprime une dépense.
-// Autorisé seulement à celui qui l'a saisie ou au payeur (mêmes règles que `canDelete`
-// renvoyé par GET /api/tricount). Les parts partent en cascade.
+// DELETE /api/tricount/expenses/{id} -> supprime une dépense (ou un remboursement).
+// Autorisé seulement à celui qui l'a saisie ou au payeur. Supprimer une vraie
+// dépense remet à zéro les validations du tricount ; supprimer la dernière ligne
+// supprime le tricount lui-même (plus de coquille vide dans l'historique).
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -16,14 +17,23 @@ export async function DELETE(
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
   const { id } = await params;
-  const { count } = await prisma.expense.deleteMany({
-    where: {
-      id,
-      OR: [{ creatorId: session.userId }, { payerId: session.userId }],
-    },
+  const expense = await prisma.expense.findUnique({
+    where: { id },
+    select: { tricountId: true, isRefund: true, creatorId: true, payerId: true },
   });
-  if (count === 0) {
+  if (!expense || (expense.creatorId !== session.userId && expense.payerId !== session.userId)) {
     return NextResponse.json({ error: "Dépense introuvable ou non autorisée" }, { status: 404 });
   }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.expense.delete({ where: { id } });
+    if (!expense.isRefund) {
+      await tx.tricountApproval.deleteMany({ where: { tricountId: expense.tricountId } });
+    }
+    const remaining = await tx.expense.count({ where: { tricountId: expense.tricountId } });
+    if (remaining === 0) {
+      await tx.tricount.delete({ where: { id: expense.tricountId } });
+    }
+  });
   return NextResponse.json({ ok: true });
 }

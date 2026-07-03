@@ -199,6 +199,15 @@ function ResetIcon() {
 }
 
 // Icône « cloche » (alertes « créneau libéré »)
+// Icône « € » (accès aux frais partagés / tricount)
+function EuroIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M17.5 5.5A7.5 7.5 0 0 0 6.8 8.5M17.5 18.5a7.5 7.5 0 0 1-10.7-3M4 10h9M4 14h8" />
+    </svg>
+  );
+}
+
 function BellIcon() {
   return (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1088,6 +1097,15 @@ export default function Home() {
               toast={toast}
             />
             <button
+              className={"secondary icon-btn money-btn" + (view === "money" ? " active" : "")}
+              onClick={() => setView(view === "money" ? "day" : "money")}
+              aria-label="Frais partagés (tricount)"
+              aria-pressed={view === "money"}
+              title="Frais partagés"
+            >
+              <EuroIcon />
+            </button>
+            <button
               className="secondary logout"
               onClick={logout}
               aria-label="Déconnexion"
@@ -1132,7 +1150,6 @@ export default function Home() {
         <div className="viewtabs" role="group" aria-label="Vue">
           <button className={view === "day" ? "active" : ""} aria-pressed={view === "day"} onClick={() => setView("day")}>Jour</button>
           <button className={view === "week" ? "active" : ""} aria-pressed={view === "week"} onClick={() => setView("week")}>Semaine</button>
-          <button className={view === "money" ? "active" : ""} aria-pressed={view === "money"} onClick={() => setView("money")}>💶 Frais</button>
         </div>
         {view !== "money" && (
           <button

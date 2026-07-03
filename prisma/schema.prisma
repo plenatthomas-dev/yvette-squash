@@ -28,6 +28,7 @@ model User {
   expensesPaid    Expense[]      @relation("ExpensePayer")
   expensesCreated Expense[]      @relation("ExpenseCreator")
   expenseShares   ExpenseShare[]
+  tricountApprovals TricountApproval[]
 }
 
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
@@ -124,12 +125,40 @@ model SlotAlert {
 }
 
 // ---- Partage de frais (type Tricount) ----
-// Une dépense payée par un membre pour le compte de plusieurs (balles, cordage, pot…).
+// Un « tricount » regroupe les dépenses d'UN jour donné (repas, sortie…) : un seul
+// tricount par date, séparé des autres jours → l'historique liste ces tricounts.
+// Workflow : dépenses ajoutées librement, puis chaque payeur valide (approval) ;
+// quand TOUS les payeurs ont validé, les remboursements deviennent possibles.
+model Tricount {
+  id        String   @id @default(cuid())
+  date      String   @unique // "YYYY-MM-DD" : un tricount par jour
+  title     String? // libellé optionnel ("Repas d'après-match"…), fixé à la création
+  createdAt DateTime @default(now())
+  expenses  Expense[]
+  approvals TricountApproval[]
+}
+
+// « OK pour lancer les remboursements » d'un payeur sur un tricount. Les approbations
+// sont remises à zéro dès que les dépenses du tricount changent (ajout/suppression).
+model TricountApproval {
+  id         String   @id @default(cuid())
+  tricount   Tricount @relation(fields: [tricountId], references: [id], onDelete: Cascade)
+  tricountId String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  createdAt  DateTime @default(now())
+
+  @@unique([tricountId, userId])
+}
+
+// Une dépense payée par un membre pour le compte de plusieurs (balles, repas, pot…).
 // Montants TOUJOURS en centimes (entiers) : aucune erreur d'arrondi flottant.
 // Un remboursement (A rend de l'argent à B) est une Expense `isRefund` payée par A
 // avec UNE seule part portée par B : les soldes se recalculent naturellement.
 model Expense {
   id          String   @id @default(cuid())
+  tricount    Tricount @relation(fields: [tricountId], references: [id], onDelete: Cascade)
+  tricountId  String
   payer       User     @relation("ExpensePayer", fields: [payerId], references: [id], onDelete: Cascade)
   payerId     String
   creator     User     @relation("ExpenseCreator", fields: [creatorId], references: [id], onDelete: Cascade)
@@ -137,10 +166,11 @@ model Expense {
   label       String
   amountCents Int
   isRefund    Boolean  @default(false)
-  spentAt     DateTime @default(now()) // date de la dépense (affichage/tri)
+  spentAt     DateTime @default(now()) // horodatage précis (affiché sur les remboursements)
   createdAt   DateTime @default(now())
   shares      ExpenseShare[]
 
+  @@index([tricountId])
   @@index([spentAt])
 }
 

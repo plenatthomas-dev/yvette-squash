@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
-// Vue « Frais » : partage de dépenses type Tricount entre membres de l'asso.
-// Tout vient de GET /api/tricount (membres, dépenses, soldes, remboursements
-// suggérés) ; les montants transitent en centimes et ne deviennent des euros
-// qu'à l'affichage.
+// Vue « Frais » : tricounts par jour (un tricount = les dépenses d'une date),
+// avec historique, validation des payeurs puis remboursements guidés.
+// Montants en centimes partout ; euros seulement à l'affichage.
 
 interface Member {
   id: string;
@@ -22,6 +21,11 @@ interface ExpenseItem {
   participantNames: string[];
   canDelete: boolean;
 }
+interface PayerStatus {
+  id: string;
+  name: string;
+  approved: boolean;
+}
 interface BalanceItem {
   userId: string;
   name: string;
@@ -34,12 +38,22 @@ interface TransferItem {
   fromName: string;
   toName: string;
 }
-interface TricountData {
-  me: string;
-  members: Member[];
+interface TricountItem {
+  id: string;
+  date: string;
+  title: string | null;
+  totalCents: number;
+  ready: boolean; // tous les payeurs ont validé -> remboursements ouverts
+  settled: boolean; // tout le monde est à zéro
+  payers: PayerStatus[];
   expenses: ExpenseItem[];
   balances: BalanceItem[];
   transfers: TransferItem[];
+}
+interface TricountData {
+  me: string;
+  members: Member[];
+  tricounts: TricountItem[];
 }
 
 /** 1234 -> "12,34 €" (format français, toujours 2 décimales). */
@@ -59,11 +73,26 @@ export function parseEuros(input: string): number | null {
   return Math.round(parseFloat(s) * 100);
 }
 
-function fmtDay(iso: string): string {
-  return new Date(iso).toLocaleDateString("fr-FR", {
+function prettyDate(date: string): string {
+  return new Date(`${date}T12:00:00`).toLocaleDateString("fr-FR", {
+    weekday: "long",
     day: "numeric",
-    month: "short",
+    month: "long",
   });
+}
+
+/** Horodatage précis d'un remboursement : "03/07/2026 à 21:15". */
+function fmtStamp(iso: string): string {
+  const d = new Date(iso);
+  return (
+    d.toLocaleDateString("fr-FR") +
+    " à " +
+    d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+  );
+}
+
+function todayISO(): string {
+  return new Date().toLocaleDateString("en-CA");
 }
 
 interface Props {
@@ -76,12 +105,23 @@ export default function Tricount({ toast, onExpired }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  // Formulaire d'ajout : "expense" (dépense partagée) ou "refund" (j'ai remboursé).
-  const [formOpen, setFormOpen] = useState<null | "expense" | "refund">(null);
+  const [openId, setOpenId] = useState<string | null>(null); // tricount déplié
+
+  // Formulaire « nouvelle dépense »
+  const [expenseOpen, setExpenseOpen] = useState(false);
+  const [date, setDate] = useState(todayISO());
+  const [title, setTitle] = useState("");
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState("");
   const [payerId, setPayerId] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // Formulaire « j'ai remboursé » (rattaché à UN tricount prêt)
+  const [refundFor, setRefundFor] = useState<TricountItem | null>(null);
+  const [refundFrom, setRefundFrom] = useState("");
+  const [refundTo, setRefundTo] = useState("");
+  const [refundAmount, setRefundAmount] = useState("");
+
   const [confirmDelete, setConfirmDelete] = useState<ExpenseItem | null>(null);
 
   const load = useCallback(async () => {
@@ -104,23 +144,27 @@ export default function Tricount({ toast, onExpired }: Props) {
     load();
   }, [load]);
 
-  const openForm = (mode: "expense" | "refund") => {
+  // Le premier tricount non soldé est déplié par défaut.
+  useEffect(() => {
+    if (data && openId === null) {
+      const first = data.tricounts.find((t) => !t.settled) ?? data.tricounts[0];
+      if (first) setOpenId(first.id);
+    }
+  }, [data, openId]);
+
+  const openExpense = () => {
     if (!data) return;
+    setDate(todayISO());
+    setTitle("");
     setLabel("");
     setAmount("");
     setPayerId(data.me);
-    // Dépense : tout le monde participe par défaut ; remboursement : personne
-    // (on choisit LE bénéficiaire).
-    setSelected(
-      mode === "expense" ? new Set(data.members.map((m) => m.id)) : new Set(),
-    );
-    setFormOpen(mode);
+    setSelected(new Set(data.members.map((m) => m.id)));
+    setExpenseOpen(true);
   };
 
   const toggle = (id: string) => {
     setSelected((prev) => {
-      // Remboursement : sélection exclusive (un seul bénéficiaire).
-      if (formOpen === "refund") return new Set(prev.has(id) ? [] : [id]);
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -128,25 +172,20 @@ export default function Tricount({ toast, onExpired }: Props) {
     });
   };
 
-  const submit = async (e: FormEvent) => {
+  const submitExpense = async (e: FormEvent) => {
     e.preventDefault();
-    if (busy || !data || !formOpen) return;
-    const refund = formOpen === "refund";
+    if (busy || !data) return;
     const cents = parseEuros(amount);
     if (cents === null || cents === 0) {
       toast("err", "Montant invalide — ex. 12,50");
       return;
     }
-    if (!refund && !label.trim()) {
+    if (!label.trim()) {
       toast("err", "Donne un libellé à la dépense.");
       return;
     }
     if (selected.size === 0) {
-      toast("err", refund ? "Choisis à qui tu as remboursé." : "Choisis au moins un participant.");
-      return;
-    }
-    if (refund && selected.has(payerId)) {
-      toast("err", "On ne se rembourse pas soi-même.");
+      toast("err", "Choisis au moins un participant.");
       return;
     }
     setBusy(true);
@@ -155,21 +194,103 @@ export default function Tricount({ toast, onExpired }: Props) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          date,
+          title: title.trim() || undefined,
           label: label.trim(),
           amountCents: cents,
           payerId,
           participantIds: [...selected],
-          isRefund: refund,
         }),
       });
       if (onExpired(res.status)) return;
       const j = await res.json();
       if (!res.ok) throw new Error(j.error ?? `Erreur ${res.status}`);
-      toast("ok", refund ? "Remboursement enregistré" : "Dépense enregistrée");
-      setFormOpen(null);
+      toast("ok", "Dépense enregistrée");
+      setExpenseOpen(false);
       load();
     } catch (e) {
       toast("err", "Enregistrement impossible : " + (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const approve = async (t: TricountItem) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/tricount/${t.id}/approve`, { method: "POST" });
+      if (onExpired(res.status)) return;
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error ?? `Erreur ${res.status}`);
+      toast("ok", "Validation enregistrée ✅");
+      load();
+    } catch (e) {
+      toast("err", "Validation impossible : " + (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Bénéficiaires possibles pour le rembourseur choisi : ses créanciers dans CE
+  // tricount (issus des virements suggérés), avec le montant conseillé.
+  const refundOptions = useMemo(() => {
+    if (!refundFor) return [];
+    return refundFor.transfers.filter((t) => t.fromId === refundFrom);
+  }, [refundFor, refundFrom]);
+
+  const openRefund = (t: TricountItem) => {
+    if (!data) return;
+    // Rembourseur par défaut : moi si je dois quelque chose, sinon le 1er débiteur.
+    const iOwe = t.transfers.some((tr) => tr.fromId === data.me);
+    const from = iOwe ? data.me : (t.transfers[0]?.fromId ?? "");
+    const first = t.transfers.find((tr) => tr.fromId === from);
+    setRefundFrom(from);
+    setRefundTo(first?.toId ?? "");
+    setRefundAmount(first ? (first.amountCents / 100).toFixed(2).replace(".", ",") : "");
+    setRefundFor(t);
+  };
+
+  const pickRefundFrom = (from: string) => {
+    setRefundFrom(from);
+    const first = refundFor?.transfers.find((tr) => tr.fromId === from);
+    setRefundTo(first?.toId ?? "");
+    setRefundAmount(first ? (first.amountCents / 100).toFixed(2).replace(".", ",") : "");
+  };
+
+  const pickRefundTo = (to: string) => {
+    setRefundTo(to);
+    const tr = refundOptions.find((o) => o.toId === to);
+    if (tr) setRefundAmount((tr.amountCents / 100).toFixed(2).replace(".", ","));
+  };
+
+  const submitRefund = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy || !refundFor) return;
+    const cents = parseEuros(refundAmount);
+    if (cents === null || cents === 0) {
+      toast("err", "Montant invalide — ex. 12,50");
+      return;
+    }
+    if (!refundFrom || !refundTo) {
+      toast("err", "Choisis qui rembourse et à qui.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/tricount/${refundFor.id}/refunds`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromId: refundFrom, toId: refundTo, amountCents: cents }),
+      });
+      if (onExpired(res.status)) return;
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error ?? `Erreur ${res.status}`);
+      toast("ok", "Remboursement enregistré 💸");
+      setRefundFor(null);
+      load();
+    } catch (e) {
+      toast("err", "Remboursement impossible : " + (e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -196,153 +317,236 @@ export default function Tricount({ toast, onExpired }: Props) {
     }
   };
 
-  const myBalance = useMemo(
-    () => data?.balances.find((b) => b.userId === data.me)?.cents ?? 0,
-    [data],
-  );
+  // Mon solde global = somme de mes soldes sur tous les tricounts non soldés.
+  const myGlobal = useMemo(() => {
+    if (!data) return 0;
+    return data.tricounts.reduce(
+      (s, t) => s + (t.balances.find((b) => b.userId === data.me)?.cents ?? 0),
+      0,
+    );
+  }, [data]);
 
   if (loading && !data) return <p className="muted">Chargement des frais…</p>;
   if (error) return <div className="notice error" role="alert">⚠️ {error}</div>;
   if (!data) return null;
 
-  const total = data.expenses
-    .filter((e) => !e.isRefund)
-    .reduce((s, e) => s + e.amountCents, 0);
-
   return (
     <section className="tricount">
-      {/* Soldes */}
       <div className="tri-summary">
-        <p className={"tri-me " + (myBalance > 0 ? "pos" : myBalance < 0 ? "neg" : "")}>
-          {myBalance > 0
-            ? `On te doit ${fmtEuros(myBalance)}`
-            : myBalance < 0
-              ? `Tu dois ${fmtEuros(-myBalance)}`
+        <p className={"tri-me " + (myGlobal > 0 ? "pos" : myGlobal < 0 ? "neg" : "")}>
+          {myGlobal > 0
+            ? `On te doit ${fmtEuros(myGlobal)} au total`
+            : myGlobal < 0
+              ? `Tu dois ${fmtEuros(-myGlobal)} au total`
               : "Tu es à l'équilibre 👌"}
-        </p>
-        <p className="muted tiny">
-          Total des dépenses partagées : {fmtEuros(total)}
         </p>
       </div>
 
       <div className="tri-actions">
-        <button onClick={() => openForm("expense")} disabled={busy}>
+        <button onClick={openExpense} disabled={busy}>
           ➕ Nouvelle dépense
         </button>
-        <button className="secondary" onClick={() => openForm("refund")} disabled={busy}>
-          💸 J'ai remboursé
-        </button>
       </div>
 
-      {data.balances.length > 0 && (
-        <div className="tri-block">
-          <h2>⚖️ Soldes</h2>
-          <ul className="tri-balances">
-            {[...data.balances]
-              .sort((a, b) => b.cents - a.cents)
-              .map((b) => (
-                <li key={b.userId} className={b.userId === data.me ? "mine" : ""}>
-                  <span>{b.name}{b.userId === data.me && " (toi)"}</span>
-                  <strong className={b.cents > 0 ? "pos" : b.cents < 0 ? "neg" : ""}>
-                    {b.cents > 0 ? "+" : ""}
-                    {fmtEuros(b.cents)}
-                  </strong>
-                </li>
-              ))}
-          </ul>
-        </div>
+      {data.tricounts.length === 0 && (
+        <p className="muted">
+          Aucun tricount pour le moment. Ajoute une dépense (repas, balles, pot…) :
+          un tricount se crée automatiquement pour ce jour-là.
+        </p>
       )}
 
-      {data.transfers.length > 0 && (
-        <div className="tri-block">
-          <h2>🔁 Pour tout équilibrer</h2>
-          <ul className="tri-transfers">
-            {data.transfers.map((t, i) => (
-              <li key={i} className={t.fromId === data.me || t.toId === data.me ? "mine" : ""}>
-                <span>
-                  <strong>{t.fromName}</strong> rembourse <strong>{t.toName}</strong>
-                </span>
-                <strong>{fmtEuros(t.amountCents)}</strong>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {/* Historique : un tricount par jour, le plus récent d'abord */}
+      {data.tricounts.map((t) => {
+        const open = openId === t.id;
+        const myBal = t.balances.find((b) => b.userId === data.me)?.cents ?? 0;
+        const iAmPayer = t.payers.find((p) => p.id === data.me);
+        const pending = t.payers.filter((p) => !p.approved);
+        return (
+          <article key={t.id} className={"tri-card" + (t.settled ? " settled" : "")}>
+            <header
+              className="tri-card-head"
+              role="button"
+              tabIndex={0}
+              aria-expanded={open}
+              onClick={() => setOpenId(open ? null : t.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setOpenId(open ? null : t.id);
+                }
+              }}
+            >
+              <div className="tri-card-title">
+                <strong>
+                  {t.title ? `${t.title} — ` : ""}
+                  {prettyDate(t.date)}
+                </strong>
+                <small>
+                  {fmtEuros(t.totalCents)}
+                  {myBal !== 0 &&
+                    ` · ${myBal > 0 ? `on te doit ${fmtEuros(myBal)}` : `tu dois ${fmtEuros(-myBal)}`}`}
+                </small>
+              </div>
+              <span
+                className={
+                  "tri-chip " + (t.settled ? "ok" : t.ready ? "ready" : "pending")
+                }
+              >
+                {t.settled ? "Équilibré ✅" : t.ready ? "Remboursements ouverts" : "En cours"}
+              </span>
+            </header>
 
-      <div className="tri-block">
-        <h2>🧾 Dépenses</h2>
-        {data.expenses.length === 0 ? (
-          <p className="muted">
-            Aucune dépense pour le moment. Balles, cordages, pots d'après-match :
-            ajoute la première !
-          </p>
-        ) : (
-          <ul className="tri-expenses">
-            {data.expenses.map((e) => (
-              <li key={e.id} className={e.isRefund ? "refund" : ""}>
-                <div className="tri-line">
-                  <span className="tri-label">
-                    {e.isRefund ? "💸 " : ""}
-                    <strong>{e.label}</strong>
-                    <small>
-                      {fmtDay(e.spentAt)} · {e.payerName}
-                      {e.isRefund
-                        ? ` → ${e.participantNames.join(", ")}`
-                        : ` a payé pour ${e.participantNames.length} pers.`}
-                    </small>
-                  </span>
-                  <span className="tri-amount">
-                    <strong>{fmtEuros(e.amountCents)}</strong>
-                    {e.canDelete && (
-                      <button
-                        className="cancel"
-                        onClick={() => setConfirmDelete(e)}
-                        disabled={busy}
-                        aria-label={`Supprimer « ${e.label} »`}
-                      >
-                        Suppr.
+            {open && (
+              <div className="tri-card-body">
+                <ul className="tri-expenses">
+                  {t.expenses.map((e) => (
+                    <li key={e.id} className={e.isRefund ? "refund" : ""}>
+                      <div className="tri-line">
+                        <span className="tri-label">
+                          {e.isRefund ? "💸 " : ""}
+                          <strong>{e.label}</strong>
+                          <small>
+                            {e.isRefund
+                              ? `${e.payerName} → ${e.participantNames.join(", ")} · le ${fmtStamp(e.spentAt)}`
+                              : `${e.payerName} a payé pour ${e.participantNames.length} pers.`}
+                          </small>
+                        </span>
+                        <span className="tri-amount">
+                          <strong>{fmtEuros(e.amountCents)}</strong>
+                          {e.canDelete && !t.settled && (
+                            <button
+                              className="cancel"
+                              onClick={() => setConfirmDelete(e)}
+                              disabled={busy}
+                              aria-label={`Supprimer « ${e.label} »`}
+                            >
+                              Suppr.
+                            </button>
+                          )}
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+
+                {t.balances.length > 0 && !t.settled && (
+                  <>
+                    <h3>⚖️ Soldes</h3>
+                    <ul className="tri-balances">
+                      {t.balances.map((b) => (
+                        <li key={b.userId} className={b.userId === data.me ? "mine" : ""}>
+                          <span>{b.name}{b.userId === data.me && " (toi)"}</span>
+                          <strong className={b.cents > 0 ? "pos" : b.cents < 0 ? "neg" : ""}>
+                            {b.cents > 0 ? "+" : ""}
+                            {fmtEuros(b.cents)}
+                          </strong>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+
+                {/* Étape 1 : validation des payeurs */}
+                {!t.ready && t.payers.length > 0 && (
+                  <div className="tri-approvals">
+                    <h3>🔒 Avant les remboursements</h3>
+                    <p className="muted tiny">
+                      Chaque payeur doit valider ses dépenses.{" "}
+                      {pending.length > 0 &&
+                        `En attente de : ${pending.map((p) => p.name).join(", ")}.`}
+                    </p>
+                    <ul className="tri-payers">
+                      {t.payers.map((p) => (
+                        <li key={p.id}>
+                          {p.approved ? "✅" : "⏳"} {p.name}
+                          {p.id === data.me && " (toi)"}
+                        </li>
+                      ))}
+                    </ul>
+                    {iAmPayer && !iAmPayer.approved && (
+                      <button onClick={() => approve(t)} disabled={busy}>
+                        ✅ OK pour lancer les remboursements
                       </button>
                     )}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+                  </div>
+                )}
 
-      {/* Modale d'ajout */}
-      {formOpen && (
-        <div className="modal-overlay" onClick={() => !busy && setFormOpen(null)}>
+                {/* Étape 2 : remboursements */}
+                {t.ready && !t.settled && (
+                  <div className="tri-settle">
+                    <h3>🔁 Pour tout équilibrer</h3>
+                    <ul className="tri-transfers">
+                      {t.transfers.map((tr, i) => (
+                        <li
+                          key={i}
+                          className={tr.fromId === data.me || tr.toId === data.me ? "mine" : ""}
+                        >
+                          <span>
+                            <strong>{tr.fromName}</strong> rembourse{" "}
+                            <strong>{tr.toName}</strong>
+                          </span>
+                          <strong>{fmtEuros(tr.amountCents)}</strong>
+                        </li>
+                      ))}
+                    </ul>
+                    <button className="secondary" onClick={() => openRefund(t)} disabled={busy}>
+                      💸 J'ai remboursé
+                    </button>
+                  </div>
+                )}
+
+                {t.settled && (
+                  <p className="muted tiny">
+                    Tout le monde est remboursé — tricount soldé. 🎉
+                  </p>
+                )}
+              </div>
+            )}
+          </article>
+        );
+      })}
+
+      {/* Modale « nouvelle dépense » */}
+      {expenseOpen && (
+        <div className="modal-overlay" onClick={() => !busy && setExpenseOpen(false)}>
           <div
             className="modal"
             role="dialog"
             aria-modal="true"
-            aria-label={formOpen === "refund" ? "Enregistrer un remboursement" : "Nouvelle dépense"}
+            aria-label="Nouvelle dépense"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3>{formOpen === "refund" ? "💸 J'ai remboursé" : "➕ Nouvelle dépense"}</h3>
-            <form onSubmit={submit} className="tri-form">
-              {formOpen === "expense" && (
+            <h3>➕ Nouvelle dépense</h3>
+            <form onSubmit={submitExpense} className="tri-form">
+              <label className="tri-field">
+                Jour du tricount
+                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              </label>
+              {!data.tricounts.some((t) => t.date === date) && (
                 <input
                   type="text"
-                  placeholder="Libellé (balles, cordage, pot…)"
-                  value={label}
-                  onChange={(e) => setLabel(e.target.value)}
+                  placeholder="Titre du tricount (optionnel) — ex. Repas"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
                   maxLength={80}
-                  autoFocus
                 />
               )}
+              <input
+                type="text"
+                placeholder="Libellé (balles, repas, pot…)"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                maxLength={80}
+              />
               <input
                 type="text"
                 inputMode="decimal"
                 placeholder="Montant en € — ex. 12,50"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                autoFocus={formOpen === "refund"}
               />
               <label className="tri-field">
-                {formOpen === "refund" ? "Qui a remboursé ?" : "Payé par"}
+                Payé par
                 <select value={payerId} onChange={(e) => setPayerId(e.target.value)}>
                   {data.members.map((m) => (
                     <option key={m.id} value={m.id}>
@@ -353,17 +557,13 @@ export default function Tricount({ toast, onExpired }: Props) {
                 </select>
               </label>
               <fieldset className="tri-participants">
-                <legend>
-                  {formOpen === "refund" ? "Remboursé à" : `Pour qui ? (${selected.size})`}
-                </legend>
+                <legend>Pour qui ? ({selected.size})</legend>
                 {data.members.map((m) => (
                   <label key={m.id} className="tri-check">
                     <input
-                      type={formOpen === "refund" ? "radio" : "checkbox"}
-                      name={formOpen === "refund" ? "beneficiary" : undefined}
+                      type="checkbox"
                       checked={selected.has(m.id)}
                       onChange={() => toggle(m.id)}
-                      disabled={formOpen === "refund" && m.id === payerId}
                     />
                     {m.name}
                     {m.id === data.me ? " (toi)" : ""}
@@ -371,7 +571,79 @@ export default function Tricount({ toast, onExpired }: Props) {
                 ))}
               </fieldset>
               <div className="modal-actions">
-                <button type="button" className="secondary" onClick={() => setFormOpen(null)} disabled={busy}>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setExpenseOpen(false)}
+                  disabled={busy}
+                >
+                  Annuler
+                </button>
+                <button type="submit" disabled={busy}>
+                  {busy ? "Enregistrement…" : "Enregistrer"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modale « j'ai remboursé » */}
+      {refundFor && (
+        <div className="modal-overlay" onClick={() => !busy && setRefundFor(null)}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Enregistrer un remboursement"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>💸 Remboursement</h3>
+            <p className="muted tiny">
+              {refundFor.title ? `${refundFor.title} — ` : ""}
+              Tricount du {prettyDate(refundFor.date)}. La date et l'heure du
+              remboursement seront enregistrées.
+            </p>
+            <form onSubmit={submitRefund} className="tri-form">
+              <label className="tri-field">
+                Qui a remboursé ?
+                <select value={refundFrom} onChange={(e) => pickRefundFrom(e.target.value)}>
+                  {[...new Set(refundFor.transfers.map((tr) => tr.fromId))].map((id) => {
+                    const m = data.members.find((x) => x.id === id);
+                    return (
+                      <option key={id} value={id}>
+                        {m?.name ?? "?"}
+                        {id === data.me ? " (toi)" : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+              <label className="tri-field">
+                Remboursé à
+                <select value={refundTo} onChange={(e) => pickRefundTo(e.target.value)}>
+                  {refundOptions.map((o) => (
+                    <option key={o.toId} value={o.toId}>
+                      {o.toName}
+                      {o.toId === data.me ? " (toi)" : ""} — {fmtEuros(o.amountCents)} suggérés
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="Montant en € — ex. 12,50"
+                value={refundAmount}
+                onChange={(e) => setRefundAmount(e.target.value)}
+              />
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setRefundFor(null)}
+                  disabled={busy}
+                >
                   Annuler
                 </button>
                 <button type="submit" disabled={busy}>
@@ -390,7 +662,7 @@ export default function Tricount({ toast, onExpired }: Props) {
             className="modal"
             role="dialog"
             aria-modal="true"
-            aria-label="Supprimer la dépense"
+            aria-label="Supprimer la ligne"
             onClick={(e) => e.stopPropagation()}
           >
             <h3>Supprimer cette ligne ?</h3>
@@ -398,6 +670,12 @@ export default function Tricount({ toast, onExpired }: Props) {
               {confirmDelete.label} — {fmtEuros(confirmDelete.amountCents)} (
               {confirmDelete.payerName})
             </p>
+            {!confirmDelete.isRefund && (
+              <p className="muted tiny">
+                Les validations « OK pour rembourser » de ce tricount seront remises à
+                zéro.
+              </p>
+            )}
             <div className="modal-actions">
               <button className="secondary" onClick={() => setConfirmDelete(null)}>
                 Garder
