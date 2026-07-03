@@ -27,3 +27,6 @@ next-env.d.ts
 npm-debug.log*
 *.log
 .DS_Store
+
+# revue de code (document de travail, ne pas committer)
+revue-code-yvette-squash.pdf

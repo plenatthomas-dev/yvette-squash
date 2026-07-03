@@ -2,13 +2,8 @@
 
 import type { KeyboardEvent } from "react";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
+import { fmtTime } from "@/lib/time";
 
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("fr-FR", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 // Déclenche l'action au clavier (Entrée / Espace) sur les cellules cliquables.
 function onKey(fn: () => void) {
   return (e: KeyboardEvent) => {
@@ -19,19 +14,39 @@ function onKey(fn: () => void) {
   };
 }
 
+// Prénoms des membres « présents » (hors réservataire). Passent à la ligne ; au-delà de
+// 3, on tronque à 4 lettres pour tenir dans la case (liste complète dans l'infobulle).
+function AttendeeList({ names }: { names: string[] }) {
+  if (!names.length) return null;
+  const short = names.length >= 3;
+  return (
+    <span className="attendees" title={names.join(", ")}>
+      {names.map((n, i) => (
+        <span className="att" key={i}>
+          {short ? n.slice(0, 4) : n}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export function PlanningGrid({
   planning,
   onBook,
   onCancelMine,
+  onTogglePresence,
   onWatch,
   canWatch,
 }: {
   planning: PlanningDay;
   onBook: (slot: Slot) => void;
   onCancelMine: (slot: Slot) => void;
+  onTogglePresence: (slot: Slot) => void;
   onWatch?: (slot: Slot) => void;
   canWatch?: boolean;
 }) {
+  // Alerte « préviens-moi si ça se libère » : proposée sur les créneaux réservés HORS asso
+  // (les créneaux asso servent, eux, à signaler sa présence — cf. onTogglePresence).
   const watchable = !!(canWatch && onWatch);
   // Lignes = horaires distincts triés ; colonnes = terrains.
   const times = [...new Set(planning.slots.map((s) => s.startsAt))].sort();
@@ -80,27 +95,45 @@ export function PlanningGrid({
                         onClick={() => onCancelMine(slot)}
                         onKeyDown={onKey(() => onCancelMine(slot))}
                       >
-                        ★ {slot.bookedBy}
+                        <span className="booker">★ {slot.bookedBy}</span>
+                        <AttendeeList names={slot.attendees ?? []} />
                       </td>
                     );
                   }
                   if (slot.bookedBy) {
-                    const watch = watchable ? () => onWatch!(slot) : undefined;
+                    const attending = slot.iAmAttending ?? false;
+                    const canToggle = new Date(slot.startsAt).getTime() >= now;
+                    const cls = "cell group" + (attending ? " attending" : "");
+                    const title = canToggle
+                      ? attending
+                        ? `Réservé par ${slot.bookedBy} — clique pour retirer ta présence`
+                        : `Réservé par ${slot.bookedBy} — clique pour signaler ta présence`
+                      : `Réservé par ${slot.bookedBy} (asso)`;
+                    const content = (
+                      <>
+                        <span className="booker">👥 {slot.bookedBy}</span>
+                        <AttendeeList names={slot.attendees ?? []} />
+                      </>
+                    );
+                    if (!canToggle) {
+                      return (
+                        <td key={c.id} className={cls} title={title}>
+                          {content}
+                        </td>
+                      );
+                    }
                     return (
                       <td
                         key={c.id}
-                        className={"cell group" + (watch ? " watchable" : "")}
-                        title={
-                          watch
-                            ? `Réservé par ${slot.bookedBy} — cliquer pour être alerté si ça se libère`
-                            : `Réservé par ${slot.bookedBy} (asso)`
-                        }
-                        role={watch ? "button" : undefined}
-                        tabIndex={watch ? 0 : undefined}
-                        onClick={watch}
-                        onKeyDown={watch ? onKey(watch) : undefined}
+                        className={cls}
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={attending}
+                        title={title}
+                        onClick={() => onTogglePresence(slot)}
+                        onKeyDown={onKey(() => onTogglePresence(slot))}
                       >
-                        👥 {slot.bookedBy}
+                        {content}
                       </td>
                     );
                   }
@@ -128,6 +161,7 @@ export function PlanningGrid({
                     );
                   }
                   {
+                    // Créneau réservé hors asso : clic = « préviens-moi si ça se libère ».
                     const watch = watchable ? () => onWatch!(slot) : undefined;
                     return (
                       <td

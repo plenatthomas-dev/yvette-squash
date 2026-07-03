@@ -14,15 +14,17 @@ datasource db {
 
 // Un joueur de l'appli, identifié par son compte ResaMania (contactId).
 model User {
-  id            String             @id @default(cuid())
-  contactId     String             @unique // ex. "/lecomplexbures/contacts/12685397"
-  displayName   String
-  email         String?
-  createdAt     DateTime           @default(now())
-  sessions      Session[]
-  bookings      Booking[]
-  pushSubs      PushSubscription[]
-  slotAlerts    SlotAlert[]
+  id          String       @id @default(cuid())
+  contactId   String       @unique // ex. "/lecomplexbures/contacts/12685397"
+  displayName String
+  nickname    String? // pseudonyme choisi par le joueur (affiché à la place du prénom)
+  email       String?
+  createdAt   DateTime     @default(now())
+  sessions    Session[]
+  bookings    Booking[]
+  attendances Attendance[]
+  pushSubs    PushSubscription[]
+  slotAlerts  SlotAlert[]
 }
 
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
@@ -31,7 +33,7 @@ model Session {
   id              String   @id // jeton aléatoire (valeur du cookie)
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId          String
-  accessToken     String // token Bearer (court, ~1h)
+  accessToken     String // token Bearer chiffré (AES-256-GCM, court ~1h)
   refreshTokenEnc String // refresh token chiffré (AES-256-GCM)
   tokenExpiresAt  DateTime
   identityJson    String // ResaIdentity sérialisée (contactId, clubId, nom…)
@@ -54,8 +56,39 @@ model Booking {
   status       String   @default("booked") // booked | cancelled
   createdAt    DateTime @default(now())
 
+  // Une seule ligne par (joueur, créneau) : empêche les doublons de réservation.
+  // book/route.ts fait un upsert sur cette clé (rebooking = on repasse la même ligne
+  // en "booked"), donc l'historique n'accumule jamais 2 lignes pour le même créneau.
+  @@unique([userId, classEventId])
   @@index([startsAt])
   @@index([userId])
+}
+
+// Tentative de connexion ÉCHOUÉE (rate limiting du login : 5 max / 15 min par IP).
+// Une ligne par échec ; les lignes sont purgées dès qu'elles sortent de la fenêtre,
+// et toutes celles d'une IP sont effacées quand elle réussit à se connecter.
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  ip        String
+  createdAt DateTime @default(now())
+
+  @@index([ip, createdAt])
+}
+
+// Présence « asso » sur un créneau déjà réservé par un membre : signal purement local
+// (ne touche jamais ResaMania ni l'identité du réservataire). Un membre peut se noter
+// présent sur le créneau d'un autre ; un second clic le retire.
+model Attendance {
+  id           String   @id @default(cuid())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       String
+  classEventId String // IRI du class_event concerné (clé de jointure avec le planning)
+  startsAt     DateTime // horaire du créneau : sert à interdire 2 présences au même horaire
+  createdAt    DateTime @default(now())
+
+  @@unique([userId, classEventId]) // une présence par personne et par créneau
+  @@index([classEventId])
+  @@index([startsAt]) // purge des présences anciennes
 }
 
 // Abonnement Web Push (un par appareil/navigateur). Sert à envoyer les alertes.

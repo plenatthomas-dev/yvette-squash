@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cancel, findAttendeeId } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import { isClassEventId } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -14,9 +15,11 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
-  const { classEventId } = (await req.json()) as { classEventId?: string };
-  if (!classEventId) {
-    return NextResponse.json({ error: "classEventId manquant" }, { status: 400 });
+  const { classEventId } = (await req.json().catch(() => ({}))) as {
+    classEventId?: unknown;
+  };
+  if (!isClassEventId(classEventId)) {
+    return NextResponse.json({ error: "classEventId invalide" }, { status: 400 });
   }
 
   const attendeeId = await findAttendeeId(session.resa, classEventId);

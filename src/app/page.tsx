@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import QRCode from "qrcode";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { PlanningGrid } from "@/components/PlanningGrid";
 import { WeekGrid } from "@/components/WeekGrid";
+import { fmtTime, slotMinutes } from "@/lib/time";
 import {
   ensurePushSubscribed,
   pushSupported,
@@ -33,20 +35,12 @@ function shortPretty(date: string): string {
     month: "short",
   });
 }
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-}
-
 // --- Semaine -----------------------------------------------------------------
 function mondayOf(date: string): string {
   const d = new Date(`${date}T12:00:00`);
   const off = (d.getDay() + 6) % 7; // 0 = lundi
   d.setDate(d.getDate() - off);
   return toISODate(d);
-}
-function weekDates(date: string): string[] {
-  const mon = mondayOf(date);
-  return Array.from({ length: 7 }, (_, i) => addDays(mon, i));
 }
 function weekLabel(date: string): string {
   const mon = mondayOf(date);
@@ -66,11 +60,6 @@ const RANGES: { key: Range; label: string }[] = [
 ];
 function isRange(v: unknown): v is Range {
   return v === "all" || v === "morning" || v === "afternoon" || v === "evening";
-}
-// Minutes depuis minuit lues directement dans l'ISO (évite tout décalage de fuseau).
-function slotMinutes(iso: string): number {
-  const m = iso.match(/T(\d{2}):(\d{2})/);
-  return m ? +m[1] * 60 + +m[2] : 0;
 }
 function inRange(iso: string, r: Range): boolean {
   const t = slotMinutes(iso);
@@ -107,23 +96,27 @@ function LogoutIcon() {
   );
 }
 
-// Thème : bouton-icône qui cycle Système (suit l'OS) → Clair → Sombre. Persisté en localStorage.
-type Theme = "system" | "light" | "dark";
-const THEME_ORDER: Theme[] = ["system", "light", "dark"];
-const THEME_LABEL: Record<Theme, string> = {
-  system: "Système",
-  light: "Clair",
-  dark: "Sombre",
-};
+// Thèmes disponibles. "rose" = variante « pinky » (voir globals.css). Persisté en localStorage.
+type Theme = "system" | "light" | "dark" | "rose";
+const THEMES: { key: Theme; label: string }[] = [
+  { key: "system", label: "Système" },
+  { key: "light", label: "Clair" },
+  { key: "dark", label: "Sombre" },
+  { key: "rose", label: "Short Rose" },
+];
+function isTheme(v: unknown): v is Theme {
+  return v === "system" || v === "light" || v === "dark" || v === "rose";
+}
 function applyTheme(t: Theme) {
   const el = document.documentElement;
-  if (t === "light" || t === "dark") el.setAttribute("data-theme", t);
-  else el.removeAttribute("data-theme"); // "system" → Pico suit prefers-color-scheme
+  if (t === "system") el.removeAttribute("data-theme"); // Pico suit prefers-color-scheme
+  else el.setAttribute("data-theme", t);
 }
+// Icône par thème : soleil (clair), lune (sombre), écran (système), short (rose).
 function ThemeIcon({ theme }: { theme: Theme }) {
   const p = {
-    width: 18,
-    height: 18,
+    width: 20,
+    height: 20,
     viewBox: "0 0 24 24",
     fill: "none",
     stroke: "currentColor",
@@ -147,6 +140,16 @@ function ThemeIcon({ theme }: { theme: Theme }) {
       </svg>
     );
   }
+  if (theme === "rose") {
+    // Short (bermuda) : ceinture + deux jambes avec échancrure centrale.
+    return (
+      <svg {...p}>
+        <path d="M5 5H19L18 19H13L12 11L11 19H6Z" />
+        <path d="M5 8H19" />
+      </svg>
+    );
+  }
+  // Système : écran + pied.
   return (
     <svg {...p}>
       <rect x="2" y="4" width="20" height="13" rx="2" />
@@ -154,39 +157,253 @@ function ThemeIcon({ theme }: { theme: Theme }) {
     </svg>
   );
 }
-function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>("system");
-  useEffect(() => {
-    const saved = (localStorage.getItem("theme") as Theme) || "system";
-    setTheme(saved);
-    applyTheme(saved);
-  }, []);
-  const cycle = () => {
-    const next = THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length];
-    setTheme(next);
-    localStorage.setItem("theme", next);
-    applyTheme(next);
-  };
+// Icône « roue crantée » (paramètres)
+function GearIcon() {
   return (
-    <button
-      className="secondary icon-btn"
-      onClick={cycle}
-      aria-label={`Thème : ${THEME_LABEL[theme]} (cliquer pour changer)`}
-      title={`Thème : ${THEME_LABEL[theme]} — cliquer pour changer`}
+    <svg
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
     >
-      <ThemeIcon theme={theme} />
-    </button>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+// Icône « RAZ » (flèche de réinitialisation) — efface le pseudonyme.
+function ResetIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polyline points="1 4 1 10 7 10" />
+      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+    </svg>
+  );
+}
+
+// Icône « cloche » (alertes « créneau libéré »)
+function BellIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+    </svg>
+  );
+}
+
+// Panneau de paramètres : choix du thème (dont « Short Rose ») + choix du pseudonyme.
+function SettingsButton({
+  nickname,
+  onNicknameSaved,
+  toast,
+}: {
+  nickname: string | null;
+  onNicknameSaved: () => void;
+  toast: (type: ToastType, msg: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [theme, setTheme] = useState<Theme>("system");
+  const [nick, setNick] = useState(nickname ?? "");
+  const [saving, setSaving] = useState(false);
+  const [comment, setComment] = useState("");
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("theme");
+    const t: Theme = isTheme(saved) ? saved : "system";
+    setTheme(t);
+    applyTheme(t);
+  }, []);
+
+  // Resynchronise le champ quand le pseudo change côté serveur / à l'ouverture.
+  useEffect(() => {
+    if (open) setNick(nickname ?? "");
+  }, [open, nickname]);
+
+  const pickTheme = (t: Theme) => {
+    setTheme(t);
+    localStorage.setItem("theme", t);
+    applyTheme(t);
+  };
+
+  // Enregistre un pseudo (ou null pour l'effacer). `close` ferme le panneau après succès.
+  const persist = async (value: string | null, close: boolean) => {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nickname: value }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      toast("ok", value ? "Pseudonyme enregistré" : "Pseudonyme retiré");
+      onNicknameSaved();
+      if (close) setOpen(false);
+    } catch (e) {
+      toast("err", (e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const saveNick = () => persist(nick.trim() ? nick : null, true);
+  const clearNick = () => {
+    setNick("");
+    persist(null, false); // RAZ : efface le pseudo, panneau ouvert pour resaisir
+  };
+
+  const sendComment = async () => {
+    if (!comment.trim()) return;
+    setSending(true);
+    try {
+      const res = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: comment }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      toast("ok", "Merci ! Ton message a été envoyé.");
+      setComment("");
+    } catch (e) {
+      toast("err", (e as Error).message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        className="secondary icon-btn"
+        onClick={() => setOpen(true)}
+        aria-label="Paramètres"
+        title="Paramètres"
+      >
+        <GearIcon />
+      </button>
+      {open && (
+        <div className="modal-overlay" onClick={() => setOpen(false)}>
+          <div
+            className="modal settings"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Paramètres"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>Paramètres</h3>
+
+            <section className="setting">
+              <h4>Thème</h4>
+              <div className="theme-choices" role="group" aria-label="Thème">
+                {THEMES.map((t) => (
+                  <button
+                    key={t.key}
+                    className={
+                      "theme-chip" +
+                      (t.key === "rose" ? " theme-chip--rose" : "") +
+                      (theme === t.key ? " active" : "")
+                    }
+                    aria-pressed={theme === t.key}
+                    aria-label={t.label}
+                    title={t.label}
+                    onClick={() => pickTheme(t.key)}
+                  >
+                    <ThemeIcon theme={t.key} />
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="setting">
+              <h4>Pseudonyme</h4>
+              <p className="muted tiny">
+                Affiché à la place de ton prénom. Laisse vide pour revenir au prénom.
+              </p>
+              <div className="nick-field">
+                <input
+                  type="text"
+                  value={nick}
+                  maxLength={24}
+                  placeholder="Ton pseudo"
+                  onChange={(e) => setNick(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveNick();
+                  }}
+                />
+                <button onClick={saveNick} disabled={saving}>
+                  {saving ? "…" : "Enregistrer"}
+                </button>
+                {(nickname || nick.trim()) && (
+                  <button
+                    className="secondary icon-btn"
+                    onClick={clearNick}
+                    disabled={saving}
+                    aria-label="Effacer le pseudonyme"
+                    title="Effacer le pseudonyme"
+                  >
+                    <ResetIcon />
+                  </button>
+                )}
+              </div>
+            </section>
+
+            <section className="setting">
+              <h4>Un commentaire ?</h4>
+              <p className="muted tiny">
+                Une question, une idée, un bug ? Écris-le ici, ça m'est envoyé par e-mail.
+              </p>
+              <textarea
+                className="comment-field"
+                value={comment}
+                maxLength={2000}
+                rows={3}
+                placeholder="Ton message…"
+                onChange={(e) => setComment(e.target.value)}
+              />
+              <button onClick={sendComment} disabled={sending || !comment.trim()}>
+                {sending ? "Envoi…" : "Envoyer"}
+              </button>
+            </section>
+
+            <div className="modal-actions">
+              <button className="secondary" onClick={() => setOpen(false)}>
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
 // --- Toasts & confirmation (remplacent alert()/confirm() natifs, moches sur mobile) ----
-type Toast = { id: number; type: "ok" | "err"; msg: string };
+type ToastType = "ok" | "err" | "info";
+type Toast = { id: number; type: ToastType; msg: string };
+const TOAST_ICON: Record<ToastType, string> = { ok: "✅", err: "⚠️", info: "ℹ️" };
 function Toasts({ items }: { items: Toast[] }) {
   return (
     <div className="toasts" role="status" aria-live="polite">
       {items.map((t) => (
         <div key={t.id} className={`toast ${t.type}`}>
-          {t.type === "ok" ? "✅" : "⚠️"} {t.msg}
+          {TOAST_ICON[t.type]} {t.msg}
         </div>
       ))}
     </div>
@@ -246,15 +463,6 @@ function ShareIcon() {
     </svg>
   );
 }
-// Icône « cloche » (alertes)
-function BellIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-    </svg>
-  );
-}
 // Icône « rafraîchir »
 function RefreshIcon() {
   return (
@@ -267,29 +475,147 @@ function RefreshIcon() {
 }
 
 // Bouton « partager » : Web Share natif (mobile) sinon copie du lien.
-function ShareButton({ onCopied }: { onCopied: () => void }) {
-  const share = async () => {
-    // URL complète (avec ?date=&view=&range=) → on partage exactement la vue affichée.
-    const url = typeof window !== "undefined" ? window.location.href : "";
+// Partage : notre PROPRE QR code (logo raquette au centre + « Squash de l'Yvette »),
+// scannable/partageable/téléchargeable. Contrairement au QR du menu natif du téléphone,
+// on maîtrise ici l'icône centrale et le texte.
+function ShareButton({ toast }: { toast: (type: ToastType, msg: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // URL racine de l'appli (sans les filtres de la vue courante) → QR stable.
+  const appUrl = () =>
+    typeof window !== "undefined" ? `${window.location.origin}/` : "";
+
+  useEffect(() => {
+    if (!open) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    let cancelled = false;
+
+    (async () => {
+      // 1) QR dans un canvas temporaire (correction d'erreurs « H » → logo central OK).
+      const qr = document.createElement("canvas");
+      await QRCode.toCanvas(qr, appUrl(), {
+        width: 320,
+        margin: 2,
+        errorCorrectionLevel: "H",
+        color: { dark: "#0f1115", light: "#ffffff" },
+      });
+      if (cancelled) return;
+
+      // 2) Composition finale : QR + légende (fond toujours blanc pour rester scannable).
+      const W = 320;
+      const H = 372;
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, W, H);
+      ctx.drawImage(qr, 0, 0, 320, 320);
+      ctx.fillStyle = "#0f1115";
+      ctx.textAlign = "center";
+      ctx.font = "600 20px system-ui, -apple-system, sans-serif";
+      ctx.fillText("Squash de l'Yvette", W / 2, 352);
+
+      // 3) Logo raquette au centre, sur une pastille blanche (préserve la lisibilité du QR).
+      const img = new Image();
+      img.onload = () => {
+        if (cancelled) return;
+        const s = 86; // taille du logo central (QR en correction « H » → reste scannable)
+        const x = (320 - s) / 2;
+        const y = (320 - s) / 2;
+        const pad = 8;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(x - pad, y - pad, s + pad * 2, s + pad * 2);
+        ctx.drawImage(img, x, y, s, s);
+      };
+      img.src = "/logo_squash.jpeg";
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const copyLink = async () => {
     try {
-      if (navigator.share) {
-        await navigator.share({
-          title: "Squash de l'Yvette",
-          text: "Réserve un terrain de squash 🎾",
-          url,
-        });
-      } else {
-        await navigator.clipboard.writeText(url);
-        onCopied();
-      }
+      await navigator.clipboard.writeText(appUrl());
+      toast("ok", "Lien copié ✅");
     } catch {
-      /* partage annulé par l'utilisateur */
+      toast("err", "Copie impossible");
     }
   };
+
+  // Partage l'IMAGE du QR (menu natif si dispo), sinon la télécharge.
+  const shareQr = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], "squash-yvette-qr.png", { type: "image/png" });
+      try {
+        if (navigator.canShare?.({ files: [file] })) {
+          await navigator.share({
+            files: [file],
+            title: "Squash de l'Yvette",
+            text: "Réserve un terrain de squash 🎾",
+          });
+        } else {
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = "squash-yvette-qr.png";
+          a.click();
+          URL.revokeObjectURL(a.href);
+          toast("ok", "QR code téléchargé");
+        }
+      } catch {
+        /* partage annulé par l'utilisateur */
+      }
+    }, "image/png");
+  };
+
   return (
-    <button className="secondary icon-btn" onClick={share} aria-label="Partager l'appli" title="Partager l'appli">
-      <ShareIcon />
-    </button>
+    <>
+      <button
+        className="secondary icon-btn"
+        onClick={() => setOpen(true)}
+        aria-label="Partager l'appli"
+        title="Partager l'appli"
+      >
+        <ShareIcon />
+      </button>
+      {open && (
+        <div className="modal-overlay" onClick={() => setOpen(false)}>
+          <div
+            className="modal share"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Partager l'appli"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>Partager l'appli</h3>
+            <p className="muted tiny">
+              Scanne ce QR code pour ouvrir l'appli, ou copie le lien.
+            </p>
+            <div className="qr-wrap">
+              <canvas ref={canvasRef} className="qr-canvas" aria-label="QR code de l'appli" />
+            </div>
+            <div className="share-actions">
+              <button onClick={shareQr}>Partager le QR</button>
+              <button className="secondary" onClick={copyLink}>
+                Copier le lien
+              </button>
+            </div>
+            <div className="modal-actions">
+              <button className="secondary" onClick={() => setOpen(false)}>
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -335,6 +661,8 @@ interface AlertItem {
 
 export default function Home() {
   const [me, setMe] = useState<string | null | undefined>(undefined); // undefined = chargement
+  const [myHandle, setMyHandle] = useState<string>(""); // token créneau (pseudo tronqué / Tho.P)
+  const [nickname, setNickname] = useState<string | null>(null); // pseudonyme choisi
   const [date, setDate] = useState<string>(() => toISODate(new Date()));
   const [planning, setPlanning] = useState<PlanningDay | null>(null);
   const [journal, setJournal] = useState<JournalEntry[]>([]);
@@ -357,7 +685,7 @@ export default function Home() {
   // ET si le navigateur les supporte ET si les clés VAPID sont configurées côté serveur.
   const canNotify = hydrated && pushSupported() && pushEnabledOnServer();
 
-  const toast = useCallback((type: "ok" | "err", msg: string) => {
+  const toast = useCallback((type: ToastType, msg: string) => {
     const id = Date.now() + Math.random();
     setToasts((t) => [...t, { id, type, msg }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3500);
@@ -375,7 +703,16 @@ export default function Home() {
 
   const checkMe = useCallback(async () => {
     const res = await fetch("/api/auth/me");
-    setMe(res.ok ? (await res.json()).displayName : null);
+    if (res.ok) {
+      const data = await res.json();
+      setMe(data.displayName);
+      setMyHandle(data.handle ?? "");
+      setNickname(data.nickname ?? null);
+    } else {
+      setMe(null);
+      setMyHandle("");
+      setNickname(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -421,21 +758,16 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
-      const results = await Promise.all(
-        weekDates(d).map(async (dd) => {
-          const r = await fetch(`/api/planning?date=${dd}`);
-          if (r.status === 401) throw new Error("__401__");
-          const j = await r.json();
-          if (!r.ok) throw new Error(j.error ?? `Erreur ${r.status}`);
-          return { date: dd, planning: j as PlanningDay };
-        }),
-      );
-      setWeek(results);
-    } catch (e) {
-      if ((e as Error).message === "__401__") {
+      // Un seul appel : /api/week renvoie les 7 jours (planning brut, sans réconciliation).
+      const r = await fetch(`/api/week?date=${d}`);
+      if (r.status === 401) {
         setMe(null);
         return;
       }
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error ?? `Erreur ${r.status}`);
+      setWeek(j as { date: string; planning: PlanningDay }[]);
+    } catch (e) {
       setError((e as Error).message);
       setWeek([]);
     } finally {
@@ -526,6 +858,13 @@ export default function Home() {
 
   const onBook = async (slot: Slot) => {
     if (busy || confirmState) return; // anti double-clic / double-modale
+    // Blocage « même créneau » : impossible de réserver 2 terrains au même horaire
+    // (ResaMania le refuse). On prévient tout de suite si on a déjà une résa à cette heure.
+    const clash = planning?.slots.find((s) => s.startsAt === slot.startsAt && s.mine);
+    if (clash) {
+      toast("info", `Tu joues déjà sur ${clash.courtName} à cet horaire — un seul terrain à la fois.`);
+      return;
+    }
     const ok = await askConfirm({
       title: "Réserver ce créneau ?",
       body: `${slot.courtName} — ${fmtTime(slot.startsAt)} le ${prettyDate(slot.startsAt.slice(0, 10))}`,
@@ -546,7 +885,14 @@ export default function Home() {
       });
       if (handleExpired(res.status)) return;
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      if (!res.ok) {
+        // Conflit « même créneau » : notif d'information plutôt qu'une erreur.
+        if (data.code === "overlap") {
+          toast("info", data.error);
+          return;
+        }
+        throw new Error(data.error ?? `Erreur ${res.status}`);
+      }
       toast("ok", "Réservation confirmée");
       reload();
     } catch (e) {
@@ -606,6 +952,55 @@ export default function Home() {
       toast("err", "Annulation impossible : " + (e as Error).message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Signale/retire sa présence sur le créneau d'un autre membre. Pas de confirmation.
+  // Mise à jour optimiste (ton prénom apparaît/disparaît aussitôt), puis re-sync si échec.
+  const onTogglePresence = async (slot: Slot) => {
+    if (!me) return;
+    // Diminutif du joueur courant (Tho.P) : DOIT correspondre à ce que renvoie le
+    // serveur dans `attendees`, sinon l'ajout optimiste laisse un doublon après re-sync.
+    const myFirst = myHandle || me.split(" ")[0];
+    const wasAttending = slot.iAmAttending ?? false;
+    setPlanning((p) =>
+      p
+        ? {
+            ...p,
+            slots: p.slots.map((s) => {
+              // Créneau ciblé : on bascule ma présence.
+              if (s.id === slot.id) {
+                const cur = s.attendees ?? [];
+                return {
+                  ...s,
+                  attendees: wasAttending ? cur.filter((n) => n !== myFirst) : [...cur, myFirst],
+                  iAmAttending: !wasAttending,
+                };
+              }
+              // Ajout : je me retire d'un éventuel autre terrain au même horaire (exclusivité).
+              if (!wasAttending && s.startsAt === slot.startsAt && s.iAmAttending) {
+                return {
+                  ...s,
+                  attendees: (s.attendees ?? []).filter((n) => n !== myFirst),
+                  iAmAttending: false,
+                };
+              }
+              return s;
+            }),
+          }
+        : p,
+    );
+    try {
+      const res = await fetch("/api/presence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classEventId: slot.id, startsAt: slot.startsAt }),
+      });
+      if (handleExpired(res.status)) return;
+      if (!res.ok) throw new Error();
+    } catch {
+      toast("err", "Présence non enregistrée");
+      reload(); // resynchronise l'état réel
     }
   };
 
@@ -686,8 +1081,12 @@ export default function Home() {
                 {alerts.length > 0 && <span className="badge">{alerts.length}</span>}
               </button>
             )}
-            <ShareButton onCopied={() => toast("ok", "Lien copié ✅")} />
-            <ThemeToggle />
+            <ShareButton toast={toast} />
+            <SettingsButton
+              nickname={nickname}
+              onNicknameSaved={checkMe}
+              toast={toast}
+            />
             <button
               className="secondary logout"
               onClick={logout}
@@ -704,7 +1103,7 @@ export default function Home() {
         <div className="sub">Planning Terrains, Le Complexe, Bures</div>
       </header>
 
-      <p className="hello">Bonjour {me.split(" ")[0]} 👋</p>
+      <p className="hello">Bonjour {nickname || me.split(" ")[0]} 👋</p>
 
       <div className="toolbar">
         <button className="secondary" aria-label="Précédent" onClick={() => setDate(addDays(date, view === "week" ? -7 : -1))}>←</button>
@@ -788,6 +1187,7 @@ export default function Home() {
                   planning={{ ...planning, slots }}
                   onBook={onBook}
                   onCancelMine={onCancelMine}
+                  onTogglePresence={onTogglePresence}
                   onWatch={onWatch}
                   canWatch={canNotify}
                 />
@@ -871,9 +1271,39 @@ export default function Home() {
   );
 }
 
+// Icône « œil » (afficher/masquer le mot de passe). `off` = œil barré (masqué).
+function EyeIcon({ off }: { off: boolean }) {
+  const p = {
+    viewBox: "0 0 24 24",
+    width: 20,
+    height: 20,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+  if (off) {
+    return (
+      <svg {...p}>
+        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20C5 20 1 12 1 12a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+        <line x1="1" y1="1" x2="23" y2="23" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...p}>
+      <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
 function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPwd, setShowPwd] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -916,21 +1346,34 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
           onChange={(e) => setUsername(e.target.value)}
           autoComplete="username"
         />
-        <input
-          type="password"
-          placeholder="Mot de passe"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="current-password"
-        />
+        <div className="pwd-field">
+          <input
+            type={showPwd ? "text" : "password"}
+            placeholder="Mot de passe"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+          />
+          <button
+            type="button"
+            className="pwd-toggle"
+            onClick={() => setShowPwd((v) => !v)}
+            aria-label={showPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+            aria-pressed={showPwd}
+            title={showPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+          >
+            <EyeIcon off={showPwd} />
+          </button>
+        </div>
         <button type="submit" disabled={busy}>
           {busy ? "Connexion…" : "Se connecter"}
         </button>
       </form>
       {err && <div className="notice error">⚠️ {err}</div>}
       <p className="muted tiny">
-        Tes identifiants servent uniquement à te connecter à ResaMania. Le mot de
-        passe n'est pas stocké ; seule une session sécurisée est conservée.
+        Ton mot de passe sert seulement à te connecter à ResaMania ; il n'est
+        jamais conservé. L'appli mémorise uniquement que tu es connecté, de façon
+        sécurisée, pour t'éviter de te reconnecter sans arrêt.
       </p>
     </main>
   );

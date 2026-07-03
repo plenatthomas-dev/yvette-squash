@@ -78,6 +78,66 @@
   --danger-hover: #ff6b6b;
 }
 
+/* THÈME « SHORT ROSE » — vraie ambiance pinky : fond, cartes, texte, boutons, tout est rose.
+   Sélecteur :root[data-theme="rose"] (spécificité 0,2,0) → bat les défauts clairs de Pico
+   à égalité de spécificité grâce à l'ordre de chargement (globals.css après pico). */
+:root[data-theme="rose"] {
+  color-scheme: light;
+
+  --pico-primary: #e6007e;
+  --pico-primary-hover: #ff2d97;
+  --pico-primary-background: #e6007e;
+  --pico-primary-hover-background: #ff2d97;
+  --pico-primary-focus: rgba(230, 0, 126, 0.3);
+  --pico-primary-inverse: #ffffff;
+  --pico-primary-underline: rgba(230, 0, 126, 0.5);
+
+  /* Boutons secondaires (partage, paramètres, ←/→…) aussi en rose. */
+  --pico-secondary: #c2367f;
+  --pico-secondary-hover: #d44b92;
+  --pico-secondary-background: #c2367f;
+  --pico-secondary-hover-background: #d44b92;
+  --pico-secondary-focus: rgba(194, 54, 127, 0.3);
+  --pico-secondary-inverse: #ffffff;
+
+  /* Surfaces + texte tout en rose. */
+  --pico-background-color: #ffd7ec;
+  --pico-card-background-color: #ffc6e2;
+  --pico-card-sectioning-background-color: #ffc6e2;
+  --pico-card-border-color: #ff9ecb;
+  --pico-color: #7a0f46;
+  --pico-h1-color: #a01060;
+  --pico-h2-color: #a01060;
+  --pico-h3-color: #a01060;
+  --pico-h4-color: #a01060;
+  --pico-muted-color: #ab4a7d;
+  --pico-muted-border-color: #ff9ecb;
+
+  /* Champs de formulaire (login, pseudo) en rose clair. */
+  --pico-form-element-background-color: #ffe8f4;
+  --pico-form-element-border-color: #ff9ecb;
+  --pico-form-element-color: #7a0f46;
+  --pico-form-element-placeholder-color: #c884a4;
+  --pico-form-element-active-background-color: #fff2f8;
+  --pico-form-element-active-border-color: #e6007e;
+
+  --free: #d6006e; /* rose vif = créneau libre */
+  --free-fg: #ffffff;
+  --free-hover: #bd0061;
+  --booked: #ffd0e6;
+  --booked-fg: #a0105a;
+  --group: #e6d4ff; /* lavande = réservé asso (distinct du rose « pris ») */
+  --group-fg: #6b3fa0;
+  --closed: #ffcbe4;
+  --accent: #c8008f;
+  --notice-bg: #ffdcef;
+  --error-fg: #9b1b1b;
+  --error-accent: #e5484d;
+  --danger-fg: #9b1b1b;
+  --danger-border: #e2a8b8;
+  --danger-hover: #e5484d;
+}
+
 /* --- Enveloppe : conteneur centré, marges maîtrisées sur mobile --------- */
 body {
   min-height: 100dvh;
@@ -566,9 +626,12 @@ td.cell.group {
   color: var(--group-fg);
   font-weight: 600;
   font-size: 0.72rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding: 4px;
+  white-space: normal; /* autorise le passage à la ligne des présences */
+  line-height: 1.15;
+}
+td.cell.group[role="button"] {
+  cursor: pointer;
 }
 
 td.cell.closed {
@@ -582,10 +645,35 @@ td.cell.mine {
   color: var(--group-fg);
   font-weight: 600;
   font-size: 0.72rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding: 4px;
+  white-space: normal;
+  line-height: 1.15;
   cursor: pointer;
+}
+
+/* Réservataire sur sa propre ligne ; présences « asso » en petites puces dessous. */
+.cell .booker {
+  display: block;
+}
+.cell .attendees {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 3px;
+  margin-top: 3px;
+}
+.cell .att {
+  font-weight: 500;
+  font-size: 0.66rem;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--group-fg) 16%, transparent);
+}
+
+/* Je suis noté présent → liseré accent pour repérer le créneau d'un coup d'œil. */
+td.cell.attending {
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 td.cell.past {
@@ -708,6 +796,49 @@ td.cell.past {
   margin: 0;
 }
 
+/* Champ mot de passe : bouton « œil » superposé à droite pour afficher/masquer */
+.pwd-field {
+  position: relative;
+}
+.pwd-field input {
+  padding-right: 46px; /* place réservée au bouton œil */
+}
+.pwd-toggle,
+.pwd-toggle:hover,
+.pwd-toggle:focus,
+.pwd-toggle:active {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 44px;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* transparent partout : sinon Pico repeint le bouton (fond + texte blanc) au focus/active */
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  /* Couleur foncée explicite : Pico redéfinit --pico-color en blanc sur les <button>,
+     donc on ne s'appuie pas dessus. Gris ardoise foncé, bien visible sur champ clair. */
+  color: #374151;
+  cursor: pointer;
+}
+/* Thème sombre : champ foncé → icône claire pour rester très visible. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .pwd-toggle {
+    color: #e5e7eb;
+  }
+}
+[data-theme="dark"] .pwd-toggle {
+  color: #e5e7eb;
+}
+.pwd-toggle svg {
+  display: block;
+}
+
 .login button[type="submit"] {
   width: 100%;
   margin-top: 4px;
@@ -747,6 +878,10 @@ td.cell.past {
 .toast.err {
   border-left: 4px solid var(--error-accent);
   color: var(--error-fg);
+}
+
+.toast.info {
+  border-left: 4px solid var(--accent);
 }
 
 @keyframes toast-in {
@@ -811,6 +946,121 @@ td.cell.past {
   color: #fff;
 }
 
+/* --- Panneau paramètres ------------------------------------------------- */
+.modal.settings {
+  max-width: 420px;
+}
+
+.setting {
+  margin-bottom: 18px;
+}
+
+.setting h4 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+.setting p {
+  margin: 0 0 10px;
+}
+
+.theme-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Couleur de texte EXPLICITE (var(--pico-muted-color)) : Pico redéfinit --pico-color en
+   blanc sur les <button>, ce qui rendait les libellés invisibles. On force donc une teinte
+   lisible, comme les filtres Journée/Matin. */
+.theme-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  width: auto;
+  flex: 1 1 auto;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+  background: var(--pico-card-background-color);
+  color: var(--pico-muted-color);
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+}
+
+.theme-chip.active {
+  background: var(--pico-primary);
+  color: #fff;
+  border-color: var(--pico-primary);
+  font-weight: 600;
+}
+
+/* Chip « Short Rose » : dessin (et fond/bordure) rose même quand il n'est pas actif,
+   pour identifier ce thème d'un coup d'œil. Actif → géré par .theme-chip.active (blanc
+   sur fond rose vif, plus spécifique). */
+.theme-chip--rose {
+  color: #e6007e;
+  background: #ffe8f4;
+  border-color: #ff9ecb;
+}
+
+.nick-field {
+  display: flex;
+  gap: 8px;
+}
+
+.nick-field input {
+  margin: 0;
+  flex: 1;
+}
+
+.nick-field button {
+  margin: 0;
+  width: auto;
+  white-space: nowrap;
+}
+
+.comment-field {
+  width: 100%;
+  margin: 0 0 10px;
+  resize: vertical;
+}
+
+/* Bouton « Envoyer » du commentaire : largeur auto (Pico met 100% par défaut). */
+.setting > button {
+  margin: 0;
+  width: auto;
+}
+
+/* --- Partage : QR code ------------------------------------------------- */
+.qr-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 6px 0 14px;
+}
+
+/* Fond blanc quel que soit le thème → le QR reste scannable (noir sur blanc). */
+.qr-canvas {
+  width: 260px;
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+}
+
+.share-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.share-actions button {
+  margin: 0;
+  width: auto;
+  flex: 1 1 auto;
+}
+
 /* Panneau « réserver depuis la semaine » : liste des terrains libres du créneau. */
 .week-sheet h3 {
   text-transform: capitalize;
@@ -851,14 +1101,31 @@ td.cell.past {
 }
 
 /* --- Vue semaine -------------------------------------------------------- */
+/* On veut voir les 7 jours d'un coup, sans scroll horizontal. table-layout: fixed
+   (hérité) répartit la largeur → colonnes étroites mais toutes visibles sur mobile. */
 table.planning.week {
-  min-width: 560px;
+  min-width: 0;
+}
+
+/* Colonne « Heure » plus étroite en vue semaine pour laisser la place aux 7 jours. */
+table.planning.week th.time {
+  width: 40px;
+  font-size: 0.66rem;
 }
 
 table.planning.week thead th {
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   text-transform: capitalize;
+  /* Couleur EXPLICITE : ces <th role="button"> héritaient du texte blanc que Pico applique
+     aux [role="button"] → les jours (sauf aujourd'hui) étaient invisibles. */
+  color: var(--pico-muted-color);
+  font-weight: 600;
+  /* Autorise « lun. » / « 29 » à passer sur 2 lignes dans une colonne étroite. */
+  white-space: normal;
+  line-height: 1.15;
+  padding: 8px 2px;
+  word-break: break-word;
 }
 
 table.planning.week thead th.today {

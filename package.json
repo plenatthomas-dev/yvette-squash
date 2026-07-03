@@ -5,11 +5,12 @@
   "description": "Appli de réservation de terrains de squash (front amélioré + journal partagé) au-dessus de ResaMania",
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && prisma db push --skip-generate --accept-data-loss && next build",
+    "build": "prisma generate && prisma migrate deploy && next build",
     "start": "next start",
     "lint": "next lint",
     "postinstall": "prisma generate",
-    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "resa:test": "tsx scripts/resa-test.ts"
   },
@@ -17,12 +18,15 @@
     "@picocss/pico": "^2.1.1",
     "@prisma/client": "^6.2.0",
     "next": "^15.1.0",
+    "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "resend": "^6.16.0",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/web-push": "^3.6.4",

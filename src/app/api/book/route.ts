@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { book } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import { isClassEventId } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -14,17 +15,64 @@ export async function POST(req: NextRequest) {
   const { classEventId, courtName, startsAt, endsAt } = await req
     .json()
     .catch(() => ({}));
-  if (!classEventId) {
-    return NextResponse.json({ error: "classEventId requis" }, { status: 400 });
+  if (!isClassEventId(classEventId)) {
+    return NextResponse.json({ error: "classEventId invalide" }, { status: 400 });
+  }
+
+  // Blocage « même créneau » : ResaMania interdit de réserver 2 terrains au même horaire.
+  // 1) Court-circuit local si on connaît déjà une résa à cet horaire → évite un appel
+  //    voué à échouer et affiche tout de suite une notif d'information.
+  if (startsAt) {
+    const clash = await prisma.booking.findFirst({
+      where: {
+        userId: session.userId,
+        status: "booked",
+        startsAt: new Date(startsAt),
+        NOT: { classEventId },
+      },
+    });
+    if (clash) {
+      return NextResponse.json(
+        {
+          error: `Tu as déjà une réservation sur ce créneau (${clash.courtName}). Un seul terrain par horaire.`,
+          code: "overlap",
+        },
+        { status: 409 },
+      );
+    }
   }
 
   const r = await book(session.resa, classEventId);
   if (!r.ok) {
+    // 2) Filet de sécurité : ResaMania bloque aussi (has-overlapping-slots) si la résa
+    //    en conflit n'était pas connue en base (faite ailleurs).
+    if (r.error?.includes("has-overlapping-slots")) {
+      return NextResponse.json(
+        {
+          error: "Tu as déjà une réservation sur ce créneau (autre terrain). Un seul terrain par horaire.",
+          code: "overlap",
+        },
+        { status: 409 },
+      );
+    }
     return NextResponse.json({ error: r.error }, { status: 409 });
   }
 
-  await prisma.booking.create({
-    data: {
+  // Upsert sur la clé unique (userId, classEventId) : réserver un créneau déjà présent
+  // dans le journal (ex. annulé puis re-réservé) repasse la même ligne en "booked" au
+  // lieu de créer un doublon. La contrainte @@unique garantit l'unicité côté base.
+  await prisma.booking.upsert({
+    where: {
+      userId_classEventId: { userId: session.userId, classEventId },
+    },
+    update: {
+      attendeeId: r.attendeeId ?? null,
+      courtName: courtName ?? "?",
+      startsAt: new Date(startsAt),
+      endsAt: new Date(endsAt),
+      status: "booked",
+    },
+    create: {
       userId: session.userId,
       attendeeId: r.attendeeId ?? null,
       classEventId,
