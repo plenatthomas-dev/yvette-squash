@@ -78,6 +78,39 @@
   --danger-hover: #ff6b6b;
 }
 
+/* THÈME « SHORT ROSE » — variante pinky. Base claire (Pico) + surcouche rose.
+   data-theme="rose" n'est pas connu de Pico → il applique sa base claire, puis nos
+   variables ci-dessous colorent tout en rose. */
+[data-theme="rose"] {
+  --pico-primary: #e0559a;
+  --pico-primary-hover: #ec6aa9;
+  --pico-primary-background: #e0559a;
+  --pico-primary-hover-background: #ec6aa9;
+  --pico-primary-focus: rgba(224, 85, 154, 0.3);
+  --pico-primary-inverse: #ffffff;
+  --pico-background-color: #fff0f6;
+  --pico-card-background-color: #ffe3ef;
+  --pico-card-border-color: #f6c3d8;
+  --pico-color: #5b1f3d;
+  --pico-muted-color: #a76b86;
+
+  --free: #d63384; /* rose vif = créneau libre */
+  --free-fg: #ffffff;
+  --free-hover: #c02a76;
+  --booked: #f9d7e6;
+  --booked-fg: #a83567;
+  --group: #f0d9ff;
+  --group-fg: #7b3fb0;
+  --closed: #f7e0ec;
+  --accent: #c026a3;
+  --notice-bg: #fde3f0;
+  --error-fg: #b3261e;
+  --error-accent: #e5484d;
+  --danger-fg: #b3261e;
+  --danger-border: #e2b8b8;
+  --danger-hover: #e5484d;
+}
+
 /* --- Enveloppe : conteneur centré, marges maîtrisées sur mobile --------- */
 body {
   min-height: 100dvh;
@@ -824,6 +857,63 @@ td.cell.past {
   color: #fff;
 }
 
+/* --- Panneau paramètres ------------------------------------------------- */
+.modal.settings {
+  max-width: 420px;
+}
+
+.setting {
+  margin-bottom: 18px;
+}
+
+.setting h4 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+.setting p {
+  margin: 0 0 10px;
+}
+
+.theme-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.theme-chip {
+  margin: 0;
+  width: auto;
+  padding: 7px 14px;
+  font-size: 0.85rem;
+  background: transparent;
+  color: var(--pico-color);
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 999px;
+}
+
+.theme-chip.active {
+  background: var(--pico-primary);
+  border-color: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+}
+
+.nick-field {
+  display: flex;
+  gap: 8px;
+}
+
+.nick-field input {
+  margin: 0;
+  flex: 1;
+}
+
+.nick-field button {
+  margin: 0;
+  width: auto;
+  white-space: nowrap;
+}
+
 /* Panneau « réserver depuis la semaine » : liste des terrains libres du créneau. */
 .week-sheet h3 {
   text-transform: capitalize;
@@ -864,14 +954,27 @@ td.cell.past {
 }
 
 /* --- Vue semaine -------------------------------------------------------- */
+/* On veut voir les 7 jours d'un coup, sans scroll horizontal. table-layout: fixed
+   (hérité) répartit la largeur → colonnes étroites mais toutes visibles sur mobile. */
 table.planning.week {
-  min-width: 560px;
+  min-width: 0;
+}
+
+/* Colonne « Heure » plus étroite en vue semaine pour laisser la place aux 7 jours. */
+table.planning.week th.time {
+  width: 40px;
+  font-size: 0.66rem;
 }
 
 table.planning.week thead th {
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   text-transform: capitalize;
+  /* Autorise « lun. » / « 29 » à passer sur 2 lignes dans une colonne étroite. */
+  white-space: normal;
+  line-height: 1.15;
+  padding: 8px 2px;
+  word-break: break-word;
 }
 
 table.planning.week thead th.today {

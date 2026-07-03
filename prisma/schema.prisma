@@ -17,6 +17,7 @@ model User {
   id          String       @id @default(cuid())
   contactId   String       @unique // ex. "/lecomplexbures/contacts/12685397"
   displayName String
+  nickname    String? // pseudonyme choisi par le joueur (affiché à la place du prénom)
   email       String?
   createdAt   DateTime     @default(now())
   sessions    Session[]
@@ -53,6 +54,10 @@ model Booking {
   status       String   @default("booked") // booked | cancelled
   createdAt    DateTime @default(now())
 
+  // Une seule ligne par (joueur, créneau) : empêche les doublons de réservation.
+  // book/route.ts fait un upsert sur cette clé (rebooking = on repasse la même ligne
+  // en "booked"), donc l'historique n'accumule jamais 2 lignes pour le même créneau.
+  @@unique([userId, classEventId])
   @@index([startsAt])
   @@index([userId])
 }

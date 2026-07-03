@@ -2,13 +2,8 @@
 
 import type { KeyboardEvent } from "react";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
+import { fmtTime } from "@/lib/time";
 
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("fr-FR", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 // Déclenche l'action au clavier (Entrée / Espace) sur les cellules cliquables.
 function onKey(fn: () => void) {
   return (e: KeyboardEvent) => {

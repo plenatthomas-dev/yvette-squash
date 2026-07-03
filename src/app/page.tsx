@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { PlanningGrid } from "@/components/PlanningGrid";
 import { WeekGrid } from "@/components/WeekGrid";
+import { fmtTime, slotMinutes } from "@/lib/time";
 
 function toISODate(d: Date): string {
   return d.toLocaleDateString("en-CA"); // YYYY-MM-DD local
@@ -28,20 +29,12 @@ function shortPretty(date: string): string {
     month: "short",
   });
 }
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-}
-
 // --- Semaine -----------------------------------------------------------------
 function mondayOf(date: string): string {
   const d = new Date(`${date}T12:00:00`);
   const off = (d.getDay() + 6) % 7; // 0 = lundi
   d.setDate(d.getDate() - off);
   return toISODate(d);
-}
-function weekDates(date: string): string[] {
-  const mon = mondayOf(date);
-  return Array.from({ length: 7 }, (_, i) => addDays(mon, i));
 }
 function weekLabel(date: string): string {
   const mon = mondayOf(date);
@@ -61,11 +54,6 @@ const RANGES: { key: Range; label: string }[] = [
 ];
 function isRange(v: unknown): v is Range {
   return v === "all" || v === "morning" || v === "afternoon" || v === "evening";
-}
-// Minutes depuis minuit lues directement dans l'ISO (évite tout décalage de fuseau).
-function slotMinutes(iso: string): number {
-  const m = iso.match(/T(\d{2}):(\d{2})/);
-  return m ? +m[1] * 60 + +m[2] : 0;
 }
 function inRange(iso: string, r: Range): boolean {
   const t = slotMinutes(iso);
@@ -102,75 +90,164 @@ function LogoutIcon() {
   );
 }
 
-// Thème : bouton-icône qui cycle Système (suit l'OS) → Clair → Sombre. Persisté en localStorage.
-type Theme = "system" | "light" | "dark";
-const THEME_ORDER: Theme[] = ["system", "light", "dark"];
-const THEME_LABEL: Record<Theme, string> = {
-  system: "Système",
-  light: "Clair",
-  dark: "Sombre",
-};
+// Thèmes disponibles. "rose" = variante « pinky » (voir globals.css). Persisté en localStorage.
+type Theme = "system" | "light" | "dark" | "rose";
+const THEMES: { key: Theme; label: string }[] = [
+  { key: "system", label: "Système" },
+  { key: "light", label: "Clair" },
+  { key: "dark", label: "Sombre" },
+  { key: "rose", label: "Short Rose" },
+];
+function isTheme(v: unknown): v is Theme {
+  return v === "system" || v === "light" || v === "dark" || v === "rose";
+}
 function applyTheme(t: Theme) {
   const el = document.documentElement;
-  if (t === "light" || t === "dark") el.setAttribute("data-theme", t);
-  else el.removeAttribute("data-theme"); // "system" → Pico suit prefers-color-scheme
+  if (t === "system") el.removeAttribute("data-theme"); // Pico suit prefers-color-scheme
+  else el.setAttribute("data-theme", t);
 }
-function ThemeIcon({ theme }: { theme: Theme }) {
-  const p = {
-    width: 18,
-    height: 18,
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 2,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-    "aria-hidden": true,
-  };
-  if (theme === "light") {
-    return (
-      <svg {...p}>
-        <circle cx="12" cy="12" r="4" />
-        <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-      </svg>
-    );
-  }
-  if (theme === "dark") {
-    return (
-      <svg {...p}>
-        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
-      </svg>
-    );
-  }
+// Icône « roue crantée » (paramètres)
+function GearIcon() {
   return (
-    <svg {...p}>
-      <rect x="2" y="4" width="20" height="13" rx="2" />
-      <path d="M8 21h8M12 17v4" />
+    <svg
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }
-function ThemeToggle() {
+
+// Panneau de paramètres : choix du thème (dont « Short Rose ») + choix du pseudonyme.
+function SettingsButton({
+  nickname,
+  onNicknameSaved,
+  toast,
+}: {
+  nickname: string | null;
+  onNicknameSaved: () => void;
+  toast: (type: ToastType, msg: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>("system");
+  const [nick, setNick] = useState(nickname ?? "");
+  const [saving, setSaving] = useState(false);
+
   useEffect(() => {
-    const saved = (localStorage.getItem("theme") as Theme) || "system";
-    setTheme(saved);
-    applyTheme(saved);
+    const saved = localStorage.getItem("theme");
+    const t: Theme = isTheme(saved) ? saved : "system";
+    setTheme(t);
+    applyTheme(t);
   }, []);
-  const cycle = () => {
-    const next = THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length];
-    setTheme(next);
-    localStorage.setItem("theme", next);
-    applyTheme(next);
+
+  // Resynchronise le champ quand le pseudo change côté serveur / à l'ouverture.
+  useEffect(() => {
+    if (open) setNick(nickname ?? "");
+  }, [open, nickname]);
+
+  const pickTheme = (t: Theme) => {
+    setTheme(t);
+    localStorage.setItem("theme", t);
+    applyTheme(t);
   };
+
+  const saveNick = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nickname: nick.trim() ? nick : null }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      toast("ok", nick.trim() ? "Pseudonyme enregistré" : "Pseudonyme retiré");
+      onNicknameSaved();
+      setOpen(false);
+    } catch (e) {
+      toast("err", (e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <button
-      className="secondary icon-btn"
-      onClick={cycle}
-      aria-label={`Thème : ${THEME_LABEL[theme]} (cliquer pour changer)`}
-      title={`Thème : ${THEME_LABEL[theme]} — cliquer pour changer`}
-    >
-      <ThemeIcon theme={theme} />
-    </button>
+    <>
+      <button
+        className="secondary icon-btn"
+        onClick={() => setOpen(true)}
+        aria-label="Paramètres"
+        title="Paramètres"
+      >
+        <GearIcon />
+      </button>
+      {open && (
+        <div className="modal-overlay" onClick={() => setOpen(false)}>
+          <div
+            className="modal settings"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Paramètres"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>Paramètres</h3>
+
+            <section className="setting">
+              <h4>Thème</h4>
+              <div className="theme-choices" role="group" aria-label="Thème">
+                {THEMES.map((t) => (
+                  <button
+                    key={t.key}
+                    className={"theme-chip" + (theme === t.key ? " active" : "")}
+                    aria-pressed={theme === t.key}
+                    onClick={() => pickTheme(t.key)}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="setting">
+              <h4>Pseudonyme</h4>
+              <p className="muted tiny">
+                Affiché à la place de ton prénom (dans le « Bonjour » et les créneaux).
+                Modifiable quand tu veux ; laisse vide pour revenir à ton prénom.
+              </p>
+              <div className="nick-field">
+                <input
+                  type="text"
+                  value={nick}
+                  maxLength={24}
+                  placeholder="Ton pseudo"
+                  onChange={(e) => setNick(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveNick();
+                  }}
+                />
+                <button onClick={saveNick} disabled={saving}>
+                  {saving ? "…" : "Enregistrer"}
+                </button>
+              </div>
+            </section>
+
+            <div className="modal-actions">
+              <button className="secondary" onClick={() => setOpen(false)}>
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -317,6 +394,8 @@ interface JournalEntry {
 
 export default function Home() {
   const [me, setMe] = useState<string | null | undefined>(undefined); // undefined = chargement
+  const [myHandle, setMyHandle] = useState<string>(""); // token créneau (pseudo tronqué / Tho.P)
+  const [nickname, setNickname] = useState<string | null>(null); // pseudonyme choisi
   const [date, setDate] = useState<string>(() => toISODate(new Date()));
   const [planning, setPlanning] = useState<PlanningDay | null>(null);
   const [journal, setJournal] = useState<JournalEntry[]>([]);
@@ -352,7 +431,16 @@ export default function Home() {
 
   const checkMe = useCallback(async () => {
     const res = await fetch("/api/auth/me");
-    setMe(res.ok ? (await res.json()).displayName : null);
+    if (res.ok) {
+      const data = await res.json();
+      setMe(data.displayName);
+      setMyHandle(data.handle ?? "");
+      setNickname(data.nickname ?? null);
+    } else {
+      setMe(null);
+      setMyHandle("");
+      setNickname(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -390,21 +478,16 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
-      const results = await Promise.all(
-        weekDates(d).map(async (dd) => {
-          const r = await fetch(`/api/planning?date=${dd}`);
-          if (r.status === 401) throw new Error("__401__");
-          const j = await r.json();
-          if (!r.ok) throw new Error(j.error ?? `Erreur ${r.status}`);
-          return { date: dd, planning: j as PlanningDay };
-        }),
-      );
-      setWeek(results);
-    } catch (e) {
-      if ((e as Error).message === "__401__") {
+      // Un seul appel : /api/week renvoie les 7 jours (planning brut, sans réconciliation).
+      const r = await fetch(`/api/week?date=${d}`);
+      if (r.status === 401) {
         setMe(null);
         return;
       }
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error ?? `Erreur ${r.status}`);
+      setWeek(j as { date: string; planning: PlanningDay }[]);
+    } catch (e) {
       setError((e as Error).message);
       setWeek([]);
     } finally {
@@ -596,7 +679,9 @@ export default function Home() {
   // Mise à jour optimiste (ton prénom apparaît/disparaît aussitôt), puis re-sync si échec.
   const onTogglePresence = async (slot: Slot) => {
     if (!me) return;
-    const myFirst = me.split(" ")[0];
+    // Diminutif du joueur courant (Tho.P) : DOIT correspondre à ce que renvoie le
+    // serveur dans `attendees`, sinon l'ajout optimiste laisse un doublon après re-sync.
+    const myFirst = myHandle || me.split(" ")[0];
     const wasAttending = slot.iAmAttending ?? false;
     setPlanning((p) =>
       p
@@ -665,7 +750,11 @@ export default function Home() {
           </div>
           <div className="actions">
             <ShareButton onCopied={() => toast("ok", "Lien copié ✅")} />
-            <ThemeToggle />
+            <SettingsButton
+              nickname={nickname}
+              onNicknameSaved={checkMe}
+              toast={toast}
+            />
             <button
               className="secondary logout"
               onClick={logout}
@@ -682,7 +771,7 @@ export default function Home() {
         <div className="sub">Planning Terrains, Le Complexe, Bures</div>
       </header>
 
-      <p className="hello">Bonjour {me.split(" ")[0]} 👋</p>
+      <p className="hello">Bonjour {nickname || me.split(" ")[0]} 👋</p>
 
       <div className="toolbar">
         <button className="secondary" aria-label="Précédent" onClick={() => setDate(addDays(date, view === "week" ? -7 : -1))}>←</button>

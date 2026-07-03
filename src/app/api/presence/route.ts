@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import { isClassEventId } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,8 +12,6 @@ export const dynamic = "force-dynamic";
 // réservataire du créneau. Pas de confirmation côté client.
 // Exclusivité : comme on ne peut pas être sur 2 terrains au même horaire, s'ajouter sur un
 // créneau retire automatiquement une éventuelle présence sur l'autre terrain à la même heure.
-// IRI d'un class_event ResaMania, ex. "/lecomplexbures/class_events/25312903".
-const CLASS_EVENT_IRI = /^\/[a-z0-9_-]+\/class_events\/\d+$/i;
 // Rétention : passé ce délai, plus rien n'affiche ces présences → purge opportuniste.
 const RETENTION_DAYS = 30;
 
@@ -30,7 +29,7 @@ export async function POST(req: NextRequest) {
   // qu'un IRI plausible et un horaire réel — ni créneau passé (marge 1 h pour un
   // match en cours), ni au-delà de l'horizon de réservation. Évite les lignes
   // fantaisistes et le 500 sur date invalide.
-  if (typeof classEventId !== "string" || !CLASS_EVENT_IRI.test(classEventId)) {
+  if (!isClassEventId(classEventId)) {
     return NextResponse.json({ error: "classEventId invalide" }, { status: 400 });
   }
   const dt = new Date(typeof startsAt === "string" ? startsAt : "");

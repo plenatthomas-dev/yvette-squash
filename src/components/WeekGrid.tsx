@@ -2,6 +2,7 @@
 
 import { useState, type KeyboardEvent } from "react";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
+import { fmtTime } from "@/lib/time";
 
 function shortDay(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString("fr-FR", {
@@ -52,7 +53,7 @@ export function WeekGrid({
   const times = new Set<string>();
   for (const d of days) {
     for (const s of d.planning.slots) {
-      if (filter(s.startsAt)) times.add(s.startsAt.slice(11, 16));
+      if (filter(s.startsAt)) times.add(fmtTime(s.startsAt));
     }
   }
   const rows = [...times].sort();
@@ -67,7 +68,7 @@ export function WeekGrid({
     const m = new Map<string, Cell>();
     for (const s of d.planning.slots) {
       if (!filter(s.startsAt)) continue;
-      const hm = s.startsAt.slice(11, 16);
+      const hm = fmtTime(s.startsAt);
       const cur = m.get(hm) ?? { free: [], total: 0, past: false };
       cur.total += 1;
       const past = new Date(s.startsAt).getTime() < now;

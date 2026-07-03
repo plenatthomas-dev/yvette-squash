@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getPlanning } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import { baseHandle, buildHandleMap } from "@/lib/handle";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,9 +25,16 @@ export async function GET(req: NextRequest) {
     //     sur ResaMania, dès lors que la personne s'est connectée une fois à l'appli),
     //  2) sinon via le journal local (réservations faites depuis l'appli).
     const users = await prisma.user.findMany({
-      select: { id: true, contactId: true, displayName: true },
+      select: {
+        id: true,
+        contactId: true,
+        displayName: true,
+        nickname: true,
+        createdAt: true,
+      },
     });
-    const byContact = new Map(users.map((u) => [u.contactId, u.displayName]));
+    // Diminutifs dé-doublonnés (Tho.P, Tho.P2…) pour tout l'ensemble des joueurs connus.
+    const handleMap = buildHandleMap(users);
     const userIdByContact = new Map(users.map((u) => [u.contactId, u.id]));
 
     const bookings = await prisma.booking.findMany({
@@ -66,10 +74,8 @@ export async function GET(req: NextRequest) {
         data: { status: "cancelled" },
       });
     }
-    const byEvent = new Map(active.map((b) => [b.classEventId, b.user.displayName]));
     const bookerUserIdByEvent = new Map(active.map((b) => [b.classEventId, b.userId]));
     const myContactId = session.resa.identity.contactId;
-    const first = (n?: string | null) => (n ?? "").trim().split(/\s+/)[0];
 
     // Présences « asso » (signal local) des créneaux du jour. On purge les orphelines
     // (créneau redevenu libre = résa annulée ailleurs) puis on regroupe le reste par créneau.
@@ -94,25 +100,26 @@ export async function GET(req: NextRequest) {
     for (const s of planning.slots) {
       // ResaMania fait foi : un créneau libre reste libre et cliquable, quoi qu'en dise le journal.
       if (s.bookable) continue;
+      // Résout d'abord le userId du réservataire (moi / contact connu / journal), puis son
+      // diminutif via handleMap — même source pour le booker et les présents.
       let bookerUserId: string | null = null;
       if (s.bookerContactId && s.bookerContactId === myContactId) {
         s.mine = true;
-        s.bookedBy = first(session.resa.identity.givenName) || "Toi";
         bookerUserId = session.userId;
-      } else if (s.bookerContactId && byContact.has(s.bookerContactId)) {
-        s.bookedBy = first(byContact.get(s.bookerContactId));
+      } else if (s.bookerContactId && userIdByContact.has(s.bookerContactId)) {
         bookerUserId = userIdByContact.get(s.bookerContactId) ?? null;
-      } else {
-        const who = byEvent.get(s.id);
-        if (who) {
-          s.bookedBy = first(who);
-          bookerUserId = bookerUserIdByEvent.get(s.id) ?? null;
-        }
+      } else if (bookerUserIdByEvent.has(s.id)) {
+        bookerUserId = bookerUserIdByEvent.get(s.id) ?? null;
+      }
+      if (bookerUserId) {
+        s.bookedBy = handleMap.get(bookerUserId) ?? (s.mine ? "Toi" : null);
       }
       // Présences : seulement sur les créneaux « asso » (réservataire connu), réservataire exclu.
       if (s.bookedBy) {
         const list = attByEvent.get(s.id) ?? [];
-        s.attendees = list.filter((a) => a.userId !== bookerUserId).map((a) => first(a.name));
+        s.attendees = list
+          .filter((a) => a.userId !== bookerUserId)
+          .map((a) => handleMap.get(a.userId) ?? baseHandle(a.name));
         s.iAmAttending = list.some((a) => a.userId === session.userId);
       }
     }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { book } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import { isClassEventId } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -14,8 +15,8 @@ export async function POST(req: NextRequest) {
   const { classEventId, courtName, startsAt, endsAt } = await req
     .json()
     .catch(() => ({}));
-  if (!classEventId) {
-    return NextResponse.json({ error: "classEventId requis" }, { status: 400 });
+  if (!isClassEventId(classEventId)) {
+    return NextResponse.json({ error: "classEventId invalide" }, { status: 400 });
   }
 
   // Blocage « même créneau » : ResaMania interdit de réserver 2 terrains au même horaire.
@@ -57,8 +58,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: r.error }, { status: 409 });
   }
 
-  await prisma.booking.create({
-    data: {
+  // Upsert sur la clé unique (userId, classEventId) : réserver un créneau déjà présent
+  // dans le journal (ex. annulé puis re-réservé) repasse la même ligne en "booked" au
+  // lieu de créer un doublon. La contrainte @@unique garantit l'unicité côté base.
+  await prisma.booking.upsert({
+    where: {
+      userId_classEventId: { userId: session.userId, classEventId },
+    },
+    update: {
+      attendeeId: r.attendeeId ?? null,
+      courtName: courtName ?? "?",
+      startsAt: new Date(startsAt),
+      endsAt: new Date(endsAt),
+      status: "booked",
+    },
+    create: {
       userId: session.userId,
       attendeeId: r.attendeeId ?? null,
       classEventId,
