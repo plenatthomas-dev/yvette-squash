@@ -949,6 +949,35 @@ td.cell.past {
   white-space: nowrap;
 }
 
+/* --- Partage : QR code ------------------------------------------------- */
+.qr-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 6px 0 14px;
+}
+
+/* Fond blanc quel que soit le thème → le QR reste scannable (noir sur blanc). */
+.qr-canvas {
+  width: 260px;
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+}
+
+.share-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.share-actions button {
+  margin: 0;
+  width: auto;
+  flex: 1 1 auto;
+}
+
 /* Panneau « réserver depuis la semaine » : liste des terrains libres du créneau. */
 .week-sheet h3 {
   text-transform: capitalize;
