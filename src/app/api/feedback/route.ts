@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
 import { getSession } from "@/lib/session";
+import { prisma } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,7 +11,15 @@ const TO = process.env.FEEDBACK_TO_EMAIL ?? "plenat.thomas@gmail.com";
 // Expéditeur : le domaine partagé de Resend fonctionne pour envoyer vers SA PROPRE adresse
 // sans configurer de domaine. Pour envoyer vers d'autres adresses, vérifier un domaine.
 const FROM = process.env.FEEDBACK_FROM_EMAIL ?? "Squash Yvette <onboarding@resend.dev>";
-const MAX = 2000;
+
+// Longueur max d'un commentaire : large pour décrire un bug/une idée, mais bornée contre
+// l'abus. Doit rester synchronisée avec le maxLength de la zone de texte (page.tsx).
+const MAX_LEN = 1000;
+// Rate limiting : au-delà de MAX_PER_DAY envois en WINDOW_MS pour un même membre, on refuse
+// (protège la boîte mail du spam). Le compteur vit en base — les fonctions serverless n'ont
+// pas de mémoire partagée — sur le même modèle que le rate limiting du login.
+const WINDOW_MS = 24 * 60 * 60_000; // 24 h glissantes
+const MAX_PER_DAY = 10;
 
 // POST /api/feedback  { message }
 // Envoie le commentaire du membre connecté par e-mail au proprio (objet « APPLI SQUASH YVETTE »),
@@ -25,7 +34,27 @@ export async function POST(req: NextRequest) {
   if (typeof message !== "string" || !message.trim()) {
     return NextResponse.json({ error: "Écris un message avant d'envoyer." }, { status: 400 });
   }
-  const text = message.trim().slice(0, MAX);
+  const text = message.trim();
+  if (text.length > MAX_LEN) {
+    return NextResponse.json(
+      { error: `Message trop long (${text.length}/${MAX_LEN} caractères max).` },
+      { status: 400 },
+    );
+  }
+
+  // Rate limiting : nombre d'envois de ce membre sur les 24 h glissantes.
+  const since = new Date(Date.now() - WINDOW_MS);
+  // Purge opportuniste des lignes hors fenêtre (tous membres : garde la table minuscule).
+  await prisma.feedbackMessage.deleteMany({ where: { createdAt: { lt: since } } });
+  const sentRecently = await prisma.feedbackMessage.count({
+    where: { userId: session.userId, createdAt: { gte: since } },
+  });
+  if (sentRecently >= MAX_PER_DAY) {
+    return NextResponse.json(
+      { error: `Limite atteinte : ${MAX_PER_DAY} messages par 24 h. Réessaie plus tard.` },
+      { status: 429 },
+    );
+  }
 
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
@@ -49,5 +78,9 @@ export async function POST(req: NextRequest) {
   if (error) {
     return NextResponse.json({ error: "Échec de l'envoi, réessaie plus tard." }, { status: 502 });
   }
+
+  // Envoi réussi : on journalise pour le compteur (les envois échoués ne comptent pas).
+  await prisma.feedbackMessage.create({ data: { userId: session.userId } }).catch(() => {});
+
   return NextResponse.json({ ok: true });
 }
