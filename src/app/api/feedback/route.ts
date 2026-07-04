@@ -64,7 +64,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const userEmail = session.resa.identity.email?.trim() || "";
+  // reply-to : email ResaMania si session ResaMania, sinon l'email vérifié du compte.
+  const dbUser = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: { email: true },
+  });
+  const userEmail = session.resa?.identity.email?.trim() || dbUser?.email || "";
   const who = session.displayName || "Membre";
 
   const resend = new Resend(apiKey);

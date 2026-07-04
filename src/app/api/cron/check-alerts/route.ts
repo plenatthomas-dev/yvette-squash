@@ -29,11 +29,14 @@ function prettyDate(date: string): string {
 
 // Régénère un access token ResaMania valide à partir de la dernière session du joueur.
 async function accessTokenForUser(userId: string): Promise<string | null> {
+  // Uniquement les sessions ResaMania (avec jeton) : les sessions « email seul » n'en ont pas.
   const s = await prisma.session.findFirst({
-    where: { userId, expiresAt: { gt: new Date() } },
+    where: { userId, expiresAt: { gt: new Date() }, refreshTokenEnc: { not: null } },
     orderBy: { createdAt: "desc" },
   });
-  if (!s) return null;
+  if (!s || !s.accessToken || !s.refreshTokenEnc || !s.tokenExpiresAt || !s.identityJson) {
+    return null;
+  }
   try {
     const resa: ResaSession = {
       accessToken: s.accessToken,

@@ -15,6 +15,13 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
+  if (!session.resa) {
+    return NextResponse.json(
+      { error: "L'annulation d'une réservation nécessite une connexion ResaMania." },
+      { status: 403 },
+    );
+  }
+  const resa = session.resa;
   const { classEventId } = (await req.json().catch(() => ({}))) as {
     classEventId?: unknown;
   };
@@ -22,7 +29,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "classEventId invalide" }, { status: 400 });
   }
 
-  const attendeeId = await findAttendeeId(session.resa, classEventId);
+  const attendeeId = await findAttendeeId(resa, classEventId);
   if (!attendeeId) {
     return NextResponse.json(
       { error: "Réservation introuvable côté ResaMania." },
@@ -30,7 +37,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const r = await cancel(session.resa, attendeeId);
+  const r = await cancel(resa, attendeeId);
   if (!r.ok) {
     return NextResponse.json({ error: r.error }, { status: 409 });
   }

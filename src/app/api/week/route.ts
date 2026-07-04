@@ -19,6 +19,14 @@ export async function GET(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
+  if (!session.resa) {
+    // TODO (lot cache planning) : servir un agrégat des snapshots par jour.
+    return NextResponse.json(
+      { error: "Vue Semaine sans ResaMania : bientôt disponible.", code: "no_resa" },
+      { status: 403 },
+    );
+  }
+  const resa = session.resa;
   const date =
     new URL(req.url).searchParams.get("date") ??
     new Date().toISOString().slice(0, 10);
@@ -27,7 +35,7 @@ export async function GET(req: NextRequest) {
     const days = await Promise.all(
       weekDates(date).map(async (d) => ({
         date: d,
-        planning: await getPlanning(d, session.resa.accessToken),
+        planning: await getPlanning(d, resa.accessToken),
       })),
     );
     return NextResponse.json(days);

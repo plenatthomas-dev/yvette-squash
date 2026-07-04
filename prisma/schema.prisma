@@ -15,10 +15,10 @@ datasource db {
 // Un joueur de l'appli, identifié par son compte ResaMania (contactId).
 model User {
   id          String       @id @default(cuid())
-  contactId   String       @unique // ex. "/lecomplexbures/contacts/12685397"
+  contactId   String?      @unique // ResaMania (nullable : un compte « email seul » n'en a pas encore)
   displayName String
   nickname    String? // pseudonyme choisi par le joueur (affiché à la place du prénom)
-  email       String?
+  email       String?      @unique // normalisé (trim+lowercase) — CLÉ D'IDENTITÉ commune ResaMania/email
   createdAt   DateTime     @default(now())
   sessions    Session[]
   bookings    Booking[]
@@ -37,10 +37,11 @@ model Session {
   id              String   @id // jeton aléatoire (valeur du cookie)
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId          String
-  accessToken     String // token Bearer chiffré (AES-256-GCM, court ~1h)
-  refreshTokenEnc String // refresh token chiffré (AES-256-GCM)
-  tokenExpiresAt  DateTime
-  identityJson    String // ResaIdentity sérialisée (contactId, clubId, nom…)
+  // Champs ResaMania : NULL pour une session « email seul » (aucun jeton).
+  accessToken     String? // token Bearer chiffré (AES-256-GCM, court ~1h)
+  refreshTokenEnc String? // refresh token chiffré (AES-256-GCM)
+  tokenExpiresAt  DateTime?
+  identityJson    String? // ResaIdentity sérialisée (contactId, clubId, nom…)
   expiresAt       DateTime // expiration de la session applicative
   createdAt       DateTime @default(now())
 
@@ -88,6 +89,19 @@ model FeedbackMessage {
   createdAt DateTime @default(now())
 
   @@index([userId, createdAt])
+}
+
+// Code OTP (6 chiffres) pour la connexion « email seul » — preuve de possession de l'email.
+// Le code n'est JAMAIS stocké en clair (HMAC-SHA256). Usage unique, court, rate-limité.
+model EmailOtp {
+  id        String   @id @default(cuid())
+  email     String // normalisé (trim+lowercase)
+  codeHash  String // HMAC-SHA256 du code
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
 }
 
 // Présence « asso » sur un créneau déjà réservé par un membre : signal purement local

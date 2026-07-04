@@ -57,3 +57,12 @@ export function decrypt(payload: string): string {
     decipher.final(),
   ]).toString("utf8");
 }
+
+/**
+ * Hash HMAC-SHA256 d'un code OTP (clé = CREDENTIALS_SECRET). Le code n'est jamais
+ * stocké en clair : on ne persiste que ce hash et on le recompare à la vérification.
+ * Déterministe → comparable ; à comparer en temps constant (crypto.timingSafeEqual).
+ */
+export function hashOtp(code: string): string {
+  return crypto.createHmac("sha256", getKey()).update(code).digest("hex");
+}

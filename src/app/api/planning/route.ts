@@ -13,12 +13,20 @@ export async function GET(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
+  if (!session.resa) {
+    // TODO (lot cache planning) : servir le PlanningSnapshot de la date + annotation live.
+    return NextResponse.json(
+      { error: "Consultation du planning sans ResaMania : bientôt en cache.", code: "no_resa" },
+      { status: 403 },
+    );
+  }
+  const resa = session.resa;
   const date =
     new URL(req.url).searchParams.get("date") ??
     new Date().toISOString().slice(0, 10);
 
   try {
-    const planning = await getPlanning(date, session.resa.accessToken);
+    const planning = await getPlanning(date, resa.accessToken);
 
     // Annoter « qui du groupe a réservé » :
     //  1) par correspondance du contactId (marche même si la résa a été faite directement
@@ -75,7 +83,7 @@ export async function GET(req: NextRequest) {
       });
     }
     const bookerUserIdByEvent = new Map(active.map((b) => [b.classEventId, b.userId]));
-    const myContactId = session.resa.identity.contactId;
+    const myContactId = resa.identity.contactId;
 
     // Présences « asso » (signal local) des créneaux du jour. On purge les orphelines
     // (créneau redevenu libre = résa annulée ailleurs) puis on regroupe le reste par créneau.
