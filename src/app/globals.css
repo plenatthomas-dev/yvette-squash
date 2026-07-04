@@ -796,6 +796,25 @@ td.cell.past {
   max-width: 400px;
 }
 
+/* Onglets de connexion (ResaMania / Par email) : deux boutons côte à côte. */
+.login-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+.login-tabs button {
+  flex: 1;
+  margin: 0;
+}
+
+/* Bandeau « lecture seule » (session email) : notice d'info un peu resserrée. */
+.readonly-note {
+  margin-top: 4px;
+}
+.cache-note {
+  margin: -4px 0 10px;
+}
+
 .login form {
   display: flex;
   flex-direction: column;

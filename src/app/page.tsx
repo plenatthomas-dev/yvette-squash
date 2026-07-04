@@ -682,6 +682,7 @@ export default function Home() {
   const [me, setMe] = useState<string | null | undefined>(undefined); // undefined = chargement
   const [myHandle, setMyHandle] = useState<string>(""); // token créneau (pseudo tronqué / Tho.P)
   const [nickname, setNickname] = useState<string | null>(null); // pseudonyme choisi
+  const [canBook, setCanBook] = useState(true); // false = session « email seul » (lecture seule)
   const [date, setDate] = useState<string>(() => toISODate(new Date()));
   const [planning, setPlanning] = useState<PlanningDay | null>(null);
   const [journal, setJournal] = useState<JournalEntry[]>([]);
@@ -727,6 +728,7 @@ export default function Home() {
       setMe(data.displayName);
       setMyHandle(data.handle ?? "");
       setNickname(data.nickname ?? null);
+      setCanBook(data.canBook ?? true);
     } else {
       setMe(null);
       setMyHandle("");
@@ -876,6 +878,13 @@ export default function Home() {
 
   const onBook = async (slot: Slot) => {
     if (busy || confirmState) return; // anti double-clic / double-modale
+    if (!canBook) {
+      toast(
+        "info",
+        "Réservation possible seulement via ResaMania. Ici tu peux te mettre « +1 » sur un créneau déjà réservé.",
+      );
+      return;
+    }
     // Blocage « même créneau » : impossible de réserver 2 terrains au même horaire
     // (ResaMania le refuse). On prévient tout de suite si on a déjà une résa à cette heure.
     const clash = planning?.slots.find((s) => s.startsAt === slot.startsAt && s.mine);
@@ -1138,6 +1147,14 @@ export default function Home() {
 
       <p className="hello">Bonjour {nickname || me.split(" ")[0]} 👋</p>
 
+      {!canBook && (
+        <div className="notice info readonly-note">
+          🔒 <strong>Lecture seule</strong> (connexion par email) : réserver un terrain passe par
+          ResaMania. Tu peux consulter le planning et te mettre « +1 » sur un créneau déjà réservé
+          par un membre.
+        </div>
+      )}
+
       {view !== "money" && (
       <div className="toolbar">
         <button className="secondary" aria-label="Précédent" onClick={() => setDate(addDays(date, view === "week" ? -7 : -1))}>←</button>
@@ -1200,6 +1217,23 @@ export default function Home() {
           <span><i style={{ background: "var(--accent)" }} /> Réservé (asso)</span>
           <span><i style={{ background: "var(--booked)" }} /> Réservé (autre)</span>
         </div>
+      )}
+      {view === "day" && planning?.cached && (
+        <p className="muted tiny cache-note">
+          🕒{" "}
+          {planning.notice
+            ? planning.notice
+            : `Planning en cache — dernière mise à jour ${
+                planning.cachedAt
+                  ? new Date(planning.cachedAt).toLocaleString("fr-FR", {
+                      day: "numeric",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : "—"
+              } par un membre connecté à ResaMania.`}
+        </p>
       )}
       {view === "week" && (
         <p className="muted week-hint">
@@ -1344,13 +1378,22 @@ function EyeIcon({ off }: { off: boolean }) {
 }
 
 function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
+  const [tab, setTab] = useState<"resa" | "email">("resa");
+  // ResaMania
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
+  // Connexion par email (OTP)
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
+
   const [err, setErr] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const submit = async (e: FormEvent) => {
+  const submitResa = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setErr(null);
@@ -1370,54 +1413,185 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     }
   };
 
+  const requestCode = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setErr(null);
+    setInfo(null);
+    try {
+      const res = await fetch("/api/auth/otp/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Envoi impossible");
+      setCodeSent(true);
+      setInfo(`Code envoyé à ${email}. Regarde tes mails (et les spams).`);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verifyCode = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/auth/otp/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code, name: name.trim() || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Code invalide");
+      onLoggedIn();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const switchTab = (t: "resa" | "email") => {
+    setTab(t);
+    setErr(null);
+    setInfo(null);
+  };
+
   return (
     <main className="login">
       <h1 className="sr-only">Squash de l'Yvette</h1>
-      <img
-        src="/logo_squash.jpeg"
-        alt="Squash de l'Yvette"
-        className="logo-hero"
-      />
-      <p className="muted">
-        Connecte-toi avec ton compte ResaMania (Le Complexe Bures).
-      </p>
-      <form onSubmit={submit}>
-        <input
-          type="text"
-          placeholder="Identifiant (email)"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          autoComplete="username"
-        />
-        <div className="pwd-field">
-          <input
-            type={showPwd ? "text" : "password"}
-            placeholder="Mot de passe"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-          />
-          <button
-            type="button"
-            className="pwd-toggle"
-            onClick={() => setShowPwd((v) => !v)}
-            aria-label={showPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-            aria-pressed={showPwd}
-            title={showPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-          >
-            <EyeIcon off={showPwd} />
-          </button>
-        </div>
-        <button type="submit" disabled={busy}>
-          {busy ? "Connexion…" : "Se connecter"}
+      <img src="/logo_squash.jpeg" alt="Squash de l'Yvette" className="logo-hero" />
+
+      <div className="login-tabs" role="group" aria-label="Méthode de connexion">
+        <button
+          type="button"
+          className={tab === "resa" ? "active" : "secondary"}
+          aria-pressed={tab === "resa"}
+          onClick={() => switchTab("resa")}
+        >
+          ResaMania
         </button>
-      </form>
+        <button
+          type="button"
+          className={tab === "email" ? "active" : "secondary"}
+          aria-pressed={tab === "email"}
+          onClick={() => switchTab("email")}
+        >
+          Par email
+        </button>
+      </div>
+
+      {tab === "resa" ? (
+        <>
+          <p className="muted">
+            Connecte-toi avec ton compte ResaMania (Le Complexe Bures).
+          </p>
+          <form onSubmit={submitResa}>
+            <input
+              type="text"
+              placeholder="Identifiant (email)"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+            />
+            <div className="pwd-field">
+              <input
+                type={showPwd ? "text" : "password"}
+                placeholder="Mot de passe"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+              />
+              <button
+                type="button"
+                className="pwd-toggle"
+                onClick={() => setShowPwd((v) => !v)}
+                aria-label={showPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                aria-pressed={showPwd}
+                title={showPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+              >
+                <EyeIcon off={showPwd} />
+              </button>
+            </div>
+            <button type="submit" disabled={busy}>
+              {busy ? "Connexion…" : "Se connecter"}
+            </button>
+          </form>
+          <p className="muted tiny">
+            Ton mot de passe sert seulement à te connecter à ResaMania ; il n'est jamais
+            conservé. L'appli mémorise uniquement que tu es connecté, de façon sécurisée.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="muted">
+            Pas d'accès ResaMania (suspendu, pas encore inscrit…) ? Connecte-toi par email.
+            Utilise le <strong>même email que sur ResaMania</strong> pour retrouver ton
+            historique le jour où tu t'y reconnecteras.
+          </p>
+          {!codeSent ? (
+            <form onSubmit={requestCode}>
+              <input
+                type="email"
+                placeholder="Ton email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+              />
+              <button type="submit" disabled={busy || !email.trim()}>
+                {busy ? "Envoi…" : "Recevoir un code"}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={verifyCode}>
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="Code à 6 chiffres"
+                value={code}
+                maxLength={6}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+              />
+              <input
+                type="text"
+                placeholder="Ton nom (si première connexion)"
+                value={name}
+                maxLength={60}
+                onChange={(e) => setName(e.target.value)}
+                autoComplete="name"
+              />
+              <button type="submit" disabled={busy || code.length !== 6}>
+                {busy ? "Vérification…" : "Se connecter"}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  setCodeSent(false);
+                  setCode("");
+                  setInfo(null);
+                  setErr(null);
+                }}
+                disabled={busy}
+              >
+                Changer d'email / renvoyer un code
+              </button>
+            </form>
+          )}
+          <p className="muted tiny">
+            En connexion email, tu peux consulter le planning et le Tricount, mais pas réserver
+            de terrain (ça reste sur ResaMania).
+          </p>
+        </>
+      )}
+
+      {info && <div className="notice info">{info}</div>}
       {err && <div className="notice error">⚠️ {err}</div>}
-      <p className="muted tiny">
-        Ton mot de passe sert seulement à te connecter à ResaMania ; il n'est
-        jamais conservé. L'appli mémorise uniquement que tu es connecté, de façon
-        sécurisée, pour t'éviter de te reconnecter sans arrêt.
-      </p>
     </main>
   );
 }
