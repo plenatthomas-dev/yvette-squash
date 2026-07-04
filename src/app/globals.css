@@ -393,6 +393,17 @@ header.app .sub {
   .logout {
     padding: 7px 9px;
   }
+
+  /* Trop d'icônes en haut sur mobile (surtout avec l'onglet Frais) → on masque le
+     titre texte ; le logo, un peu agrandi, suffit à identifier l'appli. Sur écran
+     large la place ne manque pas : le titre reste affiché (règle hors media query). */
+  .brand-title {
+    display: none;
+  }
+  header.app .logo-mark {
+    width: 46px;
+    height: 46px;
+  }
 }
 
 /* --- Filtre de plage horaire (segmenté) --------------------------------- */
@@ -1359,7 +1370,13 @@ table.planning.week td.cell {
   white-space: nowrap;
   border: 1px solid var(--pico-card-border-color);
 }
-.tri-chip.pending { color: var(--pico-muted-color); }
+/* « En cours » : pastille ambre pleine → nettement visible sur TOUS les thèmes
+   (clair / sombre / rose), contrairement à l'ancien gris muet peu lisible. */
+.tri-chip.pending {
+  color: #78350f;
+  background: #fcd34d;
+  border-color: #f59e0b;
+}
 .tri-chip.ready {
   color: var(--pico-primary);
   border-color: var(--pico-primary);

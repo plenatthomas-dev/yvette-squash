@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
 
   const [users, tricounts] = await Promise.all([
     prisma.user.findMany({
-      select: { id: true, displayName: true, nickname: true },
+      select: { id: true, displayName: true },
       orderBy: { createdAt: "asc" },
     }),
     prisma.tricount.findMany({
@@ -32,14 +32,10 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
-  const nameOf = new Map(
-    users.map((u) => [u.id, (u.nickname ?? "").trim() || u.displayName]),
-  );
+  // Tricount : on affiche TOUJOURS le prénom/nom réel (displayName), jamais le pseudo —
+  // pour savoir sans ambiguïté qui a payé quoi et à qui rendre l'argent.
+  const nameOf = new Map(users.map((u) => [u.id, u.displayName]));
   const name = (id: string) => nameOf.get(id) ?? "?";
-  // Remboursements : toujours les prénoms/noms réels (pas de pseudos), pour être
-  // sûr de savoir à QUI donner l'argent.
-  const fullOf = new Map(users.map((u) => [u.id, u.displayName]));
-  const fullName = (id: string) => fullOf.get(id) ?? "?";
 
   return NextResponse.json({
     me: session.userId,
@@ -81,8 +77,8 @@ export async function GET(req: NextRequest) {
           .sort((a, b) => b.cents - a.cents),
         transfers: transfers.map((tr) => ({
           ...tr,
-          fromName: fullName(tr.fromId),
-          toName: fullName(tr.toId),
+          fromName: name(tr.fromId),
+          toName: name(tr.toId),
         })),
       };
     }),

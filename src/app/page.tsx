@@ -1083,8 +1083,14 @@ export default function Home() {
         <div className="app-top">
           <div className="brand">
             <h1>
-              <img src="/logo_squash.jpeg" alt="" className="logo-mark" />
-              Squash de l'Yvette
+              <img
+                src="/logo_squash.jpeg"
+                alt="Squash de l'Yvette"
+                className="logo-mark"
+              />
+              <span className="brand-title" aria-hidden="true">
+                Squash de l'Yvette
+              </span>
             </h1>
           </div>
           <div className="actions">
