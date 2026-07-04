@@ -104,6 +104,16 @@ model EmailOtp {
   @@index([email, createdAt])
 }
 
+// Cache du planning d'un jour, rafraîchi à chaque chargement par un membre à jeton
+// ResaMania. Sert à afficher le planning aux comptes « email seul » (sans jeton), qui
+// le ré-annotent en direct (présences). payloadJson = PlanningDay BRUT (avant annotation).
+model PlanningSnapshot {
+  date        String   @id // "YYYY-MM-DD"
+  payloadJson String
+  updatedById String? // dernier membre (à jeton) ayant rafraîchi le snapshot
+  updatedAt   DateTime @updatedAt
+}
+
 // Présence « asso » sur un créneau déjà réservé par un membre : signal purement local
 // (ne touche jamais ResaMania ni l'identité du réservataire). Un membre peut se noter
 // présent sur le créneau d'un autre ; un second clic le retire.

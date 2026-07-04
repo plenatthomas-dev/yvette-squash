@@ -29,6 +29,11 @@ export interface PlanningDay {
   clubId: string;
   courts: Court[];
   slots: Slot[];
+  // Renseignés uniquement quand le planning vient du CACHE (compte « email seul », sans
+  // jeton ResaMania) : la donnée date du dernier chargement par un membre connecté.
+  cached?: boolean;
+  cachedAt?: string | null; // ISO du dernier rafraîchissement
+  notice?: string; // message si aucun snapshot n'existe encore
 }
 
 export interface ResaCredentials {

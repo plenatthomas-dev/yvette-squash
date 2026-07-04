@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPlanning } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
+import { prisma } from "@/lib/db";
 import { weekDates } from "@/lib/week";
+import type { PlanningDay } from "@/lib/resamania/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,17 +21,29 @@ export async function GET(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
-  if (!session.resa) {
-    // TODO (lot cache planning) : servir un agrégat des snapshots par jour.
-    return NextResponse.json(
-      { error: "Vue Semaine sans ResaMania : bientôt disponible.", code: "no_resa" },
-      { status: 403 },
-    );
-  }
-  const resa = session.resa;
   const date =
     new URL(req.url).searchParams.get("date") ??
     new Date().toISOString().slice(0, 10);
+
+  // Compte « email seul » (sans jeton) : agrégat des snapshots par jour (comptage des libres).
+  if (!session.resa) {
+    const dates = weekDates(date);
+    const snaps = await prisma.planningSnapshot.findMany({ where: { date: { in: dates } } });
+    const byDate = new Map(snaps.map((s) => [s.date, s]));
+    const days = dates.map((d) => {
+      const snap = byDate.get(d);
+      const planning: PlanningDay = snap
+        ? {
+            ...(JSON.parse(snap.payloadJson) as PlanningDay),
+            cached: true,
+            cachedAt: snap.updatedAt.toISOString(),
+          }
+        : { date: d, clubId: "", courts: [], slots: [], cached: true, cachedAt: null };
+      return { date: d, planning };
+    });
+    return NextResponse.json(days);
+  }
+  const resa = session.resa;
 
   try {
     const days = await Promise.all(
