@@ -52,6 +52,18 @@ export async function GET(req: NextRequest) {
         planning: await getPlanning(d, resa.accessToken),
       })),
     );
+    // Alimente le cache : chaque jour chargé devient un snapshot → un compte « email seul »
+    // verra TOUTE la semaine consultée ici, pas seulement les jours ouverts en vue Jour.
+    await Promise.all(
+      days.map((day) => {
+        const payloadJson = JSON.stringify(day.planning);
+        return prisma.planningSnapshot.upsert({
+          where: { date: day.date },
+          update: { payloadJson, updatedById: session.userId },
+          create: { date: day.date, payloadJson, updatedById: session.userId },
+        });
+      }),
+    );
     return NextResponse.json(days);
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
