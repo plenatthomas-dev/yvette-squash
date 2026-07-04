@@ -373,12 +373,17 @@ export async function findAttendeeId(
   );
   if (!res.ok) return null;
   const j = (await res.json()) as {
-    "hydra:member"?: Array<{ "@id": string; contactId?: string }>;
+    "hydra:member"?: Array<{ "@id": string; contactId?: string; state?: string }>;
   };
-  const mine = (j["hydra:member"] ?? []).find(
-    (a) => a.contactId === session.identity.contactId,
+  // ResaMania conserve l'HISTORIQUE des attendees : après plusieurs cycles résa/annulation
+  // sur le même créneau, plusieurs lignes coexistent pour le même contact (des "canceled"
+  // + au plus une active). On IGNORE les annulées, sinon on retomberait sur une ligne déjà
+  // "canceled" et l'annulation renverrait 400 (prohibited-transition cancel <- canceled).
+  const mine = (j["hydra:member"] ?? []).filter(
+    (a) => a.contactId === session.identity.contactId && a.state !== "canceled",
   );
-  return mine?.["@id"] ?? null;
+  // Au plus une résa active par créneau ; en cas d'ambiguïté on prend la dernière.
+  return mine.length ? mine[mine.length - 1]["@id"] : null;
 }
 
 export async function cancel(

@@ -233,6 +233,8 @@ function SettingsButton({
   const [saving, setSaving] = useState(false);
   const [comment, setComment] = useState("");
   const [sending, setSending] = useState(false);
+  // Doit rester synchronisé avec MAX_LEN côté serveur (api/feedback/route.ts).
+  const COMMENT_MAX = 1000;
 
   useEffect(() => {
     const saved = localStorage.getItem("theme");
@@ -382,11 +384,18 @@ function SettingsButton({
               <textarea
                 className="comment-field"
                 value={comment}
-                maxLength={2000}
+                maxLength={COMMENT_MAX}
                 rows={3}
                 placeholder="Ton message…"
                 onChange={(e) => setComment(e.target.value)}
               />
+              <div
+                className="muted tiny"
+                style={{ textAlign: "right" }}
+                aria-live="polite"
+              >
+                {comment.length} / {COMMENT_MAX}
+              </div>
               <button onClick={sendComment} disabled={sending || !comment.trim()}>
                 {sending ? "Envoi…" : "Envoyer"}
               </button>

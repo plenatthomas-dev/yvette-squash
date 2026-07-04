@@ -79,6 +79,17 @@ model LoginAttempt {
   @@index([ip, createdAt])
 }
 
+// Commentaire envoyé par e-mail (rate limiting : 10 max / 24 h par membre).
+// Une ligne par envoi réussi ; purgées dès qu'elles sortent de la fenêtre de 24 h.
+// Table autonome (userId brut, sans relation) comme LoginAttempt : simple compteur.
+model FeedbackMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
 // Présence « asso » sur un créneau déjà réservé par un membre : signal purement local
 // (ne touche jamais ResaMania ni l'identité du réservataire). Un membre peut se noter
 // présent sur le créneau d'un autre ; un second clic le retire.
