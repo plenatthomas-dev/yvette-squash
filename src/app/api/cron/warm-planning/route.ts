@@ -1,22 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { login, getPlanning } from "@/lib/resamania/client";
+import { cronAuthorized } from "@/lib/cron-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const DAYS_AHEAD = 14; // on préchauffe hier → aujourd'hui + 14 jours
-
-// Autorisation : « Authorization: Bearer $CRON_SECRET » (Vercel Cron) ou ?token=$CRON_SECRET
-// (déclenchement manuel / cron externe). Sans secret défini → ouvert (dev).
-function authorized(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return true;
-  const auth = req.headers.get("authorization");
-  const token = new URL(req.url).searchParams.get("token");
-  return auth === `Bearer ${secret}` || token === secret;
-}
 
 // Jeton ResaMania d'un compte « de service » DÉDIÉ (identifiants en variables d'env) :
 // le cron se connecte lui-même à chaque passage → indépendant des sessions des membres,
@@ -44,7 +35,7 @@ function dayISO(offset: number): string {
 // de service, pour qu'un compte « email seul » voie toujours le planning à venir, sans
 // dépendre de qui a navigué. Idempotent (upsert). Séquentiel (doux pour ResaMania).
 export async function GET(req: NextRequest) {
-  if (!authorized(req)) {
+  if (!cronAuthorized(req)) {
     return NextResponse.json({ error: "Interdit" }, { status: 401 });
   }
   const token = await serviceToken();

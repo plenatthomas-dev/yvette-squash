@@ -92,16 +92,20 @@ model FeedbackMessage {
 }
 
 // Code OTP (6 chiffres) pour la connexion « email seul » — preuve de possession de l'email.
-// Le code n'est JAMAIS stocké en clair (HMAC-SHA256). Usage unique, court, rate-limité.
+// Le code n'est JAMAIS stocké en clair (HMAC-SHA256). Usage unique, court, rate-limité
+// à la fois PAR EMAIL (anti-spam d'une boîte) et PAR IP (anti-abus d'envoi : empêche une
+// source d'arroser des centaines d'adresses et de brûler le quota d'envoi Gmail).
 model EmailOtp {
   id        String   @id @default(cuid())
   email     String // normalisé (trim+lowercase)
   codeHash  String // HMAC-SHA256 du code
+  ip        String? // IP demandeuse (rate limiting par IP ; nullable pour l'existant)
   expiresAt DateTime
   attempts  Int      @default(0)
   createdAt DateTime @default(now())
 
   @@index([email, createdAt])
+  @@index([ip, createdAt])
 }
 
 // Cache du planning d'un jour, rafraîchi à chaque chargement par un membre à jeton
