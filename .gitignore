@@ -6,6 +6,9 @@
 /out/
 next-env.d.ts
 
+# vercel (lien projet local — ne pas committer)
+/.vercel
+
 # typescript build info
 *.tsbuildinfo
 
