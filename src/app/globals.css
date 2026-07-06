@@ -1195,6 +1195,18 @@ table.planning.week td.cell.wk {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Neutralise le style que Pico applique à [role="button"] (bordure, border-radius,
+     padding, min-height…) : sinon un terrain interactif devient un « bouton » arrondi plus
+     petit que son voisin non-interactif → tailles/formes inégales selon la couleur. */
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  box-shadow: none;
+  font: inherit;
 }
 .wk-seg.tap {
   cursor: pointer;
