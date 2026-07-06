@@ -22,18 +22,26 @@ Idées de fonctionnalités proposées par un **bêta-testeur**, complétées d'u
 
 ---
 
-## 1. Réserver plusieurs créneaux d'un coup
+## 1. Réserver plusieurs créneaux d'un coup ✅ fait
 
 Pouvoir **réserver tout un créneau récurrent sur la semaine** (le même horaire chaque
 jour), ou plus généralement **réserver plus vite plusieurs créneaux à la fois**.
 
-- **Statut** : 💡 à étudier · **Valeur** ⭐⭐⭐ · **Effort** M
+- **Statut** : ✅ fait (avec 7b) · **Valeur** ⭐⭐⭐ · **Effort** M
 - **Notes / éval** : recoupe l'idée 7b. Faisabilité **bonne** : le cas « même horaire toute
   la semaine » est naturel car des jours différents ne déclenchent pas la règle « un
   terrain par horaire » (contrainte 2). Pas d'API batch (contrainte 1) → **boucle de N
   appels côté serveur**. Points à traiter : **échecs partiels** (dire lesquels ont réussi /
   échoué), rester raisonnable en volume pour ne pas se faire repérer côté ResaMania.
   **Verdict** : à faire, à concevoir avec 7b.
+- **Livré** (`feature/vue-semaine` → `main`) : mode « Sélection » piloté depuis la barre de
+  vue (icône), présent en **vue jour** (`PlanningGrid`) **et semaine** (`WeekGrid`). En
+  semaine, un clic sur l'horaire coche **le même créneau sur toute la semaine** (`toggleRow`),
+  répondant au cas « récurrent ». Réservation groupée = **boucle de N `POST /api/book`**
+  (contrainte 1) avec **gestion des échecs partiels** (`onBookMany` dans `page.tsx` :
+  compteur `done` + liste `fails`, **plafond d'aperçu à 10**, toast récapitulatif
+  « X confirmées · Y échecs »). Règle « un terrain par horaire » respectée (sélection
+  radio par horaire).
 
 ## 2. Reprise automatique d'un terrain libéré par le « +1 »
 
@@ -101,15 +109,22 @@ d'une soirée à sa place).
   confidentialité, idéalement en **opt-in** (chacun choisit d'apparaître). **Débloque
   3, 4 et 5b**. **Verdict** : bon investissement transverse, peu cher.
 
-## 7. Sélection multi-créneaux + couleurs asso en vue semaine
+## 7. Sélection multi-créneaux + couleurs asso en vue semaine ✅ fait
 
 Sur la **vue semaine** : **sélectionner plusieurs créneaux** (cf idée 1) et voir **qui a
 réservé** via un code couleur (asso vs autre asso) — **comme en vue jour**.
 
 À traiter en **deux morceaux distincts** :
 
-- **7a — Cellule bicolore par terrain en vue semaine** · **Valeur** ⭐⭐⭐ · **Effort** S
+- **7a — Cellule bicolore par terrain en vue semaine** · ✅ fait · **Valeur** ⭐⭐⭐ · **Effort** S
   (la modale de détail existe déjà, à enrichir)
+  **Livré** : chaque case semaine est **bicolore** (`wk-seg` par terrain, ordre stable
+  gauche→droite trié par nom) avec la **palette vue jour** — `free`/`asso`/`other`/`mine`/
+  `past`/`closed` (`segOf`, `SEG_LABEL`). Contrairement au design initial (« moitiés non
+  cliquables »), **chaque terrain est cliquable indépendamment** (réserve / annule / ouvre
+  le détail). La **modale « week-detail »** est enrichie : nom du réservataire (`bookedBy`),
+  « +1 » (`attendees`), actions (réserver, +1, annuler) + garde « un seul terrain à la fois ».
+  Accessibilité couverte (`aria-label`/`title` par segment, `SEG_LABEL`).
   **La donnée existe déjà** : chaque `Slot` porte son état (`bookable`, `bookedBy`,
   `mine`…) — c'est ce que `PlanningGrid` (vue jour) exploite. `WeekGrid` reçoit **les mêmes
   slots** mais réduit aujourd'hui les cases réservées à « 0 ».
@@ -134,9 +149,12 @@ réservé** via un code couleur (asso vs autre asso) — **comme en vue jour**.
   _NB : la **multi-sélection** pour réserver plusieurs cellules d'un coup (idées 1/7b) reste
   un mécanisme distinct (mode sélection) — ici on ne traite que le détail/action d'**une**
   cellule._
-- **7b — Sélection multiple + réservation groupée** · **Valeur** ⭐⭐⭐ · **Effort** M
+- **7b — Sélection multiple + réservation groupée** · ✅ fait · **Valeur** ⭐⭐⭐ · **Effort** M
   État de sélection sur la grille + action « tout réserver » + échecs partiels →
   **recoupe l'idée 1**. À concevoir ensemble.
+  **Livré avec l'idée 1** (voir détail ci-dessus) : `selMode`/`selected` remontés à la page,
+  barre d'action collante (`wk-actionbar`), sélection radio par horaire, `onBookMany` avec
+  échecs partiels.
 
 ---
 
@@ -164,11 +182,11 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 
 | # | Idée | Valeur | Effort | Dépend de | Priorité |
 |---|------|:------:|:------:|-----------|----------|
-| 7a | Cellule bicolore par terrain (semaine) | ⭐⭐⭐ | S | — | **Haute** (quick win) |
+| 7a | Cellule bicolore par terrain (semaine) | ⭐⭐⭐ | S | — | ✅ **fait** |
+| 1 + 7b | Réservation groupée & multi-sélection | ⭐⭐⭐ | M | — | ✅ **fait** |
 | 6 | Annuaire (opt-in) | ⭐⭐ | S | — | **Haute** (brique) |
 | B | Stats / historique perso | ⭐⭐ | S | — | Moyenne |
 | C | Export `.ics` | ⭐⭐ | S | — | Moyenne |
-| 1 + 7b | Réservation groupée & multi-sélection | ⭐⭐⭐ | M | — | **Haute** (feature phare) |
 | A | Rappels de match (push) | ⭐⭐⭐ | M | — | Moyenne-haute |
 | 5a | Commentaires sur un tricount | ⭐⭐ | S–M | — | Moyenne |
 | D | Liste d'attente | ⭐⭐⭐ | M | SlotAlert | Moyenne (alt. de 2) |
@@ -179,18 +197,23 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 
 ### Séquencement recommandé (par vagues)
 
-1. **Vague 1 — quick wins** (fort effet, peu cher) : **7a** (couleurs semaine), **6**
-   (annuaire opt-in), **B** (stats), **C** (.ics).
-2. **Vague 2 — feature phare** : **1 + 7b** (réservation groupée + sélection multiple).
+1. **Vague 1 — quick wins** (fort effet, peu cher) : ~~**7a** (couleurs semaine)~~ ✅,
+   **6** (annuaire opt-in), **B** (stats), **C** (.ics). → **reste 6, B, C**.
+2. **Vague 2 — feature phare** : ~~**1 + 7b** (réservation groupée + sélection multiple)~~ ✅.
 3. **Vague 3 — engagement** : **A** (rappels push), **5a** (commentaires tricount),
    **D** (liste d'attente).
 4. **Vague 4 — gros / sensibles, à décider** : **4** (délégation, design sécurité),
    **2** (auto-rebook, à cadrer), **3** (tournois, si fréquents), **5b** (messagerie).
 
+> **État au 2026-07-06** : la **vague 2** (feature phare) et **7a** de la vague 1 sont
+> **livrées** (branche `feature/vue-semaine` fusionnée dans `main`, en prod). Prochain
+> palier logique : **finir la vague 1** (6, B, C).
+
 ### Lecture d'ensemble (qualité des idées)
 
 - **Les meilleures** : **7a** et **1/7b** (réservation) — pile sur le cœur de l'app, forte
   valeur, coût raisonnable, et **7a** presque « gratuite » vu que la donnée est déjà là.
+  → **toutes deux livrées** (juillet 2026).
 - **Bon rapport valeur/effort** : **6, B, C, A, 5a, D** — bricks utiles et bornées.
 - **Séduisantes mais à cadrer** : **2** (fragile : cron quotidien + consentement +
   concurrence avec le public → **D** est une alternative plus sûre) et **4** (sécurité).
