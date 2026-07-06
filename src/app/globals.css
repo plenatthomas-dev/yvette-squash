@@ -1182,13 +1182,16 @@ table.planning.week td.cell.wk {
 }
 .wk-cell {
   display: flex;
+  gap: 2px; /* séparateur SYMÉTRIQUE entre les 2 terrains (laisse voir le fond) */
   width: 100%;
   height: 42px;
   border-radius: 6px;
   overflow: hidden;
+  background: var(--pico-background-color);
 }
 .wk-seg {
   flex: 1 1 0;
+  min-width: 0; /* sinon un segment avec contenu refuse de rétrécir → tailles inégales */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1203,20 +1206,6 @@ table.planning.week td.cell.wk {
 .wk-seg.tap:focus-visible {
   outline: 2px solid var(--pico-primary);
   outline-offset: -2px;
-}
-.wk-seg + .wk-seg {
-  border-left: 2px solid var(--pico-background-color); /* sépare les 2 terrains */
-}
-/* Terrain sélectionné (avant confirmation) : anneau accent + coche. */
-.wk-seg.selseg {
-  box-shadow: inset 0 0 0 3px var(--pico-primary);
-}
-.wk-check {
-  font-size: 0.9rem;
-  font-weight: 800;
-  line-height: 1;
-  color: var(--pico-primary);
-  text-shadow: 0 0 2px var(--pico-background-color), 0 0 2px var(--pico-background-color);
 }
 .wk-seg.free {
   background: var(--free);
@@ -1237,6 +1226,13 @@ table.planning.week td.cell.wk {
 }
 .wk-seg.closed {
   background: var(--closed);
+}
+/* Terrain sélectionné (avant confirmation d'une multi-réservation) : bascule en BLEU PÂLE
+   (bien visible sur le vert « libre ») + liseré primaire. Placé APRÈS les couleurs d'état
+   pour les surcharger. Aucun contenu ajouté → pas de variation de taille des segments. */
+.wk-seg.selseg {
+  background: color-mix(in srgb, var(--pico-primary) 32%, var(--pico-card-background-color));
+  box-shadow: inset 0 0 0 3px var(--pico-primary);
 }
 
 /* Barre d'outils au-dessus de la grille (bouton « sélection multiple »). */

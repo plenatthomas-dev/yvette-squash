@@ -314,9 +314,7 @@ export function WeekGrid({
                                 ? onKey(() => clickSeg(d.date, hm, c, slot, seg))
                                 : undefined
                             }
-                          >
-                            {isSel && <span className="wk-check">✓</span>}
-                          </span>
+                          />
                         );
                       })}
                     </span>
