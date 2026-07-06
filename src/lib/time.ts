@@ -34,3 +34,38 @@ export function fmtTime(iso: string): string {
   const { h, m } = clubParts(iso);
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
+
+// Certaines sources (ResaMania) renvoient une heure « murale » SANS fuseau
+// (ex. "2026-07-07T20:30:00") : lue telle quelle, `new Date` l'interprète dans le fuseau
+// AMBIANT — Paris dans le navigateur (l'affichage semble bon), mais UTC sur le serveur
+// Vercel → l'instant stocké est décalé (+2 h l'été). On réinterprète donc explicitement la
+// chaîne comme heure du club et on renvoie un INSTANT absolu (…Z), correct partout.
+// Idempotent : une chaîne déjà datée (Z ou ±HH:MM) est simplement normalisée.
+const HAS_TZ = /(?:Z|[+-]\d{2}:?\d{2})$/i;
+
+/** Décalage (ms) du fuseau du club par rapport à UTC à l'instant donné (positif à l'est). */
+function clubOffsetMs(instant: Date): number {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: CLUB_TZ,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const p: Record<string, number> = {};
+  for (const part of dtf.formatToParts(instant))
+    if (part.type !== "literal") p[part.type] = +part.value;
+  const asUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  return asUtc - instant.getTime();
+}
+
+/** Normalise une date ISO en instant absolu (…Z), en lisant une heure sans fuseau comme
+ *  heure du club (Europe/Paris), DST-safe pour les horaires de journée/soirée. */
+export function toInstant(iso: string): string {
+  if (HAS_TZ.test(iso)) return new Date(iso).toISOString();
+  const asIfUtc = new Date(`${iso}Z`);
+  return new Date(asIfUtc.getTime() - clubOffsetMs(asIfUtc)).toISOString();
+}

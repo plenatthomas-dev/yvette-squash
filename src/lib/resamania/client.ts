@@ -8,6 +8,7 @@ import type {
   Slot,
 } from "./types";
 import { mockPlanning } from "./mock";
+import { toInstant } from "@/lib/time";
 
 /**
  * ============================================================================
@@ -297,8 +298,10 @@ export async function getPlanning(
       id: e["@id"],
       courtId: e.studio,
       courtName: studios.get(e.studio) ?? e.studio.split("/").pop() ?? "?",
-      startsAt: e.startedAt,
-      endsAt: e.endedAt,
+      // ResaMania renvoie une heure murale sans fuseau → on la fige en instant absolu
+      // (interprétée comme heure du club), sinon décalage selon où tourne le code.
+      startsAt: toInstant(e.startedAt),
+      endsAt: toInstant(e.endedAt),
       status: free ? "free" : "booked",
       bookable: free,
       remaining: e.attendeeRemaining,
