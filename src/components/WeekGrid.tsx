@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { fmtTime } from "@/lib/time";
+import { downloadIcs } from "@/lib/ics";
 
 function shortDay(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString("fr-FR", {
@@ -376,16 +377,26 @@ export function WeekGrid({
                     </span>
                   )}
                   {sheetSeg === "mine" && sheetSlot && (
-                    <button
-                      type="button"
-                      className="secondary danger"
-                      onClick={() => {
-                        setSheet(null);
-                        onCancelMine(sheetSlot);
-                      }}
-                    >
-                      Annuler ma résa
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="secondary"
+                        title="Ajouter à mon agenda (.ics, rappel 1 h avant)"
+                        onClick={() => downloadIcs(sheetSlot)}
+                      >
+                        📅 Agenda
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary danger"
+                        onClick={() => {
+                          setSheet(null);
+                          onCancelMine(sheetSlot);
+                        }}
+                      >
+                        Annuler ma résa
+                      </button>
+                    </>
                   )}
                   {sheetSeg === "asso" && sheetSlot && (
                     <button

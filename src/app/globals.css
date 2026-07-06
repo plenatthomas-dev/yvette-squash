@@ -751,6 +751,28 @@ td.cell.past {
   background: color-mix(in srgb, var(--danger-hover) 10%, transparent);
 }
 
+.journal li .jrow-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.journal li button.ics {
+  margin: 0;
+  padding: 6px 9px;
+  font-size: 0.95rem;
+  line-height: 1;
+  width: auto;
+  background: transparent;
+  border: 1px solid var(--pico-card-border-color);
+  color: inherit;
+}
+
+.journal li button.ics:hover {
+  border-color: var(--pico-primary);
+  background: color-mix(in srgb, var(--pico-primary) 10%, transparent);
+}
+
 /* --- Écran de connexion ------------------------------------------------- */
 .login {
   max-width: 400px;

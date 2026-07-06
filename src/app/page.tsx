@@ -6,6 +6,7 @@ import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { PlanningGrid } from "@/components/PlanningGrid";
 import { WeekGrid } from "@/components/WeekGrid";
 import { fmtTime, slotMinutes } from "@/lib/time";
+import { downloadIcs } from "@/lib/ics";
 
 function toISODate(d: Date): string {
   return d.toLocaleDateString("en-CA"); // YYYY-MM-DD local
@@ -1405,9 +1406,20 @@ export default function Home() {
                     {b.displayName} {b.mine && "(toi)"}
                   </span>
                   {b.mine && (
-                    <button className="cancel" onClick={() => onCancel(b)}>
-                      Annuler
-                    </button>
+                    <span className="jrow-actions">
+                      <button
+                        type="button"
+                        className="ics"
+                        title="Ajouter à mon agenda (.ics, rappel 1 h avant)"
+                        aria-label="Ajouter à mon agenda"
+                        onClick={() => downloadIcs(b)}
+                      >
+                        📅
+                      </button>
+                      <button className="cancel" onClick={() => onCancel(b)}>
+                        Annuler
+                      </button>
+                    </span>
                   )}
                 </li>
               ))}
