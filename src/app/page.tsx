@@ -1257,7 +1257,7 @@ export default function Home() {
 
       <div className="legend">
         <span><i style={{ background: "var(--free)" }} /> Libre</span>
-        <span><i style={{ background: "var(--accent)" }} /> Réservé (asso)</span>
+        <span><i style={{ background: "var(--group)" }} /> Réservé (asso)</span>
         <span><i style={{ background: "var(--booked)" }} /> Réservé (autre)</span>
       </div>
 
