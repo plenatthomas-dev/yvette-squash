@@ -163,9 +163,6 @@ réservé** via un code couleur (asso vs autre asso) — **comme en vue jour**.
 - **A. Rappels de match (push avant le créneau)** · ⭐⭐⭐ · **M**
   Réutilise `PushSubscription`. ⚠️ cron quotidien (contrainte 3) → rappel « le matin
   même » réaliste ; « 1 h avant » supposerait de densifier le cron (limite du plan Hobby).
-- **B. Mes stats / historique perso** · ⭐⭐ · **S**
-  Matchs joués, terrains favoris, partenaires fréquents (via `Attendance`). **Données déjà
-  en base** (`Booking`, `Attendance`) — surtout de l'agrégation + affichage.
 - **C. Ajout au calendrier (export `.ics`)** · ⭐⭐ · **S**
   Générer un fichier ICS d'une réservation pour l'agenda perso. Aucun accès ResaMania.
 - **D. Liste d'attente sur créneau complet** · ⭐⭐⭐ · **M**
@@ -185,7 +182,6 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 | 7a | Cellule bicolore par terrain (semaine) | ⭐⭐⭐ | S | — | ✅ **fait** |
 | 1 + 7b | Réservation groupée & multi-sélection | ⭐⭐⭐ | M | — | ✅ **fait** |
 | 6 | Annuaire (opt-in) | ⭐⭐ | S | — | **Haute** (brique) |
-| B | Stats / historique perso | ⭐⭐ | S | — | Moyenne |
 | C | Export `.ics` | ⭐⭐ | S | — | Moyenne |
 | A | Rappels de match (push) | ⭐⭐⭐ | M | — | Moyenne-haute |
 | 5a | Commentaires sur un tricount | ⭐⭐ | S–M | — | Moyenne |
@@ -198,7 +194,7 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 ### Séquencement recommandé (par vagues)
 
 1. **Vague 1 — quick wins** (fort effet, peu cher) : ~~**7a** (couleurs semaine)~~ ✅,
-   **6** (annuaire opt-in), **B** (stats), **C** (.ics). → **reste 6, B, C**.
+   **6** (annuaire opt-in), **C** (.ics). → **reste 6, C**.
 2. **Vague 2 — feature phare** : ~~**1 + 7b** (réservation groupée + sélection multiple)~~ ✅.
 3. **Vague 3 — engagement** : **A** (rappels push), **5a** (commentaires tricount),
    **D** (liste d'attente).
@@ -207,14 +203,14 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 
 > **État au 2026-07-06** : la **vague 2** (feature phare) et **7a** de la vague 1 sont
 > **livrées** (branche `feature/vue-semaine` fusionnée dans `main`, en prod). Prochain
-> palier logique : **finir la vague 1** (6, B, C).
+> palier logique : **finir la vague 1** (6, C). _Idée B (stats perso) écartée._
 
 ### Lecture d'ensemble (qualité des idées)
 
 - **Les meilleures** : **7a** et **1/7b** (réservation) — pile sur le cœur de l'app, forte
   valeur, coût raisonnable, et **7a** presque « gratuite » vu que la donnée est déjà là.
   → **toutes deux livrées** (juillet 2026).
-- **Bon rapport valeur/effort** : **6, B, C, A, 5a, D** — bricks utiles et bornées.
+- **Bon rapport valeur/effort** : **6, C, A, 5a, D** — bricks utiles et bornées.
 - **Séduisantes mais à cadrer** : **2** (fragile : cron quotidien + consentement +
   concurrence avec le public → **D** est une alternative plus sûre) et **4** (sécurité).
 - **Lourdes pour la valeur** : **3** (tournois) et **5b** (messagerie générale) — à ne
