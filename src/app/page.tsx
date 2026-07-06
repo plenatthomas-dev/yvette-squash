@@ -1255,20 +1255,11 @@ export default function Home() {
         ))}
       </div>
 
-      {view === "day" && (
-        <div className="legend">
-          <span><i style={{ background: "var(--free)" }} /> Libre</span>
-          <span><i style={{ background: "var(--accent)" }} /> Réservé (asso)</span>
-          <span><i style={{ background: "var(--booked)" }} /> Réservé (autre)</span>
-        </div>
-      )}
-      {view === "week" && (
-        <p className="muted week-hint">
-          Chaque case montre les 2 terrains (gauche = Squash 1, droite = Squash 2) par
-          couleur. Touche un terrain pour réserver ou voir le détail. Sur mobile, fais
-          défiler la grille horizontalement pour voir toute la semaine.
-        </p>
-      )}
+      <div className="legend">
+        <span><i style={{ background: "var(--free)" }} /> Libre</span>
+        <span><i style={{ background: "var(--accent)" }} /> Réservé (asso)</span>
+        <span><i style={{ background: "var(--booked)" }} /> Réservé (autre)</span>
+      </div>
 
       {/* Annonce discrète pour lecteurs d'écran (chargement / erreur). */}
       <p className="sr-only" role="status" aria-live="polite">
