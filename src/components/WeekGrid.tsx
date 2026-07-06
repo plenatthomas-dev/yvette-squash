@@ -60,6 +60,7 @@ export function WeekGrid({
   filter,
   onPick,
   onBook,
+  onCancelMine,
   onTogglePresence,
   onBookMany,
 }: {
@@ -67,6 +68,7 @@ export function WeekGrid({
   filter: (iso: string) => boolean;
   onPick: (date: string) => void;
   onBook: (slot: Slot) => void;
+  onCancelMine: (slot: Slot) => void;
   onTogglePresence: (slot: Slot) => void;
   onBookMany: (slots: Slot[]) => void;
 }) {
@@ -112,10 +114,16 @@ export function WeekGrid({
   const key = (date: string, hm: string) => `${date}|${hm}`;
   const cellSlots = (date: string, hm: string) =>
     courts.map((c) => slotAt.get(`${date}|${hm}|${c.id}`) ?? null);
-  const freeSlots = (date: string, hm: string) =>
-    cellSlots(date, hm).filter(
+  // Terrains réservables d'une case. Si j'ai déjà réservé l'autre terrain à cet horaire,
+  // la case n'offre rien : ResaMania refuse 2 terrains à la même heure (règle « un seul
+  // terrain par horaire »), inutile de laisser sélectionner un échec garanti.
+  const freeSlots = (date: string, hm: string) => {
+    const slots = cellSlots(date, hm);
+    if (slots.some((s) => s?.mine)) return [];
+    return slots.filter(
       (s): s is Slot => !!s && s.bookable && new Date(s.startsAt).getTime() >= now,
     );
+  };
   const selectable = (date: string, hm: string) => freeSlots(date, hm).length > 0;
 
   const cellTitle = (date: string, hm: string) =>
@@ -174,6 +182,9 @@ export function WeekGrid({
         slot: slotAt.get(`${sheet.date}|${sheet.hm}|${c.id}`) ?? null,
       }))
     : [];
+  // Mon terrain déjà réservé à cet horaire, s'il existe : bloque « Réserver » sur l'autre
+  // (règle ResaMania « un seul terrain par horaire »).
+  const sheetMine = sheetCourts.find(({ slot }) => slot && segOf(slot, now) === "mine");
 
   return (
     <>
@@ -311,7 +322,7 @@ export function WeekGrid({
                     </div>
                     {att && <div className="wk-att">👥 +1 : {att}</div>}
                     <div className="wk-detail-actions">
-                      {seg === "free" && slot && (
+                      {seg === "free" && slot && !sheetMine && (
                         <button
                           type="button"
                           onClick={() => {
@@ -320,6 +331,24 @@ export function WeekGrid({
                           }}
                         >
                           Réserver
+                        </button>
+                      )}
+                      {seg === "free" && sheetMine && (
+                        <span className="muted tiny">
+                          Tu joues déjà sur {sheetMine.court.name} à cet horaire — un
+                          seul terrain à la fois.
+                        </span>
+                      )}
+                      {seg === "mine" && slot && (
+                        <button
+                          type="button"
+                          className="secondary danger"
+                          onClick={() => {
+                            setSheet(null);
+                            onCancelMine(slot);
+                          }}
+                        >
+                          Annuler ma résa
                         </button>
                       )}
                       {seg === "asso" && slot && (

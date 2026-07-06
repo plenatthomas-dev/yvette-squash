@@ -1124,10 +1124,10 @@ export default function Home() {
           if (res.ok) done++;
           else
             fails.push(
-              `${shortPretty(slot.startsAt.slice(0, 10))} : ${data.error ?? res.status}`,
+              `${shortPretty(slot.startsAt.slice(0, 10))} ${fmtTime(slot.startsAt)} : ${data.error ?? res.status}`,
             );
         } catch {
-          fails.push(`${shortPretty(slot.startsAt.slice(0, 10))} : réseau`);
+          fails.push(`${shortPretty(slot.startsAt.slice(0, 10))} ${fmtTime(slot.startsAt)} : réseau`);
         }
       }
     } finally {
@@ -1285,7 +1285,7 @@ export default function Home() {
             ? <Skeleton />
             : null
         : week.length
-          ? <WeekGrid days={week} filter={(iso) => inRange(iso, range)} onPick={pickDay} onBook={onBook} onTogglePresence={onTogglePresenceWeek} onBookMany={onBookMany} />
+          ? <WeekGrid days={week} filter={(iso) => inRange(iso, range)} onPick={pickDay} onBook={onBook} onCancelMine={onCancelMine} onTogglePresence={onTogglePresenceWeek} onBookMany={onBookMany} />
           : loading
             ? <Skeleton />
             : null}

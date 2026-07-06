@@ -1306,6 +1306,18 @@ td.cell.wk.selected {
   width: auto;
   padding: 8px 16px;
 }
+.wk-detail-actions button.danger {
+  background: transparent;
+  color: var(--danger-fg);
+  border-color: var(--danger-border);
+}
+.wk-detail-actions button.danger:hover {
+  border-color: var(--danger-hover);
+  background: color-mix(in srgb, var(--danger-hover) 10%, transparent);
+}
+.wk-detail-actions .muted.tiny {
+  align-self: center;
+}
 
 /* --- Skeleton de chargement --------------------------------------------- */
 .grid-wrap.skel {
