@@ -521,10 +521,11 @@ function PrivacyNotice() {
                 te reconnecter à chaque visite.
               </p>
               <p>
-                Sont enregistrés : ton nom (fourni par ResaMania), ton adresse
-                e-mail, un éventuel pseudonyme que tu choisis, les réservations
-                faites via l'appli, et ton adresse IP de connexion (uniquement
-                pour limiter les tentatives abusives).
+                Si tu te connectes via cette appli, sont enregistrés : ton nom
+                (fourni par ResaMania), ton adresse e-mail, un éventuel
+                pseudonyme que tu choisis, les réservations faites via l'appli,
+                et ton adresse IP de connexion (uniquement pour limiter les
+                tentatives abusives).
               </p>
               <p>
                 Ces données servent seulement à te connecter, afficher et gérer
@@ -538,8 +539,9 @@ function PrivacyNotice() {
               </p>
               <p>
                 Tu peux demander à consulter ou supprimer tes données à tout
-                moment — la déconnexion efface déjà ta session. Une question ?
-                Écris via ⚙️ Paramètres › « Un commentaire&nbsp;? ».
+                moment — la déconnexion efface déjà ta session. Une question, ou
+                envie d'exercer ces droits ? Une fois connecté, écris-nous
+                depuis ⚙️ Paramètres › « Un commentaire&nbsp;? ».
               </p>
             </div>
             <div className="modal-actions">
@@ -1341,11 +1343,6 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
         </button>
       </form>
       {err && <div className="notice error">⚠️ {err}</div>}
-      <p className="muted tiny">
-        Ton mot de passe sert seulement à te connecter à ResaMania ; il n'est
-        jamais conservé. L'appli mémorise uniquement que tu es connecté, de façon
-        sécurisée, pour t'éviter de te reconnecter sans arrêt.
-      </p>
       <PrivacyNotice />
     </main>
   );
