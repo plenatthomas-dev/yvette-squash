@@ -18,7 +18,7 @@ function longDay(date: string): string {
   });
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
-// Déclenche l'action au clavier (Entrée / Espace) sur les cellules cliquables.
+// Déclenche l'action au clavier (Entrée / Espace) sur les éléments cliquables.
 function onKey(fn: () => void) {
   return (e: KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -28,7 +28,7 @@ function onKey(fn: () => void) {
   };
 }
 
-// État visuel d'un demi-terrain dans une case (une couleur par état, palette de la vue jour).
+// État visuel d'un terrain dans une case (une couleur par état, palette de la vue jour).
 type Seg = "free" | "asso" | "other" | "mine" | "past" | "closed";
 type CourtRef = { id: string; name: string };
 
@@ -51,10 +51,12 @@ const SEG_LABEL: Record<Seg, string> = {
 };
 
 // Aperçu semaine : lignes = horaires, colonnes = jours. Chaque case est BICOLORE — un
-// segment par terrain (gauche = Squash 1, droite = Squash 2), coloré selon son état.
-// - Clic sur une case → modale de détail des terrains (état, réservataire, +1, actions).
-// - Mode « Sélection » → on coche plusieurs cases (ou toute une ligne d'horaire) puis on
-//   réserve tout d'un coup (un terrain libre par case).
+// segment par terrain (gauche = Squash 1, droite = Squash 2), coloré selon son état, et
+// CHAQUE terrain est cliquable INDÉPENDAMMENT (y compris au doigt) :
+// - Mode normal : terrain libre → réservation directe ; « le mien » → annulation directe ;
+//   réservé asso → détail (qui a réservé, « +1 »). Pas de modale de choix de terrain.
+// - Mode « Sélection » : on coche des terrains libres précis (un seul par horaire, règle
+//   ResaMania) — ils changent de couleur — puis on réserve tout d'un coup.
 export function WeekGrid({
   days,
   filter,
@@ -72,7 +74,9 @@ export function WeekGrid({
   onTogglePresence: (slot: Slot) => void;
   onBookMany: (slots: Slot[]) => void;
 }) {
-  const [sheet, setSheet] = useState<{ date: string; hm: string } | null>(null);
+  const [sheet, setSheet] = useState<{ date: string; hm: string; courtId: string } | null>(
+    null,
+  );
   const [selMode, setSelMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const now = Date.now();
@@ -96,7 +100,7 @@ export function WeekGrid({
     return [...t].sort();
   }, [days, filter]);
 
-  // `${date}|${hm}|${courtId}` -> slot (pour retrouver le créneau d'un terrain à un horaire).
+  // `${date}|${hm}|${courtId}` -> slot. Cette clé sert aussi de clé de sélection.
   const slotAt = useMemo(() => {
     const m = new Map<string, Slot>();
     for (const d of days)
@@ -111,47 +115,58 @@ export function WeekGrid({
     return <p className="muted">Aucun créneau sur cette plage horaire.</p>;
   }
 
-  const key = (date: string, hm: string) => `${date}|${hm}`;
-  const cellSlots = (date: string, hm: string) =>
-    courts.map((c) => slotAt.get(`${date}|${hm}|${c.id}`) ?? null);
-  // Terrains réservables d'une case. Si j'ai déjà réservé l'autre terrain à cet horaire,
-  // la case n'offre rien : ResaMania refuse 2 terrains à la même heure (règle « un seul
-  // terrain par horaire »), inutile de laisser sélectionner un échec garanti.
-  const freeSlots = (date: string, hm: string) => {
-    const slots = cellSlots(date, hm);
-    if (slots.some((s) => s?.mine)) return [];
-    return slots.filter(
-      (s): s is Slot => !!s && s.bookable && new Date(s.startsAt).getTime() >= now,
-    );
+  const segKey = (date: string, hm: string, courtId: string) => `${date}|${hm}|${courtId}`;
+  // Je joue déjà (résa « à moi ») sur un terrain de cette case ? → l'autre terrain n'est pas
+  // réservable (ResaMania refuse 2 terrains au même horaire).
+  const cellHasMine = (date: string, hm: string) =>
+    courts.some((c) => slotAt.get(segKey(date, hm, c.id))?.mine);
+  // Ce terrain précis est-il réservable ? (libre, à venir, et pas de résa à moi à cet horaire)
+  const isReservable = (slot: Slot | null, date: string, hm: string): slot is Slot =>
+    !!slot &&
+    slot.bookable &&
+    new Date(slot.startsAt).getTime() >= now &&
+    !cellHasMine(date, hm);
+  // Un terrain libre réservable existe-t-il dans cette case ? (pour la sélection par ligne)
+  const rowHasReservable = (date: string, hm: string) =>
+    courts.some((c) => isReservable(slotAt.get(segKey(date, hm, c.id)) ?? null, date, hm));
+
+  const segAria = (date: string, hm: string, court: CourtRef, seg: Seg, slot: Slot | null) => {
+    const who = seg === "asso" && slot?.bookedBy ? ` (${slot.bookedBy})` : "";
+    return `${shortDay(date)} ${hm} · ${court.name} : ${SEG_LABEL[seg]}${who}`;
   };
-  const selectable = (date: string, hm: string) => freeSlots(date, hm).length > 0;
 
-  const cellTitle = (date: string, hm: string) =>
-    courts
-      .map((c) => {
-        const s = slotAt.get(`${date}|${hm}|${c.id}`) ?? null;
-        const seg = segOf(s, now);
-        const who = seg === "asso" && s?.bookedBy ? ` (${s.bookedBy})` : "";
-        return `${c.name} : ${SEG_LABEL[seg]}${who}`;
-      })
-      .join(" · ");
-
-  const toggleCell = (date: string, hm: string) => {
-    if (!selectable(date, hm)) return;
+  // Sélection d'un terrain précis (radio DANS la case : au plus un terrain par horaire).
+  const toggleSeg = (date: string, hm: string, courtId: string) => {
     setSelected((prev) => {
       const n = new Set(prev);
-      const k = key(date, hm);
-      n.has(k) ? n.delete(k) : n.add(k);
+      const k = segKey(date, hm, courtId);
+      if (n.has(k)) {
+        n.delete(k);
+        return n;
+      }
+      for (const c of courts) n.delete(segKey(date, hm, c.id)); // vide l'autre terrain
+      n.add(k);
       return n;
     });
   };
+  // Sélectionne un terrain libre par jour pour cet horaire (le 1ᵉʳ libre), sur toute la
+  // semaine ; re-clic → désélectionne toute la ligne.
   const toggleRow = (hm: string) => {
-    const keys = days.filter((d) => selectable(d.date, hm)).map((d) => key(d.date, hm));
-    if (keys.length === 0) return;
+    const daysWithFree = days.filter((d) => rowHasReservable(d.date, hm));
+    if (daysWithFree.length === 0) return;
     setSelected((prev) => {
       const n = new Set(prev);
-      const allSel = keys.every((k) => n.has(k));
-      for (const k of keys) (allSel ? n.delete(k) : n.add(k));
+      const allSel = daysWithFree.every((d) =>
+        courts.some((c) => n.has(segKey(d.date, hm, c.id))),
+      );
+      for (const d of daysWithFree) for (const c of courts) n.delete(segKey(d.date, hm, c.id));
+      if (!allSel)
+        for (const d of daysWithFree) {
+          const c = courts.find((c) =>
+            isReservable(slotAt.get(segKey(d.date, hm, c.id)) ?? null, d.date, hm),
+          );
+          if (c) n.add(segKey(d.date, hm, c.id));
+        }
       return n;
     });
   };
@@ -160,31 +175,54 @@ export function WeekGrid({
     setSelected(new Set());
   };
 
-  const clickCell = (date: string, hm: string) => {
-    if (selMode) toggleCell(date, hm);
-    else setSheet({ date, hm });
+  // Clic sur un terrain précis (segment).
+  const clickSeg = (date: string, hm: string, court: CourtRef, slot: Slot | null, seg: Seg) => {
+    if (selMode) {
+      if (isReservable(slot, date, hm)) toggleSeg(date, hm, court.id);
+      return;
+    }
+    if (seg === "free" && slot) {
+      // Conflit « un seul terrain par horaire » : on ouvre le détail qui l'explique.
+      if (cellHasMine(date, hm)) setSheet({ date, hm, courtId: court.id });
+      else onBook(slot);
+    } else if (seg === "mine" && slot) {
+      onCancelMine(slot);
+    } else if (seg === "asso" && slot) {
+      setSheet({ date, hm, courtId: court.id });
+    }
+    // other / past / closed : inerte
   };
 
   const bookSelected = () => {
-    const slots: Slot[] = [];
-    for (const k of selected) {
-      const [date, hm] = k.split("|");
-      const free = freeSlots(date, hm);
-      if (free.length) slots.push(free[0]); // un terrain libre par case
-    }
+    const slots = [...selected]
+      .map((k) => slotAt.get(k))
+      .filter((s): s is Slot => !!s)
+      .sort((a, b) =>
+        a.startsAt === b.startsAt
+          ? a.courtName.localeCompare(b.courtName)
+          : a.startsAt.localeCompare(b.startsAt),
+      );
     if (slots.length) onBookMany(slots);
     exitSel();
   };
 
-  const sheetCourts = sheet
-    ? courts.map((c) => ({
-        court: c,
-        slot: slotAt.get(`${sheet.date}|${sheet.hm}|${c.id}`) ?? null,
-      }))
-    : [];
-  // Mon terrain déjà réservé à cet horaire, s'il existe : bloque « Réserver » sur l'autre
-  // (règle ResaMania « un seul terrain par horaire »).
-  const sheetMine = sheetCourts.find(({ slot }) => slot && segOf(slot, now) === "mine");
+  const sheetSlot = sheet
+    ? slotAt.get(segKey(sheet.date, sheet.hm, sheet.courtId)) ?? null
+    : null;
+  const sheetCourt = sheet ? courts.find((c) => c.id === sheet.courtId) ?? null : null;
+  const sheetSeg = segOf(sheetSlot, now);
+  const sheetOtherMine = sheet
+    ? courts.some((c) => c.id !== sheet.courtId && slotAt.get(segKey(sheet.date, sheet.hm, c.id))?.mine)
+    : false;
+  const sheetOtherMineName = sheet
+    ? courts.find(
+        (c) => c.id !== sheet.courtId && slotAt.get(segKey(sheet.date, sheet.hm, c.id))?.mine,
+      )?.name
+    : undefined;
+  const sheetAtt =
+    sheetSlot && (sheetSeg === "asso" || sheetSeg === "mine") && sheetSlot.attendees?.length
+      ? sheetSlot.attendees.join(", ")
+      : "";
 
   return (
     <>
@@ -199,7 +237,7 @@ export function WeekGrid({
         </button>
         {selMode && (
           <span className="muted tiny">
-            Touche les cases à réserver (ou un horaire pour toute la ligne).
+            Touche un terrain (Squash 1 ou 2) à réserver, ou un horaire pour toute la ligne.
           </span>
         )}
       </div>
@@ -241,46 +279,60 @@ export function WeekGrid({
                 >
                   {hm}
                 </th>
-                {days.map((d) => {
-                  const k = key(d.date, hm);
-                  const canSel = selectable(d.date, hm);
-                  const isSel = selected.has(k);
-                  return (
-                    <td
-                      key={d.date}
-                      className={
-                        "cell wk" +
-                        (selMode && canSel ? " selectable" : "") +
-                        (isSel ? " selected" : "")
-                      }
-                      role="button"
-                      tabIndex={0}
-                      aria-pressed={selMode ? isSel : undefined}
-                      aria-label={cellTitle(d.date, hm)}
-                      title={cellTitle(d.date, hm)}
-                      onClick={() => clickCell(d.date, hm)}
-                      onKeyDown={onKey(() => clickCell(d.date, hm))}
-                    >
-                      <span className="wk-cell">
-                        {courts.map((c) => {
-                          const s = slotAt.get(`${d.date}|${hm}|${c.id}`) ?? null;
-                          return <span key={c.id} className={"wk-seg " + segOf(s, now)} />;
-                        })}
-                      </span>
-                    </td>
-                  );
-                })}
+                {days.map((d) => (
+                  <td key={d.date} className="cell wk">
+                    <span className="wk-cell">
+                      {courts.map((c) => {
+                        const slot = slotAt.get(segKey(d.date, hm, c.id)) ?? null;
+                        const seg = segOf(slot, now);
+                        const canSel = selMode && isReservable(slot, d.date, hm);
+                        const isSel = selected.has(segKey(d.date, hm, c.id));
+                        const interactive = selMode
+                          ? canSel
+                          : seg === "free" || seg === "asso" || seg === "mine";
+                        return (
+                          <span
+                            key={c.id}
+                            className={
+                              "wk-seg " +
+                              seg +
+                              (interactive ? " tap" : "") +
+                              (isSel ? " selseg" : "")
+                            }
+                            role={interactive ? "button" : undefined}
+                            tabIndex={interactive ? 0 : undefined}
+                            aria-pressed={selMode ? isSel : undefined}
+                            aria-label={segAria(d.date, hm, c, seg, slot)}
+                            title={segAria(d.date, hm, c, seg, slot)}
+                            onClick={
+                              interactive
+                                ? () => clickSeg(d.date, hm, c, slot, seg)
+                                : undefined
+                            }
+                            onKeyDown={
+                              interactive
+                                ? onKey(() => clickSeg(d.date, hm, c, slot, seg))
+                                : undefined
+                            }
+                          >
+                            {isSel && <span className="wk-check">✓</span>}
+                          </span>
+                        );
+                      })}
+                    </span>
+                  </td>
+                ))}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      {/* Barre d'action collante quand des cases sont sélectionnées. */}
+      {/* Barre d'action collante quand des terrains sont sélectionnés. */}
       {selMode && selected.size > 0 && (
         <div className="wk-actionbar">
           <span>
-            {selected.size} créneau{selected.size > 1 ? "x" : ""} sélectionné
+            {selected.size} terrain{selected.size > 1 ? "s" : ""} sélectionné
             {selected.size > 1 ? "s" : ""}
           </span>
           <button type="button" onClick={bookSelected}>
@@ -289,84 +341,73 @@ export function WeekGrid({
         </div>
       )}
 
-      {sheet && (
+      {sheet && sheetCourt && (
         <div className="modal-overlay" onClick={() => setSheet(null)}>
           <div
             className="modal week-detail"
             role="dialog"
             aria-modal="true"
-            aria-label="Détail des terrains"
+            aria-label="Détail du terrain"
             onClick={(e) => e.stopPropagation()}
           >
             <h3>
               {longDay(sheet.date)} · {sheet.hm}
             </h3>
             <div className="wk-detail-list">
-              {sheetCourts.map(({ court, slot }) => {
-                const seg = segOf(slot, now);
-                const who =
-                  seg === "asso" && slot?.bookedBy ? ` · ${slot.bookedBy}` : "";
-                const att =
-                  slot && (seg === "asso" || seg === "mine") && slot.attendees?.length
-                    ? slot.attendees.join(", ")
-                    : "";
-                return (
-                  <div key={court.id} className={"wk-detail " + seg}>
-                    <div className="wk-detail-head">
-                      <span className={"wk-chip " + seg} />
-                      <strong>{court.name}</strong>
-                      <span className="wk-state">
-                        {seg === "mine" ? "Ta réservation ★" : SEG_LABEL[seg]}
-                        {who}
-                      </span>
-                    </div>
-                    {att && <div className="wk-att">👥 +1 : {att}</div>}
-                    <div className="wk-detail-actions">
-                      {seg === "free" && slot && !sheetMine && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSheet(null);
-                            onBook(slot);
-                          }}
-                        >
-                          Réserver
-                        </button>
-                      )}
-                      {seg === "free" && sheetMine && (
-                        <span className="muted tiny">
-                          Tu joues déjà sur {sheetMine.court.name} à cet horaire — un
-                          seul terrain à la fois.
-                        </span>
-                      )}
-                      {seg === "mine" && slot && (
-                        <button
-                          type="button"
-                          className="secondary danger"
-                          onClick={() => {
-                            setSheet(null);
-                            onCancelMine(slot);
-                          }}
-                        >
-                          Annuler ma résa
-                        </button>
-                      )}
-                      {seg === "asso" && slot && (
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={() => {
-                            setSheet(null);
-                            onTogglePresence(slot);
-                          }}
-                        >
-                          {slot.iAmAttending ? "Retirer ma présence" : "Je suis +1"}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+              <div className={"wk-detail " + sheetSeg}>
+                <div className="wk-detail-head">
+                  <span className={"wk-chip " + sheetSeg} />
+                  <strong>{sheetCourt.name}</strong>
+                  <span className="wk-state">
+                    {sheetSeg === "mine" ? "Ta réservation ★" : SEG_LABEL[sheetSeg]}
+                    {sheetSeg === "asso" && sheetSlot?.bookedBy ? ` · ${sheetSlot.bookedBy}` : ""}
+                  </span>
+                </div>
+                {sheetAtt && <div className="wk-att">👥 +1 : {sheetAtt}</div>}
+                <div className="wk-detail-actions">
+                  {sheetSeg === "free" && sheetSlot && !sheetOtherMine && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSheet(null);
+                        onBook(sheetSlot);
+                      }}
+                    >
+                      Réserver
+                    </button>
+                  )}
+                  {sheetSeg === "free" && sheetOtherMine && (
+                    <span className="muted tiny">
+                      Tu joues déjà sur {sheetOtherMineName} à cet horaire — un seul
+                      terrain à la fois.
+                    </span>
+                  )}
+                  {sheetSeg === "mine" && sheetSlot && (
+                    <button
+                      type="button"
+                      className="secondary danger"
+                      onClick={() => {
+                        setSheet(null);
+                        onCancelMine(sheetSlot);
+                      }}
+                    >
+                      Annuler ma résa
+                    </button>
+                  )}
+                  {sheetSeg === "asso" && sheetSlot && (
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => {
+                        setSheet(null);
+                        onTogglePresence(sheetSlot);
+                      }}
+                    >
+                      {sheetSlot.iAmAttending ? "Retirer ma présence" : "Je suis +1"}
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
             <div className="modal-actions">
               <button

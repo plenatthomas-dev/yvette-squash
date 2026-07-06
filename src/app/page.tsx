@@ -407,6 +407,7 @@ function Toasts({ items }: { items: Toast[] }) {
 type ConfirmOpts = {
   title: string;
   body: string;
+  lines?: string[]; // si fourni, affiché en liste (une réservation par ligne) sous le body
   confirmLabel: string;
   danger?: boolean;
 };
@@ -429,6 +430,13 @@ function ConfirmDialog({
       >
         <h3>{state.title}</h3>
         <p>{state.body}</p>
+        {state.lines && state.lines.length > 0 && (
+          <ul className="confirm-lines">
+            {state.lines.map((l, i) => (
+              <li key={i}>{l}</li>
+            ))}
+          </ul>
+        )}
         <div className="modal-actions">
           <button className="secondary" onClick={() => onResolve(false)}>
             Retour
@@ -1088,15 +1096,18 @@ export default function Home() {
   // Réservation groupée (vue semaine) : un /api/book par créneau, en séquence, avec bilan.
   const onBookMany = async (slots: Slot[]) => {
     if (busy || confirmState || slots.length === 0) return;
-    const preview = slots
-      .slice(0, 4)
-      .map((s) => `${shortPretty(s.startsAt.slice(0, 10))} ${fmtTime(s.startsAt)}`)
-      .join(" · ");
+    const MAX_LINES = 10;
+    const lines = slots
+      .slice(0, MAX_LINES)
+      .map(
+        (s) =>
+          `${shortPretty(s.startsAt.slice(0, 10))} ${fmtTime(s.startsAt)} — ${s.courtName}`,
+      );
+    if (slots.length > MAX_LINES) lines.push(`… et ${slots.length - MAX_LINES} autre${slots.length - MAX_LINES > 1 ? "s" : ""}`);
     const ok = await askConfirm({
       title: `Réserver ${slots.length} créneau${slots.length > 1 ? "x" : ""} ?`,
-      body:
-        (slots.length > 4 ? `${preview} …` : preview) +
-        " — un terrain libre sera pris sur chaque.",
+      body: "Ces terrains seront réservés :",
+      lines,
       confirmLabel: "Réserver",
     });
     if (!ok) return;

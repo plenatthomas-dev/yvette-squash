@@ -867,6 +867,25 @@ td.cell.past {
   color: var(--pico-muted-color);
 }
 
+/* Liste « une réservation par ligne » dans la confirmation groupée. */
+.confirm-lines {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.confirm-lines li {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--pico-card-sectioning-background-color, rgba(127, 127, 127, 0.1));
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
 .modal-actions {
   display: flex;
   gap: 10px;
@@ -1138,26 +1157,50 @@ table.planning.week thead th.today {
 }
 
 table.planning.week td.cell {
-  cursor: pointer;
   font-weight: 600;
 }
 
-/* --- Vue semaine : cellule bicolore (un segment par terrain) ------------- */
+/* --- Vue semaine : cellule bicolore, un segment CLIQUABLE par terrain ---- */
 table.planning.week td.cell.wk {
   padding: 2px;
 }
 .wk-cell {
   display: flex;
   width: 100%;
-  height: 38px;
+  height: 42px;
   border-radius: 6px;
   overflow: hidden;
 }
 .wk-seg {
   flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wk-seg.tap {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.wk-seg.tap:hover {
+  filter: brightness(1.08);
+}
+.wk-seg.tap:focus-visible {
+  outline: 2px solid var(--pico-primary);
+  outline-offset: -2px;
 }
 .wk-seg + .wk-seg {
   border-left: 2px solid var(--pico-background-color); /* sépare les 2 terrains */
+}
+/* Terrain sélectionné (avant confirmation) : anneau accent + coche. */
+.wk-seg.selseg {
+  box-shadow: inset 0 0 0 3px var(--pico-primary);
+}
+.wk-check {
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--pico-primary);
+  text-shadow: 0 0 2px var(--pico-background-color), 0 0 2px var(--pico-background-color);
 }
 .wk-seg.free {
   background: var(--free);
@@ -1198,20 +1241,11 @@ table.planning.week td.cell.wk {
   box-shadow: inset 0 0 0 2px var(--pico-primary);
 }
 
-/* Mode sélection : horaires cliquables + cases cochées. */
+/* Mode sélection : horaires cliquables (la sélection des terrains se fait par segment). */
 table.planning.week th.time.selrow,
 table.planning.week th.time.selhead {
   cursor: pointer;
   color: var(--pico-primary);
-}
-td.cell.wk.selectable {
-  cursor: pointer;
-}
-td.cell.wk.selected {
-  outline: 3px solid var(--pico-primary);
-  outline-offset: -3px;
-  position: relative;
-  z-index: 3;
 }
 
 /* Barre d'action collante en bas quand des cases sont sélectionnées. */
