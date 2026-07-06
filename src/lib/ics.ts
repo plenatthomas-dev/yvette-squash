@@ -3,7 +3,8 @@
 // réservation (déjà affichée) vers SON agenda. RFC 5545.
 
 // Lieu du club, tel qu'il apparaîtra dans l'agenda (géocodable par Google/Apple Agenda).
-export const CLUB_LOCATION = "Le Complexe, Bures-sur-Yvette";
+export const CLUB_LOCATION =
+  "Le Complexe, 9 rue de la Vierge, 91440 Bures-sur-Yvette";
 
 // Un évènement à exporter — sous-ensemble commun à `JournalEntry` et `Slot`.
 export interface IcsEvent {
