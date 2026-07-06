@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { fmtTime } from "@/lib/time";
 
@@ -65,6 +65,8 @@ export function WeekGrid({
   onCancelMine,
   onTogglePresence,
   onBookMany,
+  selMode,
+  setSelMode,
 }: {
   days: { date: string; planning: PlanningDay }[];
   filter: (iso: string) => boolean;
@@ -73,12 +75,17 @@ export function WeekGrid({
   onCancelMine: (slot: Slot) => void;
   onTogglePresence: (slot: Slot) => void;
   onBookMany: (slots: Slot[]) => void;
+  // Mode « Sélection » piloté par la page (bouton dans la barre de vue).
+  selMode: boolean;
+  setSelMode: (v: boolean) => void;
 }) {
   const [sheet, setSheet] = useState<{ date: string; hm: string; courtId: string } | null>(
     null,
   );
-  const [selMode, setSelMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!selMode) setSelected(new Set());
+  }, [selMode]);
   const now = Date.now();
   const todayStr = new Date().toLocaleDateString("en-CA");
 
@@ -226,21 +233,11 @@ export function WeekGrid({
 
   return (
     <>
-      <div className="week-tools">
-        <button
-          type="button"
-          className={"secondary wk-selbtn" + (selMode ? " active" : "")}
-          aria-pressed={selMode}
-          onClick={() => (selMode ? exitSel() : setSelMode(true))}
-        >
-          {selMode ? "Annuler la sélection" : "🗓️ Réserver plusieurs créneaux"}
-        </button>
-        {selMode && (
-          <span className="muted tiny">
-            Touche un terrain (Squash 1 ou 2) à réserver, ou un horaire pour toute la ligne.
-          </span>
-        )}
-      </div>
+      {selMode && (
+        <p className="muted tiny selmode-hint">
+          Touche un terrain (Squash 1 ou 2) à réserver, ou un horaire pour toute la ligne.
+        </p>
+      )}
 
       <div className="grid-wrap">
         <table className="planning week">

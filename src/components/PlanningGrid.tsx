@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { fmtTime } from "@/lib/time";
 
@@ -36,17 +36,24 @@ export function PlanningGrid({
   onCancelMine,
   onTogglePresence,
   onBookMany,
+  selMode,
+  setSelMode,
 }: {
   planning: PlanningDay;
   onBook: (slot: Slot) => void;
   onCancelMine: (slot: Slot) => void;
   onTogglePresence: (slot: Slot) => void;
   onBookMany: (slots: Slot[]) => void;
+  // Mode « Sélection » piloté par la page (bouton dans la barre de vue).
+  selMode: boolean;
+  setSelMode: (v: boolean) => void;
 }) {
-  // Mode « Sélection » : on coche des créneaux libres (un seul terrain par horaire,
-  // règle ResaMania), puis on réserve tout d'un coup. Même principe qu'en vue semaine.
-  const [selMode, setSelMode] = useState(false);
+  // On coche des créneaux libres (un seul terrain par horaire, règle ResaMania), puis on
+  // réserve tout d'un coup. La sélection se vide dès qu'on quitte le mode.
   const [selected, setSelected] = useState<Set<string>>(new Set()); // ids de slots
+  useEffect(() => {
+    if (!selMode) setSelected(new Set());
+  }, [selMode]);
 
   // Lignes = horaires distincts triés ; colonnes = terrains.
   const times = [...new Set(planning.slots.map((s) => s.startsAt))].sort();
@@ -97,21 +104,11 @@ export function PlanningGrid({
 
   return (
     <>
-      <div className="week-tools">
-        <button
-          type="button"
-          className={"secondary wk-selbtn" + (selMode ? " active" : "")}
-          aria-pressed={selMode}
-          onClick={() => (selMode ? exitSel() : setSelMode(true))}
-        >
-          {selMode ? "Annuler la sélection" : "🗓️ Réserver plusieurs créneaux"}
-        </button>
-        {selMode && (
-          <span className="muted tiny">
-            Touche les créneaux libres à réserver (un seul terrain par horaire).
-          </span>
-        )}
-      </div>
+      {selMode && (
+        <p className="muted tiny selmode-hint">
+          Touche les créneaux libres à réserver (un seul terrain par horaire).
+        </p>
+      )}
 
       <div className="grid-wrap">
         <table className="planning">

@@ -743,6 +743,57 @@ interface JournalEntry {
   mine: boolean;
 }
 
+// Icône calendrier (déclencheur du sélecteur de date natif).
+function CalendarIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="17" rx="2" />
+      <path d="M3 9h18M8 2v4M16 2v4" />
+    </svg>
+  );
+}
+
+// Icône « réserver plusieurs créneaux » (calendrier + coche).
+function MultiSelectIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 11V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6" />
+      <path d="M3 9h18M8 2v4M16 2v4" />
+      <path d="M15 18l2 2 4-4" />
+    </svg>
+  );
+}
+
+// Légende des couleurs, repliée dans un petit popover ⓘ pour libérer une ligne à l'écran.
+// (Réutilise le composant InfoIcon défini plus haut pour la note de confidentialité.)
+function LegendInfo() {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="legend-info">
+      <button
+        type="button"
+        className="secondary icon-btn"
+        aria-label="Légende des couleurs"
+        aria-expanded={open}
+        title="Légende"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <InfoIcon />
+      </button>
+      {open && (
+        <>
+          <div className="legend-backdrop" onClick={() => setOpen(false)} />
+          <div className="legend-pop" role="dialog" aria-label="Légende des couleurs">
+            <span><i style={{ background: "var(--free)" }} /> Libre</span>
+            <span><i style={{ background: "var(--group)" }} /> Réservé (asso)</span>
+            <span><i style={{ background: "var(--booked)" }} /> Réservé (autre)</span>
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
+
 export default function Home() {
   const [me, setMe] = useState<string | null | undefined>(undefined); // undefined = chargement
   const [myHandle, setMyHandle] = useState<string>(""); // token créneau (pseudo tronqué / Tho.P)
@@ -758,11 +809,26 @@ export default function Home() {
   const [view, setView] = useState<"day" | "week">("day");
   const [week, setWeek] = useState<{ date: string; planning: PlanningDay }[]>([]);
   const [busy, setBusy] = useState(false);
+  // Mode « sélection multiple » (piloté depuis la barre de vue, appliqué dans la grille
+  // affichée). Remonté ici pour que le bouton bascule vive dans la barre d'outils compacte.
+  const [selMode, setSelMode] = useState(false);
   // Hydratation : on ne charge la donnée et on n'écrit l'URL/localStorage qu'après avoir lu
   // l'état initial (URL puis localStorage). Évite un double chargement au premier rendu.
   const [hydrated, setHydrated] = useState(false);
   const lastFocusRef = useRef(0);
+  const dateInputRef = useRef<HTMLInputElement>(null);
   const today = toISODate(new Date());
+
+  // Ouvre le calendrier natif depuis le libellé de date (champ input masqué).
+  const openDatePicker = () => {
+    const el = dateInputRef.current;
+    if (!el) return;
+    try {
+      el.showPicker?.();
+    } catch {
+      el.focus(); // showPicker non supporté / hors geste utilisateur
+    }
+  };
 
   const toast = useCallback((type: ToastType, msg: string) => {
     const id = Date.now() + Math.random();
@@ -887,6 +953,12 @@ export default function Home() {
     if (view === "week") loadWeek(date);
     else load(date);
   }, [me, hydrated, date, view, load, loadWeek]);
+
+  // On sort du mode « sélection multiple » dès qu'on change de vue ou de date,
+  // pour ne pas traîner une sélection devenue hors contexte.
+  useEffect(() => {
+    setSelMode(false);
+  }, [view, date]);
 
   const reload = useCallback(
     () => (view === "week" ? loadWeek(date) : load(date)),
@@ -1198,48 +1270,77 @@ export default function Home() {
             </button>
           </div>
         </div>
-        {/* Sous-titre sur sa propre ligne pleine largeur → tient sur une seule ligne
-            même sur mobile (sinon coincé dans la colonne titre étroite). */}
-        <div className="sub">Planning Terrains, Le Complexe, Bures</div>
+        {/* Sous-titre pleine largeur : accueil + lieu réunis sur une seule ligne
+            (l'ancienne ligne « Bonjour » séparée est supprimée pour gagner de la place). */}
+        <div className="sub">Bonjour {nickname || me.split(" ")[0]} 👋 · Le Complexe, Bures</div>
       </header>
 
-      <p className="hello">Bonjour {nickname || me.split(" ")[0]} 👋</p>
-
+      {/* Navigation de date : flèches + libellé (qui ouvre le calendrier natif) + pastille
+          « Aujourd'hui » (seulement si on n'y est pas déjà), le tout sur UNE ligne. */}
       <div className="toolbar">
-        <button className="secondary" aria-label="Précédent" onClick={() => setDate(addDays(date, view === "week" ? -7 : -1))}>←</button>
-        <button className="secondary" onClick={() => setDate(today)} disabled={date === today}>Aujourd'hui</button>
-        <button className="secondary" aria-label="Suivant" onClick={() => setDate(addDays(date, view === "week" ? 7 : 1))}>→</button>
-        <span className="date">{view === "week" ? weekLabel(date) : shortPretty(date)}</span>
+        <button className="secondary nav" aria-label="Jour précédent" onClick={() => setDate(addDays(date, view === "week" ? -7 : -1))}>←</button>
+        <button
+          type="button"
+          className="secondary datebtn"
+          onClick={openDatePicker}
+          title="Choisir une date"
+          aria-label="Choisir une date"
+        >
+          <CalendarIcon />
+          <span className="date">{view === "week" ? weekLabel(date) : shortPretty(date)}</span>
+        </button>
+        <button className="secondary nav" aria-label="Jour suivant" onClick={() => setDate(addDays(date, view === "week" ? 7 : 1))}>→</button>
+        {date !== today && (
+          <button
+            type="button"
+            className="secondary today-chip"
+            onClick={() => setDate(today)}
+            title="Revenir à aujourd'hui"
+          >
+            Auj.
+          </button>
+        )}
+        {/* Champ natif masqué : ouvert via showPicker() au clic sur le libellé de date. */}
         <input
+          ref={dateInputRef}
           type="date"
-          className="datepick"
+          className="datepick-hidden"
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          // Ouvre le calendrier natif au clic n'importe où dans le champ (zone cliquable élargie)
-          onClick={(e) => {
-            try {
-              e.currentTarget.showPicker?.();
-            } catch {
-              /* showPicker non supporté / hors geste utilisateur */
-            }
-          }}
+          tabIndex={-1}
+          aria-hidden="true"
         />
       </div>
 
+      {/* Vue (Jour/Semaine) à gauche ; à droite les actions compactes en icônes :
+          sélection multiple, légende (ⓘ) et rafraîchir. */}
       <div className="viewbar">
         <div className="viewtabs" role="group" aria-label="Vue">
           <button className={view === "day" ? "active" : ""} aria-pressed={view === "day"} onClick={() => setView("day")}>Jour</button>
           <button className={view === "week" ? "active" : ""} aria-pressed={view === "week"} onClick={() => setView("week")}>Semaine</button>
         </div>
-        <button
-          className={"secondary icon-btn refresh" + (loading ? " spin" : "")}
-          onClick={reload}
-          disabled={loading}
-          aria-label="Rafraîchir"
-          title="Rafraîchir"
-        >
-          <RefreshIcon />
-        </button>
+        <div className="viewbar-icons">
+          <button
+            type="button"
+            className={"secondary icon-btn selbtn" + (selMode ? " active" : "")}
+            aria-pressed={selMode}
+            onClick={() => setSelMode((v) => !v)}
+            title={selMode ? "Annuler la sélection" : "Réserver plusieurs créneaux"}
+            aria-label={selMode ? "Annuler la sélection multiple" : "Réserver plusieurs créneaux"}
+          >
+            <MultiSelectIcon />
+          </button>
+          <LegendInfo />
+          <button
+            className={"secondary icon-btn refresh" + (loading ? " spin" : "")}
+            onClick={reload}
+            disabled={loading}
+            aria-label="Rafraîchir"
+            title="Rafraîchir"
+          >
+            <RefreshIcon />
+          </button>
+        </div>
       </div>
 
       <div className="filters" role="group" aria-label="Plage horaire">
@@ -1253,12 +1354,6 @@ export default function Home() {
             {r.label}
           </button>
         ))}
-      </div>
-
-      <div className="legend">
-        <span><i style={{ background: "var(--free)" }} /> Libre</span>
-        <span><i style={{ background: "var(--group)" }} /> Réservé (asso)</span>
-        <span><i style={{ background: "var(--booked)" }} /> Réservé (autre)</span>
       </div>
 
       {/* Annonce discrète pour lecteurs d'écran (chargement / erreur). */}
@@ -1282,6 +1377,8 @@ export default function Home() {
                   onCancelMine={onCancelMine}
                   onTogglePresence={onTogglePresence}
                   onBookMany={onBookMany}
+                  selMode={selMode}
+                  setSelMode={setSelMode}
                 />
               );
             })()
@@ -1289,7 +1386,7 @@ export default function Home() {
             ? <Skeleton />
             : null
         : week.length
-          ? <WeekGrid days={week} filter={(iso) => inRange(iso, range)} onPick={pickDay} onBook={onBook} onCancelMine={onCancelMine} onTogglePresence={onTogglePresenceWeek} onBookMany={onBookMany} />
+          ? <WeekGrid days={week} filter={(iso) => inRange(iso, range)} onPick={pickDay} onBook={onBook} onCancelMine={onCancelMine} onTogglePresence={onTogglePresenceWeek} onBookMany={onBookMany} selMode={selMode} setSelMode={setSelMode} />
           : loading
             ? <Skeleton />
             : null}
