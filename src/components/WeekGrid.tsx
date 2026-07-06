@@ -234,9 +234,7 @@ export function WeekGrid({
   return (
     <>
       {selMode && (
-        <p className="muted tiny selmode-hint">
-          Touche un terrain (Squash 1 ou 2) à réserver, ou un horaire pour toute la ligne.
-        </p>
+        <p className="muted tiny selmode-hint">Sélection multi créneau</p>
       )}
 
       <div className="grid-wrap">

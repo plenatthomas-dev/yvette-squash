@@ -105,9 +105,7 @@ export function PlanningGrid({
   return (
     <>
       {selMode && (
-        <p className="muted tiny selmode-hint">
-          Touche les créneaux libres à réserver (un seul terrain par horaire).
-        </p>
+        <p className="muted tiny selmode-hint">Sélection multi créneau</p>
       )}
 
       <div className="grid-wrap">
