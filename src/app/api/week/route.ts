@@ -39,7 +39,9 @@ export async function GET(req: NextRequest) {
       select: { id: true, contactId: true, displayName: true, nickname: true, createdAt: true },
     });
     const handleMap = buildHandleMap(users);
-    const userIdByContact = new Map(users.map((u) => [u.contactId, u.id]));
+    // Certains comptes « email seul » n'ont pas encore de contactId (null) : on les ignore.
+    const userIdByContact = new Map<string, string>();
+    for (const u of users) if (u.contactId) userIdByContact.set(u.contactId, u.id);
     const myContactId = session.resa.identity.contactId;
 
     // Tous les créneaux de la semaine (IRIs) → repli journal + présences en une requête.

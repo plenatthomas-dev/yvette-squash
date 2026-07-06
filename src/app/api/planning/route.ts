@@ -35,7 +35,9 @@ export async function GET(req: NextRequest) {
     });
     // Diminutifs dé-doublonnés (Tho.P, Tho.P2…) pour tout l'ensemble des joueurs connus.
     const handleMap = buildHandleMap(users);
-    const userIdByContact = new Map(users.map((u) => [u.contactId, u.id]));
+    // Certains comptes « email seul » n'ont pas encore de contactId (null) : on les ignore.
+    const userIdByContact = new Map<string, string>();
+    for (const u of users) if (u.contactId) userIdByContact.set(u.contactId, u.id);
 
     const bookings = await prisma.booking.findMany({
       where: {
