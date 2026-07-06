@@ -1142,6 +1142,171 @@ table.planning.week td.cell {
   font-weight: 600;
 }
 
+/* --- Vue semaine : cellule bicolore (un segment par terrain) ------------- */
+table.planning.week td.cell.wk {
+  padding: 2px;
+}
+.wk-cell {
+  display: flex;
+  width: 100%;
+  height: 38px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.wk-seg {
+  flex: 1 1 0;
+}
+.wk-seg + .wk-seg {
+  border-left: 2px solid var(--pico-background-color); /* sépare les 2 terrains */
+}
+.wk-seg.free {
+  background: var(--free);
+}
+.wk-seg.asso {
+  background: var(--group);
+}
+.wk-seg.other {
+  background: var(--booked);
+}
+.wk-seg.mine {
+  background: var(--group);
+  box-shadow: inset 0 0 0 2px var(--accent); /* mon créneau : liseré accent */
+}
+.wk-seg.past {
+  background: var(--closed);
+  opacity: 0.5;
+}
+.wk-seg.closed {
+  background: var(--closed);
+}
+
+/* Barre d'outils au-dessus de la grille (bouton « sélection multiple »). */
+.week-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 2px 0 10px;
+}
+.wk-selbtn {
+  margin: 0;
+  width: auto;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+}
+.wk-selbtn.active {
+  box-shadow: inset 0 0 0 2px var(--pico-primary);
+}
+
+/* Mode sélection : horaires cliquables + cases cochées. */
+table.planning.week th.time.selrow,
+table.planning.week th.time.selhead {
+  cursor: pointer;
+  color: var(--pico-primary);
+}
+td.cell.wk.selectable {
+  cursor: pointer;
+}
+td.cell.wk.selected {
+  outline: 3px solid var(--pico-primary);
+  outline-offset: -3px;
+  position: relative;
+  z-index: 3;
+}
+
+/* Barre d'action collante en bas quand des cases sont sélectionnées. */
+.wk-actionbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 900px;
+  margin-inline: auto;
+  padding: 12px 16px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  background: var(--pico-card-background-color);
+  border-top: 1px solid var(--pico-card-border-color);
+  box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.18);
+}
+.wk-actionbar span {
+  font-weight: 600;
+}
+.wk-actionbar button {
+  margin: 0;
+  width: auto;
+  padding: 10px 22px;
+}
+
+/* Modale de détail des 2 terrains (ouverte au clic sur une case semaine). */
+.wk-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0 16px;
+}
+.wk-detail {
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.wk-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wk-chip {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  flex: 0 0 auto;
+}
+.wk-chip.free {
+  background: var(--free);
+}
+.wk-chip.asso {
+  background: var(--group);
+}
+.wk-chip.other {
+  background: var(--booked);
+}
+.wk-chip.mine {
+  background: var(--group);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.wk-chip.past,
+.wk-chip.closed {
+  background: var(--closed);
+}
+.wk-state {
+  margin-left: auto;
+  color: var(--pico-muted-color);
+  font-size: 0.82rem;
+  text-align: right;
+}
+.wk-att {
+  margin-top: 6px;
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+}
+.wk-detail-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+.wk-detail-actions:empty {
+  display: none;
+}
+.wk-detail-actions button {
+  margin: 0;
+  width: auto;
+  padding: 8px 16px;
+}
+
 /* --- Skeleton de chargement --------------------------------------------- */
 .grid-wrap.skel {
   padding: 6px;

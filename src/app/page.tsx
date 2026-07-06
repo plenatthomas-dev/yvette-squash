@@ -1067,6 +1067,84 @@ export default function Home() {
     }
   };
 
+  // Présence « +1 » depuis la vue semaine : POST direct puis rechargement de la semaine
+  // (l'update optimiste de onTogglePresence cible le planning du jour, pas les 7 jours).
+  const onTogglePresenceWeek = async (slot: Slot) => {
+    if (!me) return;
+    try {
+      const res = await fetch("/api/presence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classEventId: slot.id, startsAt: slot.startsAt }),
+      });
+      if (handleExpired(res.status)) return;
+      if (!res.ok) throw new Error();
+      reload();
+    } catch {
+      toast("err", "Présence non enregistrée");
+    }
+  };
+
+  // Réservation groupée (vue semaine) : un /api/book par créneau, en séquence, avec bilan.
+  const onBookMany = async (slots: Slot[]) => {
+    if (busy || confirmState || slots.length === 0) return;
+    const preview = slots
+      .slice(0, 4)
+      .map((s) => `${shortPretty(s.startsAt.slice(0, 10))} ${fmtTime(s.startsAt)}`)
+      .join(" · ");
+    const ok = await askConfirm({
+      title: `Réserver ${slots.length} créneau${slots.length > 1 ? "x" : ""} ?`,
+      body:
+        (slots.length > 4 ? `${preview} …` : preview) +
+        " — un terrain libre sera pris sur chaque.",
+      confirmLabel: "Réserver",
+    });
+    if (!ok) return;
+    setBusy(true);
+    let done = 0;
+    const fails: string[] = [];
+    try {
+      for (const slot of slots) {
+        try {
+          const res = await fetch("/api/book", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              classEventId: slot.id,
+              courtName: slot.courtName,
+              startsAt: slot.startsAt,
+              endsAt: slot.endsAt,
+            }),
+          });
+          if (res.status === 401) {
+            handleExpired(401);
+            return;
+          }
+          const data = await res.json().catch(() => ({}));
+          if (res.ok) done++;
+          else
+            fails.push(
+              `${shortPretty(slot.startsAt.slice(0, 10))} : ${data.error ?? res.status}`,
+            );
+        } catch {
+          fails.push(`${shortPretty(slot.startsAt.slice(0, 10))} : réseau`);
+        }
+      }
+    } finally {
+      setBusy(false);
+    }
+    if (done > 0) {
+      toast(
+        fails.length ? "info" : "ok",
+        `${done} réservation${done > 1 ? "s" : ""} confirmée${done > 1 ? "s" : ""}` +
+          (fails.length ? ` · ${fails.length} échec${fails.length > 1 ? "s" : ""}` : ""),
+      );
+    } else {
+      toast("err", "Aucune réservation : " + (fails[0] ?? "échec"));
+    }
+    reload();
+  };
+
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     setMe(null);
@@ -1175,7 +1253,8 @@ export default function Home() {
       )}
       {view === "week" && (
         <p className="muted week-hint">
-          Chiffre = terrains libres. Touche une case (ou un jour) pour ouvrir la journée et réserver.
+          Chaque case montre les 2 terrains (gauche/droite) par couleur. Touche une case
+          pour le détail et réserver, ou « Réserver plusieurs créneaux » pour la sélection.
         </p>
       )}
 
@@ -1206,7 +1285,7 @@ export default function Home() {
             ? <Skeleton />
             : null
         : week.length
-          ? <WeekGrid days={week} filter={(iso) => inRange(iso, range)} onPick={pickDay} onBook={onBook} />
+          ? <WeekGrid days={week} filter={(iso) => inRange(iso, range)} onPick={pickDay} onBook={onBook} onTogglePresence={onTogglePresenceWeek} onBookMany={onBookMany} />
           : loading
             ? <Skeleton />
             : null}
