@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { splitWithCredits, MAX_AMOUNT_CENTS, MAX_LABEL_LEN } from "@/lib/tricount";
+import { splitWithCredits, MAX_AMOUNT_CENTS, MAX_LABEL_LEN, MAX_TITLE_LEN } from "@/lib/tricount";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,8 +34,14 @@ export async function POST(req: NextRequest) {
   if (cleanLabel.length === 0 || cleanLabel.length > MAX_LABEL_LEN) {
     return NextResponse.json({ error: "Libellé invalide (1 à 80 caractères)" }, { status: 400 });
   }
-  const cleanTitle =
-    typeof title === "string" && title.trim() ? title.trim().slice(0, MAX_LABEL_LEN) : null;
+  const rawTitle = typeof title === "string" ? title.trim() : "";
+  if (rawTitle.length > MAX_TITLE_LEN) {
+    return NextResponse.json(
+      { error: `Titre trop long (${MAX_TITLE_LEN} caractères max)` },
+      { status: 400 },
+    );
+  }
+  const cleanTitle = rawTitle || null;
   if (
     typeof amountCents !== "number" ||
     !Number.isInteger(amountCents) ||

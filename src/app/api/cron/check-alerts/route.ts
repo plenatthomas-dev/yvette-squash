@@ -3,21 +3,12 @@ import { prisma } from "@/lib/db";
 import { encrypt, decrypt } from "@/lib/crypto";
 import { ensureFresh, getPlanning } from "@/lib/resamania/client";
 import { pushToUser, pushConfigured } from "@/lib/push";
+import { cronAuthorized } from "@/lib/cron-auth";
 import type { ResaIdentity, ResaSession } from "@/lib/resamania/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-
-// Autorisation : soit l'en-tête « Authorization: Bearer $CRON_SECRET » (Vercel Cron),
-// soit ?token=$CRON_SECRET (cron externe type cron-job.org). Sans secret défini → ouvert (dev).
-function authorized(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return true;
-  const auth = req.headers.get("authorization");
-  const token = new URL(req.url).searchParams.get("token");
-  return auth === `Bearer ${secret}` || token === secret;
-}
 
 function prettyDate(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString("fr-FR", {
@@ -29,11 +20,14 @@ function prettyDate(date: string): string {
 
 // Régénère un access token ResaMania valide à partir de la dernière session du joueur.
 async function accessTokenForUser(userId: string): Promise<string | null> {
+  // Uniquement les sessions ResaMania (avec jeton) : les sessions « email seul » n'en ont pas.
   const s = await prisma.session.findFirst({
-    where: { userId, expiresAt: { gt: new Date() } },
+    where: { userId, expiresAt: { gt: new Date() }, refreshTokenEnc: { not: null } },
     orderBy: { createdAt: "desc" },
   });
-  if (!s) return null;
+  if (!s || !s.accessToken || !s.refreshTokenEnc || !s.tokenExpiresAt || !s.identityJson) {
+    return null;
+  }
   try {
     const resa: ResaSession = {
       accessToken: s.accessToken,
@@ -65,7 +59,7 @@ async function accessTokenForUser(userId: string): Promise<string | null> {
 // Pour chaque alerte active : interroge le planning du jour visé et, si un terrain est
 // redevenu réservable à l'horaire demandé, pousse une notif et désactive l'alerte.
 export async function GET(req: NextRequest) {
-  if (!authorized(req)) {
+  if (!cronAuthorized(req)) {
     return NextResponse.json({ error: "Interdit" }, { status: 401 });
   }
   if (!pushConfigured()) {

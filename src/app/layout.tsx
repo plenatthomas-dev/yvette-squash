@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "@picocss/pico/css/pico.min.css";
 import "./globals.css";
 
@@ -39,6 +41,8 @@ export default function RootLayout({
       <body>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         {children}
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );

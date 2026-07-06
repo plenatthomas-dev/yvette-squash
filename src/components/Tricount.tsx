@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { MAX_TITLE_LEN } from "@/lib/tricount";
 
 // Vue « Frais » : tricounts par jour (un tricount = les dépenses d'une date),
 // avec historique, validation des payeurs puis remboursements guidés.
@@ -8,8 +9,8 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 
 interface Member {
   id: string;
-  name: string; // pseudo ou prénom (affichage courant)
-  fullName: string; // prénom + nom réels (feature remboursement)
+  name: string; // prénom + nom réels — le Tricount n'utilise JAMAIS le pseudo
+  fullName: string; // idem (conservé pour compat) : prénom + nom réels
 }
 interface ExpenseItem {
   id: string;
@@ -111,6 +112,8 @@ export default function Tricount({ toast, onExpired }: Props) {
 
   // Formulaire « nouvelle dépense »
   const [expenseOpen, setExpenseOpen] = useState(false);
+  // Tricount cible : soit la date d'un tricount existant, soit "new" (nouvelle date).
+  const [tcChoice, setTcChoice] = useState<string>("new");
   const [date, setDate] = useState(todayISO());
   const [title, setTitle] = useState("");
   const [label, setLabel] = useState("");
@@ -157,7 +160,10 @@ export default function Tricount({ toast, onExpired }: Props) {
 
   const openExpense = () => {
     if (!data) return;
-    setDate(todayISO());
+    const today = todayISO();
+    setDate(today);
+    // Pré-sélection : le tricount d'aujourd'hui s'il existe, sinon « nouvelle date ».
+    setTcChoice(data.tricounts.some((t) => t.date === today) ? today : "new");
     setTitle("");
     setLabel("");
     setAmount("");
@@ -191,14 +197,17 @@ export default function Tricount({ toast, onExpired }: Props) {
       toast("err", "Choisis au moins un participant.");
       return;
     }
+    // Date cible : celle du tricount existant choisi, ou la nouvelle date saisie.
+    const targetDate = tcChoice === "new" ? date : tcChoice;
     setBusy(true);
     try {
       const res = await fetch("/api/tricount/expenses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          date,
-          title: title.trim() || undefined,
+          date: targetDate,
+          // Le titre ne concerne que la CRÉATION d'un tricount (nouvelle date).
+          title: tcChoice === "new" ? title.trim() || undefined : undefined,
           label: label.trim(),
           amountCents: cents,
           payerId,
@@ -513,16 +522,30 @@ export default function Tricount({ toast, onExpired }: Props) {
             <h3>➕ Nouvelle dépense</h3>
             <form onSubmit={submitExpense} className="tri-form">
               <label className="tri-field">
-                Jour du tricount
-                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                Tricount
+                <select value={tcChoice} onChange={(e) => setTcChoice(e.target.value)}>
+                  {data.tricounts.map((t) => (
+                    <option key={t.id} value={t.date}>
+                      {t.title ? `${t.title} — ` : ""}
+                      {prettyDate(t.date)}
+                    </option>
+                  ))}
+                  <option value="new">➕ Nouvelle date…</option>
+                </select>
               </label>
-              {!data.tricounts.some((t) => t.date === date) && (
+              {tcChoice === "new" && (
+                <label className="tri-field">
+                  Jour du tricount
+                  <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                </label>
+              )}
+              {tcChoice === "new" && !data.tricounts.some((t) => t.date === date) && (
                 <input
                   type="text"
                   placeholder="Titre du tricount (optionnel) — ex. Repas"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  maxLength={80}
+                  maxLength={MAX_TITLE_LEN}
                 />
               )}
               <input

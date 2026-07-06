@@ -3,6 +3,7 @@ import { prisma } from "./db";
 import { encrypt, decrypt } from "./crypto";
 import { ensureFresh } from "./resamania/client";
 import type { ResaIdentity, ResaSession } from "./resamania/types";
+import type { User } from "@prisma/client";
 
 const SESSION_DAYS = 30;
 
@@ -10,22 +11,70 @@ function nameOf(id: ResaIdentity): string {
   return `${id.givenName} ${id.familyName}`.trim() || id.email || "Joueur";
 }
 
-/** Crée un User (si besoin) + une session applicative. Renvoie l'id de cookie. */
+/** Normalise un email pour servir de clé d'identité (trim + minuscules). */
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+/**
+ * Retrouve (ou crée) LA ligne User d'une personne, l'email étant la clé d'identité
+ * commune. ResaMania (contactId) est un simple attribut attaché à cette même ligne :
+ *  - connexion ResaMania d'un membre déjà « email seul » → on lui ATTACHE le contactId
+ *    (réconciliation, sans fusion ni migration de données) ;
+ *  - connexion email d'un membre déjà connu de ResaMania → on retombe sur la même ligne.
+ */
+export async function resolveUser(input: {
+  displayName: string;
+  email?: string | null;
+  contactId?: string | null;
+}): Promise<User> {
+  const email = input.email ? normalizeEmail(input.email) : null;
+  const contactId = input.contactId ?? null;
+
+  // 1) Déjà lié par contactId ? (membres ResaMania existants)
+  if (contactId) {
+    const byContact = await prisma.user.findUnique({ where: { contactId } });
+    if (byContact) {
+      return prisma.user.update({
+        where: { id: byContact.id },
+        data: { displayName: input.displayName, email: email ?? byContact.email },
+      });
+    }
+  }
+
+  // 2) Sinon, jointure par email (clé d'identité commune).
+  if (email) {
+    const byEmail = await prisma.user.findUnique({ where: { email } });
+    if (byEmail) {
+      // Réconciliation : on n'attache le contactId que s'il manquait encore
+      // (ne jamais écraser un contactId déjà présent).
+      const attach = contactId && !byEmail.contactId ? { contactId } : {};
+      return prisma.user.update({
+        where: { id: byEmail.id },
+        data: { displayName: input.displayName, ...attach },
+      });
+    }
+  }
+
+  // 3) Personne inconnue → nouvelle ligne.
+  return prisma.user.create({
+    data: { displayName: input.displayName, email, contactId },
+  });
+}
+
+/** Crée un User (via réconciliation email) + une session ResaMania. Renvoie l'id de cookie. */
 export async function createSession(resa: ResaSession): Promise<string> {
   // Purge opportuniste : les sessions expirées ne sont sinon supprimées que si leur
   // propre cookie revient un jour — elles s'accumuleraient avec leurs refresh tokens.
   await prisma.session.deleteMany({ where: { expiresAt: { lt: new Date() } } });
 
-  const id = randomBytes(24).toString("base64url");
-  const user = await prisma.user.upsert({
-    where: { contactId: resa.identity.contactId },
-    update: { displayName: nameOf(resa.identity), email: resa.identity.email || undefined },
-    create: {
-      contactId: resa.identity.contactId,
-      displayName: nameOf(resa.identity),
-      email: resa.identity.email || undefined,
-    },
+  const user = await resolveUser({
+    displayName: nameOf(resa.identity),
+    email: resa.identity.email || null,
+    contactId: resa.identity.contactId,
   });
+
+  const id = randomBytes(24).toString("base64url");
   await prisma.session.create({
     data: {
       id,
@@ -40,10 +89,25 @@ export async function createSession(resa: ResaSession): Promise<string> {
   return id;
 }
 
+/** Crée une session « email seul » (aucun jeton ResaMania). Renvoie l'id de cookie. */
+export async function createEmailSession(userId: string): Promise<string> {
+  await prisma.session.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+  const id = randomBytes(24).toString("base64url");
+  await prisma.session.create({
+    data: {
+      id,
+      userId,
+      expiresAt: new Date(Date.now() + SESSION_DAYS * 864e5),
+      // accessToken / refreshTokenEnc / tokenExpiresAt / identityJson restent NULL
+    },
+  });
+  return id;
+}
+
 export interface AppSession {
   userId: string;
   displayName: string;
-  resa: ResaSession;
+  resa: ResaSession | null; // null = session « email seul » (sans ResaMania)
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -63,6 +127,11 @@ export async function getSession(sid: string | undefined): Promise<AppSession | 
     return null;
   }
 
+  // Session « email seul » : aucun jeton ResaMania à déchiffrer/rafraîchir.
+  if (!s.accessToken || !s.refreshTokenEnc || !s.tokenExpiresAt || !s.identityJson) {
+    return { userId: s.userId, displayName: s.user.displayName, resa: null };
+  }
+
   let resa: ResaSession;
   try {
     resa = {
@@ -72,18 +141,16 @@ export async function getSession(sid: string | undefined): Promise<AppSession | 
       identity: JSON.parse(s.identityJson) as ResaIdentity,
     };
   } catch {
-    // Session illisible (ancien format avec access token en clair, ou clé changée)
-    // → on la supprime et on force une reconnexion propre.
+    // Session illisible (ancien format en clair, ou clé changée) → on la supprime et
+    // on force une reconnexion propre.
     await prisma.session.delete({ where: { id: sid } }).catch(() => {});
     return null;
   }
 
   if (resa.expiresAt <= Date.now()) {
-    // Token (presque) expiré → refresh SÉRIALISÉ entre requêtes concurrentes : la vue
-    // Semaine tire 7 /api/planning en parallèle, et plusieurs refresh simultanés avec
-    // le même refresh token (usage unique) détruiraient la session (déconnexions
-    // sporadiques). updateMany atomique : une seule requête « gagne » et rafraîchit,
-    // les autres relisent son résultat.
+    // Token (presque) expiré → refresh SÉRIALISÉ entre requêtes concurrentes (la vue
+    // Semaine tire 7 /api/planning en parallèle). updateMany atomique : une seule requête
+    // « gagne » et rafraîchit, les autres relisent son résultat.
     const claimed = await prisma.session.updateMany({
       where: { id: sid, tokenExpiresAt: { lte: new Date() } },
       data: { tokenExpiresAt: new Date(Date.now() + REFRESH_CLAIM_MS) },
@@ -110,7 +177,7 @@ export async function getSession(sid: string | undefined): Promise<AppSession | 
       // Une autre requête détient le refresh : on lui laisse le temps d'écrire, puis on relit.
       await sleep(600);
       const s2 = await prisma.session.findUnique({ where: { id: sid } });
-      if (!s2) return null; // le refresh concurrent a échoué → session supprimée
+      if (!s2 || !s2.accessToken || !s2.refreshTokenEnc || !s2.tokenExpiresAt) return null;
       try {
         resa = {
           accessToken: decrypt(s2.accessToken),
@@ -121,8 +188,8 @@ export async function getSession(sid: string | undefined): Promise<AppSession | 
       } catch {
         return null;
       }
-      // Si le gagnant n'a pas encore fini d'écrire, on repart avec l'ancien access
-      // token : il reste réellement valide ~60 s (marge), assez pour cette requête.
+      // Si le gagnant n'a pas encore fini d'écrire, on repart avec l'ancien access token :
+      // il reste réellement valide ~60 s (marge), assez pour cette requête.
     }
   }
 

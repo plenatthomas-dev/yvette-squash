@@ -26,5 +26,8 @@ export async function GET(req: NextRequest) {
     displayName: session.displayName,
     nickname: me?.nickname ?? null,
     handle,
+    // Pilote l'UI : "email" = session sans ResaMania (lecture seule, pas de réservation).
+    mode: session.resa ? "resamania" : "email",
+    canBook: !!session.resa,
   });
 }

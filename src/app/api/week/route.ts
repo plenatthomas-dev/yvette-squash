@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPlanning } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
+import { prisma } from "@/lib/db";
 import { weekDates } from "@/lib/week";
+import type { PlanningDay } from "@/lib/resamania/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,12 +25,44 @@ export async function GET(req: NextRequest) {
     new URL(req.url).searchParams.get("date") ??
     new Date().toISOString().slice(0, 10);
 
+  // Compte « email seul » (sans jeton) : agrégat des snapshots par jour (comptage des libres).
+  if (!session.resa) {
+    const dates = weekDates(date);
+    const snaps = await prisma.planningSnapshot.findMany({ where: { date: { in: dates } } });
+    const byDate = new Map(snaps.map((s) => [s.date, s]));
+    const days = dates.map((d) => {
+      const snap = byDate.get(d);
+      const planning: PlanningDay = snap
+        ? {
+            ...(JSON.parse(snap.payloadJson) as PlanningDay),
+            cached: true,
+            cachedAt: snap.updatedAt.toISOString(),
+          }
+        : { date: d, clubId: "", courts: [], slots: [], cached: true, cachedAt: null };
+      return { date: d, planning };
+    });
+    return NextResponse.json(days);
+  }
+  const resa = session.resa;
+
   try {
     const days = await Promise.all(
       weekDates(date).map(async (d) => ({
         date: d,
-        planning: await getPlanning(d, session.resa.accessToken),
+        planning: await getPlanning(d, resa.accessToken),
       })),
+    );
+    // Alimente le cache : chaque jour chargé devient un snapshot → un compte « email seul »
+    // verra TOUTE la semaine consultée ici, pas seulement les jours ouverts en vue Jour.
+    await Promise.all(
+      days.map((day) => {
+        const payloadJson = JSON.stringify(day.planning);
+        return prisma.planningSnapshot.upsert({
+          where: { date: day.date },
+          update: { payloadJson, updatedById: session.userId },
+          create: { date: day.date, payloadJson, updatedById: session.userId },
+        });
+      }),
     );
     return NextResponse.json(days);
   } catch (e) {
