@@ -1264,8 +1264,9 @@ export default function Home() {
       )}
       {view === "week" && (
         <p className="muted week-hint">
-          Chaque case montre les 2 terrains (gauche/droite) par couleur. Touche une case
-          pour le détail et réserver, ou « Réserver plusieurs créneaux » pour la sélection.
+          Chaque case montre les 2 terrains (gauche = Squash 1, droite = Squash 2) par
+          couleur. Touche un terrain pour réserver ou voir le détail. Sur mobile, fais
+          défiler la grille horizontalement pour voir toute la semaine.
         </p>
       )}
 

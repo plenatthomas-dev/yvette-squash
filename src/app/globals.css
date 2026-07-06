@@ -1125,8 +1125,9 @@ td.cell.past {
 }
 
 /* --- Vue semaine -------------------------------------------------------- */
-/* On veut voir les 7 jours d'un coup, sans scroll horizontal. table-layout: fixed
-   (hérité) répartit la largeur → colonnes étroites mais toutes visibles sur mobile. */
+/* Desktop : les 7 jours tiennent dans la largeur (table-layout: fixed hérité les répartit).
+   Mobile : colonnes élargies + défilement horizontal (voir media query plus bas), car à
+   7 jours × 2 terrains cliquables les cases étaient trop petites au doigt. */
 table.planning.week {
   min-width: 0;
 }
@@ -1135,6 +1136,21 @@ table.planning.week {
 table.planning.week th.time {
   width: 40px;
   font-size: 0.66rem;
+}
+
+/* Petit écran : on cesse de comprimer les 7 jours. Chaque jour prend une largeur fixe
+   confortable (2 terrains tappables) et la semaine défile horizontalement ; la colonne
+   « Heure » reste figée à gauche (position: sticky déjà posé plus haut). */
+@media (max-width: 560px) {
+  /* min-width > largeur de l'écran → la table déborde et défile ; table-layout: fixed
+     répartit : Heure = 40px (figée), les 7 jours se partagent le reste (~88px chacun,
+     soit ~44px par terrain → tap confortable). */
+  table.planning.week {
+    min-width: 660px;
+  }
+  table.planning.week .wk-cell {
+    height: 46px;
+  }
 }
 
 table.planning.week thead th {
