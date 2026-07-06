@@ -1093,7 +1093,7 @@ export default function Home() {
     }
   };
 
-  // Réservation groupée (vue semaine) : un /api/book par créneau, en séquence, avec bilan.
+  // Réservation groupée (vues jour et semaine) : un /api/book par créneau, en séquence, avec bilan.
   const onBookMany = async (slots: Slot[]) => {
     if (busy || confirmState || slots.length === 0) return;
     const MAX_LINES = 10;
@@ -1281,6 +1281,7 @@ export default function Home() {
                   onBook={onBook}
                   onCancelMine={onCancelMine}
                   onTogglePresence={onTogglePresence}
+                  onBookMany={onBookMany}
                 />
               );
             })()

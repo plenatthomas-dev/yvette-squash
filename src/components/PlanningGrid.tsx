@@ -1,6 +1,6 @@
 "use client";
 
-import type { KeyboardEvent } from "react";
+import { useState, type KeyboardEvent } from "react";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { fmtTime } from "@/lib/time";
 
@@ -35,12 +35,19 @@ export function PlanningGrid({
   onBook,
   onCancelMine,
   onTogglePresence,
+  onBookMany,
 }: {
   planning: PlanningDay;
   onBook: (slot: Slot) => void;
   onCancelMine: (slot: Slot) => void;
   onTogglePresence: (slot: Slot) => void;
+  onBookMany: (slots: Slot[]) => void;
 }) {
+  // Mode « Sélection » : on coche des créneaux libres (un seul terrain par horaire,
+  // règle ResaMania), puis on réserve tout d'un coup. Même principe qu'en vue semaine.
+  const [selMode, setSelMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set()); // ids de slots
+
   // Lignes = horaires distincts triés ; colonnes = terrains.
   const times = [...new Set(planning.slots.map((s) => s.startsAt))].sort();
   const byKey = new Map(
@@ -54,116 +61,216 @@ export function PlanningGrid({
     return <p className="muted">Aucun créneau ce jour-là.</p>;
   }
 
+  // Je joue déjà (résa « à moi ») à cet horaire ? → l'autre terrain n'est pas réservable.
+  const timeHasMine = (t: string) =>
+    planning.slots.some((s) => s.startsAt === t && s.mine);
+
+  // Coche/décoche un créneau (radio par horaire : au plus un terrain à la même heure).
+  const toggleSel = (slot: Slot) => {
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (n.has(slot.id)) {
+        n.delete(slot.id);
+        return n;
+      }
+      for (const s of planning.slots)
+        if (s.startsAt === slot.startsAt) n.delete(s.id); // vide l'autre terrain
+      n.add(slot.id);
+      return n;
+    });
+  };
+  const exitSel = () => {
+    setSelMode(false);
+    setSelected(new Set());
+  };
+  const bookSelected = () => {
+    const slots = planning.slots
+      .filter((s) => selected.has(s.id))
+      .sort((a, b) =>
+        a.startsAt === b.startsAt
+          ? a.courtName.localeCompare(b.courtName)
+          : a.startsAt.localeCompare(b.startsAt),
+      );
+    if (slots.length) onBookMany(slots);
+    exitSel();
+  };
+
   return (
-    <div className="grid-wrap">
-      <table className="planning">
-        <thead>
-          <tr>
-            <th className="time">Heure</th>
-            {planning.courts.map((c) => (
-              <th key={c.id}>{c.name}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {times.map((t) => {
-            const end = endByTime.get(t);
-            return (
-              <tr key={t}>
-                <th className="time">
-                  <span className="t-start">{fmtTime(t)}</span>
-                  {end && <span className="t-end">{fmtTime(end)}</span>}
-                </th>
-                {planning.courts.map((c) => {
-                  const slot = byKey.get(c.id + "|" + t);
-                  if (!slot) return <td key={c.id} className="cell closed" />;
-                  if (slot.mine) {
-                    return (
-                      <td
-                        key={c.id}
-                        className="cell mine"
-                        role="button"
-                        tabIndex={0}
-                        title="Ta réservation — cliquer pour annuler"
-                        onClick={() => onCancelMine(slot)}
-                        onKeyDown={onKey(() => onCancelMine(slot))}
-                      >
-                        <span className="booker">★ {slot.bookedBy}</span>
-                        <AttendeeList names={slot.attendees ?? []} />
-                      </td>
-                    );
-                  }
-                  if (slot.bookedBy) {
-                    const attending = slot.iAmAttending ?? false;
-                    const canToggle = new Date(slot.startsAt).getTime() >= now;
-                    const cls = "cell group" + (attending ? " attending" : "");
-                    const title = canToggle
-                      ? attending
-                        ? `Réservé par ${slot.bookedBy} — clique pour retirer ta présence`
-                        : `Réservé par ${slot.bookedBy} — clique pour signaler ta présence`
-                      : `Réservé par ${slot.bookedBy} (asso)`;
-                    const content = (
-                      <>
-                        <span className="booker">👥 {slot.bookedBy}</span>
-                        <AttendeeList names={slot.attendees ?? []} />
-                      </>
-                    );
-                    if (!canToggle) {
+    <>
+      <div className="week-tools">
+        <button
+          type="button"
+          className={"secondary wk-selbtn" + (selMode ? " active" : "")}
+          aria-pressed={selMode}
+          onClick={() => (selMode ? exitSel() : setSelMode(true))}
+        >
+          {selMode ? "Annuler la sélection" : "🗓️ Réserver plusieurs créneaux"}
+        </button>
+        {selMode && (
+          <span className="muted tiny">
+            Touche les créneaux libres à réserver (un seul terrain par horaire).
+          </span>
+        )}
+      </div>
+
+      <div className="grid-wrap">
+        <table className="planning">
+          <thead>
+            <tr>
+              <th className="time">Heure</th>
+              {planning.courts.map((c) => (
+                <th key={c.id}>{c.name}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {times.map((t) => {
+              const end = endByTime.get(t);
+              return (
+                <tr key={t}>
+                  <th className="time">
+                    <span className="t-start">{fmtTime(t)}</span>
+                    {end && <span className="t-end">{fmtTime(end)}</span>}
+                  </th>
+                  {planning.courts.map((c) => {
+                    const slot = byKey.get(c.id + "|" + t);
+                    if (!slot) return <td key={c.id} className="cell closed" />;
+                    if (slot.mine) {
+                      // En mode sélection, la case est inerte (pas d'annulation accidentelle).
                       return (
-                        <td key={c.id} className={cls} title={title}>
+                        <td
+                          key={c.id}
+                          className="cell mine"
+                          {...(selMode
+                            ? {}
+                            : {
+                                role: "button" as const,
+                                tabIndex: 0,
+                                title: "Ta réservation — cliquer pour annuler",
+                                onClick: () => onCancelMine(slot),
+                                onKeyDown: onKey(() => onCancelMine(slot)),
+                              })}
+                        >
+                          <span className="booker">★ {slot.bookedBy}</span>
+                          <AttendeeList names={slot.attendees ?? []} />
+                        </td>
+                      );
+                    }
+                    if (slot.bookedBy) {
+                      const attending = slot.iAmAttending ?? false;
+                      const canToggle =
+                        !selMode && new Date(slot.startsAt).getTime() >= now;
+                      const cls =
+                        "cell group" + (attending ? " attending" : "");
+                      const title = canToggle
+                        ? attending
+                          ? `Réservé par ${slot.bookedBy} — clique pour retirer ta présence`
+                          : `Réservé par ${slot.bookedBy} — clique pour signaler ta présence`
+                        : `Réservé par ${slot.bookedBy} (asso)`;
+                      const content = (
+                        <>
+                          <span className="booker">👥 {slot.bookedBy}</span>
+                          <AttendeeList names={slot.attendees ?? []} />
+                        </>
+                      );
+                      if (!canToggle) {
+                        return (
+                          <td key={c.id} className={cls} title={title}>
+                            {content}
+                          </td>
+                        );
+                      }
+                      return (
+                        <td
+                          key={c.id}
+                          className={cls}
+                          role="button"
+                          tabIndex={0}
+                          aria-pressed={attending}
+                          title={title}
+                          onClick={() => onTogglePresence(slot)}
+                          onKeyDown={onKey(() => onTogglePresence(slot))}
+                        >
                           {content}
                         </td>
                       );
                     }
-                    return (
-                      <td
-                        key={c.id}
-                        className={cls}
-                        role="button"
-                        tabIndex={0}
-                        aria-pressed={attending}
-                        title={title}
-                        onClick={() => onTogglePresence(slot)}
-                        onKeyDown={onKey(() => onTogglePresence(slot))}
-                      >
-                        {content}
-                      </td>
-                    );
-                  }
-                  if (slot.bookable) {
-                    const past = new Date(slot.startsAt).getTime() < now;
-                    if (past) {
+                    if (slot.bookable) {
+                      const past = new Date(slot.startsAt).getTime() < now;
+                      if (past) {
+                        return (
+                          <td
+                            key={c.id}
+                            className="cell past"
+                            title="Créneau passé"
+                          >
+                            —
+                          </td>
+                        );
+                      }
+                      // Mode sélection : on coche (si aucun de mes créneaux au même horaire) ;
+                      // mode normal : réservation directe.
+                      const isSel = selected.has(slot.id);
+                      const canSel = !timeHasMine(slot.startsAt);
+                      const act = selMode
+                        ? canSel
+                          ? () => toggleSel(slot)
+                          : undefined
+                        : () => onBook(slot);
                       return (
-                        <td key={c.id} className="cell past" title="Créneau passé">
-                          —
+                        <td
+                          key={c.id}
+                          className={"cell free" + (isSel ? " selcell" : "")}
+                          {...(act
+                            ? {
+                                role: "button" as const,
+                                tabIndex: 0,
+                                onClick: act,
+                                onKeyDown: onKey(act),
+                              }
+                            : {})}
+                          aria-pressed={selMode ? isSel : undefined}
+                          title={
+                            selMode
+                              ? canSel
+                                ? "Sélectionner ce terrain"
+                                : "Tu joues déjà à cet horaire — un seul terrain à la fois"
+                              : "Cliquer pour réserver"
+                          }
+                        >
+                          {isSel ? "✓" : "Libre"}
                         </td>
                       );
                     }
                     return (
                       <td
                         key={c.id}
-                        className="cell free"
-                        role="button"
-                        tabIndex={0}
-                        title="Cliquer pour réserver"
-                        onClick={() => onBook(slot)}
-                        onKeyDown={onKey(() => onBook(slot))}
+                        className="cell booked"
+                        title="Réservé (hors groupe)"
                       >
-                        Libre
+                        Réservé
                       </td>
                     );
-                  }
-                  return (
-                    <td key={c.id} className="cell booked" title="Réservé (hors groupe)">
-                      Réservé
-                    </td>
-                  );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Barre d'action collante quand des créneaux sont sélectionnés. */}
+      {selMode && selected.size > 0 && (
+        <div className="wk-actionbar">
+          <span>
+            {selected.size} créneau{selected.size > 1 ? "x" : ""} sélectionné
+            {selected.size > 1 ? "s" : ""}
+          </span>
+          <button type="button" onClick={bookSelected}>
+            Réserver
+          </button>
+        </div>
+      )}
+    </>
   );
 }
