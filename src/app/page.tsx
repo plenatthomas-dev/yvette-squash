@@ -468,6 +468,92 @@ function RefreshIcon() {
   );
 }
 
+// Icône « information » (cercle + i) — ouvre la note de confidentialité.
+function InfoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <line x1="12" y1="11" x2="12" y2="16" />
+      <line x1="12" y1="8" x2="12" y2="8" />
+    </svg>
+  );
+}
+
+// Pied de page : petite note « Confidentialité & données » (obligation d'information RGPD).
+// Placée en bas de page (convention pour ce type de mention), sur l'écran de connexion
+// comme sur l'appli. La modale réutilise le style .modal existant.
+function PrivacyNotice() {
+  const [open, setOpen] = useState(false);
+  return (
+    <footer className="app-footer">
+      <button
+        type="button"
+        className="footer-info"
+        onClick={() => setOpen(true)}
+        aria-label="Confidentialité et données"
+        title="Confidentialité et données"
+      >
+        <InfoIcon />
+        <span>Confidentialité &amp; données</span>
+      </button>
+      {open && (
+        <div className="modal-overlay" onClick={() => setOpen(false)}>
+          <div
+            className="modal privacy"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confidentialité et données"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>Confidentialité &amp; données</h3>
+            <div className="privacy-body">
+              <p>
+                Application indépendante, <strong>non affiliée à ResaMania /
+                Stadline ni au club</strong>. Elle facilite la réservation des
+                terrains de squash du Complexe de Bures via ton compte
+                ResaMania.
+              </p>
+              <p>
+                Ton mot de passe ResaMania n'est <strong>jamais conservé</strong>.
+                Il ne sert qu'au moment de la connexion, pour t'authentifier
+                auprès de ResaMania. L'appli ne garde ensuite qu'un jeton de
+                session <strong>chiffré</strong> (AES-256-GCM), pour t'éviter de
+                te reconnecter à chaque visite.
+              </p>
+              <p>
+                Sont enregistrés : ton nom (fourni par ResaMania), ton adresse
+                e-mail, un éventuel pseudonyme que tu choisis, les réservations
+                faites via l'appli, et ton adresse IP de connexion (uniquement
+                pour limiter les tentatives abusives).
+              </p>
+              <p>
+                Ces données servent seulement à te connecter, afficher et gérer
+                les réservations, et protéger le service contre les abus. Elles
+                ne sont ni revendues ni transmises à des tiers (hormis
+                ResaMania, le service que tu utilises déjà).
+              </p>
+              <p>
+                Hébergement en Union européenne : application sur Vercel, base
+                de données sur Neon.
+              </p>
+              <p>
+                Tu peux demander à consulter ou supprimer tes données à tout
+                moment — la déconnexion efface déjà ta session. Une question ?
+                Écris via ⚙️ Paramètres › « Un commentaire&nbsp;? ».
+              </p>
+            </div>
+            <div className="modal-actions">
+              <button className="secondary" onClick={() => setOpen(false)}>
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </footer>
+  );
+}
+
 // Bouton « partager » : Web Share natif (mobile) sinon copie du lien.
 // Partage : notre PROPRE QR code (logo raquette au centre + « Squash de l'Yvette »),
 // scannable/partageable/téléchargeable. Contrairement au QR du menu natif du téléphone,
@@ -1148,6 +1234,8 @@ export default function Home() {
         </section>
       )}
 
+      <PrivacyNotice />
+
       <Toasts items={toasts} />
       <ConfirmDialog state={confirmState} onResolve={resolveConfirm} />
     </main>
@@ -1258,6 +1346,7 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
         jamais conservé. L'appli mémorise uniquement que tu es connecté, de façon
         sécurisée, pour t'éviter de te reconnecter sans arrêt.
       </p>
+      <PrivacyNotice />
     </main>
   );
 }

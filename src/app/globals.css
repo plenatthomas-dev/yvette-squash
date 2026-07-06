@@ -970,6 +970,73 @@ td.cell.past {
   width: auto;
 }
 
+/* --- Pied de page : note confidentialité -------------------------------- */
+.app-footer {
+  margin-top: 30px;
+  padding-top: 14px;
+  border-top: 1px solid var(--pico-card-border-color);
+  display: flex;
+  justify-content: flex-start;
+}
+
+/* Sur l'écran de connexion : centré, sans filet (plus discret). */
+.login .app-footer {
+  margin-top: 20px;
+  padding-top: 0;
+  border-top: none;
+  justify-content: center;
+}
+
+/* Lien-bouton discret (pas .secondary : on maîtrise fond/texte comme les filtres,
+   sinon Pico repeint le bouton en vert/texte blanc). */
+.footer-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  width: auto;
+  padding: 7px 12px;
+  font-size: 0.8rem;
+  background: transparent;
+  color: var(--pico-muted-color);
+  border: 1px solid var(--pico-card-border-color);
+}
+
+.footer-info:hover {
+  background: var(--pico-card-background-color);
+  color: var(--pico-color);
+}
+
+.footer-info svg {
+  display: block;
+}
+
+/* Modale confidentialité : un peu plus large, corps scrollable si l'écran est court. */
+.modal.privacy {
+  max-width: 460px;
+}
+
+.privacy-body {
+  max-height: 60vh;
+  overflow-y: auto;
+  margin-bottom: 16px;
+}
+
+.privacy-body p {
+  margin: 0 0 12px;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--pico-muted-color);
+}
+
+.privacy-body p:last-child {
+  margin-bottom: 0;
+}
+
+.privacy-body strong {
+  color: var(--pico-color);
+}
+
 /* --- Partage : QR code ------------------------------------------------- */
 .qr-wrap {
   display: flex;
