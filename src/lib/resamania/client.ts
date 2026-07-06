@@ -227,10 +227,18 @@ async function getStudios(token: string): Promise<Map<string, string>> {
         },
       },
     );
+    // Ne JAMAIS mettre en cache un échec ou un résultat vide : sinon `[]` (qui n'est pas
+    // null) reste en cache pour toute la durée de vie de l'instance serverless, et tous
+    // les noms de terrains retombent sur leur ID numérique brut (ex. « 5382 »). On renvoie
+    // une map vide pour CET appel (le planning s'affiche quand même) et on réessaiera au
+    // prochain — auto-guérison dès que /studios répond à nouveau correctement.
+    if (!res.ok) return new Map();
     const data = (await res.json()) as {
       "hydra:member"?: Array<{ "@id": string; name: string }>;
     };
-    studiosCache = (data["hydra:member"] ?? []).map((s) => ({
+    const members = data["hydra:member"] ?? [];
+    if (members.length === 0) return new Map();
+    studiosCache = members.map((s) => ({
       iri: s["@id"],
       name: s.name,
     }));
