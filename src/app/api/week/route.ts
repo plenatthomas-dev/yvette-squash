@@ -124,16 +124,24 @@ export async function GET(req: NextRequest) {
 
     // Snapshot BRUT (avant annotation) de chaque jour → alimente le cache des comptes
     // « email seul » : ils verront TOUTE la semaine consultée ici, pas seulement les jours
-    // ouverts en vue Jour.
+    // ouverts en vue Jour. Écriture CONDITIONNELLE : une seule lecture batchée des 7 jours,
+    // puis on n'upsert QUE les jours dont le planning a changé (souvent aucun → 0 écriture).
+    const prevSnaps = await prisma.planningSnapshot.findMany({
+      where: { date: { in: dates } },
+      select: { date: true, payloadJson: true },
+    });
+    const prevByDate = new Map(prevSnaps.map((s) => [s.date, s.payloadJson]));
     await Promise.all(
-      days.map((day) => {
-        const payloadJson = JSON.stringify(day.planning);
-        return prisma.planningSnapshot.upsert({
-          where: { date: day.date },
-          update: { payloadJson, updatedById: session.userId },
-          create: { date: day.date, payloadJson, updatedById: session.userId },
-        });
-      }),
+      days
+        .map((day) => ({ day, payloadJson: JSON.stringify(day.planning) }))
+        .filter(({ day, payloadJson }) => prevByDate.get(day.date) !== payloadJson)
+        .map(({ day, payloadJson }) =>
+          prisma.planningSnapshot.upsert({
+            where: { date: day.date },
+            update: { payloadJson, updatedById: session.userId },
+            create: { date: day.date, payloadJson, updatedById: session.userId },
+          }),
+        ),
     );
 
     await annotateWeek(days, session.userId);

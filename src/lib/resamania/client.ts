@@ -260,12 +260,34 @@ type RawEvent = {
   bookedAttendees?: Array<{ contactId?: string }>;
 };
 
+// Cache court du planning BRUT par date (~20 s). Partagé entre requêtes et entre joueurs :
+// le planning du club est identique pour tous. But : absorber les vues répétées et le
+// reload-au-focus sans re-taper ResaMania à chaque fois (latence dominante). Invalidé
+// explicitement sur réservation/annulation (cf. invalidatePlanningCache).
+// NB serverless : cache par instance de fonction (réutilisée par Fluid Compute) ; une
+// autre instance retombe sur ResaMania ou expire en ≤ 20 s — cohérence « eventual » assumée.
+const PLANNING_TTL_MS = 20_000;
+const planningCache = new Map<string, { at: number; data: PlanningDay }>();
+
+/** Vide le cache planning : une date précise, ou tout le cache si `date` est omis. */
+export function invalidatePlanningCache(date?: string): void {
+  if (date) planningCache.delete(date);
+  else planningCache.clear();
+}
+
 export async function getPlanning(
   date: string,
   accessToken?: string,
 ): Promise<PlanningDay> {
   if (USE_MOCK || !accessToken) {
     return mockPlanning(date, CLUB_ID);
+  }
+
+  const cached = planningCache.get(date);
+  if (cached && Date.now() - cached.at < PLANNING_TTL_MS) {
+    // Clone OBLIGATOIRE : les appelants MUTENT les slots (annotation par joueur, snapshot).
+    // Servir l'objet caché tel quel polluerait le cache avec l'annotation d'un autre joueur.
+    return structuredClone(cached.data);
   }
 
   const studios = await getStudios(accessToken);
@@ -318,7 +340,10 @@ export async function getPlanning(
     a.name.localeCompare(b.name),
   );
 
-  return { date, clubId: CLUB_ID, courts, slots };
+  const result: PlanningDay = { date, clubId: CLUB_ID, courts, slots };
+  // On met en cache un CLONE (l'original est renvoyé et sera muté par l'appelant).
+  planningCache.set(date, { at: Date.now(), data: structuredClone(result) });
+  return result;
 }
 
 // ----------------------------------------------------------------------------

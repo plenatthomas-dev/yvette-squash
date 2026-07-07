@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cancel, findAttendeeId } from "@/lib/resamania/client";
+import { cancel, findAttendeeId, invalidatePlanningCache } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { isClassEventId } from "@/lib/validation";
@@ -48,5 +48,8 @@ export async function POST(req: NextRequest) {
     data: { status: "cancelled" },
   });
 
+  // Un terrain vient de se libérer. On ne connaît pas la date ici (juste le classEventId)
+  // → on vide tout le cache planning (annulations rares, recharge en une requête).
+  invalidatePlanningCache();
   return NextResponse.json({ ok: true });
 }

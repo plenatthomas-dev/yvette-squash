@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cancel, findAttendeeId } from "@/lib/resamania/client";
+import { cancel, findAttendeeId, invalidatePlanningCache } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 
@@ -47,5 +47,7 @@ export async function DELETE(
     return NextResponse.json({ error: r.error }, { status: 409 });
   }
   await prisma.booking.update({ where: { id }, data: { status: "cancelled" } });
+  // Le créneau se libère : purge le cache planning.
+  invalidatePlanningCache();
   return NextResponse.json({ ok: true });
 }

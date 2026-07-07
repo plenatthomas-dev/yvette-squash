@@ -1,11 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import dynamic from "next/dynamic";
 import QRCode from "qrcode";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { PlanningGrid } from "@/components/PlanningGrid";
 import { WeekGrid } from "@/components/WeekGrid";
-import Tricount from "@/components/Tricount";
+// Tricount chargé à la demande (seulement à l'ouverture de la vue « Frais ») : son JS ne
+// pèse plus sur le bundle initial de la page. Rendu client uniquement (déjà dans "use client").
+const Tricount = dynamic(() => import("@/components/Tricount"), { ssr: false });
 import { fmtTime, slotMinutes } from "@/lib/time";
 import { downloadIcs } from "@/lib/ics";
 import {

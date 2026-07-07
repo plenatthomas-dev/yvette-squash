@@ -81,12 +81,21 @@ export async function GET(req: NextRequest) {
     }
 
     // Snapshot BRUT (avant annotation) → sert les comptes « email seul » sans jeton.
+    // Écriture CONDITIONNELLE : on ne réécrit que si le planning a changé (une lecture,
+    // moins chère qu'une écriture, évite d'écrire le même gros JSON à chaque affichage —
+    // encore plus efficace avec le cache planning, qui renvoie un payload identique).
     const payloadJson = JSON.stringify(planning);
-    await prisma.planningSnapshot.upsert({
+    const prevSnap = await prisma.planningSnapshot.findUnique({
       where: { date },
-      update: { payloadJson, updatedById: session.userId },
-      create: { date, payloadJson, updatedById: session.userId },
+      select: { payloadJson: true },
     });
+    if (!prevSnap || prevSnap.payloadJson !== payloadJson) {
+      await prisma.planningSnapshot.upsert({
+        where: { date },
+        update: { payloadJson, updatedById: session.userId },
+        create: { date, payloadJson, updatedById: session.userId },
+      });
+    }
 
     // Annotation (qui a réservé + présences) — partagée avec le chemin cache.
     await annotatePlanning(planning, session.userId);

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { book } from "@/lib/resamania/client";
+import { book, invalidatePlanningCache } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { isClassEventId } from "@/lib/validation";
@@ -89,5 +89,8 @@ export async function POST(req: NextRequest) {
       status: "booked",
     },
   });
+  // Le créneau vient de passer « réservé » : purge le cache planning pour que la prochaine
+  // lecture reflète tout de suite l'état réel (sinon jusqu'à 20 s à le voir encore libre).
+  invalidatePlanningCache();
   return NextResponse.json({ ok: true, state: r.state });
 }
