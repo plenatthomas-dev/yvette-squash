@@ -156,15 +156,24 @@ export function PlanningGrid({
                       const hm = t.slice(11, 16);
                       const count = waitCountFor?.(d, hm) ?? 0;
                       const mine = myWaitFor?.(d, hm) ?? null;
-                      if (count === 0 && !watchable) return null;
-                      const label = mine
-                        ? `Tu es en liste d'attente${mine.position ? ` (${mine.position}ᵉ)` : ""}${watchable ? " — cliquer pour te retirer" : ""}`
-                        : `Créneau complet — se mettre en liste d'attente${count ? ` (${count} en attente)` : ""}`;
+                      // Déjà « +1 » sur ce créneau → on masque l'offre de REJOINDRE la liste
+                      // d'attente (le compteur reste visible ; se retirer reste possible).
+                      const attending = planning.slots.some(
+                        (s) => s.startsAt === t && s.iAmAttending,
+                      );
                       const act = !watchable
                         ? undefined
                         : mine
                           ? () => onUnwatch?.(d, hm)
-                          : () => onWatch?.(planning.slots.find((s) => s.startsAt === t)!);
+                          : attending
+                            ? undefined
+                            : () => onWatch?.(planning.slots.find((s) => s.startsAt === t)!);
+                      if (count === 0 && !act) return null;
+                      const label = mine
+                        ? `Tu es en liste d'attente${mine.position ? ` (${mine.position}ᵉ)` : ""}${watchable ? " — cliquer pour te retirer" : ""}`
+                        : attending
+                          ? `Tu es déjà +1 sur ce créneau${count ? ` · ${count} en attente` : ""}`
+                          : `Créneau complet — se mettre en liste d'attente${count ? ` (${count} en attente)` : ""}`;
                       return (
                         <button
                           type="button"

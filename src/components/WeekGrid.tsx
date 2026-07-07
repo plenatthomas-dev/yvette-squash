@@ -263,6 +263,10 @@ export function WeekGrid({
   const sheetComplete = sheet ? cellComplete(sheet.date, sheet.hm) : false;
   const sheetWaitCount = sheet ? waitCountFor?.(sheet.date, sheet.hm) ?? 0 : 0;
   const sheetMyWait = sheet ? myWaitFor?.(sheet.date, sheet.hm) ?? null : null;
+  // Déjà « +1 » sur ce créneau (n'importe quel terrain) → on masque l'offre de rejoindre.
+  const sheetAttending = sheet
+    ? courts.some((c) => slotAt.get(segKey(sheet.date, sheet.hm, c.id))?.iAmAttending)
+    : false;
   const sheetAnySlot = sheet
     ? courts
         .map((c) => slotAt.get(segKey(sheet.date, sheet.hm, c.id)))
@@ -466,7 +470,8 @@ export function WeekGrid({
                 </div>
               </div>
             </div>
-            {sheetComplete && (
+            {sheetComplete &&
+              (sheetMyWait || sheetWaitCount > 0 || (canWatch && !sheetAttending)) && (
               <div className="wait-row">
                 {sheetMyWait ? (
                   <>
@@ -492,8 +497,9 @@ export function WeekGrid({
                   <>
                     <span className="muted tiny">
                       🕒 Créneau complet · {sheetWaitCount} en attente
+                      {sheetAttending ? " (tu es déjà +1)" : ""}
                     </span>
-                    {canWatch && sheetAnySlot && (
+                    {canWatch && sheetAnySlot && !sheetAttending && (
                       <button
                         type="button"
                         className="secondary"

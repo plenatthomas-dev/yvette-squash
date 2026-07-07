@@ -215,6 +215,11 @@ réservé** via un code couleur (asso vs autre asso) — **comme en vue jour**.
     modale). Modale « Ma liste d'attente » (ex-« Mes alertes ») affiche ma position. Cron
     `check-alerts` : wording « tu étais en liste d'attente ». Note de confidentialité
     complétée (compteur + position exposés, jamais les noms). **Aucune migration.**
+  - **Cohabitation avec le « +1 »** (`Attendance`) : les deux systèmes sont orthogonaux et
+    inchangés côté +1. Nuance retenue : quand tu es **déjà +1** sur le créneau, l'offre de
+    **rejoindre** la liste d'attente est **masquée** (le compteur reste visible, et se
+    **retirer** reste possible si tu étais déjà inscrit). Le test « complet » exclut aussi
+    le cas où tu as **ta propre réservation** à cet horaire.
 
 ---
 
