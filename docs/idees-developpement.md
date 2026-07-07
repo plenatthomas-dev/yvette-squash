@@ -168,9 +168,11 @@ réservé** via un code couleur (asso vs autre asso) — **comme en vue jour**.
 
 ## ➕ Idées complémentaires (ajoutées à l'analyse)
 
-- **A. Rappels de match (push avant le créneau)** · ⭐⭐⭐ · **M**
+- **A. Rappels de match (push avant le créneau)** · ❌ écarté · ⭐⭐⭐ · **M**
   Réutilise `PushSubscription`. ⚠️ cron quotidien (contrainte 3) → rappel « le matin
   même » réaliste ; « 1 h avant » supposerait de densifier le cron (limite du plan Hobby).
+  **Écarté** (décision porteur, 2026-07-07) : « l'asso se souvient de quand elle doit
+  jouer » → pas de besoin de rappel. Réactivable si l'avis change.
 - **C. Ajout au calendrier (export `.ics`)** · ✅ fait · ⭐⭐ · **S**
   Générer un fichier ICS d'une réservation pour l'agenda perso. Aucun accès ResaMania.
   **Livré** (`src/lib/ics.ts`) : `buildIcs`/`downloadIcs` produisent un `.ics` RFC 5545
@@ -233,7 +235,7 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 | 1 + 7b | Réservation groupée & multi-sélection | ⭐⭐⭐ | M | — | ✅ **fait** |
 | 6 | Annuaire (opt-out) | ⭐⭐ | S | — | ✅ **fait** |
 | C | Export `.ics` | ⭐⭐ | S | — | ✅ **fait** |
-| A | Rappels de match (push) | ⭐⭐⭐ | M | — | Moyenne-haute |
+| A | Rappels de match (push) | ⭐⭐⭐ | M | — | ❌ **écarté** (porteur) |
 | 5a | Commentaires sur un tricount | ⭐⭐ | S–M | — | Moyenne |
 | D | Liste d'attente | ⭐⭐⭐ | M (réel XS–S) | SlotAlert | ✅ **fait** (réutilise `SlotAlert`) |
 | 4 | Délégation de droits | ⭐⭐ | M–L | — | À cadrer (sécurité) |
@@ -246,23 +248,24 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 1. **Vague 1 — quick wins** (fort effet, peu cher) : ~~**7a** (couleurs semaine)~~ ✅,
    ~~**6** (annuaire opt-out)~~ ✅, ~~**C** (.ics)~~ ✅. → **vague 1 close**.
 2. **Vague 2 — feature phare** : ~~**1 + 7b** (réservation groupée + sélection multiple)~~ ✅.
-3. **Vague 3 — engagement** *(en cours)* : ~~**D** (liste d'attente)~~ ✅, **A** (rappels
-   push), **5a** (commentaires tricount).
+3. **Vague 3 — engagement** *(en cours)* : ~~**D** (liste d'attente)~~ ✅, ~~**A** (rappels
+   push)~~ ❌ écarté (porteur). → **reste 5a** (commentaires tricount).
 4. **Vague 4 — gros / sensibles, à décider** : **4** (délégation, design sécurité),
    **2** (auto-rebook, à cadrer), **3** (tournois, si fréquents), **5b** (messagerie).
 
-> **État au 2026-07-07** : **vague 1 close** (**7a**, **6** annuaire, **C** export `.ics`) et
-> **vague 2** livrée (**1 + 7b**, feature phare) — tout est fusionné dans `main`, en prod.
-> **Prochaine étape = vague 3 (engagement)** : **A** (rappels push) recommandé en premier
-> (⭐⭐⭐, réutilise `PushSubscription` + le cron quotidien), puis **D** (liste d'attente,
-> étend `SlotAlert`) et **5a** (commentaires tricount). _Idée B (stats perso) écartée._
+> **État au 2026-07-07** : **vagues 1 et 2 closes** ; **vague 3** bien avancée — **D**
+> (liste d'attente) **livrée** sur `main`, **A** (rappels push) **écartée** (décision
+> porteur). **Prochaine étape = 5a** (commentaires sur un tricount) — dernier item de la
+> vague 3, indépendant de l'annuaire. Ensuite : **vague 4** (sensibles : 4, 2, 3, 5b),
+> à cadrer avant tout code. _Idées B (stats perso) et A (rappels) écartées._
 
 ### Lecture d'ensemble (qualité des idées)
 
 - **Les meilleures** : **7a** et **1/7b** (réservation) — pile sur le cœur de l'app, forte
   valeur, coût raisonnable, et **7a** presque « gratuite » vu que la donnée est déjà là.
   → **toutes deux livrées** (juillet 2026).
-- **Bon rapport valeur/effort** : **6, C, A, 5a, D** — bricks utiles et bornées.
+- **Bon rapport valeur/effort** : **6, C, D** (livrées) et **5a** (à venir) — bricks utiles
+  et bornées. _(A était dans ce lot mais a été écarté par le porteur.)_
 - **Séduisantes mais à cadrer** : **2** (fragile : cron quotidien + consentement +
   concurrence avec le public → **D** est une alternative plus sûre) et **4** (sécurité).
 - **Lourdes pour la valeur** : **3** (tournois) et **5b** (messagerie générale) — à ne
