@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { MAX_TITLE_LEN } from "@/lib/tricount";
 
 // Vue « Frais » : tricounts par jour (un tricount = les dépenses d'une date),
 // avec historique, validation des payeurs puis remboursements guidés.
@@ -115,7 +114,6 @@ export default function Tricount({ toast, onExpired }: Props) {
   // Tricount cible : soit la date d'un tricount existant, soit "new" (nouvelle date).
   const [tcChoice, setTcChoice] = useState<string>("new");
   const [date, setDate] = useState(todayISO());
-  const [title, setTitle] = useState("");
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState("");
   const [payerId, setPayerId] = useState("");
@@ -164,7 +162,6 @@ export default function Tricount({ toast, onExpired }: Props) {
     setDate(today);
     // Pré-sélection : le tricount d'aujourd'hui s'il existe, sinon « nouvelle date ».
     setTcChoice(data.tricounts.some((t) => t.date === today) ? today : "new");
-    setTitle("");
     setLabel("");
     setAmount("");
     setPayerId(data.me);
@@ -206,8 +203,6 @@ export default function Tricount({ toast, onExpired }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           date: targetDate,
-          // Le titre ne concerne que la CRÉATION d'un tricount (nouvelle date).
-          title: tcChoice === "new" ? title.trim() || undefined : undefined,
           label: label.trim(),
           amountCents: cents,
           payerId,
@@ -378,10 +373,7 @@ export default function Tricount({ toast, onExpired }: Props) {
               }}
             >
               <div className="tri-card-title">
-                <strong>
-                  {t.title ? `${t.title} — ` : ""}
-                  {prettyDate(t.date)}
-                </strong>
+                <strong>Tricount du {prettyDate(t.date)}</strong>
                 <small>
                   {fmtEuros(t.totalCents)}
                   {myBal !== 0 &&
@@ -452,7 +444,7 @@ export default function Tricount({ toast, onExpired }: Props) {
                   <div className="tri-approvals">
                     <h3>🔒 Avant les remboursements</h3>
                     <p className="muted tiny">
-                      Le payeur valide les remboursements reçus.{" "}
+                      Le payeur valide sa demande de remboursement.{" "}
                       {pending.length > 0 &&
                         `En attente de : ${pending.map((p) => p.name).join(", ")}.`}
                     </p>
@@ -526,8 +518,7 @@ export default function Tricount({ toast, onExpired }: Props) {
                 <select value={tcChoice} onChange={(e) => setTcChoice(e.target.value)}>
                   {data.tricounts.map((t) => (
                     <option key={t.id} value={t.date}>
-                      {t.title ? `${t.title} — ` : ""}
-                      {prettyDate(t.date)}
+                      Tricount du {prettyDate(t.date)}
                     </option>
                   ))}
                   <option value="new">➕ Nouvelle date…</option>
@@ -538,15 +529,6 @@ export default function Tricount({ toast, onExpired }: Props) {
                   Jour du tricount
                   <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
                 </label>
-              )}
-              {tcChoice === "new" && !data.tricounts.some((t) => t.date === date) && (
-                <input
-                  type="text"
-                  placeholder="Titre du tricount (optionnel) — ex. Repas"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  maxLength={MAX_TITLE_LEN}
-                />
               )}
               <input
                 type="text"
@@ -617,7 +599,6 @@ export default function Tricount({ toast, onExpired }: Props) {
           >
             <h3>💸 Remboursement</h3>
             <p className="muted tiny">
-              {refundFor.title ? `${refundFor.title} — ` : ""}
               Tricount du {prettyDate(refundFor.date)}. La date et l'heure du
               remboursement seront enregistrées.
             </p>
