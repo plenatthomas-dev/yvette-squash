@@ -1365,8 +1365,20 @@ table.planning.week td.cell {
   gap: 10px;
   padding: 12px 14px;
   cursor: pointer;
+  /* Couleurs EXPLICITES : sans ça Pico applique aux [role="button"] son fond
+     primaire (bleu clair) + texte blanc au focus/clic → titre illisible. */
+  background: transparent;
+  color: var(--pico-color);
 }
-.tri-card-head:hover { background: color-mix(in srgb, var(--pico-primary) 5%, transparent); }
+.tri-card-head:hover,
+.tri-card-head:focus,
+.tri-card-head:active { background: color-mix(in srgb, var(--pico-primary) 5%, transparent); }
+/* Focus clavier visible, sans fond bleu Pico ni box-shadow parasite. */
+.tri-card-head:focus { box-shadow: none; }
+.tri-card-head:focus-visible {
+  outline: 2px solid var(--pico-primary);
+  outline-offset: -2px;
+}
 
 .tri-card-title {
   display: flex;
