@@ -618,6 +618,35 @@ table.planning thead th.time {
   opacity: 0.65;
 }
 
+/* Liste d'attente (idée D) : pastille dans l'en-tête d'horaire (vue jour) d'un créneau
+   complet — « 🕒 N » + action rejoindre/quitter. */
+.wait-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 3px;
+  padding: 1px 6px;
+  font-size: 0.6rem;
+  line-height: 1.4;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 999px;
+  background: var(--pico-background-color);
+  color: var(--pico-color);
+  cursor: pointer;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+.wait-btn:disabled {
+  cursor: default;
+  opacity: 0.8;
+}
+.wait-btn.on {
+  background: var(--group);
+  color: var(--group-fg);
+  border-color: transparent;
+  font-weight: 600;
+}
+
 td.cell {
   height: 46px;
   font-size: 0.8rem;
@@ -656,15 +685,6 @@ td.cell[role="button"]:focus-visible {
 td.cell.booked {
   background: var(--booked);
   color: var(--booked-fg);
-}
-
-/* Cases réservées « alertables » : on signale qu'un clic crée une alerte. */
-td.cell.watchable {
-  cursor: pointer;
-}
-
-td.cell.watchable:hover {
-  filter: brightness(0.97);
 }
 
 td.cell.group {
@@ -1373,6 +1393,23 @@ table.planning.week td.cell {
 /* --- Vue semaine : cellule bicolore, un segment CLIQUABLE par terrain ---- */
 table.planning.week td.cell.wk {
   padding: 2px;
+  position: relative; /* ancre le badge « N en attente » */
+}
+
+/* Badge « 🕒 N » (liste d'attente, idée D) en coin de case complète (vue semaine). */
+.wk-wait {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 1;
+  padding: 0 4px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 1.5;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  pointer-events: none; /* la case reste cliquable pour ouvrir le détail */
 }
 .wk-cell {
   display: flex;
@@ -1561,6 +1598,25 @@ table.planning.week th.time.selhead {
 }
 .wk-detail-actions .muted.tiny {
   align-self: center;
+}
+
+/* Bloc liste d'attente (idée D) dans la modale de détail (vue semaine) : compteur/position
+   + bouton rejoindre/quitter, sous les actions du terrain. */
+.wait-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--pico-muted-border-color);
+}
+.wait-row button {
+  margin: 0;
+  width: auto;
+  padding: 6px 14px;
+  white-space: nowrap;
 }
 
 /* --- Skeleton de chargement --------------------------------------------- */

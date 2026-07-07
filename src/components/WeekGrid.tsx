@@ -69,7 +69,10 @@ export function WeekGrid({
   selMode,
   setSelMode,
   onWatch,
+  onUnwatch,
   canWatch,
+  waitCountFor,
+  myWaitFor,
 }: {
   days: { date: string; planning: PlanningDay }[];
   filter: (iso: string) => boolean;
@@ -81,12 +84,14 @@ export function WeekGrid({
   // Mode « Sélection » piloté par la page (bouton dans la barre de vue).
   selMode: boolean;
   setSelMode: (v: boolean) => void;
-  // Alerte « préviens-moi si ça se libère » sur un terrain réservé hors asso
-  // (segment « other »), comme en vue jour.
+  // Liste d'attente (idée D) : s'inscrire sur un créneau complet (via la modale de détail),
+  // compteur « N en attente » montré à tous, mon inscription/rang.
   onWatch?: (slot: Slot) => void;
+  onUnwatch?: (date: string, hm: string) => void;
   canWatch?: boolean;
+  waitCountFor?: (date: string, hm: string) => number;
+  myWaitFor?: (date: string, hm: string) => { position?: number } | null;
 }) {
-  const watchable = !!(canWatch && onWatch);
   const [sheet, setSheet] = useState<{ date: string; hm: string; courtId: string } | null>(
     null,
   );
@@ -145,9 +150,22 @@ export function WeekGrid({
   const rowHasReservable = (date: string, hm: string) =>
     courts.some((c) => isReservable(slotAt.get(segKey(date, hm, c.id)) ?? null, date, hm));
 
+  // Case COMPLÈTE (liste d'attente, idée D) : à venir, aucun terrain libre, et je n'y joue
+  // pas déjà. Un terrain libre → réservation directe (pas d'attente).
+  const cellComplete = (date: string, hm: string) => {
+    const atCell = courts
+      .map((c) => slotAt.get(segKey(date, hm, c.id)))
+      .filter((s): s is Slot => !!s);
+    if (atCell.length === 0) return false;
+    if (atCell.some((s) => new Date(s.startsAt).getTime() < now)) return false;
+    if (atCell.some((s) => s.mine)) return false;
+    if (atCell.some((s) => s.bookable)) return false;
+    return true;
+  };
+
   const segAria = (date: string, hm: string, court: CourtRef, seg: Seg, slot: Slot | null) => {
     const who = seg === "asso" && slot?.bookedBy ? ` (${slot.bookedBy})` : "";
-    const hint = seg === "other" && watchable ? " — cliquer pour être alerté si ça se libère" : "";
+    const hint = seg === "other" ? " — cliquer pour le détail" : "";
     return `${shortDay(date)} ${hm} · ${court.name} : ${SEG_LABEL[seg]}${who}${hint}`;
   };
 
@@ -203,13 +221,12 @@ export function WeekGrid({
       else onBook(slot);
     } else if (seg === "mine" && slot) {
       onCancelMine(slot);
-    } else if (seg === "asso" && slot) {
+    } else if ((seg === "asso" || seg === "other") && slot) {
+      // Réservé (asso ou hors asso) : ouvre le détail — c'est là qu'on rejoint la liste
+      // d'attente si le créneau est complet (idée D).
       setSheet({ date, hm, courtId: court.id });
-    } else if (seg === "other" && slot && watchable) {
-      // Réservé hors asso : « préviens-moi si ça se libère » (comme en vue jour).
-      onWatch!(slot);
     }
-    // past / closed (et other sans watch) : inerte
+    // past / closed : inerte
   };
 
   const bookSelected = () => {
@@ -242,6 +259,15 @@ export function WeekGrid({
     sheetSlot && (sheetSeg === "asso" || sheetSeg === "mine") && sheetSlot.attendees?.length
       ? sheetSlot.attendees.join(", ")
       : "";
+  // Liste d'attente (idée D) proposée dans la modale quand la case entière est complète.
+  const sheetComplete = sheet ? cellComplete(sheet.date, sheet.hm) : false;
+  const sheetWaitCount = sheet ? waitCountFor?.(sheet.date, sheet.hm) ?? 0 : 0;
+  const sheetMyWait = sheet ? myWaitFor?.(sheet.date, sheet.hm) ?? null : null;
+  const sheetAnySlot = sheet
+    ? courts
+        .map((c) => slotAt.get(segKey(sheet.date, sheet.hm, c.id)))
+        .find((s): s is Slot => !!s) ?? null
+    : null;
 
   return (
     <>
@@ -286,8 +312,20 @@ export function WeekGrid({
                 >
                   {hm}
                 </th>
-                {days.map((d) => (
+                {days.map((d) => {
+                  const waitN = waitCountFor?.(d.date, hm) ?? 0;
+                  const showWait = waitN > 0 && cellComplete(d.date, hm);
+                  return (
                   <td key={d.date} className="cell wk">
+                    {showWait && (
+                      <span
+                        className="wk-wait"
+                        title={`${waitN} en liste d'attente`}
+                        aria-label={`${waitN} en liste d'attente`}
+                      >
+                        🕒{waitN}
+                      </span>
+                    )}
                     <span className="wk-cell">
                       {courts.map((c) => {
                         const slot = slotAt.get(segKey(d.date, hm, c.id)) ?? null;
@@ -299,7 +337,7 @@ export function WeekGrid({
                           : seg === "free" ||
                             seg === "asso" ||
                             seg === "mine" ||
-                            (seg === "other" && watchable);
+                            seg === "other";
                         return (
                           <span
                             key={c.id}
@@ -329,7 +367,8 @@ export function WeekGrid({
                       })}
                     </span>
                   </td>
-                ))}
+                  );
+                })}
               </tr>
             ))}
           </tbody>
@@ -427,6 +466,49 @@ export function WeekGrid({
                 </div>
               </div>
             </div>
+            {sheetComplete && (
+              <div className="wait-row">
+                {sheetMyWait ? (
+                  <>
+                    <span className="muted tiny">
+                      🕒 Tu es en liste d'attente
+                      {sheetMyWait.position ? ` (${sheetMyWait.position}ᵉ)` : ""} ·{" "}
+                      {sheetWaitCount} en attente
+                    </span>
+                    {canWatch && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => {
+                          setSheet(null);
+                          onUnwatch?.(sheet.date, sheet.hm);
+                        }}
+                      >
+                        Quitter la liste
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span className="muted tiny">
+                      🕒 Créneau complet · {sheetWaitCount} en attente
+                    </span>
+                    {canWatch && sheetAnySlot && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => {
+                          setSheet(null);
+                          onWatch?.(sheetAnySlot);
+                        }}
+                      >
+                        Me prévenir si ça se libère
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
             <div className="modal-actions">
               <button
                 className="secondary"

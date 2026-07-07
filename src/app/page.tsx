@@ -736,6 +736,16 @@ function PrivacyNotice() {
                 </p>
               )}
               <p>
+                <strong>Liste d'attente &amp; notifications.</strong> Sur un créneau
+                complet, tu peux demander à être prévenu qu'un terrain se libère : on
+                enregistre alors le créneau visé et, si tu l'autorises, un abonnement aux
+                notifications de ton navigateur (pour t'envoyer l'alerte). Le
+                <strong> nombre de membres en attente</strong> et <strong>ta position</strong>
+                sont affichés aux membres connectés — <strong>jamais le nom</strong> des
+                inscrits. Tu peux quitter une liste d'attente à tout moment (🕒 « Ma liste
+                d'attente »).
+              </p>
+              <p>
                 Hébergement en Union européenne : application sur Vercel, base
                 de données sur Neon.
               </p>
@@ -992,6 +1002,8 @@ interface AlertItem {
   id: string;
   date: string; // YYYY-MM-DD
   hm: string; // HH:MM
+  count?: number; // total d'inscrits en liste d'attente sur ce créneau
+  position?: number; // mon rang (1 = 1ᵉʳ inscrit)
 }
 
 export default function Home() {
@@ -1021,6 +1033,9 @@ export default function Home() {
   const dateInputRef = useRef<HTMLInputElement>(null);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  // Liste d'attente (idée D) : nombre d'inscrits par créneau ("YYYY-MM-DD|HH:MM" -> n),
+  // pour la plage affichée. Alimenté par /api/alerts/counts, montré à tous.
+  const [waitCounts, setWaitCounts] = useState<Record<string, number>>({});
   // Badge € : nombre de tricounts où JE dois de l'argent et où les remboursements
   // sont ouverts (action possible « rembourser »). Alimenté au chargement/focus et,
   // en direct, par le composant Tricount quand la vue Frais est ouverte.
@@ -1085,6 +1100,13 @@ export default function Home() {
     if (me && canNotify) loadAlerts();
   }, [me, canNotify, loadAlerts]);
 
+  // Compteurs « N en attente » pour la plage [from, to] (jour : from==to).
+  const loadWaitCounts = useCallback(async (from: string, to: string) => {
+    const r = await fetch(`/api/alerts/counts?from=${from}&to=${to}`);
+    if (r.ok) setWaitCounts(await r.json());
+    else setWaitCounts({});
+  }, []);
+
   // Compteur du badge € : tricounts où je dois de l'argent, remboursements ouverts.
   const loadTriOwed = useCallback(async () => {
     const r = await fetch("/api/tricount");
@@ -1126,6 +1148,7 @@ export default function Home() {
         setPlanning(pdata);
         const jr = await fetch(`/api/bookings?date=${d}`);
         setJournal(jr.ok ? await jr.json() : []);
+        loadWaitCounts(d, d);
       } catch (e) {
         setError((e as Error).message);
         setPlanning(null);
@@ -1133,7 +1156,7 @@ export default function Home() {
         setLoading(false);
       }
     },
-    [],
+    [loadWaitCounts],
   );
 
   const loadWeek = useCallback(async (d: string) => {
@@ -1148,14 +1171,16 @@ export default function Home() {
       }
       const j = await r.json();
       if (!r.ok) throw new Error(j.error ?? `Erreur ${r.status}`);
-      setWeek(j as { date: string; planning: PlanningDay }[]);
+      const wk = j as { date: string; planning: PlanningDay }[];
+      setWeek(wk);
+      if (wk.length) loadWaitCounts(wk[0].date, wk[wk.length - 1].date);
     } catch (e) {
       setError((e as Error).message);
       setWeek([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadWaitCounts]);
 
   // Lecture de l'état initial : URL (?date=&view=&range=) prioritaire, sinon localStorage.
   useEffect(() => {
@@ -1481,7 +1506,17 @@ export default function Home() {
     reload();
   };
 
-  // « Préviens-moi si un terrain se libère » sur un créneau réservé.
+  // Rafraîchit les compteurs « N en attente » pour la plage actuellement affichée.
+  const refreshWaitCounts = useCallback(() => {
+    if (view === "week" && week.length) {
+      loadWaitCounts(week[0].date, week[week.length - 1].date);
+    } else {
+      loadWaitCounts(date, date);
+    }
+  }, [view, week, date, loadWaitCounts]);
+
+  // Liste d'attente (idée D) : s'inscrire pour être prévenu qu'un terrain se libère sur
+  // un créneau COMPLET. La résa reste manuelle (notif push quand ça se libère).
   const onWatch = async (slot: Slot) => {
     if (busy || confirmState) return;
     if (!canNotify) {
@@ -1491,9 +1526,9 @@ export default function Home() {
     const day = slot.startsAt.slice(0, 10);
     const hm = slot.startsAt.slice(11, 16);
     const ok = await askConfirm({
-      title: "Être alerté si ça se libère ?",
-      body: `${fmtTime(slot.startsAt)} le ${prettyDate(day)} — on te notifie dès qu'un terrain se libère à cet horaire.`,
-      confirmLabel: "M'alerter 🔔",
+      title: "Rejoindre la liste d'attente ?",
+      body: `${fmtTime(slot.startsAt)} le ${prettyDate(day)} — on te notifie dès qu'un terrain se libère à cet horaire (réservation manuelle).`,
+      confirmLabel: "M'inscrire 🕒",
     });
     if (!ok) return;
     const subscribed = await ensurePushSubscribed();
@@ -1509,10 +1544,11 @@ export default function Home() {
       });
       if (handleExpired(res.status)) return;
       if (!res.ok) throw new Error();
-      toast("ok", "Alerte activée 🔔");
+      toast("ok", "Inscrit en liste d'attente 🕒");
       loadAlerts();
+      refreshWaitCounts();
     } catch {
-      toast("err", "Impossible d'activer l'alerte.");
+      toast("err", "Impossible de rejoindre la liste d'attente.");
     }
   };
 
@@ -1520,7 +1556,19 @@ export default function Home() {
     setAlerts((a) => a.filter((x) => x.id !== id)); // retrait optimiste
     await fetch(`/api/alerts/${id}`, { method: "DELETE" }).catch(() => {});
     loadAlerts();
+    refreshWaitCounts();
   };
+
+  // Retrait de la liste d'attente depuis la grille (par créneau, pas par id d'alerte).
+  const onUnwatch = (date: string, hm: string) => {
+    const a = alerts.find((x) => x.date === date && x.hm === hm);
+    if (a) cancelAlert(a.id);
+  };
+
+  // Compteur « N en attente » et mon rang pour un créneau (pour les grilles + modale).
+  const waitCountFor = (date: string, hm: string) => waitCounts[`${date}|${hm}`] ?? 0;
+  const myWaitFor = (date: string, hm: string) =>
+    alerts.find((a) => a.date === date && a.hm === hm) ?? null;
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -1557,8 +1605,8 @@ export default function Home() {
               <button
                 className="secondary icon-btn alerts-btn"
                 onClick={() => setAlertsOpen(true)}
-                aria-label={`Mes alertes${alerts.length ? ` (${alerts.length})` : ""}`}
-                title="Mes alertes"
+                aria-label={`Ma liste d'attente${alerts.length ? ` (${alerts.length})` : ""}`}
+                title="Ma liste d'attente"
               >
                 <BellIcon />
                 {alerts.length > 0 && <span className="badge">{alerts.length}</span>}
@@ -1754,7 +1802,10 @@ export default function Home() {
                   selMode={selMode}
                   setSelMode={setSelMode}
                   onWatch={onWatch}
+                  onUnwatch={onUnwatch}
                   canWatch={canNotify}
+                  waitCountFor={waitCountFor}
+                  myWaitFor={myWaitFor}
                 />
               );
             })()
@@ -1762,7 +1813,7 @@ export default function Home() {
             ? <Skeleton />
             : null
         : week.length
-          ? <WeekGrid days={week} filter={(iso) => inRange(iso, range)} onPick={pickDay} onBook={onBook} onCancelMine={onCancelMine} onTogglePresence={onTogglePresenceWeek} onBookMany={onBookMany} selMode={selMode} setSelMode={setSelMode} onWatch={onWatch} canWatch={canNotify} />
+          ? <WeekGrid days={week} filter={(iso) => inRange(iso, range)} onPick={pickDay} onBook={onBook} onCancelMine={onCancelMine} onTogglePresence={onTogglePresenceWeek} onBookMany={onBookMany} selMode={selMode} setSelMode={setSelMode} onWatch={onWatch} onUnwatch={onUnwatch} canWatch={canNotify} waitCountFor={waitCountFor} myWaitFor={myWaitFor} />
           : loading
             ? <Skeleton />
             : null}
@@ -1810,14 +1861,15 @@ export default function Home() {
             className="modal"
             role="dialog"
             aria-modal="true"
-            aria-label="Mes alertes"
+            aria-label="Ma liste d'attente"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3>🔔 Mes alertes</h3>
+            <h3>🕒 Ma liste d'attente</h3>
             {alerts.length === 0 ? (
               <p className="muted">
-                Aucune alerte pour le moment. Dans la vue Jour, touche un créneau
-                « Réservé » pour être prévenu s'il se libère.
+                Tu n'es sur aucune liste d'attente. Sur un créneau complet, touche
+                l'horaire (vue Jour) ou la case (vue Semaine) pour être prévenu qu'un
+                terrain se libère.
               </p>
             ) : (
               <ul className="alerts-list">
@@ -1825,6 +1877,13 @@ export default function Home() {
                   <li key={a.id}>
                     <span>
                       {prettyDate(a.date)} · <strong>{a.hm}</strong>
+                      {a.count != null && a.position != null && (
+                        <span className="muted tiny">
+                          {" "}
+                          — {a.position}
+                          <sup>e</sup> sur {a.count} en attente
+                        </span>
+                      )}
                     </span>
                     <button className="cancel" onClick={() => cancelAlert(a.id)}>
                       Retirer

@@ -99,15 +99,23 @@ d'une soirée à sa place).
   Web Push (`PushSubscription`) déjà en place pour notifier. **Verdict** : commencer par
   **(a)**, remettre (b) à plus tard.
 
-## 6. Annuaire des utilisateurs inscrits
+## 6. Annuaire des utilisateurs inscrits ✅ fait
 
 **Liste des membres** pour faciliter la recherche (ex. choisir un destinataire de message).
 
-- **Statut** : 💡 à étudier · **Valeur** ⭐⭐ (surtout comme brique) · **Effort** S
+- **Statut** : ✅ fait · **Valeur** ⭐⭐ (surtout comme brique) · **Effort** S
 - **Notes / éval** : liste dérivée du modèle `User` (nom réel + pseudo). ⚠️ **RGPD** :
   exposer les membres est une **nouvelle finalité** → à refléter dans la note de
   confidentialité, idéalement en **opt-in** (chacun choisit d'apparaître). **Débloque
   3, 4 et 5b**. **Verdict** : bon investissement transverse, peu cher.
+- **Livré** (`feature/list` → `main`, commit `b09ca80`, derrière le flag
+  `NEXT_PUBLIC_FEATURE_DIRECTORY`) : schéma `User.listed` (`Boolean @default(true)`,
+  migration `9_user_listed`). `GET /api/directory` ne renvoie que `{ id, name }` des membres
+  **listés** — **jamais** email ni `contactId`. `PATCH /api/profile` accepte `{ listed }` et
+  `/api/auth/me` renvoie `listed`. UI : bouton « Membres » (modale + recherche), case dans
+  Paramètres, paragraphe RGPD ajouté à la note de confidentialité (gated par le flag).
+  **Déviation assumée** vs le design : livré en **opt-out** (`listed` vrai par défaut, chacun
+  décoche pour se retirer) plutôt qu'en opt-in — à garder en tête côté RGPD.
 
 ## 7. Sélection multi-créneaux + couleurs asso en vue semaine ✅ fait
 
@@ -171,11 +179,42 @@ réservé** via un code couleur (asso vs autre asso) — **comme en vue jour**.
   **alarme `VALARM` -1 h**, `UID` stable dérivé de l'IRI ResaMania, horaires en UTC.
   Nom de fichier lisible (`squash-AAAA-MM-JJ-HHMM.ics`). Branché depuis la vue jour
   (`page.tsx`) et la vue semaine (`WeekGrid.tsx`).
-- **D. Liste d'attente sur créneau complet** · ⭐⭐⭐ · **M**
+- **D. Liste d'attente sur créneau complet** · ✅ fait · ⭐⭐⭐ · **M** (réel : **XS–S**)
   Version **plus simple et moins risquée que l'idée 2** : s'inscrire en attente sur un
   créneau plein → **notification** (push, infra existante) quand il se libère ; la
   réservation reste **manuelle**. Étend le modèle `SlotAlert` (déjà « préviens-moi si un
   terrain se libère »). Bon compromis valeur/risque.
+  - **Constat** : le **cœur de D existe déjà** — `SlotAlert` + le cron `check-alerts`
+    (quotidien) font exactement « s'inscrire → notif quand un terrain redevient `bookable` à
+    l'horaire visé, résa manuelle ». D n'est donc **pas** un nouveau chantier mais un
+    **delta** sur l'offre / l'affichage.
+  - **Contrainte** : une file **séquentielle** (« notifier le 2ᵉ si le 1ᵉʳ ne réserve pas en
+    X min ») est **impossible** en cron **quotidien** (contrainte 3). Le vrai FIFO à verrou =
+    idée 2 (écartée). D reste l'alternative simple.
+  - **Scope retenu (D-léger, one-shot)** :
+    1. **Cible** : proposer la mise en attente **quand l'horaire est *complet*** (aucun
+       terrain `bookable`), **y compris réservé par l'asso** — plus seulement sur un terrain
+       hors-asso. Cas **moitié asso / moitié libre = réservation directe** (pas d'attente).
+    2. **File** : pas de verrou — à la libération, **tous** les inscrits sont notifiés
+       (comportement actuel, course assumée). Affichage d'une **position** indicative.
+    3. **Visibilité** : compteur **« N en attente »** montré **à tous** sur un créneau
+       complet, + **ma position**. **Compteurs seulement, jamais de noms** (RGPD).
+    4. **One-shot** conservé (`active=false` + `notifiedAt` après la 1ʳᵉ notif).
+    5. **Aucune migration** : `SlotAlert` réutilisé tel quel.
+  - **Touche** : `PlanningGrid`/`WeekGrid` (offre + badge), `page.tsx` (offre, badge,
+    modale « Ma liste d'attente »), `/api/alerts` (count + position), endpoint counts par
+    plage de dates pour les grilles, `check-alerts` (wording), note de confidentialité
+    (contrainte 4 : compteur + position exposés), `globals.css`.
+  - **Livré** (sur `main`, build vert) : nouvel endpoint `GET /api/alerts/counts?from&to`
+    (`groupBy` sur `SlotAlert` actif → `{ "date|hm": n }`, **compteurs seulement**) ;
+    `GET /api/alerts` enrichi (`count` + `position` par rang `createdAt`). **Vue jour** :
+    l'offre d'attente vit dans **l'en-tête d'horaire** d'un créneau complet (bouton `🕒 N`
+    rejoindre/quitter) — la cellule hors-asso devient inerte, l'attente n'est plus proposée
+    quand un terrain reste libre. **Vue semaine** : badge `🕒 N` en coin de case complète +
+    section « liste d'attente » dans la modale de détail (tout segment réservé ouvre la
+    modale). Modale « Ma liste d'attente » (ex-« Mes alertes ») affiche ma position. Cron
+    `check-alerts` : wording « tu étais en liste d'attente ». Note de confidentialité
+    complétée (compteur + position exposés, jamais les noms). **Aucune migration.**
 
 ---
 
@@ -187,11 +226,11 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 |---|------|:------:|:------:|-----------|----------|
 | 7a | Cellule bicolore par terrain (semaine) | ⭐⭐⭐ | S | — | ✅ **fait** |
 | 1 + 7b | Réservation groupée & multi-sélection | ⭐⭐⭐ | M | — | ✅ **fait** |
-| 6 | Annuaire (opt-in) | ⭐⭐ | S | — | 🚧 **en cours** (`feature/list`) |
+| 6 | Annuaire (opt-out) | ⭐⭐ | S | — | ✅ **fait** |
 | C | Export `.ics` | ⭐⭐ | S | — | ✅ **fait** |
 | A | Rappels de match (push) | ⭐⭐⭐ | M | — | Moyenne-haute |
 | 5a | Commentaires sur un tricount | ⭐⭐ | S–M | — | Moyenne |
-| D | Liste d'attente | ⭐⭐⭐ | M | SlotAlert | Moyenne (alt. de 2) |
+| D | Liste d'attente | ⭐⭐⭐ | M (réel XS–S) | SlotAlert | ✅ **fait** (réutilise `SlotAlert`) |
 | 4 | Délégation de droits | ⭐⭐ | M–L | — | À cadrer (sécurité) |
 | 2 | Reprise auto via « +1 » | ⭐⭐ | L | Attendance | À cadrer (risqué) |
 | 5b | Messagerie générale | ⭐⭐ | L–XL | 6 | Basse |
@@ -200,17 +239,18 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 ### Séquencement recommandé (par vagues)
 
 1. **Vague 1 — quick wins** (fort effet, peu cher) : ~~**7a** (couleurs semaine)~~ ✅,
-   **6** (annuaire opt-in) 🚧, ~~**C** (.ics)~~ ✅. → **reste 6** (en cours sur `feature/list`).
+   ~~**6** (annuaire opt-out)~~ ✅, ~~**C** (.ics)~~ ✅. → **vague 1 close**.
 2. **Vague 2 — feature phare** : ~~**1 + 7b** (réservation groupée + sélection multiple)~~ ✅.
-3. **Vague 3 — engagement** : **A** (rappels push), **5a** (commentaires tricount),
-   **D** (liste d'attente).
+3. **Vague 3 — engagement** *(en cours)* : ~~**D** (liste d'attente)~~ ✅, **A** (rappels
+   push), **5a** (commentaires tricount).
 4. **Vague 4 — gros / sensibles, à décider** : **4** (délégation, design sécurité),
    **2** (auto-rebook, à cadrer), **3** (tournois, si fréquents), **5b** (messagerie).
 
-> **État au 2026-07-07** : la **vague 2** (feature phare), **7a** et **C** (export `.ics`)
-> sont **livrées** (`feature/vue-semaine` fusionnée dans `main`, en prod). Il ne reste que
-> **6** (annuaire opt-in) pour clore la vague 1 → **en cours sur `feature/list`**.
-> _Idée B (stats perso) écartée._
+> **État au 2026-07-07** : **vague 1 close** (**7a**, **6** annuaire, **C** export `.ics`) et
+> **vague 2** livrée (**1 + 7b**, feature phare) — tout est fusionné dans `main`, en prod.
+> **Prochaine étape = vague 3 (engagement)** : **A** (rappels push) recommandé en premier
+> (⭐⭐⭐, réutilise `PushSubscription` + le cron quotidien), puis **D** (liste d'attente,
+> étend `SlotAlert`) et **5a** (commentaires tricount). _Idée B (stats perso) écartée._
 
 ### Lecture d'ensemble (qualité des idées)
 

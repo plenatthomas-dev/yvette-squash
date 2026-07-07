@@ -39,7 +39,10 @@ export function PlanningGrid({
   selMode,
   setSelMode,
   onWatch,
+  onUnwatch,
   canWatch,
+  waitCountFor,
+  myWaitFor,
 }: {
   planning: PlanningDay;
   onBook: (slot: Slot) => void;
@@ -50,7 +53,11 @@ export function PlanningGrid({
   selMode: boolean;
   setSelMode: (v: boolean) => void;
   onWatch?: (slot: Slot) => void;
+  onUnwatch?: (date: string, hm: string) => void;
   canWatch?: boolean;
+  // Liste d'attente (idée D) : compteur et mon inscription par créneau.
+  waitCountFor?: (date: string, hm: string) => number;
+  myWaitFor?: (date: string, hm: string) => { position?: number } | null;
 }) {
   // On coche des créneaux libres (un seul terrain par horaire, règle ResaMania), puis on
   // réserve tout d'un coup. La sélection se vide dès qu'on quitte le mode.
@@ -78,6 +85,17 @@ export function PlanningGrid({
   // Je joue déjà (résa « à moi ») à cet horaire ? → l'autre terrain n'est pas réservable.
   const timeHasMine = (t: string) =>
     planning.slots.some((s) => s.startsAt === t && s.mine);
+
+  // Créneau COMPLET (liste d'attente, idée D) : à venir, aucun terrain libre, et je n'y
+  // joue pas déjà. Un terrain libre → réservation directe (pas d'attente).
+  const rowComplete = (t: string) => {
+    if (new Date(t).getTime() < now) return false;
+    const atT = planning.slots.filter((s) => s.startsAt === t);
+    if (atT.length === 0) return false;
+    if (atT.some((s) => s.mine)) return false;
+    if (atT.some((s) => s.bookable)) return false;
+    return true;
+  };
 
   // Coche/décoche un créneau (radio par horaire : au plus un terrain à la même heure).
   const toggleSel = (slot: Slot) => {
@@ -133,6 +151,34 @@ export function PlanningGrid({
                   <th className="time">
                     <span className="t-start">{fmtTime(t)}</span>
                     {end && <span className="t-end">{fmtTime(end)}</span>}
+                    {!selMode && rowComplete(t) && (() => {
+                      const d = t.slice(0, 10);
+                      const hm = t.slice(11, 16);
+                      const count = waitCountFor?.(d, hm) ?? 0;
+                      const mine = myWaitFor?.(d, hm) ?? null;
+                      if (count === 0 && !watchable) return null;
+                      const label = mine
+                        ? `Tu es en liste d'attente${mine.position ? ` (${mine.position}ᵉ)` : ""}${watchable ? " — cliquer pour te retirer" : ""}`
+                        : `Créneau complet — se mettre en liste d'attente${count ? ` (${count} en attente)` : ""}`;
+                      const act = !watchable
+                        ? undefined
+                        : mine
+                          ? () => onUnwatch?.(d, hm)
+                          : () => onWatch?.(planning.slots.find((s) => s.startsAt === t)!);
+                      return (
+                        <button
+                          type="button"
+                          className={"wait-btn" + (mine ? " on" : "")}
+                          disabled={!act}
+                          aria-pressed={mine ? true : undefined}
+                          title={label}
+                          aria-label={label}
+                          onClick={act}
+                        >
+                          🕒{count > 0 ? ` ${count}` : ""}
+                        </button>
+                      );
+                    })()}
                   </th>
                   {planning.courts.map((c) => {
                     const slot = byKey.get(c.id + "|" + t);
@@ -245,22 +291,11 @@ export function PlanningGrid({
                       );
                     }
                     {
-                      // Créneau réservé hors asso : clic = « préviens-moi si ça se libère ».
-                      const watch = watchable ? () => onWatch!(slot) : undefined;
+                      // Créneau réservé hors asso : inerte. La liste d'attente (idée D) est
+                      // proposée via le bouton 🕒 de l'en-tête d'horaire, uniquement quand
+                      // l'horaire est complet (aucun terrain libre).
                       return (
-                        <td
-                          key={c.id}
-                          className={"cell booked" + (watch ? " watchable" : "")}
-                          title={
-                            watch
-                              ? "Réservé — cliquer pour être alerté si ça se libère"
-                              : "Réservé (hors groupe)"
-                          }
-                          role={watch ? "button" : undefined}
-                          tabIndex={watch ? 0 : undefined}
-                          onClick={watch}
-                          onKeyDown={watch ? onKey(watch) : undefined}
-                        >
+                        <td key={c.id} className="cell booked" title="Réservé (hors groupe)">
                           Réservé
                         </td>
                       );

@@ -5,17 +5,40 @@ import { prisma } from "@/lib/db";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// GET /api/alerts -> mes alertes actives (« préviens-moi si un terrain se libère »).
+// GET /api/alerts -> mes alertes actives (« préviens-moi si un terrain se libère »),
+// enrichies pour la liste d'attente (idée D) : `count` = nombre total d'inscrits sur le
+// créneau, `position` = mon rang (1 = 1ᵉʳ inscrit, ordre d'arrivée). Aucun nom exposé.
 export async function GET(req: NextRequest) {
   const session = await getSession(req.cookies.get("sid")?.value);
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
-  const alerts = await prisma.slotAlert.findMany({
+  const mine = await prisma.slotAlert.findMany({
     where: { userId: session.userId, active: true },
     orderBy: [{ date: "asc" }, { hm: "asc" }],
   });
-  return NextResponse.json(alerts);
+  if (mine.length === 0) return NextResponse.json([]);
+
+  // Tous les inscrits (ordre d'arrivée) sur les créneaux qui me concernent → compteur + rang.
+  const pairs = mine.map((a) => ({ date: a.date, hm: a.hm }));
+  const others = await prisma.slotAlert.findMany({
+    where: { active: true, OR: pairs },
+    orderBy: { createdAt: "asc" },
+    select: { userId: true, date: true, hm: true },
+  });
+  const byPair = new Map<string, string[]>(); // "date|hm" -> userIds dans l'ordre
+  for (const o of others) {
+    const k = `${o.date}|${o.hm}`;
+    const arr = byPair.get(k);
+    if (arr) arr.push(o.userId);
+    else byPair.set(k, [o.userId]);
+  }
+  const enriched = mine.map((a) => {
+    const list = byPair.get(`${a.date}|${a.hm}`) ?? [];
+    const idx = list.indexOf(session.userId);
+    return { ...a, count: list.length, position: idx < 0 ? 1 : idx + 1 };
+  });
+  return NextResponse.json(enriched);
 }
 
 // POST /api/alerts { date: "YYYY-MM-DD", hm: "HH:MM" } -> crée/ré-active une alerte.

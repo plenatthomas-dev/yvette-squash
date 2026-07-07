@@ -105,7 +105,7 @@ export async function GET(req: NextRequest) {
       if (!freeHm.has(a.hm)) continue;
       const sent = await pushToUser(userId, {
         title: "Un terrain s'est libéré 🎾",
-        body: `${prettyDate(a.date)} à ${a.hm} — file réserver !`,
+        body: `${prettyDate(a.date)} à ${a.hm} — tu étais en liste d'attente, file réserver !`,
         url: `/?date=${a.date}&view=day`,
         tag: `alert-${a.id}`,
       });
