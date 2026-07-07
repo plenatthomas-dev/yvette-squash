@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { hashOtp } from "@/lib/crypto";
 import { normalizeEmail } from "@/lib/session";
 import { sendEmail, emailConfigured } from "@/lib/email";
+import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,6 +27,9 @@ function clientIp(req: NextRequest): string {
 // Envoie un code à 6 chiffres à l'email fourni (connexion « email seul », sans ResaMania).
 // Le code n'est stocké que HACHÉ. On ne divulgue pas si l'email correspond à un membre.
 export async function POST(req: NextRequest) {
+  if (!FEATURE_EMAIL_LOGIN) {
+    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
+  }
   const { email: raw } = (await req.json().catch(() => ({}))) as { email?: unknown };
   if (typeof raw !== "string" || !EMAIL_RE.test(raw.trim())) {
     return NextResponse.json({ error: "Email invalide." }, { status: 400 });

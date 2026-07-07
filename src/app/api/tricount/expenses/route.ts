@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { splitWithCredits, MAX_AMOUNT_CENTS, MAX_LABEL_LEN, MAX_TITLE_LEN } from "@/lib/tricount";
+import { FEATURE_TRICOUNT } from "@/lib/features";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +13,9 @@ export const dynamic = "force-dynamic";
 // compte uniquement à la création). Toute modification des dépenses remet à zéro
 // les validations « OK pour rembourser » du tricount.
 export async function POST(req: NextRequest) {
+  if (!FEATURE_TRICOUNT) {
+    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
+  }
   const session = await getSession(req.cookies.get("sid")?.value);
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });

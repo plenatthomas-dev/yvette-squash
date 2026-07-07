@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import { FEATURE_TRICOUNT } from "@/lib/features";
 
 export const runtime = "nodejs";
 
@@ -12,6 +13,9 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  if (!FEATURE_TRICOUNT) {
+    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
+  }
   const session = await getSession(req.cookies.get("sid")?.value);
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });

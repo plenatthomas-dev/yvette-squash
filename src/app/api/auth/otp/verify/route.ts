@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { hashOtp } from "@/lib/crypto";
 import { normalizeEmail, resolveUser, createEmailSession } from "@/lib/session";
+import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +35,9 @@ function nameFromEmail(email: string): string {
 // POST /api/auth/otp/verify  { email, code, name? }
 // Vérifie le code, ouvre une session « email seul », et rattache/crée le User par email.
 export async function POST(req: NextRequest) {
+  if (!FEATURE_EMAIL_LOGIN) {
+    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
+  }
   const body = (await req.json().catch(() => ({}))) as {
     email?: unknown;
     code?: unknown;

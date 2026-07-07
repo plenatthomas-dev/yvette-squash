@@ -12,6 +12,7 @@ import {
   pushSupported,
   pushEnabledOnServer,
 } from "@/lib/pushClient";
+import { FEATURE_TRICOUNT, FEATURE_EMAIL_LOGIN } from "@/lib/features";
 
 function toISODate(d: Date): string {
   return d.toLocaleDateString("en-CA"); // YYYY-MM-DD local
@@ -773,7 +774,7 @@ export default function Home() {
     setTriOwed(n);
   }, []);
   useEffect(() => {
-    if (me) loadTriOwed();
+    if (me && FEATURE_TRICOUNT) loadTriOwed();
   }, [me, loadTriOwed]);
 
   const load = useCallback(
@@ -834,7 +835,8 @@ export default function Home() {
       x === "day" || x === "week" || x === "money";
     const vParam = p.get("view");
     const vLS = localStorage.getItem("view");
-    const v = isView(vParam) ? vParam : isView(vLS) ? vLS : null;
+    let v = isView(vParam) ? vParam : isView(vLS) ? vLS : null;
+    if (v === "money" && !FEATURE_TRICOUNT) v = "day"; // Frais désactivé : jamais cette vue
     if (v) setView(v);
 
     const rParam = p.get("range");
@@ -880,7 +882,7 @@ export default function Home() {
       if (now - lastFocusRef.current < 15000) return;
       lastFocusRef.current = now;
       reload();
-      loadTriOwed(); // le badge € peut avoir changé (un payeur a validé ailleurs)
+      if (FEATURE_TRICOUNT) loadTriOwed(); // le badge € peut avoir changé (validation ailleurs)
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
@@ -1149,16 +1151,18 @@ export default function Home() {
               onNicknameSaved={checkMe}
               toast={toast}
             />
-            <button
-              className={"secondary icon-btn money-btn" + (view === "money" ? " active" : "")}
-              onClick={() => setView(view === "money" ? "day" : "money")}
-              aria-label={`Frais partagés (tricount)${triOwed ? ` — ${triOwed} à rembourser` : ""}`}
-              aria-pressed={view === "money"}
-              title="Frais partagés"
-            >
-              <EuroIcon />
-              {triOwed > 0 && <span className="badge">{triOwed}</span>}
-            </button>
+            {FEATURE_TRICOUNT && (
+              <button
+                className={"secondary icon-btn money-btn" + (view === "money" ? " active" : "")}
+                onClick={() => setView(view === "money" ? "day" : "money")}
+                aria-label={`Frais partagés (tricount)${triOwed ? ` — ${triOwed} à rembourser` : ""}`}
+                aria-pressed={view === "money"}
+                title="Frais partagés"
+              >
+                <EuroIcon />
+                {triOwed > 0 && <span className="badge">{triOwed}</span>}
+              </button>
+            )}
             <button
               className="secondary logout"
               onClick={logout}
@@ -1278,7 +1282,7 @@ export default function Home() {
 
       {error && view !== "money" && <div className="notice error" role="alert">⚠️ {error}</div>}
 
-      {view === "money" && (
+      {FEATURE_TRICOUNT && view === "money" && (
         <Tricount toast={toast} onExpired={handleExpired} onOwedChange={setTriOwed} />
       )}
 
@@ -1498,26 +1502,29 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
       <h1 className="sr-only">Squash de l'Yvette</h1>
       <img src="/logo_squash.jpeg" alt="Squash de l'Yvette" className="logo-hero" />
 
-      <div className="login-tabs" role="group" aria-label="Méthode de connexion">
-        <button
-          type="button"
-          className={tab === "resa" ? "active" : "secondary"}
-          aria-pressed={tab === "resa"}
-          onClick={() => switchTab("resa")}
-        >
-          ResaMania
-        </button>
-        <button
-          type="button"
-          className={tab === "email" ? "active" : "secondary"}
-          aria-pressed={tab === "email"}
-          onClick={() => switchTab("email")}
-        >
-          Par email
-        </button>
-      </div>
+      {/* Onglets masqués si la connexion email est désactivée : seule ResaMania reste. */}
+      {FEATURE_EMAIL_LOGIN && (
+        <div className="login-tabs" role="group" aria-label="Méthode de connexion">
+          <button
+            type="button"
+            className={tab === "resa" ? "active" : "secondary"}
+            aria-pressed={tab === "resa"}
+            onClick={() => switchTab("resa")}
+          >
+            ResaMania
+          </button>
+          <button
+            type="button"
+            className={tab === "email" ? "active" : "secondary"}
+            aria-pressed={tab === "email"}
+            onClick={() => switchTab("email")}
+          >
+            Par email
+          </button>
+        </div>
+      )}
 
-      {tab === "resa" ? (
+      {tab === "resa" || !FEATURE_EMAIL_LOGIN ? (
         <>
           <p className="muted">
             Connecte-toi avec ton compte ResaMania (Le Complexe Bures).
