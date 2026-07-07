@@ -6,9 +6,10 @@ import { computeBalances, settle, payersOf } from "@/lib/tricount";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// GET /api/tricount -> l'historique complet : un tricount par jour (le plus récent
-// d'abord), chacun avec ses dépenses, ses soldes, ses remboursements suggérés et
-// l'état des validations (« OK pour rembourser ») de ses payeurs.
+// GET /api/tricount -> l'historique complet : un tricount par jour, chacun avec ses
+// dépenses, ses soldes, ses remboursements suggérés et l'état des validations
+// (« OK pour rembourser ») de ses payeurs. Ordre d'affichage : les tricounts EN COURS
+// d'abord (plus récent en tête), puis les tricounts ÉQUILIBRÉS en bas.
 export async function GET(req: NextRequest) {
   const session = await getSession(req.cookies.get("sid")?.value);
   if (!session) {
@@ -40,7 +41,8 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     me: session.userId,
     members: users.map((u) => ({ id: u.id, name: name(u.id), fullName: u.displayName })),
-    tricounts: tricounts.map((t) => {
+    tricounts: tricounts
+      .map((t) => {
       const balances = computeBalances(t.expenses);
       const transfers = settle(balances);
       const payers = payersOf(t.expenses);
@@ -81,6 +83,10 @@ export async function GET(req: NextRequest) {
           toName: name(tr.toId),
         })),
       };
-    }),
+      })
+      // Équilibrés en bas ; à statut égal, le plus récent en premier (date desc).
+      .sort(
+        (a, b) => Number(a.settled) - Number(b.settled) || (a.date < b.date ? 1 : -1),
+      ),
   });
 }

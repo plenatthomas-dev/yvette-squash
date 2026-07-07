@@ -1365,16 +1365,27 @@ table.planning.week td.cell {
   gap: 10px;
   padding: 12px 14px;
   cursor: pointer;
-  /* Couleurs EXPLICITES : sans ça Pico applique aux [role="button"] son fond
-     primaire (bleu clair) + texte blanc au focus/clic → titre illisible. */
+  /* Pico traite tout [role="button"] comme un bouton : il REDÉFINIT la variable
+     --pico-color (→ blanc/inverse) et applique un fond primaire sur l'élément,
+     ce qui rendait le titre illisible (blanc sur blanc). On rétablit l'héritage :
+     --pico-color reprend la valeur normale de la carte, et le fond reste neutre. */
+  --pico-color: inherit;
+  --pico-background-color: transparent;
   background: transparent;
   color: var(--pico-color);
 }
+/* Pico réapplique --pico-color = blanc + fond primaire sur :hover/:focus/:active
+   des [role="button"] : on rétablit l'héritage dans TOUS ces états, sinon le titre
+   repasse en blanc au survol / à la sélection. Fond neutre, sans box-shadow Pico. */
 .tri-card-head:hover,
 .tri-card-head:focus,
-.tri-card-head:active { background: color-mix(in srgb, var(--pico-primary) 5%, transparent); }
-/* Focus clavier visible, sans fond bleu Pico ni box-shadow parasite. */
-.tri-card-head:focus { box-shadow: none; }
+.tri-card-head:active {
+  --pico-color: inherit;
+  --pico-background-color: transparent;
+  color: var(--pico-color);
+  background: color-mix(in srgb, var(--pico-primary) 6%, transparent);
+  box-shadow: none;
+}
 .tri-card-head:focus-visible {
   outline: 2px solid var(--pico-primary);
   outline-offset: -2px;
