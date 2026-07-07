@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getPlanning } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { baseHandle, buildHandleMap } from "@/lib/handle";
+import { annotatePlanning } from "@/lib/planning-annotate";
+import type { PlanningDay } from "@/lib/resamania/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,28 +18,36 @@ export async function GET(req: NextRequest) {
     new URL(req.url).searchParams.get("date") ??
     new Date().toISOString().slice(0, 10);
 
+  // --- Compte « email seul » (sans jeton ResaMania) : on sert le dernier snapshot du
+  //     planning, ré-annoté en direct (présences à jour, dont son propre « +1 »). ---
+  if (!session.resa) {
+    const snap = await prisma.planningSnapshot.findUnique({ where: { date } });
+    if (!snap) {
+      return NextResponse.json({
+        date,
+        clubId: "",
+        courts: [],
+        slots: [],
+        cached: true,
+        cachedAt: null,
+        notice: "Planning pas encore chargé par un membre connecté à ResaMania.",
+      } satisfies PlanningDay);
+    }
+    const planning = JSON.parse(snap.payloadJson) as PlanningDay;
+    await annotatePlanning(planning, session.userId);
+    planning.cached = true;
+    planning.cachedAt = snap.updatedAt.toISOString();
+    return NextResponse.json(planning);
+  }
+
+  // --- Chemin ResaMania (avec jeton) : fetch live → réconciliation → snapshot → annotation. ---
+  const resa = session.resa;
   try {
-    const planning = await getPlanning(date, session.resa.accessToken);
+    const planning = await getPlanning(date, resa.accessToken);
 
-    // Annoter « qui du groupe a réservé » :
-    //  1) par correspondance du contactId (marche même si la résa a été faite directement
-    //     sur ResaMania, dès lors que la personne s'est connectée une fois à l'appli),
-    //  2) sinon via le journal local (réservations faites depuis l'appli).
-    const users = await prisma.user.findMany({
-      select: {
-        id: true,
-        contactId: true,
-        displayName: true,
-        nickname: true,
-        createdAt: true,
-      },
-    });
-    // Diminutifs dé-doublonnés (Tho.P, Tho.P2…) pour tout l'ensemble des joueurs connus.
-    const handleMap = buildHandleMap(users);
-    // Certains comptes « email seul » n'ont pas encore de contactId (null) : on les ignore.
-    const userIdByContact = new Map<string, string>();
-    for (const u of users) if (u.contactId) userIdByContact.set(u.contactId, u.id);
-
+    // Réconciliation base ↔ ResaMania (nécessite l'état LIVE) : une résa dont le créneau
+    // est redevenu libre — ou pris par quelqu'un d'autre — a été annulée ailleurs → on la
+    // marque "cancelled". Prudence : créneau hors planning ou booker inconnu → on ne juge pas.
     const bookings = await prisma.booking.findMany({
       where: {
         status: "booked",
@@ -49,82 +58,38 @@ export async function GET(req: NextRequest) {
       },
       include: { user: true },
     });
-
-    // Auto-réconciliation : on confronte le journal local à l'état RÉEL de ResaMania.
-    // Une résa dont le créneau est redevenu libre — ou est désormais pris par quelqu'un
-    // d'autre — a été annulée ailleurs : on la marque "cancelled" (fini les fantômes).
-    // On reste prudent : si le créneau est absent du planning ou pris par un booker
-    // inconnu, on ne juge pas.
     const slotById = new Map(planning.slots.map((s) => [s.id, s]));
     const stale: string[] = [];
-    const active = bookings.filter((b) => {
+    for (const b of bookings) {
       const slot = slotById.get(b.classEventId);
-      if (!slot) return true; // hors planning courant
-      if (slot.bookable) {
-        stale.push(b.id); // redevenu libre → annulé
-        return false;
-      }
-      if (slot.bookerContactId && slot.bookerContactId !== b.user.contactId) {
+      if (!slot) continue; // hors planning courant
+      if (slot.bookable) stale.push(b.id); // redevenu libre → annulé
+      else if (slot.bookerContactId && slot.bookerContactId !== b.user.contactId) {
         stale.push(b.id); // pris par quelqu'un d'autre → notre résa a sauté
-        return false;
       }
-      return true; // pris par nous (ou booker inconnu) → on garde
-    });
+    }
     if (stale.length) {
       await prisma.booking.updateMany({
         where: { id: { in: stale } },
         data: { status: "cancelled" },
       });
     }
-    const bookerUserIdByEvent = new Map(active.map((b) => [b.classEventId, b.userId]));
-    const myContactId = session.resa.identity.contactId;
+    // Présences orphelines (créneau redevenu libre = résa annulée ailleurs) → purge.
+    const freeIds = planning.slots.filter((s) => s.bookable).map((s) => s.id);
+    if (freeIds.length) {
+      await prisma.attendance.deleteMany({ where: { classEventId: { in: freeIds } } });
+    }
 
-    // Présences « asso » (signal local) des créneaux du jour. On purge les orphelines
-    // (créneau redevenu libre = résa annulée ailleurs) puis on regroupe le reste par créneau.
-    const slotIds = planning.slots.map((s) => s.id);
-    const freeIds = new Set(planning.slots.filter((s) => s.bookable).map((s) => s.id));
-    const attendances = await prisma.attendance.findMany({
-      where: { classEventId: { in: slotIds } },
-      include: { user: true },
+    // Snapshot BRUT (avant annotation) → sert les comptes « email seul » sans jeton.
+    const payloadJson = JSON.stringify(planning);
+    await prisma.planningSnapshot.upsert({
+      where: { date },
+      update: { payloadJson, updatedById: session.userId },
+      create: { date, payloadJson, updatedById: session.userId },
     });
-    const orphanIds = attendances.filter((a) => freeIds.has(a.classEventId)).map((a) => a.id);
-    if (orphanIds.length) {
-      await prisma.attendance.deleteMany({ where: { id: { in: orphanIds } } });
-    }
-    const attByEvent = new Map<string, { userId: string; name: string }[]>();
-    for (const a of attendances) {
-      if (freeIds.has(a.classEventId)) continue; // orphelin (supprimé ci-dessus)
-      const list = attByEvent.get(a.classEventId) ?? [];
-      list.push({ userId: a.userId, name: a.user.displayName });
-      attByEvent.set(a.classEventId, list);
-    }
 
-    for (const s of planning.slots) {
-      // ResaMania fait foi : un créneau libre reste libre et cliquable, quoi qu'en dise le journal.
-      if (s.bookable) continue;
-      // Résout d'abord le userId du réservataire (moi / contact connu / journal), puis son
-      // diminutif via handleMap — même source pour le booker et les présents.
-      let bookerUserId: string | null = null;
-      if (s.bookerContactId && s.bookerContactId === myContactId) {
-        s.mine = true;
-        bookerUserId = session.userId;
-      } else if (s.bookerContactId && userIdByContact.has(s.bookerContactId)) {
-        bookerUserId = userIdByContact.get(s.bookerContactId) ?? null;
-      } else if (bookerUserIdByEvent.has(s.id)) {
-        bookerUserId = bookerUserIdByEvent.get(s.id) ?? null;
-      }
-      if (bookerUserId) {
-        s.bookedBy = handleMap.get(bookerUserId) ?? (s.mine ? "Toi" : null);
-      }
-      // Présences : seulement sur les créneaux « asso » (réservataire connu), réservataire exclu.
-      if (s.bookedBy) {
-        const list = attByEvent.get(s.id) ?? [];
-        s.attendees = list
-          .filter((a) => a.userId !== bookerUserId)
-          .map((a) => handleMap.get(a.userId) ?? baseHandle(a.name));
-        s.iAmAttending = list.some((a) => a.userId === session.userId);
-      }
-    }
+    // Annotation (qui a réservé + présences) — partagée avec le chemin cache.
+    await annotatePlanning(planning, session.userId);
 
     return NextResponse.json(planning);
   } catch (e) {

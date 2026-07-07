@@ -249,6 +249,61 @@ header.app .sub {
   width: auto;
 }
 
+/* Cloche « alertes » + pastille de compteur */
+.alerts-btn,
+.money-btn {
+  position: relative;
+}
+
+.alerts-btn .badge,
+.money-btn .badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--error-accent);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* Liste des alertes dans la modale « Mes alertes » */
+.alerts-list {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 16px;
+}
+
+.alerts-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  font-size: 0.88rem;
+  text-transform: capitalize;
+}
+
+.alerts-list li button.cancel {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  width: auto;
+  text-transform: none;
+  background: transparent;
+  color: var(--danger-fg);
+  border: 1px solid var(--danger-border);
+}
+
 /* Bouton déconnexion : icône + libellé (libellé masqué sur mobile) */
 .logout {
   display: inline-flex;
@@ -331,6 +386,17 @@ header.app .sub {
 
   .logout {
     padding: 7px 9px;
+  }
+
+  /* Trop d'icônes en haut sur mobile (surtout avec l'onglet Frais) → on masque le
+     titre texte ; le logo, un peu agrandi, suffit à identifier l'appli. Sur écran
+     large la place ne manque pas : le titre reste affiché (règle hors media query). */
+  .brand-title {
+    display: none;
+  }
+  header.app .logo-mark {
+    width: 46px;
+    height: 46px;
   }
 }
 
@@ -592,6 +658,15 @@ td.cell.booked {
   color: var(--booked-fg);
 }
 
+/* Cases réservées « alertables » : on signale qu'un clic crée une alerte. */
+td.cell.watchable {
+  cursor: pointer;
+}
+
+td.cell.watchable:hover {
+  filter: brightness(0.97);
+}
+
 td.cell.group {
   background: var(--group);
   color: var(--group-fg);
@@ -776,6 +851,25 @@ td.cell.past {
 /* --- Écran de connexion ------------------------------------------------- */
 .login {
   max-width: 400px;
+}
+
+/* Onglets de connexion (ResaMania / Par email) : deux boutons côte à côte. */
+.login-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+.login-tabs button {
+  flex: 1;
+  margin: 0;
+}
+
+/* Bandeau « lecture seule » (session email) : notice d'info un peu resserrée. */
+.readonly-note {
+  margin-top: 4px;
+}
+.cache-note {
+  margin: -4px 0 10px;
 }
 
 .login form {
@@ -1461,4 +1555,263 @@ table.planning.week th.time.selhead {
   to {
     background-position: -200% 0;
   }
+}
+
+/* --- Vue « Frais » (partage de dépenses type Tricount) ------------------- */
+.tricount {
+  margin-top: 4px;
+}
+
+.tri-summary {
+  text-align: center;
+  margin-bottom: 14px;
+}
+
+.tri-me {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 0 0 2px;
+}
+.tri-me.pos { color: var(--pico-primary); }
+.tri-me.neg { color: var(--danger-fg); }
+
+.tri-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.tri-actions button {
+  flex: 1;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.tri-block { margin-top: 22px; }
+.tri-block h2 {
+  font-size: 1.05rem;
+  margin-bottom: 10px;
+}
+
+/* Listes (soldes, virements, dépenses) : mêmes cartes que le journal */
+.tri-block ul {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0;
+}
+.tri-block li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  font-size: 0.88rem;
+  background: var(--pico-card-background-color);
+}
+.tri-block li.mine { border-left: 3px solid var(--pico-primary); }
+.tri-block li.refund { opacity: 0.85; }
+
+.tri-balances strong.pos { color: var(--pico-primary); }
+.tri-balances strong.neg { color: var(--danger-fg); }
+
+/* Ligne de dépense : libellé + méta à gauche, montant + suppr à droite */
+.tri-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+.tri-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.tri-label small {
+  color: var(--pico-color);
+  opacity: 0.78;
+  font-size: 0.78rem;
+}
+.tri-amount {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.tri-amount button.cancel {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  width: auto;
+  background: transparent;
+  color: var(--danger-fg);
+  border: 1px solid var(--danger-border);
+}
+
+/* Formulaire d'ajout (dans la modale) */
+.tri-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tri-form input[type="text"] { margin: 0; }
+.tri-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+.tri-field select { margin: 0; }
+
+.tri-participants {
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.tri-participants legend {
+  font-size: 0.85rem;
+  padding: 0 4px;
+}
+.tri-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  padding: 4px 0;
+}
+.tri-check input { margin: 0; }
+
+/* --- Tricounts par jour (cartes d'historique) ---------------------------- */
+.money-btn.active {
+  border-color: var(--pico-primary);
+  color: var(--pico-primary);
+}
+
+.tri-card {
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 12px;
+  background: var(--pico-card-background-color);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+/* Tricount soldé : TOUTE la carte change de couleur (teinte primaire), bien
+   plus repérable que la seule pastille. */
+.tri-card.settled {
+  background: color-mix(in srgb, var(--pico-primary) 14%, var(--pico-card-background-color));
+  border-color: color-mix(in srgb, var(--pico-primary) 45%, var(--pico-card-border-color));
+}
+.tri-card.settled .tri-card-head:hover {
+  background: color-mix(in srgb, var(--pico-primary) 20%, transparent);
+}
+
+.tri-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  /* Pico traite tout [role="button"] comme un bouton : il REDÉFINIT la variable
+     --pico-color (→ blanc/inverse) et applique un fond primaire sur l'élément,
+     ce qui rendait le titre illisible (blanc sur blanc). On rétablit l'héritage :
+     --pico-color reprend la valeur normale de la carte, et le fond reste neutre. */
+  --pico-color: inherit;
+  --pico-background-color: transparent;
+  background: transparent;
+  color: var(--pico-color);
+}
+/* Pico réapplique --pico-color = blanc + fond primaire sur :hover/:focus/:active
+   des [role="button"] : on rétablit l'héritage dans TOUS ces états, sinon le titre
+   repasse en blanc au survol / à la sélection. Fond neutre, sans box-shadow Pico. */
+.tri-card-head:hover,
+.tri-card-head:focus,
+.tri-card-head:active {
+  --pico-color: inherit;
+  --pico-background-color: transparent;
+  color: var(--pico-color);
+  background: color-mix(in srgb, var(--pico-primary) 6%, transparent);
+  box-shadow: none;
+}
+.tri-card-head:focus-visible {
+  outline: 2px solid var(--pico-primary);
+  outline-offset: -2px;
+}
+
+.tri-card-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.tri-card-title small {
+  /* Contraste : la couleur du texte courant légèrement atténuée, plutôt que le
+     gris « muted » illisible sur les fonds teintés (cartes soldées, hover…). */
+  color: var(--pico-color);
+  opacity: 0.78;
+  font-size: 0.78rem;
+}
+
+.tri-chip {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  border: 1px solid var(--pico-card-border-color);
+}
+/* « En cours » : pastille ambre pleine → nettement visible sur TOUS les thèmes
+   (clair / sombre / rose), contrairement à l'ancien gris muet peu lisible. */
+.tri-chip.pending {
+  color: #78350f;
+  background: #fcd34d;
+  border-color: #f59e0b;
+}
+.tri-chip.ready {
+  color: var(--pico-primary);
+  border-color: var(--pico-primary);
+}
+.tri-chip.ok {
+  color: var(--pico-primary);
+  background: color-mix(in srgb, var(--pico-primary) 12%, transparent);
+  border-color: transparent;
+}
+
+.tri-card-body {
+  padding: 0 14px 14px;
+  border-top: 1px solid var(--pico-card-border-color);
+}
+.tri-card-body h3 {
+  font-size: 0.92rem;
+  margin: 14px 0 6px;
+}
+.tri-card-body ul { margin: 6px 0; }
+.tri-card-body li {
+  border: none;
+  border-bottom: 1px solid var(--pico-card-border-color);
+  border-radius: 0;
+  margin-bottom: 0;
+  padding: 8px 0;
+  background: transparent;
+}
+.tri-card-body li:last-child { border-bottom: none; }
+.tri-card-body li.mine { border-left: none; }
+.tri-card-body li.mine span:first-child { font-weight: 600; }
+
+.tri-approvals button,
+.tri-settle button {
+  width: auto;
+  margin: 8px 0 0;
+  font-size: 0.88rem;
+}
+.tri-payers {
+  list-style: none;
+  padding: 0;
+}
+.tri-payers li {
+  display: block;
+  font-size: 0.88rem;
 }

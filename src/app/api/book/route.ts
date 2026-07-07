@@ -12,6 +12,13 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
+  if (!session.resa) {
+    return NextResponse.json(
+      { error: "La réservation nécessite une connexion ResaMania." },
+      { status: 403 },
+    );
+  }
+  const resa = session.resa;
   const { classEventId, courtName, startsAt, endsAt } = await req
     .json()
     .catch(() => ({}));
@@ -42,7 +49,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const r = await book(session.resa, classEventId);
+  const r = await book(resa, classEventId);
   if (!r.ok) {
     // 2) Filet de sécurité : ResaMania bloque aussi (has-overlapping-slots) si la résa
     //    en conflit n'était pas connue en base (faite ailleurs).

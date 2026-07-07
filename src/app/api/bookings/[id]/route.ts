@@ -14,6 +14,13 @@ export async function DELETE(
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
+  if (!session.resa) {
+    return NextResponse.json(
+      { error: "L'annulation d'une réservation nécessite une connexion ResaMania." },
+      { status: 403 },
+    );
+  }
+  const resa = session.resa;
   const { id } = await params;
   const booking = await prisma.booking.findUnique({ where: { id } });
   if (!booking || booking.userId !== session.userId) {
@@ -23,7 +30,7 @@ export async function DELETE(
   // Rattrapage : si l'attendeeId n'a pas été mémorisé, on le retrouve via l'API.
   let attendeeId = booking.attendeeId;
   if (!attendeeId) {
-    attendeeId = await findAttendeeId(session.resa, booking.classEventId);
+    attendeeId = await findAttendeeId(resa, booking.classEventId);
     if (attendeeId) {
       await prisma.booking.update({ where: { id }, data: { attendeeId } });
     }
@@ -35,7 +42,7 @@ export async function DELETE(
     );
   }
 
-  const r = await cancel(session.resa, attendeeId);
+  const r = await cancel(resa, attendeeId);
   if (!r.ok) {
     return NextResponse.json({ error: r.error }, { status: 409 });
   }

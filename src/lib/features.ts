@@ -1,0 +1,25 @@
+// Feature flags pilotés par variables d'environnement NEXT_PUBLIC_* : la même
+// variable est lisible côté CLIENT (masquer l'UI) et côté SERVEUR (refuser l'API),
+// donc un seul flag suffit à couper une fonction de bout en bout.
+//
+// Règle : un flag est ACTIVÉ uniquement si sa valeur vaut "1", "true" ou "on"
+// (insensible à la casse). Absent ou toute autre valeur ⇒ DÉSACTIVÉ. Défaut
+// « fail-safe » : rien de sensible n'est exposé tant qu'on ne l'active pas
+// explicitement — en prod on laisse la variable non définie.
+//
+// ⚠️ NEXT_PUBLIC_* est inliné au BUILD dans le bundle client : changer la valeur
+// en prod nécessite un REDEPLOY (mais pas de changement de code ni de re-merge).
+//
+// NB : ce module ne doit rien importer de « server-only » (ex. next/server) pour
+// rester utilisable depuis les composants client.
+
+function isOn(v: string | undefined): boolean {
+  const s = (v ?? "").trim().toLowerCase();
+  return s === "1" || s === "true" || s === "on";
+}
+
+// Partage de frais (onglet « Frais » / tricount) : UI + routes /api/tricount/**.
+export const FEATURE_TRICOUNT = isOn(process.env.NEXT_PUBLIC_FEATURE_TRICOUNT);
+
+// Connexion « email seul » (OTP) : onglet de login + routes /api/auth/otp/**.
+export const FEATURE_EMAIL_LOGIN = isOn(process.env.NEXT_PUBLIC_FEATURE_EMAIL_LOGIN);

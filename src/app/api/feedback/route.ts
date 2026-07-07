@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Resend } from "resend";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import { sendEmail, emailConfigured } from "@/lib/email";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Destinataire des commentaires (le proprio de l'appli). Surchargeable par variable d'env.
 const TO = process.env.FEEDBACK_TO_EMAIL ?? "plenat.thomas@gmail.com";
-// Expéditeur : le domaine partagé de Resend fonctionne pour envoyer vers SA PROPRE adresse
-// sans configurer de domaine. Pour envoyer vers d'autres adresses, vérifier un domaine.
-const FROM = process.env.FEEDBACK_FROM_EMAIL ?? "Squash Yvette <onboarding@resend.dev>";
 
 // Longueur max d'un commentaire : large pour décrire un bug/une idée, mais bornée contre
 // l'abus. Doit rester synchronisée avec le maxLength de la zone de texte (page.tsx).
@@ -56,26 +53,29 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
+  if (!emailConfigured()) {
     return NextResponse.json(
-      { error: "Envoi d'e-mail non configuré (RESEND_API_KEY manquant côté serveur)." },
+      { error: "Envoi d'e-mail non configuré côté serveur." },
       { status: 503 },
     );
   }
 
-  const userEmail = session.resa.identity.email?.trim() || "";
+  // reply-to : email ResaMania si session ResaMania, sinon l'email vérifié du compte.
+  const dbUser = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: { email: true },
+  });
+  const userEmail = session.resa?.identity.email?.trim() || dbUser?.email || "";
   const who = session.displayName || "Membre";
 
-  const resend = new Resend(apiKey);
-  const { error } = await resend.emails.send({
-    from: FROM,
-    to: [TO],
-    replyTo: userEmail || undefined,
-    subject: "APPLI SQUASH YVETTE",
-    text: `Commentaire de ${who}${userEmail ? ` (${userEmail})` : ""} :\n\n${text}`,
-  });
-  if (error) {
+  try {
+    await sendEmail({
+      to: TO,
+      replyTo: userEmail || undefined,
+      subject: "APPLI SQUASH YVETTE",
+      text: `Commentaire de ${who}${userEmail ? ` (${userEmail})` : ""} :\n\n${text}`,
+    });
+  } catch {
     return NextResponse.json({ error: "Échec de l'envoi, réessaie plus tard." }, { status: 502 });
   }
 

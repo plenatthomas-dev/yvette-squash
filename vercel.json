@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/warm-planning",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/check-alerts",
+      "schedule": "0 7 * * *"
+    }
+  ]
+}

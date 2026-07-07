@@ -38,6 +38,8 @@ export function PlanningGrid({
   onBookMany,
   selMode,
   setSelMode,
+  onWatch,
+  canWatch,
 }: {
   planning: PlanningDay;
   onBook: (slot: Slot) => void;
@@ -47,6 +49,8 @@ export function PlanningGrid({
   // Mode « Sélection » piloté par la page (bouton dans la barre de vue).
   selMode: boolean;
   setSelMode: (v: boolean) => void;
+  onWatch?: (slot: Slot) => void;
+  canWatch?: boolean;
 }) {
   // On coche des créneaux libres (un seul terrain par horaire, règle ResaMania), puis on
   // réserve tout d'un coup. La sélection se vide dès qu'on quitte le mode.
@@ -55,6 +59,9 @@ export function PlanningGrid({
     if (!selMode) setSelected(new Set());
   }, [selMode]);
 
+  // Alerte « préviens-moi si ça se libère » : proposée sur les créneaux réservés HORS asso
+  // (les créneaux asso servent, eux, à signaler sa présence — cf. onTogglePresence).
+  const watchable = !!(canWatch && onWatch);
   // Lignes = horaires distincts triés ; colonnes = terrains.
   const times = [...new Set(planning.slots.map((s) => s.startsAt))].sort();
   const byKey = new Map(
@@ -237,15 +244,27 @@ export function PlanningGrid({
                         </td>
                       );
                     }
-                    return (
-                      <td
-                        key={c.id}
-                        className="cell booked"
-                        title="Réservé (hors groupe)"
-                      >
-                        Réservé
-                      </td>
-                    );
+                    {
+                      // Créneau réservé hors asso : clic = « préviens-moi si ça se libère ».
+                      const watch = watchable ? () => onWatch!(slot) : undefined;
+                      return (
+                        <td
+                          key={c.id}
+                          className={"cell booked" + (watch ? " watchable" : "")}
+                          title={
+                            watch
+                              ? "Réservé — cliquer pour être alerté si ça se libère"
+                              : "Réservé (hors groupe)"
+                          }
+                          role={watch ? "button" : undefined}
+                          tabIndex={watch ? 0 : undefined}
+                          onClick={watch}
+                          onKeyDown={watch ? onKey(watch) : undefined}
+                        >
+                          Réservé
+                        </td>
+                      );
+                    }
                   })}
                 </tr>
               );

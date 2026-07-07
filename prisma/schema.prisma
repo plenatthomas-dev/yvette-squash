@@ -18,11 +18,17 @@ model User {
   contactId   String?      @unique // ResaMania (nullable : un compte « email seul » n'en a pas encore)
   displayName String
   nickname    String? // pseudonyme choisi par le joueur (affiché à la place du prénom)
-  email       String?
+  email       String?      @unique // normalisé (trim+lowercase) — CLÉ D'IDENTITÉ commune ResaMania/email
   createdAt   DateTime     @default(now())
   sessions    Session[]
   bookings    Booking[]
   attendances Attendance[]
+  pushSubs    PushSubscription[]
+  slotAlerts  SlotAlert[]
+  expensesPaid    Expense[]      @relation("ExpensePayer")
+  expensesCreated Expense[]      @relation("ExpenseCreator")
+  expenseShares   ExpenseShare[]
+  tricountApprovals TricountApproval[]
 }
 
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
@@ -31,10 +37,11 @@ model Session {
   id              String   @id // jeton aléatoire (valeur du cookie)
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId          String
-  accessToken     String // token Bearer chiffré (AES-256-GCM, court ~1h)
-  refreshTokenEnc String // refresh token chiffré (AES-256-GCM)
-  tokenExpiresAt  DateTime
-  identityJson    String // ResaIdentity sérialisée (contactId, clubId, nom…)
+  // Champs ResaMania : NULL pour une session « email seul » (aucun jeton).
+  accessToken     String? // token Bearer chiffré (AES-256-GCM, court ~1h)
+  refreshTokenEnc String? // refresh token chiffré (AES-256-GCM)
+  tokenExpiresAt  DateTime?
+  identityJson    String? // ResaIdentity sérialisée (contactId, clubId, nom…)
   expiresAt       DateTime // expiration de la session applicative
   createdAt       DateTime @default(now())
 
@@ -84,6 +91,33 @@ model FeedbackMessage {
   @@index([userId, createdAt])
 }
 
+// Code OTP (6 chiffres) pour la connexion « email seul » — preuve de possession de l'email.
+// Le code n'est JAMAIS stocké en clair (HMAC-SHA256). Usage unique, court, rate-limité
+// à la fois PAR EMAIL (anti-spam d'une boîte) et PAR IP (anti-abus d'envoi : empêche une
+// source d'arroser des centaines d'adresses et de brûler le quota d'envoi Gmail).
+model EmailOtp {
+  id        String   @id @default(cuid())
+  email     String // normalisé (trim+lowercase)
+  codeHash  String // HMAC-SHA256 du code
+  ip        String? // IP demandeuse (rate limiting par IP ; nullable pour l'existant)
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([ip, createdAt])
+}
+
+// Cache du planning d'un jour, rafraîchi à chaque chargement par un membre à jeton
+// ResaMania. Sert à afficher le planning aux comptes « email seul » (sans jeton), qui
+// le ré-annotent en direct (présences). payloadJson = PlanningDay BRUT (avant annotation).
+model PlanningSnapshot {
+  date        String   @id // "YYYY-MM-DD"
+  payloadJson String
+  updatedById String? // dernier membre (à jeton) ayant rafraîchi le snapshot
+  updatedAt   DateTime @updatedAt
+}
+
 // Présence « asso » sur un créneau déjà réservé par un membre : signal purement local
 // (ne touche jamais ResaMania ni l'identité du réservataire). Un membre peut se noter
 // présent sur le créneau d'un autre ; un second clic le retire.
@@ -98,4 +132,97 @@ model Attendance {
   @@unique([userId, classEventId]) // une présence par personne et par créneau
   @@index([classEventId])
   @@index([startsAt]) // purge des présences anciennes
+}
+
+// Abonnement Web Push (un par appareil/navigateur). Sert à envoyer les alertes.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  endpoint  String   @unique
+  p256dh    String // clé publique du client (chiffrement Web Push)
+  auth      String // secret d'authentification
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Alerte « préviens-moi si un terrain se libère » pour une date + un horaire (HH:MM).
+// Le cron interroge ResaMania et pousse une notif dès qu'un créneau redevient réservable.
+model SlotAlert {
+  id         String    @id @default(cuid())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  date       String // "YYYY-MM-DD" (jour visé)
+  hm         String // "HH:MM" (début du créneau visé)
+  active     Boolean   @default(true)
+  notifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@unique([userId, date, hm]) // une seule alerte par créneau et par joueur
+  @@index([active, date])
+}
+
+// ---- Partage de frais (type Tricount) ----
+// Un « tricount » regroupe les dépenses d'UN jour donné (repas, sortie…) : un seul
+// tricount par date, séparé des autres jours → l'historique liste ces tricounts.
+// Workflow : dépenses ajoutées librement, puis chaque payeur valide (approval) ;
+// quand TOUS les payeurs ont validé, les remboursements deviennent possibles.
+model Tricount {
+  id        String   @id @default(cuid())
+  date      String   @unique // "YYYY-MM-DD" : un tricount par jour
+  title     String? // libellé optionnel ("Repas d'après-match"…), fixé à la création
+  createdAt DateTime @default(now())
+  expenses  Expense[]
+  approvals TricountApproval[]
+}
+
+// « OK pour lancer les remboursements » d'un payeur sur un tricount. Les approbations
+// sont remises à zéro dès que les dépenses du tricount changent (ajout/suppression).
+model TricountApproval {
+  id         String   @id @default(cuid())
+  tricount   Tricount @relation(fields: [tricountId], references: [id], onDelete: Cascade)
+  tricountId String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  createdAt  DateTime @default(now())
+
+  @@unique([tricountId, userId])
+}
+
+// Une dépense payée par un membre pour le compte de plusieurs (balles, repas, pot…).
+// Montants TOUJOURS en centimes (entiers) : aucune erreur d'arrondi flottant.
+// Un remboursement (A rend de l'argent à B) est une Expense `isRefund` payée par A
+// avec UNE seule part portée par B : les soldes se recalculent naturellement.
+model Expense {
+  id          String   @id @default(cuid())
+  tricount    Tricount @relation(fields: [tricountId], references: [id], onDelete: Cascade)
+  tricountId  String
+  payer       User     @relation("ExpensePayer", fields: [payerId], references: [id], onDelete: Cascade)
+  payerId     String
+  creator     User     @relation("ExpenseCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  creatorId   String // qui a saisi la ligne (peut différer du payeur) : droit de suppression
+  label       String
+  amountCents Int
+  isRefund    Boolean  @default(false)
+  spentAt     DateTime @default(now()) // horodatage précis (affiché sur les remboursements)
+  createdAt   DateTime @default(now())
+  shares      ExpenseShare[]
+
+  @@index([tricountId])
+  @@index([spentAt])
+}
+
+// Part d'un participant dans une dépense (répartition égale, ajustée au centime :
+// la somme des parts vaut exactement amountCents).
+model ExpenseShare {
+  id          String  @id @default(cuid())
+  expense     Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  expenseId   String
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  amountCents Int
+
+  @@unique([expenseId, userId])
+  @@index([userId])
 }

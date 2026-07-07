@@ -5,8 +5,15 @@ import QRCode from "qrcode";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { PlanningGrid } from "@/components/PlanningGrid";
 import { WeekGrid } from "@/components/WeekGrid";
+import Tricount from "@/components/Tricount";
 import { fmtTime, slotMinutes } from "@/lib/time";
 import { downloadIcs } from "@/lib/ics";
+import {
+  ensurePushSubscribed,
+  pushSupported,
+  pushEnabledOnServer,
+} from "@/lib/pushClient";
+import { FEATURE_TRICOUNT, FEATURE_EMAIL_LOGIN } from "@/lib/features";
 
 function toISODate(d: Date): string {
   return d.toLocaleDateString("en-CA"); // YYYY-MM-DD local
@@ -189,6 +196,25 @@ function ResetIcon() {
     >
       <polyline points="1 4 1 10 7 10" />
       <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+    </svg>
+  );
+}
+
+// Icône « cloche » (alertes « créneau libéré »)
+// Icône « € » (accès aux frais partagés / tricount)
+function EuroIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M17.5 5.5A7.5 7.5 0 0 0 6.8 8.5M17.5 18.5a7.5 7.5 0 0 1-10.7-3M4 10h9M4 14h8" />
+    </svg>
+  );
+}
+
+function BellIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.7 21a2 2 0 0 1-3.4 0" />
     </svg>
   );
 }
@@ -795,10 +821,17 @@ function LegendInfo() {
   );
 }
 
+interface AlertItem {
+  id: string;
+  date: string; // YYYY-MM-DD
+  hm: string; // HH:MM
+}
+
 export default function Home() {
   const [me, setMe] = useState<string | null | undefined>(undefined); // undefined = chargement
   const [myHandle, setMyHandle] = useState<string>(""); // token créneau (pseudo tronqué / Tho.P)
   const [nickname, setNickname] = useState<string | null>(null); // pseudonyme choisi
+  const [canBook, setCanBook] = useState(true); // false = session « email seul » (lecture seule)
   const [date, setDate] = useState<string>(() => toISODate(new Date()));
   const [planning, setPlanning] = useState<PlanningDay | null>(null);
   const [journal, setJournal] = useState<JournalEntry[]>([]);
@@ -807,7 +840,7 @@ export default function Home() {
   const [range, setRange] = useState<Range>("all");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
-  const [view, setView] = useState<"day" | "week">("day");
+  const [view, setView] = useState<"day" | "week" | "money">("day");
   const [week, setWeek] = useState<{ date: string; planning: PlanningDay }[]>([]);
   const [busy, setBusy] = useState(false);
   // Mode « sélection multiple » (piloté depuis la barre de vue, appliqué dans la grille
@@ -818,7 +851,16 @@ export default function Home() {
   const [hydrated, setHydrated] = useState(false);
   const lastFocusRef = useRef(0);
   const dateInputRef = useRef<HTMLInputElement>(null);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  // Badge € : nombre de tricounts où JE dois de l'argent et où les remboursements
+  // sont ouverts (action possible « rembourser »). Alimenté au chargement/focus et,
+  // en direct, par le composant Tricount quand la vue Frais est ouverte.
+  const [triOwed, setTriOwed] = useState(0);
   const today = toISODate(new Date());
+  // Notifications disponibles seulement une fois monté (évite un décalage d'hydratation)
+  // ET si le navigateur les supporte ET si les clés VAPID sont configurées côté serveur.
+  const canNotify = hydrated && pushSupported() && pushEnabledOnServer();
 
   // Ouvre le calendrier natif depuis le libellé de date (champ input masqué).
   const openDatePicker = () => {
@@ -854,6 +896,7 @@ export default function Home() {
       setMe(data.displayName);
       setMyHandle(data.handle ?? "");
       setNickname(data.nickname ?? null);
+      setCanBook(data.canBook ?? true);
     } else {
       setMe(null);
       setMyHandle("");
@@ -864,6 +907,38 @@ export default function Home() {
   useEffect(() => {
     checkMe();
   }, [checkMe]);
+
+  const loadAlerts = useCallback(async () => {
+    const r = await fetch("/api/alerts");
+    if (r.ok) setAlerts(await r.json());
+  }, []);
+  useEffect(() => {
+    if (me && canNotify) loadAlerts();
+  }, [me, canNotify, loadAlerts]);
+
+  // Compteur du badge € : tricounts où je dois de l'argent, remboursements ouverts.
+  const loadTriOwed = useCallback(async () => {
+    const r = await fetch("/api/tricount");
+    if (!r.ok) return;
+    const d = (await r.json()) as {
+      me: string;
+      tricounts: {
+        ready: boolean;
+        settled: boolean;
+        balances: { userId: string; cents: number }[];
+      }[];
+    };
+    const n = d.tricounts.filter(
+      (t) =>
+        t.ready &&
+        !t.settled &&
+        (t.balances.find((b) => b.userId === d.me)?.cents ?? 0) < 0,
+    ).length;
+    setTriOwed(n);
+  }, []);
+  useEffect(() => {
+    if (me && FEATURE_TRICOUNT) loadTriOwed();
+  }, [me, loadTriOwed]);
 
   const load = useCallback(
     async (d: string) => {
@@ -919,14 +994,12 @@ export default function Home() {
     const d = p.get("date");
     if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) setDate(d);
 
+    const isView = (x: string | null): x is "day" | "week" | "money" =>
+      x === "day" || x === "week" || x === "money";
     const vParam = p.get("view");
     const vLS = localStorage.getItem("view");
-    const v =
-      vParam === "week" || vParam === "day"
-        ? vParam
-        : vLS === "week" || vLS === "day"
-          ? vLS
-          : null;
+    let v = isView(vParam) ? vParam : isView(vLS) ? vLS : null;
+    if (v === "money" && !FEATURE_TRICOUNT) v = "day"; // Frais désactivé : jamais cette vue
     if (v) setView(v);
 
     const rParam = p.get("range");
@@ -951,6 +1024,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!me || !hydrated) return;
+    if (view === "money") return; // la vue Frais charge ses propres données
     if (view === "week") loadWeek(date);
     else load(date);
   }, [me, hydrated, date, view, load, loadWeek]);
@@ -961,10 +1035,11 @@ export default function Home() {
     setSelMode(false);
   }, [view, date]);
 
-  const reload = useCallback(
-    () => (view === "week" ? loadWeek(date) : load(date)),
-    [view, date, load, loadWeek],
-  );
+  const reload = useCallback(() => {
+    if (view === "money") return; // Tricount se recharge tout seul (montage + actions)
+    if (view === "week") loadWeek(date);
+    else load(date);
+  }, [view, date, load, loadWeek]);
 
   // Rafraîchit au retour sur l'onglet (throttle 15 s) : le planning peut avoir bougé
   // pendant l'absence (un autre membre a réservé). Évite de réserver un créneau déjà pris.
@@ -976,6 +1051,7 @@ export default function Home() {
       if (now - lastFocusRef.current < 15000) return;
       lastFocusRef.current = now;
       reload();
+      if (FEATURE_TRICOUNT) loadTriOwed(); // le badge € peut avoir changé (validation ailleurs)
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
@@ -983,7 +1059,7 @@ export default function Home() {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, [me, reload]);
+  }, [me, reload, loadTriOwed]);
 
   const pickDay = (d: string) => {
     setView("day");
@@ -1002,6 +1078,13 @@ export default function Home() {
 
   const onBook = async (slot: Slot) => {
     if (busy || confirmState) return; // anti double-clic / double-modale
+    if (!canBook) {
+      toast(
+        "info",
+        "Réservation possible seulement via ResaMania. Ici tu peux te mettre « +1 » sur un créneau déjà réservé.",
+      );
+      return;
+    }
     // Blocage « même créneau » : impossible de réserver 2 terrains au même horaire
     // (ResaMania le refuse). On prévient tout de suite si on a déjà une résa à cette heure.
     const clash = planning?.slots.find((s) => s.startsAt === slot.startsAt && s.mine);
@@ -1229,6 +1312,47 @@ export default function Home() {
     reload();
   };
 
+  // « Préviens-moi si un terrain se libère » sur un créneau réservé.
+  const onWatch = async (slot: Slot) => {
+    if (busy || confirmState) return;
+    if (!canNotify) {
+      toast("err", "Notifications indisponibles sur cet appareil.");
+      return;
+    }
+    const day = slot.startsAt.slice(0, 10);
+    const hm = slot.startsAt.slice(11, 16);
+    const ok = await askConfirm({
+      title: "Être alerté si ça se libère ?",
+      body: `${fmtTime(slot.startsAt)} le ${prettyDate(day)} — on te notifie dès qu'un terrain se libère à cet horaire.`,
+      confirmLabel: "M'alerter 🔔",
+    });
+    if (!ok) return;
+    const subscribed = await ensurePushSubscribed();
+    if (!subscribed) {
+      toast("err", "Autorise les notifications pour recevoir l'alerte.");
+      return;
+    }
+    try {
+      const res = await fetch("/api/alerts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: day, hm }),
+      });
+      if (handleExpired(res.status)) return;
+      if (!res.ok) throw new Error();
+      toast("ok", "Alerte activée 🔔");
+      loadAlerts();
+    } catch {
+      toast("err", "Impossible d'activer l'alerte.");
+    }
+  };
+
+  const cancelAlert = async (id: string) => {
+    setAlerts((a) => a.filter((x) => x.id !== id)); // retrait optimiste
+    await fetch(`/api/alerts/${id}`, { method: "DELETE" }).catch(() => {});
+    loadAlerts();
+  };
+
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     setMe(null);
@@ -1249,17 +1373,46 @@ export default function Home() {
         <div className="app-top">
           <div className="brand">
             <h1>
-              <img src="/logo_squash.jpeg" alt="" className="logo-mark" />
-              Squash de l'Yvette
+              <img
+                src="/logo_squash.jpeg"
+                alt="Squash de l'Yvette"
+                className="logo-mark"
+              />
+              <span className="brand-title" aria-hidden="true">
+                Squash de l'Yvette
+              </span>
             </h1>
           </div>
           <div className="actions">
+            {canNotify && (
+              <button
+                className="secondary icon-btn alerts-btn"
+                onClick={() => setAlertsOpen(true)}
+                aria-label={`Mes alertes${alerts.length ? ` (${alerts.length})` : ""}`}
+                title="Mes alertes"
+              >
+                <BellIcon />
+                {alerts.length > 0 && <span className="badge">{alerts.length}</span>}
+              </button>
+            )}
             <ShareButton toast={toast} />
             <SettingsButton
               nickname={nickname}
               onNicknameSaved={checkMe}
               toast={toast}
             />
+            {FEATURE_TRICOUNT && (
+              <button
+                className={"secondary icon-btn money-btn" + (view === "money" ? " active" : "")}
+                onClick={() => setView(view === "money" ? "day" : "money")}
+                aria-label={`Frais partagés (tricount)${triOwed ? ` — ${triOwed} à rembourser` : ""}`}
+                aria-pressed={view === "money"}
+                title="Frais partagés"
+              >
+                <EuroIcon />
+                {triOwed > 0 && <span className="badge">{triOwed}</span>}
+              </button>
+            )}
             <button
               className="secondary logout"
               onClick={logout}
@@ -1276,8 +1429,17 @@ export default function Home() {
         <div className="sub">Bonjour {nickname || me.split(" ")[0]} 👋 · Le Complexe, Bures</div>
       </header>
 
+      {!canBook && (
+        <div className="notice info readonly-note">
+          🔒 <strong>Lecture seule</strong> (connexion par email) : réserver un terrain passe par
+          ResaMania. Tu peux consulter le planning et te mettre « +1 » sur un créneau déjà réservé
+          par un membre.
+        </div>
+      )}
+
       {/* Navigation de date : flèches + libellé (qui ouvre le calendrier natif) + pastille
           « Aujourd'hui » (seulement si on n'y est pas déjà), le tout sur UNE ligne. */}
+      {view !== "money" && (
       <div className="toolbar">
         <button className="secondary nav" aria-label="Jour précédent" onClick={() => setDate(addDays(date, view === "week" ? -7 : -1))}>←</button>
         <button
@@ -1312,6 +1474,7 @@ export default function Home() {
           aria-hidden="true"
         />
       </div>
+      )}
 
       {/* Vue (Jour/Semaine) à gauche ; à droite les actions compactes en icônes :
           sélection multiple, légende (ⓘ) et rafraîchir. */}
@@ -1320,6 +1483,7 @@ export default function Home() {
           <button className={view === "day" ? "active" : ""} aria-pressed={view === "day"} onClick={() => setView("day")}>Jour</button>
           <button className={view === "week" ? "active" : ""} aria-pressed={view === "week"} onClick={() => setView("week")}>Semaine</button>
         </div>
+        {view !== "money" && (
         <div className="viewbar-icons">
           <button
             type="button"
@@ -1342,8 +1506,10 @@ export default function Home() {
             <RefreshIcon />
           </button>
         </div>
+        )}
       </div>
 
+      {view !== "money" && (
       <div className="filters" role="group" aria-label="Plage horaire">
         {RANGES.map((r) => (
           <button
@@ -1356,15 +1522,40 @@ export default function Home() {
           </button>
         ))}
       </div>
+      )}
+
+      {view === "day" && planning?.cached && (
+        <p className="muted tiny cache-note">
+          🕒{" "}
+          {planning.notice
+            ? planning.notice
+            : `Planning en cache — dernière mise à jour ${
+                planning.cachedAt
+                  ? new Date(planning.cachedAt).toLocaleString("fr-FR", {
+                      day: "numeric",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : "—"
+              } par un membre connecté à ResaMania.`}
+        </p>
+      )}
 
       {/* Annonce discrète pour lecteurs d'écran (chargement / erreur). */}
       <p className="sr-only" role="status" aria-live="polite">
         {loading ? "Chargement du planning…" : error ? `Erreur : ${error}` : ""}
       </p>
 
-      {error && <div className="notice error" role="alert">⚠️ {error}</div>}
+      {error && view !== "money" && <div className="notice error" role="alert">⚠️ {error}</div>}
 
-      {view === "day"
+      {FEATURE_TRICOUNT && view === "money" && (
+        <Tricount toast={toast} onExpired={handleExpired} onOwedChange={setTriOwed} />
+      )}
+
+      {view === "money"
+        ? null
+        : view === "day"
         ? planning
           ? (() => {
               const slots = planning.slots.filter((s) => inRange(s.startsAt, range));
@@ -1380,6 +1571,8 @@ export default function Home() {
                   onBookMany={onBookMany}
                   selMode={selMode}
                   setSelMode={setSelMode}
+                  onWatch={onWatch}
+                  canWatch={canNotify}
                 />
               );
             })()
@@ -1429,6 +1622,43 @@ export default function Home() {
       )}
 
       <PrivacyNotice />
+      {alertsOpen && (
+        <div className="modal-overlay" onClick={() => setAlertsOpen(false)}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Mes alertes"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>🔔 Mes alertes</h3>
+            {alerts.length === 0 ? (
+              <p className="muted">
+                Aucune alerte pour le moment. Dans la vue Jour, touche un créneau
+                « Réservé » pour être prévenu s'il se libère.
+              </p>
+            ) : (
+              <ul className="alerts-list">
+                {alerts.map((a) => (
+                  <li key={a.id}>
+                    <span>
+                      {prettyDate(a.date)} · <strong>{a.hm}</strong>
+                    </span>
+                    <button className="cancel" onClick={() => cancelAlert(a.id)}>
+                      Retirer
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="modal-actions">
+              <button className="secondary" onClick={() => setAlertsOpen(false)}>
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Toasts items={toasts} />
       <ConfirmDialog state={confirmState} onResolve={resolveConfirm} />
@@ -1466,13 +1696,22 @@ function EyeIcon({ off }: { off: boolean }) {
 }
 
 function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
+  const [tab, setTab] = useState<"resa" | "email">("resa");
+  // ResaMania
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
+  // Connexion par email (OTP)
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
+
   const [err, setErr] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const submit = async (e: FormEvent) => {
+  const submitResa = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setErr(null);
@@ -1492,48 +1731,187 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     }
   };
 
+  const requestCode = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setErr(null);
+    setInfo(null);
+    try {
+      const res = await fetch("/api/auth/otp/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Envoi impossible");
+      setCodeSent(true);
+      setInfo(`Code envoyé à ${email}. Regarde tes mails (et les spams).`);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verifyCode = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/auth/otp/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code, name: name.trim() || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Code invalide");
+      onLoggedIn();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const switchTab = (t: "resa" | "email") => {
+    setTab(t);
+    setErr(null);
+    setInfo(null);
+  };
+
   return (
     <main className="login">
       <h1 className="sr-only">Squash de l'Yvette</h1>
-      <img
-        src="/logo_squash.jpeg"
-        alt="Squash de l'Yvette"
-        className="logo-hero"
-      />
-      <p className="muted">
-        Connecte-toi avec ton compte ResaMania (Le Complexe Bures).
-      </p>
-      <form onSubmit={submit}>
-        <input
-          type="text"
-          placeholder="Identifiant (email)"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          autoComplete="username"
-        />
-        <div className="pwd-field">
-          <input
-            type={showPwd ? "text" : "password"}
-            placeholder="Mot de passe"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-          />
+      <img src="/logo_squash.jpeg" alt="Squash de l'Yvette" className="logo-hero" />
+
+      {/* Onglets masqués si la connexion email est désactivée : seule ResaMania reste. */}
+      {FEATURE_EMAIL_LOGIN && (
+        <div className="login-tabs" role="group" aria-label="Méthode de connexion">
           <button
             type="button"
-            className="pwd-toggle"
-            onClick={() => setShowPwd((v) => !v)}
-            aria-label={showPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-            aria-pressed={showPwd}
-            title={showPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+            className={tab === "resa" ? "active" : "secondary"}
+            aria-pressed={tab === "resa"}
+            onClick={() => switchTab("resa")}
           >
-            <EyeIcon off={showPwd} />
+            ResaMania
+          </button>
+          <button
+            type="button"
+            className={tab === "email" ? "active" : "secondary"}
+            aria-pressed={tab === "email"}
+            onClick={() => switchTab("email")}
+          >
+            Par email
           </button>
         </div>
-        <button type="submit" disabled={busy}>
-          {busy ? "Connexion…" : "Se connecter"}
-        </button>
-      </form>
+      )}
+
+      {tab === "resa" || !FEATURE_EMAIL_LOGIN ? (
+        <>
+          <p className="muted">
+            Connecte-toi avec ton compte ResaMania (Le Complexe Bures).
+          </p>
+          <form onSubmit={submitResa}>
+            <input
+              type="text"
+              placeholder="Identifiant (email)"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+            />
+            <div className="pwd-field">
+              <input
+                type={showPwd ? "text" : "password"}
+                placeholder="Mot de passe"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+              />
+              <button
+                type="button"
+                className="pwd-toggle"
+                onClick={() => setShowPwd((v) => !v)}
+                aria-label={showPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                aria-pressed={showPwd}
+                title={showPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+              >
+                <EyeIcon off={showPwd} />
+              </button>
+            </div>
+            <button type="submit" disabled={busy}>
+              {busy ? "Connexion…" : "Se connecter"}
+            </button>
+          </form>
+          <p className="muted tiny">
+            Ton mot de passe sert seulement à te connecter à ResaMania ; il n'est jamais
+            conservé. L'appli mémorise uniquement que tu es connecté, de façon sécurisée.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="muted">
+            Pas d'accès ResaMania (suspendu, pas encore inscrit…) ? Connecte-toi par email.
+            Utilise le <strong>même email que sur ResaMania</strong> pour retrouver ton
+            historique le jour où tu t'y reconnecteras.
+          </p>
+          {!codeSent ? (
+            <form onSubmit={requestCode}>
+              <input
+                type="email"
+                placeholder="Ton email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+              />
+              <button type="submit" disabled={busy || !email.trim()}>
+                {busy ? "Envoi…" : "Recevoir un code"}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={verifyCode}>
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="Code à 6 chiffres"
+                value={code}
+                maxLength={6}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+              />
+              <input
+                type="text"
+                placeholder="Ton nom (si première connexion)"
+                value={name}
+                maxLength={60}
+                onChange={(e) => setName(e.target.value)}
+                autoComplete="name"
+              />
+              <button type="submit" disabled={busy || code.length !== 6}>
+                {busy ? "Vérification…" : "Se connecter"}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  setCodeSent(false);
+                  setCode("");
+                  setInfo(null);
+                  setErr(null);
+                }}
+                disabled={busy}
+              >
+                Changer d'email / renvoyer un code
+              </button>
+            </form>
+          )}
+          <p className="muted tiny">
+            En connexion email, tu peux consulter le planning et le Tricount, mais pas réserver
+            de terrain (ça reste sur ResaMania).
+          </p>
+        </>
+      )}
+
+      {info && <div className="notice info">{info}</div>}
       {err && <div className="notice error">⚠️ {err}</div>}
       <PrivacyNotice />
     </main>
