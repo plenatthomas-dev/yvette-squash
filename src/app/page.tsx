@@ -23,6 +23,13 @@ function addDays(date: string, n: number): string {
   d.setDate(d.getDate() + n);
   return toISODate(d);
 }
+// Jour sur lequel l'app s'ouvre par défaut : aujourd'hui, ou DEMAIN s'il est déjà tard
+// (≥ 21 h), car il ne reste alors plus guère de créneaux jouables le soir même.
+function defaultOpenDate(): string {
+  const now = new Date();
+  const today = toISODate(now);
+  return now.getHours() >= 21 ? addDays(today, 1) : today;
+}
 function prettyDate(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString("fr-FR", {
     weekday: "long",
@@ -1012,7 +1019,7 @@ export default function Home() {
   const [nickname, setNickname] = useState<string | null>(null); // pseudonyme choisi
   const [listed, setListed] = useState(true); // visibilité annuaire (idée 6, opt-out)
   const [canBook, setCanBook] = useState(true); // false = session « email seul » (lecture seule)
-  const [date, setDate] = useState<string>(() => toISODate(new Date()));
+  const [date, setDate] = useState<string>(() => defaultOpenDate());
   const [planning, setPlanning] = useState<PlanningDay | null>(null);
   const [journal, setJournal] = useState<JournalEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -1182,11 +1189,11 @@ export default function Home() {
     }
   }, [loadWaitCounts]);
 
-  // Lecture de l'état initial : URL (?date=&view=&range=) prioritaire, sinon localStorage.
+  // Lecture de l'état initial : `view`/`range` depuis l'URL (sinon localStorage). La DATE
+  // n'est volontairement PAS restaurée : l'app s'ouvre toujours sur le jour par défaut
+  // (aujourd'hui, ou demain après 21 h — cf. defaultOpenDate), pas sur le dernier jour vu.
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
-    const d = p.get("date");
-    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) setDate(d);
 
     const isView = (x: string | null): x is "day" | "week" | "money" =>
       x === "day" || x === "week" || x === "money";
@@ -1668,7 +1675,7 @@ export default function Home() {
       )}
 
       {/* Navigation de date : flèches + libellé (qui ouvre le calendrier natif) + pastille
-          « Aujourd'hui » (seulement si on n'y est pas déjà), le tout sur UNE ligne. */}
+          « Aujourd'hui » (toujours présente, inactive si on y est déjà), le tout sur UNE ligne. */}
       {view !== "money" && (
       <div className="toolbar">
         <button className="secondary nav" aria-label="Jour précédent" onClick={() => setDate(addDays(date, view === "week" ? -7 : -1))}>←</button>
@@ -1683,16 +1690,17 @@ export default function Home() {
           <span className="date">{view === "week" ? weekLabel(date) : shortPretty(date)}</span>
         </button>
         <button className="secondary nav" aria-label="Jour suivant" onClick={() => setDate(addDays(date, view === "week" ? 7 : 1))}>→</button>
-        {date !== today && (
-          <button
-            type="button"
-            className="secondary today-chip"
-            onClick={() => setDate(today)}
-            title="Revenir à aujourd'hui"
-          >
-            Auj.
-          </button>
-        )}
+        {/* Toujours présent (place fixe dans la barre) ; inactif quand on est déjà sur aujourd'hui. */}
+        <button
+          type="button"
+          className="secondary today-chip"
+          onClick={() => setDate(today)}
+          disabled={date === today}
+          aria-label="Revenir à aujourd'hui"
+          title={date === today ? "Tu es déjà sur aujourd'hui" : "Revenir à aujourd'hui"}
+        >
+          Auj.
+        </button>
         {/* Champ natif masqué : ouvert via showPicker() au clic sur le libellé de date. */}
         <input
           ref={dateInputRef}

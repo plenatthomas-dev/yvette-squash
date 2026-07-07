@@ -365,6 +365,11 @@ header.app .sub {
   padding: 7px 11px;
   font-size: 0.8rem;
 }
+/* Toujours affichée, mais grisée/inactive quand on est déjà sur aujourd'hui. */
+.toolbar .today-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 
 /* Champ date natif rendu invisible mais présent dans le DOM (support de showPicker). */
 .datepick-hidden {
