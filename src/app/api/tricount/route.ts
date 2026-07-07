@@ -32,6 +32,10 @@ export async function GET(req: NextRequest) {
           orderBy: [{ isRefund: "asc" }, { spentAt: "asc" }],
         },
         approvals: { select: { userId: true } },
+        comments: {
+          select: { id: true, body: true, userId: true, createdAt: true },
+          orderBy: { createdAt: "asc" },
+        },
       },
       orderBy: { date: "desc" },
     }),
@@ -85,6 +89,16 @@ export async function GET(req: NextRequest) {
           ...tr,
           fromName: name(tr.fromId),
           toName: name(tr.toId),
+        })),
+        // Fil de commentaires (idée 5a). On affiche le nom réel (comme le reste du tricount),
+        // jamais le pseudo ; chacun ne peut supprimer que ses propres messages.
+        comments: t.comments.map((c) => ({
+          id: c.id,
+          body: c.body,
+          userId: c.userId,
+          userName: name(c.userId),
+          createdAt: c.createdAt.toISOString(),
+          canDelete: c.userId === session.userId,
         })),
       };
       })

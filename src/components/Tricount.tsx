@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { MAX_COMMENT_LEN } from "@/lib/tricount";
 
 // Vue « Frais » : tricounts par jour (un tricount = les dépenses d'une date),
 // avec historique, validation des payeurs puis remboursements guidés.
@@ -39,6 +40,14 @@ interface TransferItem {
   fromName: string;
   toName: string;
 }
+interface CommentItem {
+  id: string;
+  body: string;
+  userId: string;
+  userName: string;
+  createdAt: string;
+  canDelete: boolean;
+}
 interface TricountItem {
   id: string;
   date: string;
@@ -50,6 +59,7 @@ interface TricountItem {
   expenses: ExpenseItem[];
   balances: BalanceItem[];
   transfers: TransferItem[];
+  comments: CommentItem[];
 }
 interface TricountData {
   me: string;
@@ -96,6 +106,16 @@ function todayISO(): string {
   return new Date().toLocaleDateString("en-CA");
 }
 
+/** Horodatage compact d'un commentaire : "3 juil. · 21:15". */
+function fmtCommentStamp(iso: string): string {
+  const d = new Date(iso);
+  return (
+    d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) +
+    " · " +
+    d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+  );
+}
+
 interface Props {
   toast: (type: "ok" | "err" | "info", msg: string) => void;
   onExpired: (status: number) => boolean;
@@ -129,6 +149,8 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
   const [refundAmount, setRefundAmount] = useState("");
 
   const [confirmDelete, setConfirmDelete] = useState<ExpenseItem | null>(null);
+  // Brouillons du fil de commentaires (idée 5a), un par tricount déplié.
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -310,6 +332,52 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
         throw new Error(j.error ?? `Erreur ${res.status}`);
       }
       toast("ok", "Ligne supprimée");
+      load();
+    } catch (e) {
+      toast("err", "Suppression impossible : " + (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Fil de commentaires (idée 5a) : poster / supprimer un message.
+  const postComment = async (t: TricountItem) => {
+    if (busy) return;
+    const text = (commentDrafts[t.id] ?? "").trim();
+    if (!text) return;
+    if (text.length > MAX_COMMENT_LEN) {
+      toast("err", `Message trop long (${MAX_COMMENT_LEN} caractères max)`);
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/tricount/${t.id}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: text }),
+      });
+      if (onExpired(res.status)) return;
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error ?? `Erreur ${res.status}`);
+      setCommentDrafts((d) => ({ ...d, [t.id]: "" }));
+      load();
+    } catch (e) {
+      toast("err", "Message impossible : " + (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteComment = async (id: string) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/tricount/comments/${id}`, { method: "DELETE" });
+      if (onExpired(res.status)) return;
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error ?? `Erreur ${res.status}`);
+      }
       load();
     } catch (e) {
       toast("err", "Suppression impossible : " + (e as Error).message);
@@ -513,6 +581,59 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                     Tout le monde est remboursé — tricount soldé. 🎉
                   </p>
                 )}
+
+                {/* Fil de commentaires (idée 5a) */}
+                <section className="tri-comments">
+                  <h3>💬 Discussion</h3>
+                  {t.comments.length > 0 && (
+                    <ul className="tri-comment-list">
+                      {t.comments.map((c) => (
+                        <li key={c.id} className={c.userId === data.me ? "mine" : ""}>
+                          <div className="tri-comment-head">
+                            <strong>{c.userName}{c.userId === data.me && " (toi)"}</strong>
+                            <small>{fmtCommentStamp(c.createdAt)}</small>
+                          </div>
+                          <p className="tri-comment-body">{c.body}</p>
+                          {c.canDelete && (
+                            <button
+                              type="button"
+                              className="cancel tri-comment-del"
+                              onClick={() => deleteComment(c.id)}
+                              disabled={busy}
+                              aria-label="Supprimer mon commentaire"
+                            >
+                              Suppr.
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <form
+                    className="tri-comment-form"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      postComment(t);
+                    }}
+                  >
+                    <input
+                      type="text"
+                      value={commentDrafts[t.id] ?? ""}
+                      onChange={(e) =>
+                        setCommentDrafts((d) => ({ ...d, [t.id]: e.target.value }))
+                      }
+                      placeholder="Écrire un message…"
+                      maxLength={MAX_COMMENT_LEN}
+                      aria-label="Nouveau commentaire"
+                    />
+                    <button
+                      type="submit"
+                      disabled={busy || !(commentDrafts[t.id] ?? "").trim()}
+                    >
+                      Envoyer
+                    </button>
+                  </form>
+                </section>
               </div>
             )}
           </article>

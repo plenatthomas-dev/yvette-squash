@@ -33,6 +33,7 @@ model User {
   expensesCreated Expense[]      @relation("ExpenseCreator")
   expenseShares   ExpenseShare[]
   tricountApprovals TricountApproval[]
+  tricountComments  TricountComment[]
 }
 
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
@@ -179,6 +180,22 @@ model Tricount {
   createdAt DateTime @default(now())
   expenses  Expense[]
   approvals TricountApproval[]
+  comments  TricountComment[]
+}
+
+// Fil de commentaires attaché à UN tricount (idée 5a) : entraide sur le partage de frais
+// (« j'ai payé le pot », « il manque les balles »…). Signal purement local. Supprimé avec
+// le tricount (cascade) — donc disparaît si toutes les dépenses du jour sont retirées.
+model TricountComment {
+  id         String   @id @default(cuid())
+  tricount   Tricount @relation(fields: [tricountId], references: [id], onDelete: Cascade)
+  tricountId String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  body       String // texte du message
+  createdAt  DateTime @default(now())
+
+  @@index([tricountId, createdAt])
 }
 
 // « OK pour lancer les remboursements » d'un payeur sur un tricount. Les approbations

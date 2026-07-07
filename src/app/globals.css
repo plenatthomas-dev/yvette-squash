@@ -1921,3 +1921,52 @@ table.planning.week th.time.selhead {
   display: block;
   font-size: 0.88rem;
 }
+
+/* Fil de commentaires (idée 5a) */
+.tri-comment-list {
+  list-style: none;
+  padding: 0;
+}
+.tri-card-body .tri-comment-list li {
+  position: relative;
+  padding: 8px 0;
+}
+.tri-comment-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.tri-comment-head strong {
+  font-size: 0.86rem;
+}
+.tri-comment-head small {
+  color: var(--pico-muted-color);
+  font-size: 0.72rem;
+}
+.tri-comment-body {
+  margin: 2px 0 0;
+  font-size: 0.9rem;
+  white-space: pre-wrap; /* respecte les retours à la ligne éventuels */
+  overflow-wrap: anywhere; /* pas de débordement sur un mot très long / URL */
+}
+.tri-comment-del {
+  position: absolute;
+  top: 6px;
+  right: 0;
+}
+.tri-comment-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: stretch;
+}
+.tri-comment-form input {
+  flex: 1;
+  margin: 0;
+}
+.tri-comment-form button {
+  width: auto;
+  margin: 0;
+  flex-shrink: 0;
+  font-size: 0.88rem;
+}

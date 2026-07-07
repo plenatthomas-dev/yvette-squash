@@ -6,6 +6,8 @@ export const MAX_AMOUNT_CENTS = 10_000_000;
 export const MAX_LABEL_LEN = 80;
 // Titre d'un tricount : court (affiché dans l'en-tête de la carte, à côté de la date).
 export const MAX_TITLE_LEN = 40;
+// Commentaire (idée 5a) : un message de fil de discussion attaché à un tricount.
+export const MAX_COMMENT_LEN = 500;
 
 /**
  * Répartition égale de `amountCents` entre `n` participants, ajustée au centime :

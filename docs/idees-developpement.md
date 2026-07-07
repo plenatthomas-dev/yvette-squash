@@ -90,14 +90,23 @@ d'une soirée à sa place).
 
 **Communiquer entre utilisateurs** — par exemple à propos d'un tricount.
 
-- **Statut** : 💡 à étudier · **Valeur** ⭐⭐ · **Effort** variable
+- **Statut** : 🚧 (a) fait · (b) à étudier · **Valeur** ⭐⭐ · **Effort** variable
 - **Notes / éval** : deux périmètres très différents :
   - **(a) fil de commentaires attaché à un tricount** → **S–M**, ciblé, directement utile
-    au partage de frais ;
+    au partage de frais ; **✅ fait** (voir ci-dessous) ;
   - **(b) messagerie générale** entre membres → **L–XL** (fils, non-lus, modération,
     notifs) et **dépend de l'annuaire (6)**.
   Web Push (`PushSubscription`) déjà en place pour notifier. **Verdict** : commencer par
   **(a)**, remettre (b) à plus tard.
+- **Livré 5a** (sur `main`, build vert, **gated `FEATURE_TRICOUNT` → invisible en prod**
+  tant que le flag reste off) : nouveau modèle `TricountComment` (lié au `Tricount`,
+  `onDelete: Cascade` → le fil disparaît si toutes les dépenses du jour sont retirées ;
+  migration `10_tricount_comments`). Les commentaires sont **embarqués dans
+  `GET /api/tricount`** (comme dépenses/soldes) ; `POST /api/tricount/{id}/comments` (tout
+  membre connecté, 1–500 car.) et `DELETE /api/tricount/comments/{id}` (son propre message
+  seulement). UI : section **« 💬 Discussion »** en bas de chaque carte dépliée (liste +
+  champ de saisie + suppression de ses messages), **nom réel** affiché (jamais le pseudo,
+  comme le reste du tricount). Rechargement via `load()` après post/suppression.
 
 ## 6. Annuaire des utilisateurs inscrits ✅ fait
 
@@ -236,7 +245,7 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 | 6 | Annuaire (opt-out) | ⭐⭐ | S | — | ✅ **fait** |
 | C | Export `.ics` | ⭐⭐ | S | — | ✅ **fait** |
 | A | Rappels de match (push) | ⭐⭐⭐ | M | — | ❌ **écarté** (porteur) |
-| 5a | Commentaires sur un tricount | ⭐⭐ | S–M | — | Moyenne |
+| 5a | Commentaires sur un tricount | ⭐⭐ | S–M | Tricount | ✅ **fait** (gated `FEATURE_TRICOUNT`) |
 | D | Liste d'attente | ⭐⭐⭐ | M (réel XS–S) | SlotAlert | ✅ **fait** (réutilise `SlotAlert`) |
 | 4 | Délégation de droits | ⭐⭐ | M–L | — | À cadrer (sécurité) |
 | 2 | Reprise auto via « +1 » | ⭐⭐ | L | Attendance | À cadrer (risqué) |
@@ -248,16 +257,17 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 1. **Vague 1 — quick wins** (fort effet, peu cher) : ~~**7a** (couleurs semaine)~~ ✅,
    ~~**6** (annuaire opt-out)~~ ✅, ~~**C** (.ics)~~ ✅. → **vague 1 close**.
 2. **Vague 2 — feature phare** : ~~**1 + 7b** (réservation groupée + sélection multiple)~~ ✅.
-3. **Vague 3 — engagement** *(en cours)* : ~~**D** (liste d'attente)~~ ✅, ~~**A** (rappels
-   push)~~ ❌ écarté (porteur). → **reste 5a** (commentaires tricount).
+3. **Vague 3 — engagement** *(close)* : ~~**D** (liste d'attente)~~ ✅, ~~**A** (rappels
+   push)~~ ❌ écarté (porteur), ~~**5a** (commentaires tricount)~~ ✅ (gated `FEATURE_TRICOUNT`).
 4. **Vague 4 — gros / sensibles, à décider** : **4** (délégation, design sécurité),
    **2** (auto-rebook, à cadrer), **3** (tournois, si fréquents), **5b** (messagerie).
 
-> **État au 2026-07-07** : **vagues 1 et 2 closes** ; **vague 3** bien avancée — **D**
-> (liste d'attente) **livrée** sur `main`, **A** (rappels push) **écartée** (décision
-> porteur). **Prochaine étape = 5a** (commentaires sur un tricount) — dernier item de la
-> vague 3, indépendant de l'annuaire. Ensuite : **vague 4** (sensibles : 4, 2, 3, 5b),
-> à cadrer avant tout code. _Idées B (stats perso) et A (rappels) écartées._
+> **État au 2026-07-07** : **vagues 1, 2 et 3 closes**. Vague 3 : **D** (liste d'attente)
+> et **5a** (commentaires tricount, gated `FEATURE_TRICOUNT`, invisible en prod) **livrées**
+> sur `main` ; **A** (rappels push) **écartée** (décision porteur). **Prochaine étape =
+> vague 4** (gros / sensibles : **4** délégation, **2** auto-rebook, **3** tournois, **5b**
+> messagerie) — tous **à cadrer** avant tout code. _Idées B (stats perso) et A (rappels)
+> écartées._
 
 ### Lecture d'ensemble (qualité des idées)
 
