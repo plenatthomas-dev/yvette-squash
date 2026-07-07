@@ -1146,6 +1146,43 @@ td.cell.past {
   width: auto;
 }
 
+/* Case à cocher alignée avec son libellé (opt-out annuaire). */
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.check-row input {
+  margin: 0;
+  width: auto;
+}
+
+/* --- Annuaire des membres ---------------------------------------------- */
+.directory-search {
+  width: 100%;
+  margin: 0 0 10px;
+}
+
+.directory-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.directory-list li {
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--pico-card-border-color);
+}
+
+.directory-list li:last-child {
+  border-bottom: none;
+}
+
 /* --- Pied de page : note confidentialité -------------------------------- */
 .app-footer {
   margin-top: 30px;

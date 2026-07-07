@@ -18,13 +18,15 @@ export async function GET(req: NextRequest) {
   //    ou diminutif). Calculé sur l'ensemble des joueurs → identique à la grille ;
   //    le client s'en sert pour la mise à jour optimiste des présences.
   const users = await prisma.user.findMany({
-    select: { id: true, displayName: true, nickname: true, createdAt: true },
+    select: { id: true, displayName: true, nickname: true, listed: true, createdAt: true },
   });
   const me = users.find((u) => u.id === session.userId);
   const handle = buildHandleMap(users).get(session.userId) ?? null;
   return NextResponse.json({
     displayName: session.displayName,
     nickname: me?.nickname ?? null,
+    // Visibilité annuaire (idée 6) : pilote la case opt-out des paramètres.
+    listed: me?.listed ?? true,
     handle,
     // Pilote l'UI : "email" = session sans ResaMania (lecture seule, pas de réservation).
     mode: session.resa ? "resamania" : "email",

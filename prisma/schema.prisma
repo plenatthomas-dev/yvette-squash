@@ -19,6 +19,10 @@ model User {
   displayName String
   nickname    String? // pseudonyme choisi par le joueur (affiché à la place du prénom)
   email       String?      @unique // normalisé (trim+lowercase) — CLÉ D'IDENTITÉ commune ResaMania/email
+  // Annuaire (idée 6) : visibilité OPT-OUT — visible par défaut, le joueur peut se retirer
+  // depuis ses paramètres. Base légale = intérêt légitime (entraide asso) + retrait facile.
+  // Seuls `id` + nom/pseudo sont exposés par /api/directory (jamais email ni contactId).
+  listed      Boolean      @default(true)
   createdAt   DateTime     @default(now())
   sessions    Session[]
   bookings    Booking[]

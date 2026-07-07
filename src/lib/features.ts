@@ -23,3 +23,6 @@ export const FEATURE_TRICOUNT = isOn(process.env.NEXT_PUBLIC_FEATURE_TRICOUNT);
 
 // Connexion « email seul » (OTP) : onglet de login + routes /api/auth/otp/**.
 export const FEATURE_EMAIL_LOGIN = isOn(process.env.NEXT_PUBLIC_FEATURE_EMAIL_LOGIN);
+
+// Annuaire des membres (idée 6) : bouton « Membres » + route /api/directory.
+export const FEATURE_DIRECTORY = isOn(process.env.NEXT_PUBLIC_FEATURE_DIRECTORY);

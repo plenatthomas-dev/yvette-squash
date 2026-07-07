@@ -13,7 +13,7 @@ import {
   pushSupported,
   pushEnabledOnServer,
 } from "@/lib/pushClient";
-import { FEATURE_TRICOUNT, FEATURE_EMAIL_LOGIN } from "@/lib/features";
+import { FEATURE_TRICOUNT, FEATURE_EMAIL_LOGIN, FEATURE_DIRECTORY } from "@/lib/features";
 
 function toISODate(d: Date): string {
   return d.toLocaleDateString("en-CA"); // YYYY-MM-DD local
@@ -219,20 +219,131 @@ function BellIcon() {
   );
 }
 
+// Icône « membres » (deux silhouettes) pour le bouton annuaire.
+function UsersIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+// Annuaire des membres (idée 6). Bouton d'en-tête → modale listant les joueurs opt-in,
+// avec une recherche par nom. Gated par FEATURE_DIRECTORY : grisé (« bientôt ») si OFF,
+// à l'image du bouton Frais. Lecture seule ici (les usages — message, etc. — viendront).
+function DirectoryButton({ toast }: { toast: (type: ToastType, msg: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [members, setMembers] = useState<{ id: string; name: string }[] | null>(null);
+  const [q, setQ] = useState("");
+
+  // Charge la liste à l'ouverture (à chaque fois : elle peut avoir bougé).
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setMembers(null);
+    (async () => {
+      try {
+        const res = await fetch("/api/directory");
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+        if (!cancelled) setMembers(data.members ?? []);
+      } catch (e) {
+        if (!cancelled) {
+          setMembers([]);
+          toast("err", (e as Error).message);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, toast]);
+
+  const needle = q.trim().toLowerCase();
+  const shown = (members ?? []).filter((m) => m.name.toLowerCase().includes(needle));
+
+  return (
+    <>
+      <button
+        className={"secondary icon-btn" + (FEATURE_DIRECTORY ? "" : " coming-soon")}
+        onClick={() => FEATURE_DIRECTORY && setOpen(true)}
+        disabled={!FEATURE_DIRECTORY}
+        aria-label={FEATURE_DIRECTORY ? "Annuaire des membres" : "Annuaire — en cours de développement"}
+        title={FEATURE_DIRECTORY ? "Annuaire des membres" : "🚧 En cours de développement"}
+      >
+        <UsersIcon />
+      </button>
+      {open && (
+        <div className="modal-overlay" onClick={() => setOpen(false)}>
+          <div
+            className="modal directory"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Annuaire des membres"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>Annuaire des membres</h3>
+            <input
+              type="search"
+              className="directory-search"
+              placeholder="Rechercher un membre…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              aria-label="Rechercher un membre"
+            />
+            {members === null ? (
+              <p className="muted tiny">Chargement…</p>
+            ) : shown.length === 0 ? (
+              <p className="muted tiny">
+                {members.length === 0
+                  ? "Aucun membre visible pour le moment."
+                  : "Aucun résultat."}
+              </p>
+            ) : (
+              <ul className="directory-list">
+                {shown.map((m) => (
+                  <li key={m.id}>{m.name}</li>
+                ))}
+              </ul>
+            )}
+            <p className="muted tiny">
+              Seuls les membres ayant choisi d'apparaître sont listés. Pour t'ajouter ou te
+              retirer : ⚙️ Paramètres › « Annuaire des membres ».
+            </p>
+            <div className="modal-actions">
+              <button className="secondary" onClick={() => setOpen(false)}>
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // Panneau de paramètres : choix du thème (dont « Short Rose ») + choix du pseudonyme.
 function SettingsButton({
   nickname,
-  onNicknameSaved,
+  listed,
+  onProfileSaved,
   toast,
 }: {
   nickname: string | null;
-  onNicknameSaved: () => void;
+  listed: boolean;
+  onProfileSaved: () => void;
   toast: (type: ToastType, msg: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>("system");
   const [nick, setNick] = useState(nickname ?? "");
   const [saving, setSaving] = useState(false);
+  // État optimiste de la case « annuaire » : bascule tout de suite, se resync sur `listed`.
+  const [listedLocal, setListedLocal] = useState(listed);
+  const [savingListed, setSavingListed] = useState(false);
   const [comment, setComment] = useState("");
   const [sending, setSending] = useState(false);
   // Doit rester synchronisé avec MAX_LEN côté serveur (api/feedback/route.ts).
@@ -249,6 +360,11 @@ function SettingsButton({
   useEffect(() => {
     if (open) setNick(nickname ?? "");
   }, [open, nickname]);
+
+  // Idem pour la case annuaire.
+  useEffect(() => {
+    setListedLocal(listed);
+  }, [listed]);
 
   const pickTheme = (t: Theme) => {
     setTheme(t);
@@ -268,7 +384,7 @@ function SettingsButton({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
       toast("ok", value ? "Pseudonyme enregistré" : "Pseudonyme retiré");
-      onNicknameSaved();
+      onProfileSaved();
       if (close) setOpen(false);
     } catch (e) {
       toast("err", (e as Error).message);
@@ -277,6 +393,29 @@ function SettingsButton({
     }
   };
   const saveNick = () => persist(nick.trim() ? nick : null, true);
+
+  // Bascule la visibilité dans l'annuaire (opt-out). Optimiste : on met à jour la case tout
+  // de suite, puis on PATCH ; en cas d'échec on revient en arrière.
+  const toggleListed = async (next: boolean) => {
+    setListedLocal(next);
+    setSavingListed(true);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listed: next }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      toast("ok", next ? "Tu apparais dans l'annuaire" : "Tu es retiré de l'annuaire");
+      onProfileSaved();
+    } catch (e) {
+      setListedLocal(!next); // rollback
+      toast("err", (e as Error).message);
+    } finally {
+      setSavingListed(false);
+    }
+  };
   const clearNick = () => {
     setNick("");
     persist(null, false); // RAZ : efface le pseudo, panneau ouvert pour resaisir
@@ -377,6 +516,25 @@ function SettingsButton({
                 )}
               </div>
             </section>
+
+            {FEATURE_DIRECTORY && (
+              <section className="setting">
+                <h4>Annuaire des membres</h4>
+                <p className="muted tiny">
+                  Par défaut, ton nom (ou pseudo) apparaît dans l'annuaire des membres pour
+                  faciliter l'entraide entre joueurs. Tu peux t'en retirer à tout moment.
+                </p>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={listedLocal}
+                    disabled={savingListed}
+                    onChange={(e) => toggleListed(e.target.checked)}
+                  />
+                  <span>Apparaître dans l'annuaire</span>
+                </label>
+              </section>
+            )}
 
             <section className="setting">
               <h4>Un commentaire ?</h4>
@@ -568,6 +726,15 @@ function PrivacyNotice() {
                 ne sont ni revendues ni transmises à des tiers (hormis
                 ResaMania, le service que tu utilises déjà).
               </p>
+              {FEATURE_DIRECTORY && (
+                <p>
+                  <strong>Annuaire des membres.</strong> Pour faciliter l'entraide
+                  entre joueurs, ton nom (ou pseudonyme) est visible dans un annuaire
+                  interne réservé aux membres connectés. <strong>Aucune autre donnée
+                  n'y figure</strong> (ni e-mail, ni réservations). Tu peux t'en retirer
+                  à tout moment depuis ⚙️ Paramètres › « Annuaire des membres ».
+                </p>
+              )}
               <p>
                 Hébergement en Union européenne : application sur Vercel, base
                 de données sur Neon.
@@ -831,6 +998,7 @@ export default function Home() {
   const [me, setMe] = useState<string | null | undefined>(undefined); // undefined = chargement
   const [myHandle, setMyHandle] = useState<string>(""); // token créneau (pseudo tronqué / Tho.P)
   const [nickname, setNickname] = useState<string | null>(null); // pseudonyme choisi
+  const [listed, setListed] = useState(true); // visibilité annuaire (idée 6, opt-out)
   const [canBook, setCanBook] = useState(true); // false = session « email seul » (lecture seule)
   const [date, setDate] = useState<string>(() => toISODate(new Date()));
   const [planning, setPlanning] = useState<PlanningDay | null>(null);
@@ -896,6 +1064,7 @@ export default function Home() {
       setMe(data.displayName);
       setMyHandle(data.handle ?? "");
       setNickname(data.nickname ?? null);
+      setListed(data.listed ?? true);
       setCanBook(data.canBook ?? true);
     } else {
       setMe(null);
@@ -1396,9 +1565,11 @@ export default function Home() {
               </button>
             )}
             <ShareButton toast={toast} />
+            <DirectoryButton toast={toast} />
             <SettingsButton
               nickname={nickname}
-              onNicknameSaved={checkMe}
+              listed={listed}
+              onProfileSaved={checkMe}
               toast={toast}
             />
             {/* Bouton Frais : actif si le flag est ON ; sinon affiché grisé (désactivé)
