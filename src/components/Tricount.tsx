@@ -160,8 +160,10 @@ export default function Tricount({ toast, onExpired }: Props) {
     if (!data) return;
     const today = todayISO();
     setDate(today);
-    // Pré-sélection : le tricount d'aujourd'hui s'il existe, sinon « nouvelle date ».
-    setTcChoice(data.tricounts.some((t) => t.date === today) ? today : "new");
+    // Pré-sélection : le tricount d'aujourd'hui s'il existe, sinon le plus récent,
+    // sinon seulement « nouvelle date » (aucun tricount encore).
+    const todayTc = data.tricounts.find((t) => t.date === today);
+    setTcChoice(todayTc?.date ?? data.tricounts[0]?.date ?? "new");
     setLabel("");
     setAmount("");
     setPayerId(data.me);
