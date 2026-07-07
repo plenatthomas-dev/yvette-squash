@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import { invalidateAnnotationUsers } from "@/lib/planning-annotate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,5 +71,8 @@ export async function PATCH(req: NextRequest) {
     data,
     select: { nickname: true, listed: true },
   });
+  // Le pseudo/la visibilité changent → le cache mémoire de la liste des membres (annotation)
+  // doit refléter le nouveau nom sans attendre son TTL.
+  invalidateAnnotationUsers();
   return NextResponse.json({ ok: true, ...updated });
 }

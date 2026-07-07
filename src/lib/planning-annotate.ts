@@ -2,6 +2,34 @@ import { prisma } from "./db";
 import { buildHandleMap, baseHandle } from "./handle";
 import type { PlanningDay } from "./resamania/types";
 
+// Liste des membres utilisée pour l'annotation (nom/pseudo/contactId). Relue à CHAQUE
+// affichage du planning, mais elle change rarement → cache mémoire court (60 s) partagé.
+// Retire une requête DB du chemin chaud (et du « réveil » d'une base Neon endormie).
+// Invalidé explicitement sur mise à jour de profil (cf. invalidateAnnotationUsers).
+export type AnnotationUser = {
+  id: string;
+  contactId: string | null;
+  displayName: string;
+  nickname: string | null;
+  createdAt: Date;
+};
+const USERS_TTL_MS = 60_000;
+let usersCache: { at: number; data: AnnotationUser[] } | null = null;
+
+export async function loadAnnotationUsers(): Promise<AnnotationUser[]> {
+  if (usersCache && Date.now() - usersCache.at < USERS_TTL_MS) return usersCache.data;
+  const data = await prisma.user.findMany({
+    select: { id: true, contactId: true, displayName: true, nickname: true, createdAt: true },
+  });
+  usersCache = { at: Date.now(), data };
+  return data;
+}
+
+/** Vide le cache de la liste des membres (après changement de pseudo / visibilité). */
+export function invalidateAnnotationUsers(): void {
+  usersCache = null;
+}
+
 /**
  * Annote les slots d'un planning : qui du groupe a réservé (contactId connu ou journal
  * local) + les présences « +1 ». LECTURE SEULE — aucune réconciliation live (celle-ci,
@@ -9,26 +37,27 @@ import type { PlanningDay } from "./resamania/types";
  * et le chemin « cache » (compte email seul) pour un rendu identique. Mute planning.slots.
  */
 export async function annotatePlanning(planning: PlanningDay, userId: string): Promise<void> {
-  const users = await prisma.user.findMany({
-    select: { id: true, contactId: true, displayName: true, nickname: true, createdAt: true },
-  });
+  const slotIds = planning.slots.map((s) => s.id);
+  // Les 3 lectures sont indépendantes → en parallèle (1 aller-retour au lieu de 3, ce qui
+  // compte double sur une base froide). La liste des membres vient souvent du cache.
+  const [users, bookings, attendances] = await Promise.all([
+    loadAnnotationUsers(),
+    prisma.booking.findMany({
+      where: { status: "booked", classEventId: { in: slotIds } },
+      select: { classEventId: true, userId: true },
+    }),
+    prisma.attendance.findMany({
+      where: { classEventId: { in: slotIds } },
+      include: { user: true },
+    }),
+  ]);
   const handleMap = buildHandleMap(users);
   const userIdByContact = new Map(
     users.filter((u) => u.contactId).map((u) => [u.contactId as string, u.id]),
   );
   const myContactId = users.find((u) => u.id === userId)?.contactId ?? null;
 
-  const slotIds = planning.slots.map((s) => s.id);
-  const bookings = await prisma.booking.findMany({
-    where: { status: "booked", classEventId: { in: slotIds } },
-    select: { classEventId: true, userId: true },
-  });
   const bookerUserIdByEvent = new Map(bookings.map((b) => [b.classEventId, b.userId]));
-
-  const attendances = await prisma.attendance.findMany({
-    where: { classEventId: { in: slotIds } },
-    include: { user: true },
-  });
   const attByEvent = new Map<string, { userId: string; name: string }[]>();
   for (const a of attendances) {
     const list = attByEvent.get(a.classEventId) ?? [];

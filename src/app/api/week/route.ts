@@ -3,6 +3,7 @@ import { getPlanning } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { baseHandle, buildHandleMap } from "@/lib/handle";
+import { loadAnnotationUsers } from "@/lib/planning-annotate";
 import { weekDates } from "@/lib/week";
 import type { PlanningDay } from "@/lib/resamania/types";
 
@@ -27,19 +28,12 @@ async function annotateWeek(
   days: { date: string; planning: PlanningDay }[],
   userId: string,
 ): Promise<void> {
-  const users = await prisma.user.findMany({
-    select: { id: true, contactId: true, displayName: true, nickname: true, createdAt: true },
-  });
-  const handleMap = buildHandleMap(users);
-  // Certains comptes « email seul » n'ont pas encore de contactId (null) : on les ignore.
-  const userIdByContact = new Map<string, string>();
-  for (const u of users) if (u.contactId) userIdByContact.set(u.contactId, u.id);
-  const myContactId = users.find((u) => u.id === userId)?.contactId ?? null;
-
   const allSlotIds = days.flatMap((d) => d.planning.slots.map((s) => s.id));
   if (allSlotIds.length === 0) return;
 
-  const [bookings, attendances] = await Promise.all([
+  // Membres (cache mémoire partagé) + bookings + présences en UNE passe parallèle.
+  const [users, bookings, attendances] = await Promise.all([
+    loadAnnotationUsers(),
     prisma.booking.findMany({
       where: { status: "booked", classEventId: { in: allSlotIds } },
       select: { classEventId: true, userId: true },
@@ -49,6 +43,11 @@ async function annotateWeek(
       include: { user: true },
     }),
   ]);
+  const handleMap = buildHandleMap(users);
+  // Certains comptes « email seul » n'ont pas encore de contactId (null) : on les ignore.
+  const userIdByContact = new Map<string, string>();
+  for (const u of users) if (u.contactId) userIdByContact.set(u.contactId, u.id);
+  const myContactId = users.find((u) => u.id === userId)?.contactId ?? null;
   const bookerUserIdByEvent = new Map(bookings.map((b) => [b.classEventId, b.userId]));
   const attByEvent = new Map<string, { userId: string; name: string }[]>();
   for (const a of attendances) {
