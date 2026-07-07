@@ -1401,18 +1401,29 @@ export default function Home() {
               onNicknameSaved={checkMe}
               toast={toast}
             />
-            {FEATURE_TRICOUNT && (
-              <button
-                className={"secondary icon-btn money-btn" + (view === "money" ? " active" : "")}
-                onClick={() => setView(view === "money" ? "day" : "money")}
-                aria-label={`Frais partagés (tricount)${triOwed ? ` — ${triOwed} à rembourser` : ""}`}
-                aria-pressed={view === "money"}
-                title="Frais partagés"
-              >
-                <EuroIcon />
-                {triOwed > 0 && <span className="badge">{triOwed}</span>}
-              </button>
-            )}
+            {/* Bouton Frais : actif si le flag est ON ; sinon affiché grisé (désactivé)
+                avec un tooltip « en cours de développement » (feature bientôt dispo). */}
+            <button
+              className={
+                "secondary icon-btn money-btn" +
+                (view === "money" ? " active" : "") +
+                (FEATURE_TRICOUNT ? "" : " coming-soon")
+              }
+              onClick={() =>
+                FEATURE_TRICOUNT && setView(view === "money" ? "day" : "money")
+              }
+              disabled={!FEATURE_TRICOUNT}
+              aria-label={
+                FEATURE_TRICOUNT
+                  ? `Frais partagés (tricount)${triOwed ? ` — ${triOwed} à rembourser` : ""}`
+                  : "Frais partagés — en cours de développement"
+              }
+              aria-pressed={view === "money"}
+              title={FEATURE_TRICOUNT ? "Frais partagés" : "🚧 En cours de développement"}
+            >
+              <EuroIcon />
+              {FEATURE_TRICOUNT && triOwed > 0 && <span className="badge">{triOwed}</span>}
+            </button>
             <button
               className="secondary logout"
               onClick={logout}
@@ -1784,27 +1795,31 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
       <h1 className="sr-only">Squash de l'Yvette</h1>
       <img src="/logo_squash.jpeg" alt="Squash de l'Yvette" className="logo-hero" />
 
-      {/* Onglets masqués si la connexion email est désactivée : seule ResaMania reste. */}
-      {FEATURE_EMAIL_LOGIN && (
-        <div className="login-tabs" role="group" aria-label="Méthode de connexion">
-          <button
-            type="button"
-            className={tab === "resa" ? "active" : "secondary"}
-            aria-pressed={tab === "resa"}
-            onClick={() => switchTab("resa")}
-          >
-            ResaMania
-          </button>
-          <button
-            type="button"
-            className={tab === "email" ? "active" : "secondary"}
-            aria-pressed={tab === "email"}
-            onClick={() => switchTab("email")}
-          >
-            Par email
-          </button>
-        </div>
-      )}
+      {/* Onglet « Par email » : actif si le flag est ON ; sinon affiché grisé (désactivé)
+          avec un tooltip « en cours de développement ». Seule ResaMania reste utilisable. */}
+      <div className="login-tabs" role="group" aria-label="Méthode de connexion">
+        <button
+          type="button"
+          className={tab === "resa" ? "active" : "secondary"}
+          aria-pressed={tab === "resa"}
+          onClick={() => switchTab("resa")}
+        >
+          ResaMania
+        </button>
+        <button
+          type="button"
+          className={
+            (tab === "email" ? "active" : "secondary") +
+            (FEATURE_EMAIL_LOGIN ? "" : " coming-soon")
+          }
+          aria-pressed={tab === "email"}
+          onClick={() => FEATURE_EMAIL_LOGIN && switchTab("email")}
+          disabled={!FEATURE_EMAIL_LOGIN}
+          title={FEATURE_EMAIL_LOGIN ? undefined : "🚧 En cours de développement"}
+        >
+          Par email
+        </button>
+      </div>
 
       {tab === "resa" || !FEATURE_EMAIL_LOGIN ? (
         <>

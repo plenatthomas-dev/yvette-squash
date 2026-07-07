@@ -864,6 +864,14 @@ td.cell.past {
   margin: 0;
 }
 
+/* Bouton d'une fonctionnalité désactivée par feature flag (« en cours de dev ») :
+   visible mais grisé et non cliquable. Le tooltip (title) précise l'état. */
+.coming-soon:disabled,
+.coming-soon[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* Bandeau « lecture seule » (session email) : notice d'info un peu resserrée. */
 .readonly-note {
   margin-top: 4px;
