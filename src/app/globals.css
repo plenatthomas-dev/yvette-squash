@@ -256,11 +256,13 @@ header.app .sub {
 }
 
 /* Cloche « alertes » + pastille de compteur */
-.alerts-btn {
+.alerts-btn,
+.money-btn {
   position: relative;
 }
 
-.alerts-btn .badge {
+.alerts-btn .badge,
+.money-btn .badge {
   position: absolute;
   top: -4px;
   right: -4px;

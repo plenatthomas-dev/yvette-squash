@@ -700,6 +700,10 @@ export default function Home() {
   const lastFocusRef = useRef(0);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  // Badge € : nombre de tricounts où JE dois de l'argent et où les remboursements
+  // sont ouverts (action possible « rembourser »). Alimenté au chargement/focus et,
+  // en direct, par le composant Tricount quand la vue Frais est ouverte.
+  const [triOwed, setTriOwed] = useState(0);
   const today = toISODate(new Date());
   // Notifications disponibles seulement une fois monté (évite un décalage d'hydratation)
   // ET si le navigateur les supporte ET si les clés VAPID sont configurées côté serveur.
@@ -747,6 +751,30 @@ export default function Home() {
   useEffect(() => {
     if (me && canNotify) loadAlerts();
   }, [me, canNotify, loadAlerts]);
+
+  // Compteur du badge € : tricounts où je dois de l'argent, remboursements ouverts.
+  const loadTriOwed = useCallback(async () => {
+    const r = await fetch("/api/tricount");
+    if (!r.ok) return;
+    const d = (await r.json()) as {
+      me: string;
+      tricounts: {
+        ready: boolean;
+        settled: boolean;
+        balances: { userId: string; cents: number }[];
+      }[];
+    };
+    const n = d.tricounts.filter(
+      (t) =>
+        t.ready &&
+        !t.settled &&
+        (t.balances.find((b) => b.userId === d.me)?.cents ?? 0) < 0,
+    ).length;
+    setTriOwed(n);
+  }, []);
+  useEffect(() => {
+    if (me) loadTriOwed();
+  }, [me, loadTriOwed]);
 
   const load = useCallback(
     async (d: string) => {
@@ -852,6 +880,7 @@ export default function Home() {
       if (now - lastFocusRef.current < 15000) return;
       lastFocusRef.current = now;
       reload();
+      loadTriOwed(); // le badge € peut avoir changé (un payeur a validé ailleurs)
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
@@ -859,7 +888,7 @@ export default function Home() {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, [me, reload]);
+  }, [me, reload, loadTriOwed]);
 
   const pickDay = (d: string) => {
     setView("day");
@@ -1123,11 +1152,12 @@ export default function Home() {
             <button
               className={"secondary icon-btn money-btn" + (view === "money" ? " active" : "")}
               onClick={() => setView(view === "money" ? "day" : "money")}
-              aria-label="Frais partagés (tricount)"
+              aria-label={`Frais partagés (tricount)${triOwed ? ` — ${triOwed} à rembourser` : ""}`}
               aria-pressed={view === "money"}
               title="Frais partagés"
             >
               <EuroIcon />
+              {triOwed > 0 && <span className="badge">{triOwed}</span>}
             </button>
             <button
               className="secondary logout"
@@ -1248,7 +1278,9 @@ export default function Home() {
 
       {error && view !== "money" && <div className="notice error" role="alert">⚠️ {error}</div>}
 
-      {view === "money" && <Tricount toast={toast} onExpired={handleExpired} />}
+      {view === "money" && (
+        <Tricount toast={toast} onExpired={handleExpired} onOwedChange={setTriOwed} />
+      )}
 
       {view === "money"
         ? null

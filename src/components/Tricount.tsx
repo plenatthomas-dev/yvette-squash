@@ -99,9 +99,12 @@ function todayISO(): string {
 interface Props {
   toast: (type: "ok" | "err" | "info", msg: string) => void;
   onExpired: (status: number) => boolean;
+  // Remonte le nombre de tricounts où JE dois de l'argent avec remboursements ouverts
+  // (alimente le badge € de la barre d'actions). Optionnel.
+  onOwedChange?: (count: number) => void;
 }
 
-export default function Tricount({ toast, onExpired }: Props) {
+export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
   const [data, setData] = useState<TricountData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -323,6 +326,19 @@ export default function Tricount({ toast, onExpired }: Props) {
       0,
     );
   }, [data]);
+
+  // Remonte le compteur du badge € : tricounts où je dois de l'argent, remboursements
+  // ouverts. Recalculé à chaque (re)chargement → le badge suit mes remboursements en direct.
+  useEffect(() => {
+    if (!data || !onOwedChange) return;
+    const n = data.tricounts.filter(
+      (t) =>
+        t.ready &&
+        !t.settled &&
+        (t.balances.find((b) => b.userId === data.me)?.cents ?? 0) < 0,
+    ).length;
+    onOwedChange(n);
+  }, [data, onOwedChange]);
 
   if (loading && !data) return <p className="muted">Chargement des frais…</p>;
   if (error) return <div className="notice error" role="alert">⚠️ {error}</div>;
