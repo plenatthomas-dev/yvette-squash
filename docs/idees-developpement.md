@@ -163,8 +163,14 @@ réservé** via un code couleur (asso vs autre asso) — **comme en vue jour**.
 - **A. Rappels de match (push avant le créneau)** · ⭐⭐⭐ · **M**
   Réutilise `PushSubscription`. ⚠️ cron quotidien (contrainte 3) → rappel « le matin
   même » réaliste ; « 1 h avant » supposerait de densifier le cron (limite du plan Hobby).
-- **C. Ajout au calendrier (export `.ics`)** · ⭐⭐ · **S**
+- **C. Ajout au calendrier (export `.ics`)** · ✅ fait · ⭐⭐ · **S**
   Générer un fichier ICS d'une réservation pour l'agenda perso. Aucun accès ResaMania.
+  **Livré** (`src/lib/ics.ts`) : `buildIcs`/`downloadIcs` produisent un `.ics` RFC 5545
+  **100 % côté client** (aucune donnée envoyée au serveur) pour **une** réservation —
+  `SUMMARY` « Squash — <terrain> », `LOCATION` = adresse du club (géocodable),
+  **alarme `VALARM` -1 h**, `UID` stable dérivé de l'IRI ResaMania, horaires en UTC.
+  Nom de fichier lisible (`squash-AAAA-MM-JJ-HHMM.ics`). Branché depuis la vue jour
+  (`page.tsx`) et la vue semaine (`WeekGrid.tsx`).
 - **D. Liste d'attente sur créneau complet** · ⭐⭐⭐ · **M**
   Version **plus simple et moins risquée que l'idée 2** : s'inscrire en attente sur un
   créneau plein → **notification** (push, infra existante) quand il se libère ; la
@@ -181,8 +187,8 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 |---|------|:------:|:------:|-----------|----------|
 | 7a | Cellule bicolore par terrain (semaine) | ⭐⭐⭐ | S | — | ✅ **fait** |
 | 1 + 7b | Réservation groupée & multi-sélection | ⭐⭐⭐ | M | — | ✅ **fait** |
-| 6 | Annuaire (opt-in) | ⭐⭐ | S | — | **Haute** (brique) |
-| C | Export `.ics` | ⭐⭐ | S | — | Moyenne |
+| 6 | Annuaire (opt-in) | ⭐⭐ | S | — | 🚧 **en cours** (`feature/list`) |
+| C | Export `.ics` | ⭐⭐ | S | — | ✅ **fait** |
 | A | Rappels de match (push) | ⭐⭐⭐ | M | — | Moyenne-haute |
 | 5a | Commentaires sur un tricount | ⭐⭐ | S–M | — | Moyenne |
 | D | Liste d'attente | ⭐⭐⭐ | M | SlotAlert | Moyenne (alt. de 2) |
@@ -194,16 +200,17 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 ### Séquencement recommandé (par vagues)
 
 1. **Vague 1 — quick wins** (fort effet, peu cher) : ~~**7a** (couleurs semaine)~~ ✅,
-   **6** (annuaire opt-in), **C** (.ics). → **reste 6, C**.
+   **6** (annuaire opt-in) 🚧, ~~**C** (.ics)~~ ✅. → **reste 6** (en cours sur `feature/list`).
 2. **Vague 2 — feature phare** : ~~**1 + 7b** (réservation groupée + sélection multiple)~~ ✅.
 3. **Vague 3 — engagement** : **A** (rappels push), **5a** (commentaires tricount),
    **D** (liste d'attente).
 4. **Vague 4 — gros / sensibles, à décider** : **4** (délégation, design sécurité),
    **2** (auto-rebook, à cadrer), **3** (tournois, si fréquents), **5b** (messagerie).
 
-> **État au 2026-07-06** : la **vague 2** (feature phare) et **7a** de la vague 1 sont
-> **livrées** (branche `feature/vue-semaine` fusionnée dans `main`, en prod). Prochain
-> palier logique : **finir la vague 1** (6, C). _Idée B (stats perso) écartée._
+> **État au 2026-07-07** : la **vague 2** (feature phare), **7a** et **C** (export `.ics`)
+> sont **livrées** (`feature/vue-semaine` fusionnée dans `main`, en prod). Il ne reste que
+> **6** (annuaire opt-in) pour clore la vague 1 → **en cours sur `feature/list`**.
+> _Idée B (stats perso) écartée._
 
 ### Lecture d'ensemble (qualité des idées)
 
