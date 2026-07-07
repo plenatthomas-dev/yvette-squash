@@ -68,6 +68,8 @@ export function WeekGrid({
   onBookMany,
   selMode,
   setSelMode,
+  onWatch,
+  canWatch,
 }: {
   days: { date: string; planning: PlanningDay }[];
   filter: (iso: string) => boolean;
@@ -79,7 +81,12 @@ export function WeekGrid({
   // Mode « Sélection » piloté par la page (bouton dans la barre de vue).
   selMode: boolean;
   setSelMode: (v: boolean) => void;
+  // Alerte « préviens-moi si ça se libère » sur un terrain réservé hors asso
+  // (segment « other »), comme en vue jour.
+  onWatch?: (slot: Slot) => void;
+  canWatch?: boolean;
 }) {
+  const watchable = !!(canWatch && onWatch);
   const [sheet, setSheet] = useState<{ date: string; hm: string; courtId: string } | null>(
     null,
   );
@@ -140,7 +147,8 @@ export function WeekGrid({
 
   const segAria = (date: string, hm: string, court: CourtRef, seg: Seg, slot: Slot | null) => {
     const who = seg === "asso" && slot?.bookedBy ? ` (${slot.bookedBy})` : "";
-    return `${shortDay(date)} ${hm} · ${court.name} : ${SEG_LABEL[seg]}${who}`;
+    const hint = seg === "other" && watchable ? " — cliquer pour être alerté si ça se libère" : "";
+    return `${shortDay(date)} ${hm} · ${court.name} : ${SEG_LABEL[seg]}${who}${hint}`;
   };
 
   // Sélection d'un terrain précis (radio DANS la case : au plus un terrain par horaire).
@@ -197,8 +205,11 @@ export function WeekGrid({
       onCancelMine(slot);
     } else if (seg === "asso" && slot) {
       setSheet({ date, hm, courtId: court.id });
+    } else if (seg === "other" && slot && watchable) {
+      // Réservé hors asso : « préviens-moi si ça se libère » (comme en vue jour).
+      onWatch!(slot);
     }
-    // other / past / closed : inerte
+    // past / closed (et other sans watch) : inerte
   };
 
   const bookSelected = () => {
@@ -285,7 +296,10 @@ export function WeekGrid({
                         const isSel = selected.has(segKey(d.date, hm, c.id));
                         const interactive = selMode
                           ? canSel
-                          : seg === "free" || seg === "asso" || seg === "mine";
+                          : seg === "free" ||
+                            seg === "asso" ||
+                            seg === "mine" ||
+                            (seg === "other" && watchable);
                         return (
                           <span
                             key={c.id}
