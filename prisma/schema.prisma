@@ -190,6 +190,9 @@ model Delegation {
   scope       String    @default("book_cancel") // v1 : "book_cancel" uniquement (pas plus large)
   expiresAt   DateTime // borne dure (24h à 5j côté UI) — limite le rayon si compromis
   revokedAt   DateTime? // révocation manuelle par le délégant, avant expiresAt
+  // Push « délégation terminée » envoyé au délégataire (révocation OU fin naturelle) :
+  // marqueur d'idempotence pour ne notifier la fin qu'UNE seule fois.
+  endNotifiedAt DateTime?
   createdAt   DateTime  @default(now())
 
   @@index([delegateId, expiresAt])

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getResaTokenForUser } from "@/lib/session";
 import { cronAuthorized } from "@/lib/cron-auth";
+import { pushToUser } from "@/lib/push";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,5 +38,31 @@ export async function GET(req: NextRequest) {
     else failed++;
   }
 
-  return NextResponse.json({ delegators: delegations.length, refreshed, failed });
+  // Fins naturelles : notifie chaque délégataire dont la délégation a expiré sans avoir
+  // encore reçu de push de fin (endNotifiedAt null). Une révocation manuelle a déjà posé
+  // endNotifiedAt → jamais notifiée deux fois. Best-effort ; on marque avant/après l'envoi.
+  const expired = await prisma.delegation.findMany({
+    where: { endNotifiedAt: null, expiresAt: { lt: new Date() } },
+    select: {
+      id: true,
+      delegateId: true,
+      delegator: { select: { displayName: true, nickname: true } },
+    },
+  });
+  let ended = 0;
+  for (const d of expired) {
+    const name = d.delegator.nickname ?? d.delegator.displayName ?? "Un membre";
+    await pushToUser(d.delegateId, {
+      title: "Délégation terminée",
+      body: `La délégation de ${name} est arrivée à échéance — tu ne peux plus agir en son nom.`,
+      url: "/",
+      tag: `delegation-end-${d.id}`,
+    }).catch(() => {});
+    await prisma.delegation
+      .update({ where: { id: d.id }, data: { endNotifiedAt: new Date() } })
+      .catch(() => {});
+    ended++;
+  }
+
+  return NextResponse.json({ delegators: delegations.length, refreshed, failed, ended });
 }
