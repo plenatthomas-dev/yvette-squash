@@ -1236,6 +1236,9 @@ export default function Home() {
     expiresAt: string;
   } | null>(null);
   const [actingAsId, setActingAsId] = useState<string | null>(null);
+  // Bandeau « on t'a délégué des droits » : masquable, mais ré-affiché si la délégation
+  // change (nouveau délégant ou nouvelle échéance) via une clé identité.
+  const [delegBannerDismissed, setDelegBannerDismissed] = useState<string | null>(null);
   const today = toISODate(new Date());
   // Notifications disponibles seulement une fois monté (évite un décalage d'hydratation)
   // ET si le navigateur les supporte ET si les clés VAPID sont configurées côté serveur.
@@ -1896,6 +1899,38 @@ export default function Home() {
             (l'ancienne ligne « Bonjour » séparée est supprimée pour gagner de la place). */}
         <div className="sub">Bonjour {nickname || me.split(" ")[0]} 👋 · Le Complexe, Bures</div>
       </header>
+
+      {FEATURE_DELEGATION &&
+        incomingDelegation &&
+        delegBannerDismissed !==
+          `${incomingDelegation.delegatorId}|${incomingDelegation.expiresAt}` && (
+          <div className="notice info deleg-banner" role="status">
+            <span>
+              🤝 <strong>{incomingDelegation.delegatorName}</strong> t'a délégué ses droits :
+              tu peux réserver / annuler en son nom jusqu'au{" "}
+              {new Date(incomingDelegation.expiresAt).toLocaleString("fr-FR", {
+                day: "numeric",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+              . Sélectionne « Pour {incomingDelegation.delegatorName} » en haut à droite pour
+              agir en son nom.
+            </span>
+            <button
+              type="button"
+              className="deleg-banner-close"
+              aria-label="Masquer ce message"
+              onClick={() =>
+                setDelegBannerDismissed(
+                  `${incomingDelegation.delegatorId}|${incomingDelegation.expiresAt}`,
+                )
+              }
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
       {!canBook && (
         <div className="notice info readonly-note">

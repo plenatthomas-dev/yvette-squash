@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { FEATURE_DELEGATION } from "@/lib/features";
+import { pushToUser } from "@/lib/push";
 import {
   DELEGATION_DURATIONS_H,
   DELEGATION_SCOPE,
@@ -92,6 +93,27 @@ export async function POST(req: NextRequest) {
       data: { delegatorId: session.userId, delegateId, scope: DELEGATION_SCOPE, expiresAt },
     });
   });
+
+  // Notifie le délégataire (push web) qu'il vient de recevoir des droits. Best-effort :
+  // un échec d'envoi ne doit jamais faire échouer la délégation elle-même.
+  const delegator = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: { displayName: true, nickname: true },
+  });
+  const delegatorName = delegator?.nickname ?? delegator?.displayName ?? "Un membre";
+  const whenStr = expiresAt.toLocaleString("fr-FR", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Paris",
+  });
+  await pushToUser(delegateId, {
+    title: "Tu as reçu une délégation 🤝",
+    body: `${delegatorName} t'a délégué ses droits (réserver/annuler en son nom) jusqu'au ${whenStr}.`,
+    url: "/",
+    tag: `delegation-${delegation.id}`,
+  }).catch(() => {});
 
   return NextResponse.json({
     ok: true,

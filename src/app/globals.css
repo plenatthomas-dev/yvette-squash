@@ -911,6 +911,37 @@ td.cell.past {
 .readonly-note {
   margin-top: 4px;
 }
+
+/* Bandeau « on t'a délégué des droits » : texte + bouton fermer aligné à droite. */
+.deleg-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 4px;
+}
+.deleg-banner span {
+  flex: 1;
+}
+.deleg-banner-close {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  line-height: 1;
+  background: transparent;
+  border: none;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.deleg-banner-close:hover {
+  opacity: 1;
+}
 .cache-note {
   margin: -4px 0 10px;
 }
