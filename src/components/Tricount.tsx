@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { MAX_COMMENT_LEN } from "@/lib/tricount";
+import {
+  MAX_COMMENT_LEN,
+  MAX_PARTS,
+  splitEqually,
+  splitByWeights,
+} from "@/lib/tricount";
 
 // Vue « Frais » : tricounts par jour (un tricount = les dépenses d'une date),
 // avec historique, validation des payeurs puis remboursements guidés.
@@ -84,11 +89,13 @@ export function parseEuros(input: string): number | null {
   return Math.round(parseFloat(s) * 100);
 }
 
+// Format court pour tenir dans l'en-tête de carte : « mer. 8 juil. » (au lieu de
+// « mercredi 8 juillet », qui débordait sur mobile).
 function prettyDate(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString("fr-FR", {
-    weekday: "long",
+    weekday: "short",
     day: "numeric",
-    month: "long",
+    month: "short",
   });
 }
 
@@ -141,6 +148,9 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
   const [amount, setAmount] = useState("");
   const [payerId, setPayerId] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Répartition : « equal » = à parts égales ; « shares » = pondérée (nb de parts/pers.).
+  const [splitMode, setSplitMode] = useState<"equal" | "shares">("equal");
+  const [weights, setWeights] = useState<Record<string, number>>({});
 
   // Formulaire « j'ai remboursé » (rattaché à UN tricount prêt ; le rembourseur
   // est TOUJOURS l'utilisateur connecté)
@@ -193,6 +203,8 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     setAmount("");
     setPayerId(data.me);
     setSelected(new Set(data.members.map((m) => m.id)));
+    setSplitMode("equal");
+    setWeights(Object.fromEntries(data.members.map((m) => [m.id, 1])));
     setExpenseOpen(true);
   };
 
@@ -223,6 +235,13 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     }
     // Date cible : celle du tricount existant choisi, ou la nouvelle date saisie.
     const targetDate = tcChoice === "new" ? date : tcChoice;
+    const participantIds = [...selected];
+    // En mode « parts », on transmet le poids de chaque participant coché ; le serveur
+    // fait la répartition pondérée. En mode « équitable », rien (partage égal côté serveur).
+    const weightsPayload =
+      splitMode === "shares"
+        ? Object.fromEntries(participantIds.map((id) => [id, weights[id] ?? 1]))
+        : undefined;
     setBusy(true);
     try {
       const res = await fetch("/api/tricount/expenses", {
@@ -233,7 +252,8 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
           label: label.trim(),
           amountCents: cents,
           payerId,
-          participantIds: [...selected],
+          participantIds,
+          ...(weightsPayload ? { weights: weightsPayload } : {}),
         }),
       });
       if (onExpired(res.status)) return;
@@ -407,6 +427,26 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     ).length;
     onOwedChange(n);
   }, [data, onOwedChange]);
+
+  // Répartition affichée en direct dans le formulaire : montant dû par chaque participant
+  // coché, recalculé à chaque frappe (montant, sélection, mode, parts). Purement indicatif —
+  // le serveur reste la source de vérité au moment de l'enregistrement.
+  const selectedIds = data
+    ? data.members.filter((m) => selected.has(m.id)).map((m) => m.id)
+    : [];
+  const previewCents = parseEuros(amount);
+  const shareByMember = useMemo(() => {
+    const map = new Map<string, number>();
+    if (previewCents === null || previewCents === 0 || selectedIds.length === 0) return map;
+    const parts =
+      splitMode === "shares"
+        ? splitByWeights(previewCents, selectedIds, selectedIds.map((id) => weights[id] ?? 1))
+        : splitEqually(previewCents, selectedIds.length);
+    selectedIds.forEach((id, i) => map.set(id, parts[i]));
+    return map;
+    // selectedIds est dérivé de (data, selected) ; on liste ces sources pour eslint.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewCents, splitMode, weights, data, selected]);
 
   if (loading && !data) return <p className="muted">Chargement des frais…</p>;
   if (error) return <div className="notice error" role="alert">⚠️ {error}</div>;
@@ -696,17 +736,63 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
               </label>
               <fieldset className="tri-participants">
                 <legend>Pour qui ? ({selected.size})</legend>
-                {data.members.map((m) => (
-                  <label key={m.id} className="tri-check">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(m.id)}
-                      onChange={() => toggle(m.id)}
-                    />
-                    {m.name}
-                    {m.id === data.me ? " (toi)" : ""}
-                  </label>
-                ))}
+                <div className="tri-splitmode" role="group" aria-label="Mode de répartition">
+                  <button
+                    type="button"
+                    className={splitMode === "equal" ? "on" : ""}
+                    aria-pressed={splitMode === "equal"}
+                    onClick={() => setSplitMode("equal")}
+                  >
+                    Équitable
+                  </button>
+                  <button
+                    type="button"
+                    className={splitMode === "shares" ? "on" : ""}
+                    aria-pressed={splitMode === "shares"}
+                    onClick={() => setSplitMode("shares")}
+                  >
+                    Par parts
+                  </button>
+                </div>
+                {data.members.map((m) => {
+                  const checked = selected.has(m.id);
+                  const share = shareByMember.get(m.id);
+                  const w = weights[m.id] ?? 1;
+                  return (
+                    <div key={m.id} className={"tri-check-row" + (checked ? " on" : "")}>
+                      <label className="tri-check">
+                        <input type="checkbox" checked={checked} onChange={() => toggle(m.id)} />
+                        {m.name}
+                        {m.id === data.me ? " (toi)" : ""}
+                      </label>
+                      {checked && splitMode === "shares" && (
+                        <span className="tri-parts">
+                          <input
+                            type="number"
+                            min={1}
+                            max={MAX_PARTS}
+                            step={1}
+                            value={w}
+                            onChange={(e) =>
+                              setWeights((prev) => ({
+                                ...prev,
+                                [m.id]: Math.max(
+                                  1,
+                                  Math.min(MAX_PARTS, Math.floor(Number(e.target.value) || 1)),
+                                ),
+                              }))
+                            }
+                            aria-label={`Parts de ${m.name}`}
+                          />
+                          <span className="tri-parts-unit">{w > 1 ? "parts" : "part"}</span>
+                        </span>
+                      )}
+                      {checked && share !== undefined && (
+                        <span className="tri-share">{fmtEuros(share)}</span>
+                      )}
+                    </div>
+                  );
+                })}
               </fieldset>
               <div className="modal-actions">
                 <button

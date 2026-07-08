@@ -625,11 +625,21 @@ table.planning thead th.time {
 
 /* Liste d'attente (idée D) : pastille dans l'en-tête d'horaire (vue jour) d'un créneau
    complet — « 🕒 N » + action rejoindre/quitter. */
+/* Le badge « 🕒 N » est en position absolue (bas de l'en-tête d'horaire) : ainsi il ne
+   s'ajoute pas au flux et ne rallonge PLUS la cellule — la ligne garde la hauteur des
+   autres. La colonne « Heure » (déjà sticky) sert de bloc conteneur ; on aligne son
+   contenu en haut pour laisser la place au badge sans chevauchement. */
+table.planning:not(.week) tbody th.time {
+  vertical-align: top;
+}
 .wait-btn {
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-top: 3px;
   padding: 1px 6px;
   font-size: 0.6rem;
   line-height: 1.4;
@@ -1097,6 +1107,44 @@ td.cell.past {
 .setting h4 {
   margin: 0 0 8px;
   font-size: 0.95rem;
+}
+
+/* En-tête de section avec bouton d'info : titre à gauche, pastille « i » à droite. */
+.setting-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.setting-head h4 {
+  margin: 0;
+}
+.info-tip-btn {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 999px;
+  background: var(--pico-background-color);
+  color: var(--pico-muted-color);
+  cursor: pointer;
+}
+.info-tip-btn[aria-expanded="true"] {
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+  border-color: transparent;
+}
+.setting-info-text {
+  margin: 0 0 10px;
 }
 
 .setting p {
@@ -1832,6 +1880,66 @@ table.planning.week th.time.selhead {
   padding: 4px 0;
 }
 .tri-check input { margin: 0; }
+
+/* Choix du mode de répartition (équitable / par parts) — segmenté compact. */
+.tri-splitmode {
+  display: flex;
+  gap: 6px;
+  margin: 2px 0 8px;
+}
+.tri-splitmode button {
+  flex: 1;
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 0.78rem;
+  background: var(--pico-background-color);
+  color: var(--pico-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.tri-splitmode button.on {
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+/* Ligne participant : case à cocher (flexible) + parts éventuelles + montant en direct. */
+.tri-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tri-check-row .tri-check {
+  flex: 1;
+  min-width: 0;
+}
+.tri-parts {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--pico-muted-color);
+}
+.tri-parts input {
+  width: 48px;
+  margin: 0;
+  padding: 2px 4px;
+  font-size: 0.8rem;
+  text-align: center;
+}
+.tri-parts-unit {
+  white-space: nowrap;
+}
+.tri-share {
+  min-width: 62px;
+  text-align: right;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--pico-color);
+}
 
 /* --- Tricounts par jour (cartes d'historique) ---------------------------- */
 .money-btn.active {

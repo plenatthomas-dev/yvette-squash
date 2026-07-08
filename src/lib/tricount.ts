@@ -8,6 +8,8 @@ export const MAX_LABEL_LEN = 80;
 export const MAX_TITLE_LEN = 40;
 // Commentaire (idée 5a) : un message de fil de discussion attaché à un tricount.
 export const MAX_COMMENT_LEN = 500;
+// Mode « par parts » : nombre de parts max qu'un participant peut prendre sur une dépense.
+export const MAX_PARTS = 99;
 
 /**
  * Répartition égale de `amountCents` entre `n` participants, ajustée au centime :
@@ -44,6 +46,36 @@ export function splitWithCredits(
     if (extra <= 0) break;
     out[o.i] = base + 1;
     extra--;
+  }
+  return out;
+}
+
+/**
+ * Répartition PONDÉRÉE de `amountCents` selon un nombre de parts (poids entier ≥ 1) par
+ * participant, `weights` aligné sur `ids`. Méthode du plus grand reste : chacun reçoit
+ * floor(montant × poids / total), puis les centimes restants vont aux plus grands restes
+ * fractionnaires (départage par index croissant → déterministe). La somme des parts vaut
+ * EXACTEMENT le montant. Ex. 40 € avec parts [1, 2, 1] → [10, 20, 10] €.
+ * Filet de sécurité : si le total des poids est nul, on retombe sur un partage égal.
+ */
+export function splitByWeights(
+  amountCents: number,
+  ids: string[],
+  weights: number[],
+): number[] {
+  const n = ids.length;
+  const totalW = weights.reduce((s, w) => s + w, 0);
+  if (totalW <= 0) return splitEqually(amountCents, n);
+  const exact = weights.map((w) => (amountCents * w) / totalW);
+  const out = exact.map((x) => Math.floor(x));
+  let remaining = amountCents - out.reduce((s, x) => s + x, 0);
+  const order = exact
+    .map((x, i) => ({ i, frac: x - Math.floor(x) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i);
+  for (const o of order) {
+    if (remaining <= 0) break;
+    out[o.i] += 1;
+    remaining--;
   }
   return out;
 }

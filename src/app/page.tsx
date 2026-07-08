@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import QRCode from "qrcode";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
@@ -244,6 +244,30 @@ function UsersIcon() {
       <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
       <path d="M16 3.13a4 4 0 0 1 0 7.75" />
     </svg>
+  );
+}
+
+// En-tête d'une section de Paramètres : titre + petit bouton « i » qui déplie/replie
+// l'explication (les phrases longues n'occupent plus la modale en permanence).
+function SettingInfo({ title, children }: { title: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <div className="setting-head">
+        <h4>{title}</h4>
+        <button
+          type="button"
+          className="info-tip-btn"
+          aria-expanded={open}
+          aria-label={`${open ? "Masquer" : "Afficher"} l'explication : ${title}`}
+          title="Qu'est-ce que c'est ?"
+          onClick={() => setOpen((o) => !o)}
+        >
+          i
+        </button>
+      </div>
+      {open && <p className="muted tiny setting-info-text">{children}</p>}
+    </>
   );
 }
 
@@ -619,11 +643,10 @@ function SettingsButton({
 
             {FEATURE_DIRECTORY && (
               <section className="setting">
-                <h4>Annuaire des membres</h4>
-                <p className="muted tiny">
+                <SettingInfo title="Annuaire des membres">
                   Par défaut, ton nom (ou pseudo) apparaît dans l'annuaire des membres pour
                   faciliter l'entraide entre joueurs. Tu peux t'en retirer à tout moment.
-                </p>
+                </SettingInfo>
                 <label className="check-row">
                   <input
                     type="checkbox"
@@ -638,13 +661,12 @@ function SettingsButton({
 
             {FEATURE_DELEGATION && (
               <section className="setting">
-                <h4>Déléguer mes droits</h4>
-                <p className="muted tiny">
+                <SettingInfo title="Déléguer mes droits">
                   Autorise un autre membre à réserver/annuler en ton nom pendant une durée
                   limitée (ex. il gère les résas d'une soirée à ta place pendant que tu es
                   indisponible). La réservation reste sous ton compte ResaMania ; on trace
                   qui a agi.
-                </p>
+                </SettingInfo>
                 {outgoingDelegation ? (
                   <div className="delegation-active">
                     <p className="tiny">

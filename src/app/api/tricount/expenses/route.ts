@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { splitWithCredits, MAX_AMOUNT_CENTS, MAX_LABEL_LEN, MAX_TITLE_LEN } from "@/lib/tricount";
+import {
+  splitWithCredits,
+  splitByWeights,
+  MAX_AMOUNT_CENTS,
+  MAX_LABEL_LEN,
+  MAX_TITLE_LEN,
+  MAX_PARTS,
+} from "@/lib/tricount";
 import { FEATURE_TRICOUNT } from "@/lib/features";
 
 export const runtime = "nodejs";
@@ -22,13 +29,14 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}));
-  const { date, title, label, amountCents, payerId, participantIds } = body as {
+  const { date, title, label, amountCents, payerId, participantIds, weights } = body as {
     date?: unknown;
     title?: unknown;
     label?: unknown;
     amountCents?: unknown;
     payerId?: unknown;
     participantIds?: unknown;
+    weights?: unknown;
   };
 
   if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -66,6 +74,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Payeur invalide" }, { status: 400 });
   }
 
+  // Parts optionnelles (mode « par parts ») : un poids entier ≥ 1 par participant.
+  // Absent → partage égal (comportement historique). Présent → chaque participant doit
+  // avoir un poids valide, sinon on refuse (pas de partage silencieusement faux).
+  let weightArr: number[] | null = null;
+  if (weights !== undefined && weights !== null) {
+    if (typeof weights !== "object" || Array.isArray(weights)) {
+      return NextResponse.json({ error: "Parts invalides" }, { status: 400 });
+    }
+    const w = weights as Record<string, unknown>;
+    weightArr = uniqueIds.map((id) => (typeof w[id] === "number" ? (w[id] as number) : NaN));
+    if (
+      weightArr.some(
+        (n) => !Number.isInteger(n) || n < 1 || n > MAX_PARTS,
+      )
+    ) {
+      return NextResponse.json(
+        { error: `Parts invalides (entier de 1 à ${MAX_PARTS} par participant)` },
+        { status: 400 },
+      );
+    }
+  }
+
   // Payeur + participants doivent être des membres connus (l'IHM liste les mêmes).
   const known = await prisma.user.findMany({
     where: { id: { in: [payerId, ...uniqueIds] } },
@@ -94,7 +124,10 @@ export async function POST(req: NextRequest) {
       credit.set(s.userId, (credit.get(s.userId) ?? 0) + (s.amountCents - exact));
     }
   }
-  const parts = splitWithCredits(amountCents, uniqueIds, credit);
+  // Mode « parts » → répartition pondérée ; sinon partage égal avec mémoire des arrondis.
+  const parts = weightArr
+    ? splitByWeights(amountCents, uniqueIds, weightArr)
+    : splitWithCredits(amountCents, uniqueIds, credit);
   const [expense] = await prisma.$transaction([
     prisma.expense.create({
       data: {
