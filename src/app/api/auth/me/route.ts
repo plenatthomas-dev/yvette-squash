@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { prisma } from "@/lib/db";
-import { buildHandleMap } from "@/lib/handle";
+import { buildMePayload } from "@/lib/me-payload";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,25 +10,5 @@ export async function GET(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
-  // On renvoie :
-  //  - displayName : nom réel (fallback du « Bonjour » si pas de pseudo)
-  //  - nickname    : pseudonyme choisi (affiché en priorité dans le « Bonjour »)
-  //  - handle      : token dé-doublonné du joueur pour les créneaux (pseudo tronqué
-  //    ou diminutif). Calculé sur l'ensemble des joueurs → identique à la grille ;
-  //    le client s'en sert pour la mise à jour optimiste des présences.
-  const users = await prisma.user.findMany({
-    select: { id: true, displayName: true, nickname: true, listed: true, createdAt: true },
-  });
-  const me = users.find((u) => u.id === session.userId);
-  const handle = buildHandleMap(users).get(session.userId) ?? null;
-  return NextResponse.json({
-    displayName: session.displayName,
-    nickname: me?.nickname ?? null,
-    // Visibilité annuaire (idée 6) : pilote la case opt-out des paramètres.
-    listed: me?.listed ?? true,
-    handle,
-    // Pilote l'UI : "email" = session sans ResaMania (lecture seule, pas de réservation).
-    mode: session.resa ? "resamania" : "email",
-    canBook: !!session.resa,
-  });
+  return NextResponse.json(await buildMePayload(session));
 }
