@@ -16,7 +16,13 @@ import {
   pushSupported,
   pushEnabledOnServer,
 } from "@/lib/pushClient";
-import { FEATURE_TRICOUNT, FEATURE_EMAIL_LOGIN, FEATURE_DIRECTORY } from "@/lib/features";
+import {
+  FEATURE_TRICOUNT,
+  FEATURE_EMAIL_LOGIN,
+  FEATURE_DIRECTORY,
+  FEATURE_DELEGATION,
+} from "@/lib/features";
+import { DELEGATION_DURATIONS } from "@/lib/delegation-shared";
 
 function toISODate(d: Date): string {
   return d.toLocaleDateString("en-CA"); // YYYY-MM-DD local
@@ -359,6 +365,90 @@ function SettingsButton({
   // Doit rester synchronisé avec MAX_LEN côté serveur (api/feedback/route.ts).
   const COMMENT_MAX = 1000;
 
+  // Délégation (idée 4) : liste des membres (pour choisir un délégué) + délégation
+  // sortante active éventuelle. Chargées à l'ouverture du panneau (peuvent avoir bougé).
+  const [delegateMembers, setDelegateMembers] = useState<
+    { id: string; name: string }[] | null
+  >(null);
+  const [outgoingDelegation, setOutgoingDelegation] = useState<{
+    id: string;
+    delegateId: string;
+    delegateName: string;
+    expiresAt: string;
+  } | null>(null);
+  const [pickedDelegate, setPickedDelegate] = useState("");
+  const [pickedHours, setPickedHours] = useState<number>(DELEGATION_DURATIONS[0].hours);
+  const [delegating, setDelegating] = useState(false);
+
+  useEffect(() => {
+    if (!open || !FEATURE_DELEGATION) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [dirRes, delRes] = await Promise.all([
+          fetch("/api/directory"),
+          fetch("/api/delegations"),
+        ]);
+        const dir = await dirRes.json().catch(() => ({}));
+        const del = await delRes.json().catch(() => ({}));
+        if (cancelled) return;
+        setDelegateMembers(dirRes.ok ? (dir.members ?? []) : []);
+        setOutgoingDelegation(delRes.ok ? (del.outgoing ?? null) : null);
+      } catch {
+        if (!cancelled) {
+          setDelegateMembers([]);
+          setOutgoingDelegation(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const createDelegation = async () => {
+    if (!pickedDelegate) return;
+    setDelegating(true);
+    try {
+      const res = await fetch("/api/delegations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ delegateId: pickedDelegate, hours: pickedHours }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      const delegate = (delegateMembers ?? []).find((m) => m.id === pickedDelegate);
+      setOutgoingDelegation({
+        id: data.id,
+        delegateId: pickedDelegate,
+        delegateName: delegate?.name ?? "ce membre",
+        expiresAt: data.expiresAt,
+      });
+      toast("ok", "Délégation activée");
+    } catch (e) {
+      toast("err", (e as Error).message);
+    } finally {
+      setDelegating(false);
+    }
+  };
+
+  const revokeDelegation = async () => {
+    if (!outgoingDelegation) return;
+    setDelegating(true);
+    try {
+      const res = await fetch(`/api/delegations/${outgoingDelegation.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(`Erreur ${res.status}`);
+      setOutgoingDelegation(null);
+      toast("ok", "Délégation révoquée");
+    } catch (e) {
+      toast("err", (e as Error).message);
+    } finally {
+      setDelegating(false);
+    }
+  };
+
   useEffect(() => {
     const saved = localStorage.getItem("theme");
     const t: Theme = isTheme(saved) ? saved : "system";
@@ -543,6 +633,72 @@ function SettingsButton({
                   />
                   <span>Apparaître dans l'annuaire</span>
                 </label>
+              </section>
+            )}
+
+            {FEATURE_DELEGATION && (
+              <section className="setting">
+                <h4>Déléguer mes droits</h4>
+                <p className="muted tiny">
+                  Autorise un autre membre à réserver/annuler en ton nom pendant une durée
+                  limitée (ex. il gère les résas d'une soirée à ta place pendant que tu es
+                  indisponible). La réservation reste sous ton compte ResaMania ; on trace
+                  qui a agi.
+                </p>
+                {outgoingDelegation ? (
+                  <div className="delegation-active">
+                    <p className="tiny">
+                      Délégué à <strong>{outgoingDelegation.delegateName}</strong> jusqu'au{" "}
+                      {new Date(outgoingDelegation.expiresAt).toLocaleString("fr-FR", {
+                        day: "numeric",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                      .
+                    </p>
+                    <button
+                      className="secondary"
+                      onClick={revokeDelegation}
+                      disabled={delegating}
+                    >
+                      {delegating ? "…" : "Révoquer"}
+                    </button>
+                  </div>
+                ) : delegateMembers === null ? (
+                  <p className="muted tiny">Chargement…</p>
+                ) : delegateMembers.length === 0 ? (
+                  <p className="muted tiny">Aucun autre membre disponible pour l'instant.</p>
+                ) : (
+                  <div className="delegation-form">
+                    <select
+                      value={pickedDelegate}
+                      onChange={(e) => setPickedDelegate(e.target.value)}
+                      aria-label="Choisir un délégué"
+                    >
+                      <option value="">— Choisir un membre —</option>
+                      {delegateMembers.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={pickedHours}
+                      onChange={(e) => setPickedHours(Number(e.target.value))}
+                      aria-label="Durée de la délégation"
+                    >
+                      {DELEGATION_DURATIONS.map((d) => (
+                        <option key={d.hours} value={d.hours}>
+                          {d.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button onClick={createDelegation} disabled={delegating || !pickedDelegate}>
+                      {delegating ? "…" : "Déléguer"}
+                    </button>
+                  </div>
+                )}
               </section>
             )}
 
@@ -1050,6 +1206,14 @@ export default function Home() {
   // sont ouverts (action possible « rembourser »). Alimenté au chargement/focus et,
   // en direct, par le composant Tricount quand la vue Frais est ouverte.
   const [triOwed, setTriOwed] = useState(0);
+  // Délégation (idée 4) : délégation entrante active (si un autre membre m'a délégué ses
+  // droits) + pour qui j'agis actuellement (null = moi-même).
+  const [incomingDelegation, setIncomingDelegation] = useState<{
+    delegatorId: string;
+    delegatorName: string;
+    expiresAt: string;
+  } | null>(null);
+  const [actingAsId, setActingAsId] = useState<string | null>(null);
   const today = toISODate(new Date());
   // Notifications disponibles seulement une fois monté (évite un décalage d'hydratation)
   // ET si le navigateur les supporte ET si les clés VAPID sont configurées côté serveur.
@@ -1140,6 +1304,28 @@ export default function Home() {
   useEffect(() => {
     if (me && FEATURE_TRICOUNT) loadTriOwed();
   }, [me, loadTriOwed]);
+
+  // Délégation reçue (idée 4) : si un autre membre m'a délégué ses droits, je peux agir
+  // « en son nom ». `actingAs` = pour qui j'agis actuellement (null = moi-même).
+  const loadIncomingDelegation = useCallback(async () => {
+    const r = await fetch("/api/delegations");
+    if (!r.ok) {
+      setIncomingDelegation(null);
+      return;
+    }
+    const d = (await r.json()) as {
+      incoming: { delegatorId: string; delegatorName: string; expiresAt: string } | null;
+    };
+    setIncomingDelegation(d.incoming);
+  }, []);
+  useEffect(() => {
+    if (me && FEATURE_DELEGATION) loadIncomingDelegation();
+  }, [me, loadIncomingDelegation]);
+  // Sécurité : si la délégation sélectionnée n'est plus la délégation entrante active
+  // (révoquée, expirée, remplacée), on retombe sur « moi-même ».
+  useEffect(() => {
+    if (actingAsId && incomingDelegation?.delegatorId !== actingAsId) setActingAsId(null);
+  }, [actingAsId, incomingDelegation]);
 
   const load = useCallback(
     async (d: string) => {
@@ -1312,6 +1498,7 @@ export default function Home() {
           courtName: slot.courtName,
           startsAt: slot.startsAt,
           endsAt: slot.endsAt,
+          onBehalfOf: actingAsId ?? undefined,
         }),
       });
       if (handleExpired(res.status)) return;
@@ -1344,7 +1531,11 @@ export default function Home() {
     if (!ok) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/bookings/${b.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/bookings/${b.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ onBehalfOf: actingAsId ?? undefined }),
+      });
       if (handleExpired(res.status)) return;
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
@@ -1372,7 +1563,7 @@ export default function Home() {
       const res = await fetch("/api/cancel-slot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ classEventId: slot.id }),
+        body: JSON.stringify({ classEventId: slot.id, onBehalfOf: actingAsId ?? undefined }),
       });
       if (handleExpired(res.status)) return;
       const data = await res.json();
@@ -1485,6 +1676,7 @@ export default function Home() {
               courtName: slot.courtName,
               startsAt: slot.startsAt,
               endsAt: slot.endsAt,
+              onBehalfOf: actingAsId ?? undefined,
             }),
           });
           if (res.status === 401) {
@@ -1611,6 +1803,20 @@ export default function Home() {
             </h1>
           </div>
           <div className="actions">
+            {FEATURE_DELEGATION && incomingDelegation && (
+              <select
+                className="acting-as-select"
+                value={actingAsId ?? ""}
+                onChange={(e) => setActingAsId(e.target.value || null)}
+                aria-label="Réserver pour"
+                title="Réserver pour"
+              >
+                <option value="">Pour moi</option>
+                <option value={incomingDelegation.delegatorId}>
+                  Pour {incomingDelegation.delegatorName}
+                </option>
+              </select>
+            )}
             {canNotify && (
               <button
                 className="secondary icon-btn alerts-btn"

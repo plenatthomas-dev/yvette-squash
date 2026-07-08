@@ -1185,6 +1185,47 @@ td.cell.past {
   width: auto;
 }
 
+/* --- Délégation de droits (idée 4) -------------------------------------- */
+.delegation-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.delegation-form select {
+  margin: 0;
+  flex: 1 1 auto;
+  width: auto;
+}
+
+.delegation-form button {
+  margin: 0;
+  width: auto;
+  white-space: nowrap;
+}
+
+.delegation-active {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.delegation-active button {
+  margin: 0;
+  width: auto;
+}
+
+/* Sélecteur « Pour moi / Pour X » dans la barre d'en-tête : même gabarit que les
+   icon-btn voisins (ShareButton, DirectoryButton…). */
+.acting-as-select {
+  margin: 0;
+  width: auto;
+  font-size: 0.8rem;
+  padding: 6px 10px;
+}
+
 /* --- Annuaire des membres ---------------------------------------------- */
 .directory-search {
   width: 100%;

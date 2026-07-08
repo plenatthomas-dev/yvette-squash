@@ -1,8 +1,50 @@
 # 🔐 Idée 4 — Délégation temporaire de droits (notes de cadrage)
 
-Statut : **💡 à cadrer, pas commencé**. Ce fichier capture la discussion de cadrage du
-2026-07-08, à relire avant de reprendre ce chantier. Contexte général : voir idée **4**
-dans [`idees-developpement.md`](./idees-developpement.md).
+Statut : **🚧 V1 implémentée** sur la branche `delegation`, **gated `FEATURE_DELEGATION`
+(OFF par défaut)** — invisible tant que le flag n'est pas activé. Ce fichier capture la
+discussion de cadrage du 2026-07-08 (toujours valable) + l'état du code au 2026-07-08.
+Contexte général : voir idée **4** dans [`idees-developpement.md`](./idees-developpement.md).
+
+## Livré (V1, branche `delegation`)
+
+- **Schéma** : `model Delegation` (`prisma/migrations/11_delegation`) + `Booking.actingUserId`
+  (pas de FK, comme `PlanningSnapshot.updatedById`). Diff vérifié hors-ligne
+  (`prisma migrate diff --from-schema-datamodel ... --to-schema-datamodel ...`) identique à
+  ce que Prisma aurait généré — aucune connexion DB nécessaire pour l'écrire/vérifier.
+- **`src/lib/session.ts`** : logique de refresh/claim extraite en `resolveResaToken()`
+  (partagée), exposant `getResaTokenForUser(userId)` — récupère/rafraîchit le jeton
+  ResaMania d'un AUTRE user par son id, sans dépendre de son cookie.
+- **`src/lib/delegation.ts`** (+ `delegation-shared.ts` pour les constantes côté client) :
+  `getActiveOutgoingDelegation`, `getActiveIncomingDelegation`, `findActiveDelegation`,
+  et surtout `resolveActingContext(session, onBehalfOf, message)` — point d'entrée unique
+  utilisé par book/cancel-slot/bookings pour résoudre soit sa propre session, soit celle
+  du délégant si `onBehalfOf` est fourni et couvert par une délégation active.
+- **API** : `GET/POST /api/delegations` (créer — remplace silencieusement toute délégation
+  sortante déjà active, v1 = une seule à la fois), `DELETE /api/delegations/{id}` (révoquer,
+  délégant uniquement).
+- **`onBehalfOf`** branché dans `POST /api/book`, `POST /api/cancel-slot`,
+  `DELETE /api/bookings/{id}` : la règle « un seul terrain par horaire » et le
+  `Booking.userId` portent sur le **délégant** (propriétaire réel), `actingUserId` trace le
+  délégué.
+- **UI** : Réglages → section « Déléguer mes droits » (choix membre via `/api/directory`,
+  durée 24h/3j/5j, révocation). En-tête : sélecteur « Pour moi / Pour {délégant} » si une
+  délégation entrante est active, poussé dans les 4 appels de réservation/annulation.
+- **Cron `keep-alive-delegations`** (`vercel.json`, quotidien 5h) : rafraîchit le jeton de
+  chaque délégant ayant une délégation active via `getResaTokenForUser`, scope limité aux
+  délégations actives (pas tout le club).
+- Vérifié : `tsc --noEmit`, `next lint`, `next build` tous verts (sans `prisma migrate`
+  ni `npm run build`, `.env` local pointant vers la prod).
+
+## Pas fait / ouvert avant d'activer le flag en prod
+
+- **Note de confidentialité (RGPD, contrainte 4)** : pas encore mise à jour — `actingUserId`
+  et le fait qu'un membre puisse agir pour un autre sont une nouvelle finalité à
+  documenter, comme fait pour l'annuaire (idée 6).
+- **Pas testé en conditions réelles** (aucune requête faite contre la prod pendant ce
+  chantier) — à faire via un déploiement preview avant d'activer `FEATURE_DELEGATION`.
+- Historique des délégations passées : non affiché (seule la délégation active l'est).
+- Le filtre « pas moi-même » dans le picker de délégué (Réglages) n'est fait que
+  côté serveur (400 si on se choisit soi-même) — pas de filtre client dans la liste.
 
 ## Besoin
 

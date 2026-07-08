@@ -117,19 +117,29 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 // prise sur expires_in à l'émission (cf. exchangeToken).
 const REFRESH_CLAIM_MS = 20_000;
 
-/** Récupère la session depuis l'id de cookie, en rafraîchissant le token ResaMania si besoin. */
-export async function getSession(sid: string | undefined): Promise<AppSession | null> {
-  if (!sid) return null;
-  const s = await prisma.session.findUnique({ where: { id: sid }, include: { user: true } });
-  if (!s) return null;
-  if (s.expiresAt < new Date()) {
-    await prisma.session.delete({ where: { id: sid } }).catch(() => {});
-    return null;
-  }
+type SessionTokenFields = {
+  id: string;
+  accessToken: string | null;
+  refreshTokenEnc: string | null;
+  tokenExpiresAt: Date | null;
+  identityJson: string | null;
+};
 
+/**
+ * Résout (et rafraîchit si besoin) le jeton ResaMania d'une ligne Session déjà chargée.
+ * Factorisé pour être réutilisé par `getSession` (session du cookie courant) ET
+ * `getResaTokenForUser` (délégation, idée 4 : jeton d'un AUTRE user, retrouvé par userId
+ * plutôt que par cookie — cf. docs/delegation-droits.md).
+ *
+ * - `undefined` : session « email seul » par nature (jamais eu de jeton) — état normal.
+ * - `null`      : jeton attendu mais irrécupérable (déchiffrement/refresh en échec) — la
+ *                 session elle-même doit être considérée invalide (déjà supprimée ici).
+ * - `ResaSession` : jeton valide (frais, ou tout juste rafraîchi).
+ */
+async function resolveResaToken(s: SessionTokenFields): Promise<ResaSession | null | undefined> {
   // Session « email seul » : aucun jeton ResaMania à déchiffrer/rafraîchir.
   if (!s.accessToken || !s.refreshTokenEnc || !s.tokenExpiresAt || !s.identityJson) {
-    return { userId: s.userId, displayName: s.user.displayName, resa: null };
+    return undefined;
   }
 
   let resa: ResaSession;
@@ -143,57 +153,89 @@ export async function getSession(sid: string | undefined): Promise<AppSession | 
   } catch {
     // Session illisible (ancien format en clair, ou clé changée) → on la supprime et
     // on force une reconnexion propre.
+    await prisma.session.delete({ where: { id: s.id } }).catch(() => {});
+    return null;
+  }
+
+  if (resa.expiresAt > Date.now()) return resa;
+
+  // Token (presque) expiré → refresh SÉRIALISÉ entre requêtes concurrentes (la vue
+  // Semaine tire 7 /api/planning en parallèle). updateMany atomique : une seule requête
+  // « gagne » et rafraîchit, les autres relisent son résultat.
+  const claimed = await prisma.session.updateMany({
+    where: { id: s.id, tokenExpiresAt: { lte: new Date() } },
+    data: { tokenExpiresAt: new Date(Date.now() + REFRESH_CLAIM_MS) },
+  });
+
+  if (claimed.count === 1) {
+    try {
+      const fresh = await ensureFresh(resa);
+      resa = { ...fresh, identity: resa.identity };
+      await prisma.session.update({
+        where: { id: s.id },
+        data: {
+          accessToken: encrypt(resa.accessToken),
+          refreshTokenEnc: encrypt(resa.refreshToken),
+          tokenExpiresAt: new Date(resa.expiresAt),
+        },
+      });
+      return resa;
+    } catch {
+      // refresh impossible (token révoqué…) -> session invalide, reconnexion forcée
+      await prisma.session.delete({ where: { id: s.id } }).catch(() => {});
+      return null;
+    }
+  }
+
+  // Une autre requête détient le refresh : on lui laisse le temps d'écrire, puis on relit.
+  await sleep(600);
+  const s2 = await prisma.session.findUnique({ where: { id: s.id } });
+  if (!s2 || !s2.accessToken || !s2.refreshTokenEnc || !s2.tokenExpiresAt) return null;
+  try {
+    // Si le gagnant n'a pas encore fini d'écrire, on repart avec l'ancien access token :
+    // il reste réellement valide ~60 s (marge), assez pour cette requête.
+    return {
+      accessToken: decrypt(s2.accessToken),
+      refreshToken: decrypt(s2.refreshTokenEnc),
+      expiresAt: s2.tokenExpiresAt.getTime(),
+      identity: resa.identity,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Récupère la session depuis l'id de cookie, en rafraîchissant le token ResaMania si besoin. */
+export async function getSession(sid: string | undefined): Promise<AppSession | null> {
+  if (!sid) return null;
+  const s = await prisma.session.findUnique({ where: { id: sid }, include: { user: true } });
+  if (!s) return null;
+  if (s.expiresAt < new Date()) {
     await prisma.session.delete({ where: { id: sid } }).catch(() => {});
     return null;
   }
 
-  if (resa.expiresAt <= Date.now()) {
-    // Token (presque) expiré → refresh SÉRIALISÉ entre requêtes concurrentes (la vue
-    // Semaine tire 7 /api/planning en parallèle). updateMany atomique : une seule requête
-    // « gagne » et rafraîchit, les autres relisent son résultat.
-    const claimed = await prisma.session.updateMany({
-      where: { id: sid, tokenExpiresAt: { lte: new Date() } },
-      data: { tokenExpiresAt: new Date(Date.now() + REFRESH_CLAIM_MS) },
-    });
+  const resa = await resolveResaToken(s);
+  if (resa === null) return null; // jeton irrécupérable → session invalidée (déjà supprimée)
+  return { userId: s.userId, displayName: s.user.displayName, resa: resa ?? null };
+}
 
-    if (claimed.count === 1) {
-      try {
-        const fresh = await ensureFresh(resa);
-        resa = { ...fresh, identity: resa.identity };
-        await prisma.session.update({
-          where: { id: sid },
-          data: {
-            accessToken: encrypt(resa.accessToken),
-            refreshTokenEnc: encrypt(resa.refreshToken),
-            tokenExpiresAt: new Date(resa.expiresAt),
-          },
-        });
-      } catch {
-        // refresh impossible (token révoqué…) -> session invalide, reconnexion forcée
-        await prisma.session.delete({ where: { id: sid } }).catch(() => {});
-        return null;
-      }
-    } else {
-      // Une autre requête détient le refresh : on lui laisse le temps d'écrire, puis on relit.
-      await sleep(600);
-      const s2 = await prisma.session.findUnique({ where: { id: sid } });
-      if (!s2 || !s2.accessToken || !s2.refreshTokenEnc || !s2.tokenExpiresAt) return null;
-      try {
-        resa = {
-          accessToken: decrypt(s2.accessToken),
-          refreshToken: decrypt(s2.refreshTokenEnc),
-          expiresAt: s2.tokenExpiresAt.getTime(),
-          identity: resa.identity,
-        };
-      } catch {
-        return null;
-      }
-      // Si le gagnant n'a pas encore fini d'écrire, on repart avec l'ancien access token :
-      // il reste réellement valide ~60 s (marge), assez pour cette requête.
-    }
-  }
-
-  return { userId: s.userId, displayName: s.user.displayName, resa };
+/**
+ * Retrouve le jeton ResaMania d'un AUTRE user (délégation, idée 4) : la session la plus
+ * récente encore valide de ce user, rafraîchie si besoin — SANS dépendre de son cookie ni
+ * de son activité (cf. docs/delegation-droits.md, "le problème du token qui dort"). C'est
+ * la requête du DÉLÉGUÉ qui déclenche ce refresh, pas une action du délégant.
+ * `null` si aucune session ResaMania utilisable n'existe (jamais connecté via ResaMania,
+ * session expirée, ou jeton irrécupérable).
+ */
+export async function getResaTokenForUser(userId: string): Promise<ResaSession | null> {
+  const s = await prisma.session.findFirst({
+    where: { userId, refreshTokenEnc: { not: null }, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!s) return null;
+  const resa = await resolveResaToken(s);
+  return resa ?? null; // undefined (email-seule) ne devrait pas arriver ici, traité pareil
 }
 
 export async function destroySession(sid: string | undefined): Promise<void> {

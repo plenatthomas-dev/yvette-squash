@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { cancel, findAttendeeId, invalidatePlanningCache } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import { resolveActingContext } from "@/lib/delegation";
 
 export const runtime = "nodejs";
 
-// DELETE /api/bookings/{id} -> annule la réservation (chez ResaMania + dans le journal)
+// DELETE /api/bookings/{id} { onBehalfOf? } -> annule la réservation (ResaMania + journal).
+// onBehalfOf (idée 4) : userId du délégant si on annule en son nom (délégation active).
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -14,16 +16,21 @@ export async function DELETE(
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
-  if (!session.resa) {
-    return NextResponse.json(
-      { error: "L'annulation d'une réservation nécessite une connexion ResaMania." },
-      { status: 403 },
-    );
+  const { onBehalfOf } = (await req.json().catch(() => ({}))) as { onBehalfOf?: unknown };
+
+  const acting = await resolveActingContext(
+    session,
+    onBehalfOf,
+    "L'annulation d'une réservation nécessite une connexion ResaMania.",
+  );
+  if (!acting.ok) {
+    return NextResponse.json({ error: acting.error }, { status: acting.status });
   }
-  const resa = session.resa;
+  const { resa, bookingOwnerId, actingUserId } = acting.ctx;
+
   const { id } = await params;
   const booking = await prisma.booking.findUnique({ where: { id } });
-  if (!booking || booking.userId !== session.userId) {
+  if (!booking || booking.userId !== bookingOwnerId) {
     return NextResponse.json({ error: "Réservation introuvable" }, { status: 404 });
   }
 
@@ -46,7 +53,7 @@ export async function DELETE(
   if (!r.ok) {
     return NextResponse.json({ error: r.error }, { status: 409 });
   }
-  await prisma.booking.update({ where: { id }, data: { status: "cancelled" } });
+  await prisma.booking.update({ where: { id }, data: { status: "cancelled", actingUserId } });
   // Le créneau se libère : purge le cache planning.
   invalidatePlanningCache();
   return NextResponse.json({ ok: true });
