@@ -510,15 +510,24 @@ export default function Tournament({ toast, onExpired }: Props) {
                   {/* Arbre principal (chemin vers la 1re place) */}
                   <h4>Tableau principal</h4>
                   {renderTree(winners, (r) => (r === b.rounds - 1 ? "Finale" : `Tour ${r + 1}`))}
-                  {/* Repêchage : les perdants ont AUSSI leurs demi/finales, en arbre. */}
-                  {classif.length > 0 && (
-                    <>
-                      <h4>Repêchage &amp; classement</h4>
-                      {renderTree(classif, (r) =>
-                        r === b.rounds - 1 ? "Finales de classement" : `Tour ${r + 1}`,
-                      )}
-                    </>
-                  )}
+                  {/* Repêchage : les perdants (dès le 1er tour) ont AUSSI leur arbre —
+                      leurs demi-finales puis leurs finales de classement. */}
+                  {classif.length > 0 &&
+                    (() => {
+                      const minR = Math.min(...classif.map((m) => m.round ?? 0));
+                      return (
+                        <>
+                          <h4>Tableau des perdants (repêchage)</h4>
+                          {renderTree(classif, (r) =>
+                            r === b.rounds - 1
+                              ? "Finales de classement"
+                              : r === minR
+                                ? "Demi-finales des perdants"
+                                : `Repêchage ${r - minR + 1}`,
+                          )}
+                        </>
+                      );
+                    })()}
                 </section>
               );
             })()}
