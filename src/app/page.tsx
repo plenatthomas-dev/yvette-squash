@@ -1254,17 +1254,16 @@ export default function Home() {
   // sont ouverts (action possible « rembourser »). Alimenté au chargement/focus et,
   // en direct, par le composant Tricount quand la vue Frais est ouverte.
   const [triOwed, setTriOwed] = useState(0);
-  // Délégation (idée 4) : délégation entrante active (si un autre membre m'a délégué ses
-  // droits) + pour qui j'agis actuellement (null = moi-même).
-  const [incomingDelegation, setIncomingDelegation] = useState<{
-    delegatorId: string;
-    delegatorName: string;
-    expiresAt: string;
-  } | null>(null);
+  // Délégation (idée 4) : délégations entrantes actives (plusieurs membres peuvent m'avoir
+  // délégué leurs droits simultanément) + pour qui j'agis actuellement (null = moi-même).
+  const [incomingDelegations, setIncomingDelegations] = useState<
+    { delegatorId: string; delegatorName: string; expiresAt: string }[]
+  >([]);
   const [actingAsId, setActingAsId] = useState<string | null>(null);
-  // Bandeau « on t'a délégué des droits » : masquable, mais ré-affiché si la délégation
-  // change (nouveau délégant ou nouvelle échéance) via une clé identité.
-  const [delegBannerDismissed, setDelegBannerDismissed] = useState<string | null>(null);
+  // Bandeaux « on t'a délégué des droits » : un par délégant, masquables individuellement.
+  // Chaque bandeau masqué est mémorisé par une clé identité (délégant + échéance) → il se
+  // ré-affiche si la délégation change (nouvelle échéance) ou si un nouveau délégant arrive.
+  const [delegBannerDismissed, setDelegBannerDismissed] = useState<string[]>([]);
   const today = toISODate(new Date());
   // Notifications disponibles seulement une fois monté (évite un décalage d'hydratation)
   // ET si le navigateur les supporte ET si les clés VAPID sont configurées côté serveur.
@@ -1361,22 +1360,24 @@ export default function Home() {
   const loadIncomingDelegation = useCallback(async () => {
     const r = await fetch("/api/delegations");
     if (!r.ok) {
-      setIncomingDelegation(null);
+      setIncomingDelegations([]);
       return;
     }
     const d = (await r.json()) as {
-      incoming: { delegatorId: string; delegatorName: string; expiresAt: string } | null;
+      incoming: { delegatorId: string; delegatorName: string; expiresAt: string }[];
     };
-    setIncomingDelegation(d.incoming);
+    setIncomingDelegations(d.incoming ?? []);
   }, []);
   useEffect(() => {
     if (me && FEATURE_DELEGATION) loadIncomingDelegation();
   }, [me, loadIncomingDelegation]);
-  // Sécurité : si la délégation sélectionnée n'est plus la délégation entrante active
-  // (révoquée, expirée, remplacée), on retombe sur « moi-même ».
+  // Sécurité : si le délégant sélectionné n'est plus dans les délégations entrantes actives
+  // (révoquée, expirée), on retombe sur « moi-même ».
   useEffect(() => {
-    if (actingAsId && incomingDelegation?.delegatorId !== actingAsId) setActingAsId(null);
-  }, [actingAsId, incomingDelegation]);
+    if (actingAsId && !incomingDelegations.some((d) => d.delegatorId === actingAsId)) {
+      setActingAsId(null);
+    }
+  }, [actingAsId, incomingDelegations]);
 
   const load = useCallback(
     async (d: string) => {
@@ -1855,7 +1856,7 @@ export default function Home() {
             </h1>
           </div>
           <div className="actions">
-            {FEATURE_DELEGATION && incomingDelegation && (
+            {FEATURE_DELEGATION && incomingDelegations.length > 0 && (
               <select
                 className="acting-as-select"
                 value={actingAsId ?? ""}
@@ -1864,9 +1865,11 @@ export default function Home() {
                 title="Réserver pour"
               >
                 <option value="">Pour moi</option>
-                <option value={incomingDelegation.delegatorId}>
-                  Pour {incomingDelegation.delegatorName}
-                </option>
+                {incomingDelegations.map((d) => (
+                  <option key={d.delegatorId} value={d.delegatorId}>
+                    Pour {d.delegatorName}
+                  </option>
+                ))}
               </select>
             )}
             {canNotify && (
@@ -1947,36 +1950,34 @@ export default function Home() {
       </header>
 
       {FEATURE_DELEGATION &&
-        incomingDelegation &&
-        delegBannerDismissed !==
-          `${incomingDelegation.delegatorId}|${incomingDelegation.expiresAt}` && (
-          <div className="notice info deleg-banner" role="status">
-            <span>
-              🤝 <strong>{incomingDelegation.delegatorName}</strong> t'a délégué ses droits :
-              tu peux réserver / annuler en son nom jusqu'au{" "}
-              {new Date(incomingDelegation.expiresAt).toLocaleString("fr-FR", {
-                day: "numeric",
-                month: "short",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-              . Sélectionne « Pour {incomingDelegation.delegatorName} » en haut à droite pour
-              agir en son nom.
-            </span>
-            <button
-              type="button"
-              className="deleg-banner-close"
-              aria-label="Masquer ce message"
-              onClick={() =>
-                setDelegBannerDismissed(
-                  `${incomingDelegation.delegatorId}|${incomingDelegation.expiresAt}`,
-                )
-              }
-            >
-              ✕
-            </button>
-          </div>
-        )}
+        incomingDelegations.map((deleg) => {
+          const key = `${deleg.delegatorId}|${deleg.expiresAt}`;
+          if (delegBannerDismissed.includes(key)) return null;
+          return (
+            <div key={key} className="notice info deleg-banner" role="status">
+              <span>
+                🤝 <strong>{deleg.delegatorName}</strong> t'a délégué ses droits : tu peux
+                réserver / annuler en son nom jusqu'au{" "}
+                {new Date(deleg.expiresAt).toLocaleString("fr-FR", {
+                  day: "numeric",
+                  month: "short",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+                . Sélectionne « Pour {deleg.delegatorName} » en haut à droite pour agir en son
+                nom.
+              </span>
+              <button
+                type="button"
+                className="deleg-banner-close"
+                aria-label="Masquer ce message"
+                onClick={() => setDelegBannerDismissed((prev) => [...prev, key])}
+              >
+                ✕
+              </button>
+            </div>
+          );
+        })}
 
       {!canBook && (
         <div className="notice info readonly-note">

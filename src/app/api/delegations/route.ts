@@ -6,15 +6,15 @@ import { pushToUser } from "@/lib/push";
 import {
   DELEGATION_DURATIONS_H,
   DELEGATION_SCOPE,
-  getActiveIncomingDelegation,
+  getActiveIncomingDelegations,
   getActiveOutgoingDelegation,
 } from "@/lib/delegation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// GET /api/delegations -> mes délégations actives : celle que je donne (outgoing) et
-// celle que je reçois (incoming), s'il y en a une de chaque (v1 : au plus une par sens).
+// GET /api/delegations -> mes délégations actives : celle que je donne (outgoing, au plus
+// une, v1) et CELLES que je reçois (incoming, plusieurs délégants possibles simultanément).
 export async function GET(req: NextRequest) {
   if (!FEATURE_DELEGATION) {
     return NextResponse.json({ error: "Délégation désactivée" }, { status: 404 });
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   }
   const [outgoing, incoming] = await Promise.all([
     getActiveOutgoingDelegation(session.userId),
-    getActiveIncomingDelegation(session.userId),
+    getActiveIncomingDelegations(session.userId),
   ]);
   return NextResponse.json({
     outgoing: outgoing
@@ -36,14 +36,13 @@ export async function GET(req: NextRequest) {
           expiresAt: outgoing.expiresAt.toISOString(),
         }
       : null,
-    incoming: incoming
-      ? {
-          id: incoming.id,
-          delegatorId: incoming.delegatorId,
-          delegatorName: incoming.delegator.nickname ?? incoming.delegator.displayName,
-          expiresAt: incoming.expiresAt.toISOString(),
-        }
-      : null,
+    // Tableau (éventuellement vide) : une entrée par délégant actif.
+    incoming: incoming.map((d) => ({
+      id: d.id,
+      delegatorId: d.delegatorId,
+      delegatorName: d.delegator.nickname ?? d.delegator.displayName,
+      expiresAt: d.expiresAt.toISOString(),
+    })),
   });
 }
 
