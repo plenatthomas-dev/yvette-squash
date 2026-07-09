@@ -21,9 +21,13 @@ export function getActiveOutgoingDelegation(delegatorId: string) {
   });
 }
 
-/** Délégation que JE (delegateId) reçois actuellement (pour agir au nom d'un autre). */
-export function getActiveIncomingDelegation(delegateId: string) {
-  return prisma.delegation.findFirst({
+/**
+ * Délégations que JE (delegateId) reçois actuellement (pour agir au nom d'un autre).
+ * Plusieurs personnes peuvent me déléguer simultanément → on les renvoie TOUTES
+ * (le backend d'action, indexé sur le couple délégant/délégataire, gère chacune).
+ */
+export function getActiveIncomingDelegations(delegateId: string) {
+  return prisma.delegation.findMany({
     where: { delegateId, revokedAt: null, expiresAt: { gt: new Date() } },
     orderBy: { createdAt: "desc" },
     include: { delegator: { select: { id: true, displayName: true, nickname: true } } },
