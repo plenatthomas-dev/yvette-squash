@@ -37,6 +37,9 @@ model User {
   // Délégation temporaire de droits (idée 4) : ce que je donne / ce qu'on me donne.
   delegationsGiven    Delegation[] @relation("DelegationGiven")
   delegationsReceived Delegation[] @relation("DelegationReceived")
+  // Tournois (idée 3) : ceux que j'ai créés + les participations où je suis membre.
+  tournamentsCreated  Tournament[]       @relation("TournamentCreator")
+  tournamentPlayers   TournamentPlayer[]
 }
 
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
@@ -282,4 +285,90 @@ model ExpenseShare {
 
   @@unique([expenseId, userId])
   @@index([userId])
+}
+
+// --- Tournois (idée 3) -----------------------------------------------------
+// Un tournoi = un roster (membres + invités hors asso), un format calculé (poules,
+// tableau à repêchage, ou poules + phase finale) et ses matchs. Scores en JEUX gagnés.
+model Tournament {
+  id            String   @id @default(cuid())
+  name          String?
+  date          String // "YYYY-MM-DD" (comme Tricount)
+  createdById   String
+  createdBy     User     @relation("TournamentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  status        String   @default("draft") // draft | running | done
+  format        String // pools | bracket | pools_bracket
+  targetMatches Int // nombre de matchs visé par joueur (2, 3 ou 4)
+  bestOf        Int      @default(3) // 3 => 2 jeux gagnants ; 5 => 3 jeux gagnants
+  courts        Int      @default(2)
+  createdAt     DateTime @default(now())
+  players       TournamentPlayer[]
+  groups        TournamentGroup[]
+  matches       Match[]
+
+  @@index([date])
+}
+
+// Un participant : soit un MEMBRE (userId) soit un INVITÉ hors asso (guestName, prénom
+// libre). displayName est FIGÉ à la création — supprimer un membre (userId -> null) ne
+// casse pas l'historique.
+model TournamentPlayer {
+  id           String     @id @default(cuid())
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  tournamentId String
+  user         User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId       String?
+  guestName    String? // invité hors asso (null pour un membre)
+  displayName  String // figé : nom du membre ou prénom de l'invité
+  seed         Int?
+  group        TournamentGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  groupId      String?
+
+  @@index([tournamentId])
+  @@index([userId])
+}
+
+// Une poule (round-robin). Absente pour un tournoi 100 % tableau.
+model TournamentGroup {
+  id           String     @id @default(cuid())
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  tournamentId String
+  label        String // "A", "B"...
+  players      TournamentPlayer[]
+  matches      Match[]
+
+  @@index([tournamentId])
+}
+
+// Un match. En poule : rattaché à un group. En tableau : round/slot/branch + liens
+// nextWin/nextLose (le vainqueur monte, le perdant bascule dans la branche de classement).
+model Match {
+  id           String     @id @default(cuid())
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  tournamentId String
+  phase        String // pool | winners | classification
+  group        TournamentGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  groupId      String?
+  round        Int? // tableau : 0 = 1er tour
+  slot         Int?
+  branch       String? // "main" | "cons-5-8" ... (branche du tableau)
+  placeLabel   String? // "Finale", "3e place", "Finale perdants"...
+  // Participants (nullables : un slot de tableau se remplit quand le match amont est joué).
+  player1Id    String?
+  player2Id    String?
+  // Résultat en JEUX gagnés.
+  score1       Int?
+  score2       Int?
+  winnerId     String?
+  status       String   @default("pending") // pending | bye | done
+  courtName    String?
+  order        Int? // ordre de passage global
+  // Aiguillage tableau : où vont le vainqueur / le perdant.
+  nextWinMatchId  String?
+  nextWinSlot     Int?
+  nextLoseMatchId String?
+  nextLoseSlot    Int?
+
+  @@index([tournamentId])
+  @@index([groupId])
 }
