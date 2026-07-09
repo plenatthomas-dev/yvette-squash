@@ -25,8 +25,10 @@ interface ExpenseItem {
   spentAt: string;
   payerId: string;
   payerName: string;
+  participantIds: string[];
   participantNames: string[];
   canDelete: boolean;
+  canEdit: boolean;
 }
 interface PayerStatus {
   id: string;
@@ -139,8 +141,9 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
   // Tricount déplié (au plus un ; "" = tous repliés, null = pas encore initialisé)
   const [openId, setOpenId] = useState<string | null>(null);
 
-  // Formulaire « nouvelle dépense »
+  // Formulaire « nouvelle dépense » (réutilisé en édition : editingId non nul).
   const [expenseOpen, setExpenseOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   // Tricount cible : soit la date d'un tricount existant, soit "new" (nouvelle date).
   const [tcChoice, setTcChoice] = useState<string>("new");
   const [date, setDate] = useState(todayISO());
@@ -205,7 +208,31 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     setSelected(new Set(data.members.map((m) => m.id)));
     setSplitMode("equal");
     setWeights(Object.fromEntries(data.members.map((m) => [m.id, 1])));
+    setEditingId(null);
     setExpenseOpen(true);
+  };
+
+  // Édition d'une dépense existante : on rouvre la MÊME modale, préremplie. Le jour
+  // (donc le tricount) est figé. Les parts d'origine ne sont pas stockées (seuls les
+  // montants le sont) : on repart en mode « équitable », l'utilisateur repasse en
+  // « par parts » s'il le souhaite.
+  const openEditExpense = (t: TricountItem, e: ExpenseItem) => {
+    if (!data) return;
+    setDate(t.date);
+    setTcChoice(t.date);
+    setLabel(e.label);
+    setAmount((e.amountCents / 100).toFixed(2).replace(".", ","));
+    setPayerId(e.payerId);
+    setSelected(new Set(e.participantIds));
+    setSplitMode("equal");
+    setWeights(Object.fromEntries(data.members.map((m) => [m.id, 1])));
+    setEditingId(e.id);
+    setExpenseOpen(true);
+  };
+
+  const closeExpense = () => {
+    setExpenseOpen(false);
+    setEditingId(null);
   };
 
   const toggle = (id: string) => {
@@ -244,23 +271,36 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
         : undefined;
     setBusy(true);
     try {
-      const res = await fetch("/api/tricount/expenses", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          date: targetDate,
-          label: label.trim(),
-          amountCents: cents,
-          payerId,
-          participantIds,
-          ...(weightsPayload ? { weights: weightsPayload } : {}),
-        }),
-      });
+      // Édition : PATCH sur la ligne (le jour/tricount ne bouge pas). Création : POST.
+      const res = editingId
+        ? await fetch(`/api/tricount/expenses/${editingId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              label: label.trim(),
+              amountCents: cents,
+              payerId,
+              participantIds,
+              ...(weightsPayload ? { weights: weightsPayload } : {}),
+            }),
+          })
+        : await fetch("/api/tricount/expenses", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              date: targetDate,
+              label: label.trim(),
+              amountCents: cents,
+              payerId,
+              participantIds,
+              ...(weightsPayload ? { weights: weightsPayload } : {}),
+            }),
+          });
       if (onExpired(res.status)) return;
       const j = await res.json();
       if (!res.ok) throw new Error(j.error ?? `Erreur ${res.status}`);
-      toast("ok", "Dépense enregistrée");
-      setExpenseOpen(false);
+      toast("ok", editingId ? "Dépense modifiée" : "Dépense enregistrée");
+      closeExpense();
       load();
     } catch (e) {
       toast("err", "Enregistrement impossible : " + (e as Error).message);
@@ -532,6 +572,16 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                         </span>
                         <span className="tri-amount">
                           <strong>{fmtEuros(e.amountCents)}</strong>
+                          {e.canEdit && !t.settled && (
+                            <button
+                              className="secondary tri-edit"
+                              onClick={() => openEditExpense(t, e)}
+                              disabled={busy}
+                              aria-label={`Modifier « ${e.label} »`}
+                            >
+                              Modifier
+                            </button>
+                          )}
                           {e.canDelete && !t.settled && (
                             <button
                               className="cancel"
@@ -680,34 +730,45 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
         );
       })}
 
-      {/* Modale « nouvelle dépense » */}
+      {/* Modale « nouvelle dépense » (aussi utilisée pour l'édition) */}
       {expenseOpen && (
-        <div className="modal-overlay" onClick={() => !busy && setExpenseOpen(false)}>
+        <div className="modal-overlay" onClick={() => !busy && closeExpense()}>
           <div
             className="modal"
             role="dialog"
             aria-modal="true"
-            aria-label="Nouvelle dépense"
+            aria-label={editingId ? "Modifier la dépense" : "Nouvelle dépense"}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3>➕ Nouvelle dépense</h3>
+            <h3>{editingId ? "✏️ Modifier la dépense" : "➕ Nouvelle dépense"}</h3>
             <form onSubmit={submitExpense} className="tri-form">
-              <label className="tri-field">
-                Tricount
-                <select value={tcChoice} onChange={(e) => setTcChoice(e.target.value)}>
-                  {data.tricounts.map((t) => (
-                    <option key={t.id} value={t.date}>
-                      Tricount du {prettyDate(t.date)}
-                    </option>
-                  ))}
-                  <option value="new">➕ Nouvelle date…</option>
-                </select>
-              </label>
-              {tcChoice === "new" && (
-                <label className="tri-field">
-                  Jour du tricount
-                  <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-                </label>
+              {editingId ? (
+                // En édition, le jour (donc le tricount) est figé : on l'affiche seulement.
+                <p className="muted tiny">Tricount du {prettyDate(date)}</p>
+              ) : (
+                <>
+                  <label className="tri-field">
+                    Tricount
+                    <select value={tcChoice} onChange={(e) => setTcChoice(e.target.value)}>
+                      {data.tricounts.map((t) => (
+                        <option key={t.id} value={t.date}>
+                          Tricount du {prettyDate(t.date)}
+                        </option>
+                      ))}
+                      <option value="new">➕ Nouvelle date…</option>
+                    </select>
+                  </label>
+                  {tcChoice === "new" && (
+                    <label className="tri-field">
+                      Jour du tricount
+                      <input
+                        type="date"
+                        value={date}
+                        onChange={(e) => setDate(e.target.value)}
+                      />
+                    </label>
+                  )}
+                </>
               )}
               <input
                 type="text"
@@ -798,13 +859,17 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                 <button
                   type="button"
                   className="secondary"
-                  onClick={() => setExpenseOpen(false)}
+                  onClick={closeExpense}
                   disabled={busy}
                 >
                   Annuler
                 </button>
                 <button type="submit" disabled={busy}>
-                  {busy ? "Enregistrement…" : "Enregistrer"}
+                  {busy
+                    ? "Enregistrement…"
+                    : editingId
+                      ? "Enregistrer les modifications"
+                      : "Enregistrer"}
                 </button>
               </div>
             </form>

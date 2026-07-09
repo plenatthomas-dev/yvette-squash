@@ -71,17 +71,23 @@ export async function GET(req: NextRequest) {
           name: name(p),
           approved: approved.has(p),
         })),
-        expenses: t.expenses.map((e) => ({
-          id: e.id,
-          label: e.label,
-          amountCents: e.amountCents,
-          isRefund: e.isRefund,
-          spentAt: e.spentAt.toISOString(),
-          payerId: e.payerId,
-          payerName: name(e.payerId),
-          participantNames: e.shares.map((s) => name(s.userId)),
-          canDelete: e.creatorId === session.userId || e.payerId === session.userId,
-        })),
+        expenses: t.expenses.map((e) => {
+          const mine = e.creatorId === session.userId || e.payerId === session.userId;
+          return {
+            id: e.id,
+            label: e.label,
+            amountCents: e.amountCents,
+            isRefund: e.isRefund,
+            spentAt: e.spentAt.toISOString(),
+            payerId: e.payerId,
+            payerName: name(e.payerId),
+            participantIds: e.shares.map((s) => s.userId),
+            participantNames: e.shares.map((s) => name(s.userId)),
+            canDelete: mine,
+            // Édition réservée aux vraies dépenses (un remboursement se supprime/refait).
+            canEdit: mine && !e.isRefund,
+          };
+        }),
         balances: [...balances]
           .map(([userId, cents]) => ({ userId, name: name(userId), cents }))
           .sort((a, b) => b.cents - a.cents),

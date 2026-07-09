@@ -1887,6 +1887,14 @@ table.planning.week th.time.selhead {
   color: var(--danger-fg);
   border: 1px solid var(--danger-border);
 }
+/* Bouton « Modifier » d'une dépense : même gabarit compact que « Suppr. »,
+   couleur neutre (action non destructive). */
+.tri-amount button.tri-edit {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  width: auto;
+}
 
 /* Formulaire d'ajout (dans la modale) */
 .tri-form {
