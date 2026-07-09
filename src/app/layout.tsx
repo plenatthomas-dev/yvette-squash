@@ -28,8 +28,9 @@ export const viewport: Viewport = {
 };
 
 // Applique le thème choisi (localStorage) avant le premier rendu → pas de flash.
-// Absent ou "system" → aucun attribut, Pico suit prefers-color-scheme.
-const themeScript = `(function(){try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark'){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();`;
+// Absent ou "system" → aucun attribut, Pico suit prefers-color-scheme. Les thèmes
+// explicites (light/dark/rose) sont posés en data-theme dès le paint initial.
+const themeScript = `(function(){try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark'||t==='rose'){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();`;
 
 export default function RootLayout({
   children,

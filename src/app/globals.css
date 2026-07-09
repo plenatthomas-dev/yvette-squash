@@ -2613,3 +2613,28 @@ table.planning.week th.time.selhead {
 /* Texte en pleine couleur (pas de primaire/gris sur fond coloré → illisible). */
 .trn-proposal strong { color: var(--pico-color); font-size: 0.95rem; }
 .trn-proposal small { color: var(--pico-color); opacity: 0.72; }
+
+/* --- Respect du réglage « réduire les animations » (a11y / WCAG 2.3.3) -----
+   Pour les personnes sensibles au mouvement : on neutralise les animations
+   décoratives (shimmer du skeleton en boucle, roue du rafraîchissement) et on
+   réduit à un simple fondu quasi instantané les entrées de toasts/modales.
+   Les transitions courtes (hover, etc.) restent, elles ne posent pas problème. */
+@media (prefers-reduced-motion: reduce) {
+  /* Coupe net les animations en boucle (skeleton, spinner de rafraîchissement). */
+  .skel-cell,
+  .refresh.spin svg {
+    animation: none !important;
+  }
+  /* Le skeleton garde un fond statique lisible plutôt qu'un dégradé figé à mi-course. */
+  .skel-cell {
+    background: var(--pico-card-border-color);
+  }
+  /* Entrées d'UI (toasts, overlay + boîtes de modale, menu ⋯ déroulant) : on
+     ramène l'animation à une durée quasi nulle → apparition sans translation/scale. */
+  .toast,
+  .modal-overlay,
+  .modal,
+  .header-menu-panel {
+    animation-duration: 0.01ms !important;
+  }
+}
