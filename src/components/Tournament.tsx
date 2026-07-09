@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "@/components/Dialog";
 import { MIN_PLAYERS, MAX_PLAYERS } from "@/lib/tournament";
+import { fetchDirectory } from "@/lib/directoryCache";
 
 // Vue « Tournoi » : liste des tournois, assistant de création (roster annuaire + invités,
 // cible de matchs) → proposition de formule → génération, puis suivi (poules/tableau,
@@ -223,10 +224,13 @@ export default function Tournament({ toast, onExpired }: Props) {
     setSeeded([]);
     setWizardOpen(true);
     if (members === null) {
-      const r = await fetch("/api/directory");
-      if (onExpired(r.status)) return;
-      const j = await r.json().catch(() => ({}));
-      if (r.ok) setMembers(j.members ?? []);
+      // Cache mémoire partagé (cf. fetchDirectory) : dédupliqué avec la modale Annuaire
+      // et le panneau Réglages. En cas d'échec réseau, on laisse `members` à null.
+      try {
+        setMembers(await fetchDirectory());
+      } catch {
+        /* on retentera à la prochaine ouverture du wizard */
+      }
     }
   };
 
@@ -477,7 +481,9 @@ export default function Tournament({ toast, onExpired }: Props) {
   };
 
   // Liste des matchs planifiés (par ordre de passage / terrain) — les prochains d'abord.
-  const scheduleMatches = (): MatchView[] => {
+  // Mémoïsé : ne se recalcule que quand le tournoi change (et non à chaque rendu déclenché
+  // par un toast, le refresh au focus, etc.), et n'est plus parcouru deux fois dans le JSX.
+  const scheduleMatches = useMemo<MatchView[]>(() => {
     if (!detail) return [];
     const all = detail.pools
       ? detail.pools.flatMap((p) => p.matches)
@@ -485,7 +491,7 @@ export default function Tournament({ toast, onExpired }: Props) {
     return all
       .filter((m) => m.order !== null && m.status === "pending" && m.p1 && m.p2)
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  };
+  }, [detail]);
 
   return (
     <section className="tournament">
@@ -517,11 +523,11 @@ export default function Tournament({ toast, onExpired }: Props) {
           )}
 
           {/* Prochains matchs (planning des terrains) */}
-          {scheduleMatches().length > 0 && (
+          {scheduleMatches.length > 0 && (
             <section className="trn-block">
               <h3>📋 Prochains matchs</h3>
               <ul className="trn-schedule">
-                {scheduleMatches()
+                {scheduleMatches
                   .slice(0, 6)
                   .map((m) => (
                     <li key={`sch-${m.id}`}>
