@@ -251,6 +251,17 @@ function BellIcon() {
   );
 }
 
+// Icône « plus d'options » (trois points) pour le menu déroulant du header.
+function MoreIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+      <circle cx="5" cy="12" r="2" />
+      <circle cx="12" cy="12" r="2" />
+      <circle cx="19" cy="12" r="2" />
+    </svg>
+  );
+}
+
 // Icône « membres » (deux silhouettes) pour le bouton annuaire.
 function UsersIcon() {
   return (
@@ -290,8 +301,15 @@ function SettingInfo({ title, children }: { title: string; children: ReactNode }
 // Annuaire des membres (idée 6). Bouton d'en-tête → modale listant les joueurs opt-in,
 // avec une recherche par nom. Gated par FEATURE_DIRECTORY : grisé (« bientôt ») si OFF,
 // à l'image du bouton Frais. Lecture seule ici (les usages — message, etc. — viendront).
-function DirectoryButton({ toast }: { toast: (type: ToastType, msg: string) => void }) {
-  const [open, setOpen] = useState(false);
+function DirectoryModal({
+  open,
+  onClose,
+  toast,
+}: {
+  open: boolean;
+  onClose: () => void;
+  toast: (type: ToastType, msg: string) => void;
+}) {
   const [members, setMembers] = useState<
     { id: string; name: string; clt?: string; rang?: number | null; cat?: string | null }[] | null
   >(null);
@@ -323,19 +341,9 @@ function DirectoryButton({ toast }: { toast: (type: ToastType, msg: string) => v
   const needle = q.trim().toLowerCase();
   const shown = (members ?? []).filter((m) => m.name.toLowerCase().includes(needle));
 
+  if (!open) return null;
   return (
-    <>
-      <button
-        className={"secondary icon-btn" + (FEATURE_DIRECTORY ? "" : " coming-soon")}
-        onClick={() => FEATURE_DIRECTORY && setOpen(true)}
-        disabled={!FEATURE_DIRECTORY}
-        aria-label={FEATURE_DIRECTORY ? "Annuaire des membres" : "Annuaire — en cours de développement"}
-        title={FEATURE_DIRECTORY ? "Annuaire des membres" : "🚧 En cours de développement"}
-      >
-        <UsersIcon />
-      </button>
-      {open && (
-        <Dialog onClose={() => setOpen(false)} label="Annuaire des membres" className="directory">
+        <Dialog onClose={onClose} label="Annuaire des membres" className="directory">
             <h3>Annuaire des membres</h3>
             <input
               type="search"
@@ -379,13 +387,11 @@ function DirectoryButton({ toast }: { toast: (type: ToastType, msg: string) => v
               retirer : ⚙️ Paramètres › « Annuaire des membres ».
             </p>
             <div className="modal-actions">
-              <button className="secondary" onClick={() => setOpen(false)}>
+              <button className="secondary" onClick={onClose}>
                 Fermer
               </button>
             </div>
         </Dialog>
-      )}
-    </>
   );
 }
 
@@ -992,8 +998,15 @@ function PrivacyNotice() {
 // Partage : notre PROPRE QR code (logo raquette au centre + « Squash de l'Yvette »),
 // scannable/partageable/téléchargeable. Contrairement au QR du menu natif du téléphone,
 // on maîtrise ici l'icône centrale et le texte.
-function ShareButton({ toast }: { toast: (type: ToastType, msg: string) => void }) {
-  const [open, setOpen] = useState(false);
+function ShareModal({
+  open,
+  onClose,
+  toast,
+}: {
+  open: boolean;
+  onClose: () => void;
+  toast: (type: ToastType, msg: string) => void;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // URL racine de l'appli (sans les filtres de la vue courante) → QR stable.
@@ -1089,18 +1102,9 @@ function ShareButton({ toast }: { toast: (type: ToastType, msg: string) => void 
     }, "image/png");
   };
 
+  if (!open) return null;
   return (
-    <>
-      <button
-        className="secondary icon-btn"
-        onClick={() => setOpen(true)}
-        aria-label="Partager l'appli"
-        title="Partager l'appli"
-      >
-        <ShareIcon />
-      </button>
-      {open && (
-        <Dialog onClose={() => setOpen(false)} label="Partager l'appli" className="share">
+        <Dialog onClose={onClose} label="Partager l'appli" className="share">
             <h3>Partager l'appli</h3>
             <p className="muted tiny">
               Scanne ce QR code pour ouvrir l'appli, ou copie le lien.
@@ -1115,13 +1119,95 @@ function ShareButton({ toast }: { toast: (type: ToastType, msg: string) => void 
               </button>
             </div>
             <div className="modal-actions">
-              <button className="secondary" onClick={() => setOpen(false)}>
+              <button className="secondary" onClick={onClose}>
                 Fermer
               </button>
             </div>
         </Dialog>
+  );
+}
+
+// Un élément du menu déroulant du header (⋯).
+interface HeaderMenuItem {
+  key: string;
+  label: string;
+  icon: ReactNode;
+  onClick: () => void;
+  active?: boolean; // vue courante (Frais / Tournoi)
+  badge?: number; // pastille (ex. montant à rembourser)
+  disabled?: boolean;
+  comingSoon?: boolean; // fonction gated OFF → grisée « en dév »
+}
+
+// Menu déroulant qui regroupe les actions secondaires du header (Frais, Tournoi, Annuaire,
+// Partager, Déconnexion) pour désencombrer l'en-tête et mettre le logo en avant. Ferme au
+// clic extérieur et sur Échap. Notifications et Réglages restent HORS du menu (accès direct).
+function HeaderMenu({ items }: { items: HeaderMenuItem[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const anyBadge = items.some((i) => (i.badge ?? 0) > 0);
+  const anyActive = items.some((i) => i.active);
+  return (
+    <div className="header-menu" ref={ref}>
+      <button
+        className={"secondary icon-btn" + (anyActive ? " active" : "")}
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Plus d'options"
+        title="Plus d'options"
+      >
+        <MoreIcon />
+        {anyBadge && <span className="badge dot" aria-hidden="true" />}
+      </button>
+      {open && (
+        <div className="header-menu-panel" role="menu">
+          {items.map((it) => (
+            <button
+              key={it.key}
+              role="menuitem"
+              className={
+                "header-menu-item" +
+                (it.active ? " active" : "") +
+                (it.comingSoon ? " coming-soon" : "")
+              }
+              disabled={it.disabled}
+              onClick={() => {
+                it.onClick();
+                setOpen(false);
+              }}
+              title={it.comingSoon ? "🚧 En cours de développement" : it.label}
+            >
+              <span className="hm-icon">{it.icon}</span>
+              <span className="hm-label">{it.label}</span>
+              {(it.badge ?? 0) > 0 ? (
+                <span className="badge">{it.badge}</span>
+              ) : it.comingSoon ? (
+                <span className="hm-soon" aria-hidden="true">
+                  🚧
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -1264,6 +1350,9 @@ export default function Home() {
   // Chaque bandeau masqué est mémorisé par une clé identité (délégant + échéance) → il se
   // ré-affiche si la délégation change (nouvelle échéance) ou si un nouveau délégant arrive.
   const [delegBannerDismissed, setDelegBannerDismissed] = useState<string[]>([]);
+  // Modales du menu ⋯ (partage / annuaire), pilotées depuis HeaderMenu.
+  const [shareOpen, setShareOpen] = useState(false);
+  const [directoryOpen, setDirectoryOpen] = useState(false);
   const today = toISODate(new Date());
   // Notifications disponibles seulement une fois monté (évite un décalage d'hydratation)
   // ET si le navigateur les supporte ET si les clés VAPID sont configurées côté serveur.
@@ -1883,71 +1972,71 @@ export default function Home() {
                 {alerts.length > 0 && <span className="badge">{alerts.length}</span>}
               </button>
             )}
-            <ShareButton toast={toast} />
-            <DirectoryButton toast={toast} />
+            {/* Réglages : accès DIRECT (hors menu ⋯), comme les notifications. */}
             <SettingsButton
               nickname={nickname}
               listed={listed}
               onProfileSaved={checkMe}
               toast={toast}
             />
-            {/* Bouton Frais : actif si le flag est ON ; sinon affiché grisé (désactivé)
-                avec un tooltip « en cours de développement » (feature bientôt dispo). */}
-            <button
-              className={
-                "secondary icon-btn money-btn" +
-                (view === "money" ? " active" : "") +
-                (FEATURE_TRICOUNT ? "" : " coming-soon")
-              }
-              onClick={() =>
-                FEATURE_TRICOUNT && setView(view === "money" ? "day" : "money")
-              }
-              disabled={!FEATURE_TRICOUNT}
-              aria-label={
-                FEATURE_TRICOUNT
-                  ? `Frais partagés (tricount)${triOwed ? ` — ${triOwed} à rembourser` : ""}`
-                  : "Frais partagés — en cours de développement"
-              }
-              aria-pressed={view === "money"}
-              title={FEATURE_TRICOUNT ? "Frais partagés" : "🚧 En cours de développement"}
-            >
-              <EuroIcon />
-              {FEATURE_TRICOUNT && triOwed > 0 && <span className="badge">{triOwed}</span>}
-            </button>
-            {/* Bouton Tournoi : actif si le flag est ON, sinon grisé « en dév ». */}
-            <button
-              className={
-                "secondary icon-btn tourney-btn" +
-                (view === "tourney" ? " active" : "") +
-                (FEATURE_TOURNAMENT ? "" : " coming-soon")
-              }
-              onClick={() =>
-                FEATURE_TOURNAMENT && setView(view === "tourney" ? "day" : "tourney")
-              }
-              disabled={!FEATURE_TOURNAMENT}
-              aria-label={
-                FEATURE_TOURNAMENT ? "Tournois" : "Tournois — en cours de développement"
-              }
-              aria-pressed={view === "tourney"}
-              title={FEATURE_TOURNAMENT ? "Tournois" : "🚧 En cours de développement"}
-            >
-              <TrophyIcon />
-            </button>
-            <button
-              className="secondary logout"
-              onClick={logout}
-              aria-label="Déconnexion"
-              title="Déconnexion"
-            >
-              <LogoutIcon />
-              <span className="label">Déconnexion</span>
-            </button>
+            {/* Menu ⋯ : regroupe les actions secondaires pour dégager le logo. */}
+            <HeaderMenu
+              items={[
+                {
+                  key: "money",
+                  label: "Frais partagés",
+                  icon: <EuroIcon />,
+                  active: view === "money",
+                  badge: FEATURE_TRICOUNT && triOwed > 0 ? triOwed : undefined,
+                  disabled: !FEATURE_TRICOUNT,
+                  comingSoon: !FEATURE_TRICOUNT,
+                  onClick: () => setView(view === "money" ? "day" : "money"),
+                },
+                {
+                  key: "tourney",
+                  label: "Tournois",
+                  icon: <TrophyIcon />,
+                  active: view === "tourney",
+                  disabled: !FEATURE_TOURNAMENT,
+                  comingSoon: !FEATURE_TOURNAMENT,
+                  onClick: () => setView(view === "tourney" ? "day" : "tourney"),
+                },
+                {
+                  key: "directory",
+                  label: "Annuaire des membres",
+                  icon: <UsersIcon />,
+                  disabled: !FEATURE_DIRECTORY,
+                  comingSoon: !FEATURE_DIRECTORY,
+                  onClick: () => setDirectoryOpen(true),
+                },
+                {
+                  key: "share",
+                  label: "Partager l'appli",
+                  icon: <ShareIcon />,
+                  onClick: () => setShareOpen(true),
+                },
+                {
+                  key: "logout",
+                  label: "Déconnexion",
+                  icon: <LogoutIcon />,
+                  onClick: logout,
+                },
+              ]}
+            />
           </div>
         </div>
         {/* Sous-titre pleine largeur : accueil + lieu réunis sur une seule ligne
             (l'ancienne ligne « Bonjour » séparée est supprimée pour gagner de la place). */}
         <div className="sub">Bonjour {nickname || me.split(" ")[0]} 👋 · Le Complexe, Bures</div>
       </header>
+
+      {/* Modales du menu ⋯ (rendues hors du menu pour survivre à sa fermeture). */}
+      <ShareModal open={shareOpen} onClose={() => setShareOpen(false)} toast={toast} />
+      <DirectoryModal
+        open={directoryOpen}
+        onClose={() => setDirectoryOpen(false)}
+        toast={toast}
+      />
 
       {FEATURE_DELEGATION &&
         incomingDelegations.map((deleg) => {
