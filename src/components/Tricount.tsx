@@ -7,6 +7,7 @@ import {
   splitEqually,
   splitByWeights,
 } from "@/lib/tricount";
+import { Dialog } from "@/components/Dialog";
 
 // Vue « Frais » : tricounts par jour (un tricount = les dépenses d'une date),
 // avec historique, validation des payeurs puis remboursements guidés.
@@ -72,9 +73,14 @@ interface TricountData {
   me: string;
   // Compte « email seul » : gestion des dépenses masquée (le serveur refuse aussi).
   emailOnly: boolean;
+  // Reste-t-il des tricounts plus anciens au-delà de la fenêtre demandée ?
+  hasMore: boolean;
   members: Member[];
   tricounts: TricountItem[];
 }
+
+// Nombre de tricounts chargés au départ, et pas d'agrandissement de « Charger plus ».
+const TRICOUNT_PAGE = 25;
 
 /** 1234 -> "12,34 €" (format français, toujours 2 décimales). */
 export function fmtEuros(cents: number): string {
@@ -142,6 +148,8 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
   const [busy, setBusy] = useState(false);
   // Tricount déplié (au plus un ; "" = tous repliés, null = pas encore initialisé)
   const [openId, setOpenId] = useState<string | null>(null);
+  // Pagination : combien de tricounts on demande (agrandi par « Charger plus »).
+  const [limit, setLimit] = useState(TRICOUNT_PAGE);
 
   // Formulaire « nouvelle dépense » (réutilisé en édition : editingId non nul).
   const [expenseOpen, setExpenseOpen] = useState(false);
@@ -171,7 +179,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const r = await fetch("/api/tricount");
+      const r = await fetch(`/api/tricount?limit=${limit}`);
       if (onExpired(r.status)) return;
       const j = await r.json();
       if (!r.ok) throw new Error(j.error ?? `Erreur ${r.status}`);
@@ -181,7 +189,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [onExpired]);
+  }, [onExpired, limit]);
 
   useEffect(() => {
     load();
@@ -736,16 +744,26 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
         );
       })}
 
+      {/* Historique paginé : charge les tricounts plus anciens à la demande. */}
+      {data.hasMore && (
+        <div className="tri-loadmore">
+          <button
+            className="secondary"
+            onClick={() => setLimit((l) => l + TRICOUNT_PAGE)}
+            disabled={loading}
+          >
+            {loading ? "Chargement…" : "Charger l'historique plus ancien"}
+          </button>
+        </div>
+      )}
+
       {/* Modale « nouvelle dépense » (aussi utilisée pour l'édition) */}
       {expenseOpen && (
-        <div className="modal-overlay" onClick={() => !busy && closeExpense()}>
-          <div
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label={editingId ? "Modifier la dépense" : "Nouvelle dépense"}
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog
+          onClose={() => !busy && closeExpense()}
+          closeOnOverlay={!busy}
+          label={editingId ? "Modifier la dépense" : "Nouvelle dépense"}
+        >
             <h3>{editingId ? "✏️ Modifier la dépense" : "➕ Nouvelle dépense"}</h3>
             <form onSubmit={submitExpense} className="tri-form">
               {editingId ? (
@@ -879,20 +897,16 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Dialog>
       )}
 
       {/* Modale « j'ai remboursé » */}
       {refundFor && (
-        <div className="modal-overlay" onClick={() => !busy && setRefundFor(null)}>
-          <div
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Enregistrer un remboursement"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog
+          onClose={() => !busy && setRefundFor(null)}
+          closeOnOverlay={!busy}
+          label="Enregistrer un remboursement"
+        >
             <h3>💸 Remboursement</h3>
             <p className="muted tiny">
               Tricount du {prettyDate(refundFor.date)}. La date et l'heure du
@@ -940,20 +954,12 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Dialog>
       )}
 
       {/* Confirmation de suppression */}
       {confirmDelete && (
-        <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
-          <div
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Supprimer la ligne"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog onClose={() => setConfirmDelete(null)} label="Supprimer la ligne">
             <h3>Supprimer cette ligne ?</h3>
             <p>
               {confirmDelete.label} — {fmtEuros(confirmDelete.amountCents)} (
@@ -973,8 +979,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                 Supprimer
               </button>
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
     </section>
   );

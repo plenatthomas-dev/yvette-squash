@@ -1825,6 +1825,18 @@ table.planning.week th.time.selhead {
 }
 
 .tri-block { margin-top: 22px; }
+
+/* Bouton « charger l'historique plus ancien » (pagination). */
+.tri-loadmore {
+  display: flex;
+  justify-content: center;
+  margin: 14px 0 4px;
+}
+.tri-loadmore button {
+  width: auto;
+  margin: 0;
+  font-size: 0.85rem;
+}
 .tri-block h2 {
   font-size: 1.05rem;
   margin-bottom: 10px;

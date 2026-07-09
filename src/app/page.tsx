@@ -6,6 +6,7 @@ import QRCode from "qrcode";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { PlanningGrid } from "@/components/PlanningGrid";
 import { WeekGrid } from "@/components/WeekGrid";
+import { Dialog } from "@/components/Dialog";
 // Tricount chargé à la demande (seulement à l'ouverture de la vue « Frais ») : son JS ne
 // pèse plus sur le bundle initial de la page. Rendu client uniquement (déjà dans "use client").
 const Tricount = dynamic(() => import("@/components/Tricount"), { ssr: false });
@@ -317,14 +318,7 @@ function DirectoryButton({ toast }: { toast: (type: ToastType, msg: string) => v
         <UsersIcon />
       </button>
       {open && (
-        <div className="modal-overlay" onClick={() => setOpen(false)}>
-          <div
-            className="modal directory"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Annuaire des membres"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog onClose={() => setOpen(false)} label="Annuaire des membres" className="directory">
             <h3>Annuaire des membres</h3>
             <input
               type="search"
@@ -358,8 +352,7 @@ function DirectoryButton({ toast }: { toast: (type: ToastType, msg: string) => v
                 Fermer
               </button>
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
     </>
   );
@@ -576,14 +569,7 @@ function SettingsButton({
         <GearIcon />
       </button>
       {open && (
-        <div className="modal-overlay" onClick={() => setOpen(false)}>
-          <div
-            className="modal settings"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Paramètres"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog onClose={() => setOpen(false)} label="Paramètres" className="settings">
             <h3>Paramètres</h3>
 
             <section className="setting">
@@ -755,8 +741,7 @@ function SettingsButton({
                 Fermer
               </button>
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
     </>
   );
@@ -795,35 +780,28 @@ function ConfirmDialog({
 }) {
   if (!state) return null;
   return (
-    <div className="modal-overlay" onClick={() => onResolve(false)}>
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3>{state.title}</h3>
-        <p>{state.body}</p>
-        {state.lines && state.lines.length > 0 && (
-          <ul className="confirm-lines">
-            {state.lines.map((l, i) => (
-              <li key={i}>{l}</li>
-            ))}
-          </ul>
-        )}
-        <div className="modal-actions">
-          <button className="secondary" onClick={() => onResolve(false)}>
-            Retour
-          </button>
-          <button
-            className={state.danger ? "danger" : ""}
-            onClick={() => onResolve(true)}
-          >
-            {state.confirmLabel}
-          </button>
-        </div>
+    <Dialog onClose={() => onResolve(false)} label={state.title}>
+      <h3>{state.title}</h3>
+      <p>{state.body}</p>
+      {state.lines && state.lines.length > 0 && (
+        <ul className="confirm-lines">
+          {state.lines.map((l, i) => (
+            <li key={i}>{l}</li>
+          ))}
+        </ul>
+      )}
+      <div className="modal-actions">
+        <button className="secondary" onClick={() => onResolve(false)}>
+          Retour
+        </button>
+        <button
+          className={state.danger ? "danger" : ""}
+          onClick={() => onResolve(true)}
+        >
+          {state.confirmLabel}
+        </button>
       </div>
-    </div>
+    </Dialog>
   );
 }
 
@@ -879,14 +857,7 @@ function PrivacyNotice() {
         <span>Confidentialité &amp; données</span>
       </button>
       {open && (
-        <div className="modal-overlay" onClick={() => setOpen(false)}>
-          <div
-            className="modal privacy"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Confidentialité et données"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog onClose={() => setOpen(false)} label="Confidentialité et données" className="privacy">
             <h3>Confidentialité &amp; données</h3>
             <div className="privacy-body">
               <p>
@@ -950,8 +921,7 @@ function PrivacyNotice() {
                 Fermer
               </button>
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
     </footer>
   );
@@ -1069,14 +1039,7 @@ function ShareButton({ toast }: { toast: (type: ToastType, msg: string) => void 
         <ShareIcon />
       </button>
       {open && (
-        <div className="modal-overlay" onClick={() => setOpen(false)}>
-          <div
-            className="modal share"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Partager l'appli"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog onClose={() => setOpen(false)} label="Partager l'appli" className="share">
             <h3>Partager l'appli</h3>
             <p className="muted tiny">
               Scanne ce QR code pour ouvrir l'appli, ou copie le lien.
@@ -1095,8 +1058,7 @@ function ShareButton({ toast }: { toast: (type: ToastType, msg: string) => void 
                 Fermer
               </button>
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
     </>
   );
@@ -2131,14 +2093,7 @@ export default function Home() {
 
       <PrivacyNotice />
       {alertsOpen && (
-        <div className="modal-overlay" onClick={() => setAlertsOpen(false)}>
-          <div
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Ma liste d'attente"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog onClose={() => setAlertsOpen(false)} label="Ma liste d'attente">
             <h3>🕒 Ma liste d'attente</h3>
             {alerts.length === 0 ? (
               <p className="muted">
@@ -2172,8 +2127,7 @@ export default function Home() {
                 Fermer
               </button>
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
 
       <Toasts items={toasts} />
