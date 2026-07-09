@@ -292,9 +292,9 @@ function SettingInfo({ title, children }: { title: string; children: ReactNode }
 // à l'image du bouton Frais. Lecture seule ici (les usages — message, etc. — viendront).
 function DirectoryButton({ toast }: { toast: (type: ToastType, msg: string) => void }) {
   const [open, setOpen] = useState(false);
-  const [members, setMembers] = useState<{ id: string; name: string; clt?: string }[] | null>(
-    null,
-  );
+  const [members, setMembers] = useState<
+    { id: string; name: string; clt?: string; rang?: number | null; cat?: string | null }[] | null
+  >(null);
   const [q, setQ] = useState("");
 
   // Charge la liste à l'ouverture (à chaque fois : elle peut avoir bougé).
@@ -359,7 +359,14 @@ function DirectoryButton({ toast }: { toast: (type: ToastType, msg: string) => v
                   <li key={m.id}>
                     <span className="directory-name">{m.name}</span>
                     {m.clt && (
-                      <span className="directory-clt" title="Classement fédéral">
+                      <span
+                        className="directory-clt"
+                        title={
+                          "Classement fédéral" +
+                          (m.rang ? ` · rang national ${m.rang}` : "") +
+                          (m.cat ? ` · ${m.cat}` : "")
+                        }
+                      >
                         {m.clt}
                       </span>
                     )}

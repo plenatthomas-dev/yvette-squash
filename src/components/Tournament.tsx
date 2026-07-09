@@ -13,6 +13,7 @@ interface Member {
   name: string;
   clt?: string; // classement fédéral (si FEATURE_RANKING + rapprochement sûr)
   rang?: number | null; // rang national (tri des têtes de série)
+  cat?: string | null; // catégorie d'âge (info-bulle)
 }
 interface PlayerRef {
   id: string;
@@ -145,7 +146,15 @@ export default function Tournament({ toast, onExpired }: Props) {
   const [guestInput, setGuestInput] = useState("");
   // Ordre des têtes de série (glisser-déposer / flèches) : le 1er = tête de série n°1.
   const [seeded, setSeeded] = useState<
-    { key: string; label: string; userId: string | null; guestName: string | null; clt?: string | null }[]
+    {
+      key: string;
+      label: string;
+      userId: string | null;
+      guestName: string | null;
+      clt?: string | null;
+      rang?: number | null;
+      cat?: string | null;
+    }[]
   >([]);
   const dragIndex = useRef<number | null>(null);
   const [name, setName] = useState("");
@@ -259,6 +268,8 @@ export default function Tournament({ toast, onExpired }: Props) {
       userId: id as string | null,
       guestName: null as string | null,
       clt: memberOf(id)?.clt ?? null,
+      rang: memberOf(id)?.rang ?? null,
+      cat: memberOf(id)?.cat ?? null,
     }));
     const guestItems = guests.map((g, i) => ({
       key: `g${i}`,
@@ -266,6 +277,8 @@ export default function Tournament({ toast, onExpired }: Props) {
       userId: null as string | null,
       guestName: g as string | null,
       clt: null as string | null,
+      rang: null as number | null,
+      cat: null as string | null,
     }));
     setSeeded([...memberItems, ...guestItems]);
   };
@@ -751,7 +764,14 @@ export default function Tournament({ toast, onExpired }: Props) {
                     <span className="trn-seed-num">{i + 1}</span>
                     <span className="trn-seed-name">{s.label}</span>
                     {s.clt && (
-                      <span className="trn-seed-clt" title="Classement fédéral">
+                      <span
+                        className="trn-seed-clt"
+                        title={
+                          "Classement fédéral" +
+                          (s.rang ? ` · rang national ${s.rang}` : "") +
+                          (s.cat ? ` · ${s.cat}` : "")
+                        }
+                      >
                         {s.clt}
                       </span>
                     )}

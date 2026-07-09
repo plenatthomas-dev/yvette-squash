@@ -61,30 +61,44 @@ se **désinscrit**, la réservation est **automatiquement reprise par la personn
   priorité si plusieurs « +1 ». **Verdict** : à **cadrer** (périmètre in-app + consentement
   explicite) avant tout code — sinon usine à gaz. Alternative plus simple : idée **D**.
 
-## 3. Module de gestion de tournois internes
+## 3. Module de gestion de tournois internes ✅ fait
 
 Une liste de personnes s'inscrit, l'appli **génère le meilleur format** (poules /
 quarts-demies-finale) **selon le nombre de participants et de matchs souhaité**.
 
-- **Statut** : 💡 à étudier · **Valeur** ⭐⭐ · **Effort** XL
+- **Statut** : ✅ fait (gated `FEATURE_TOURNAMENT`) · **Valeur** ⭐⭐ · **Effort** XL
 - **Notes / éval** : module **autonome complet** — nouveaux modèles (tournoi, match,
   résultat), **algorithme de bracket & poules paramétrable**, UI de suivi + saisie des
-  scores. Gros chantier, isolé du reste. Réutilise l'annuaire (6). **Verdict** : à réserver
-  **si les tournois sont fréquents** ; sinon repousser (rapport valeur/effort faible pour
-  un usage ponctuel).
+  scores. Gros chantier, isolé du reste. Réutilise l'annuaire (6).
+- **Livré** (gated `NEXT_PUBLIC_FEATURE_TOURNAMENT`) : moteur **pur & testé au fuzz**
+  (`src/lib/tournament.ts` : découpe en poules, répartition **serpentin** des têtes de
+  série, round-robin méthode du cercle, **tableau à repêchage** — tout le monde joue
+  `log2(P)` matchs, byes vers les mieux classés, classement intégral 1..N ; `proposeFormats`
+  choisit la formule qui égalise le nb de matchs/joueur au plus près de la cible). Modèles
+  `Tournament/TournamentPlayer/TournamentGroup/Match` (invités hors asso = prénoms libres).
+  Assistant en 4 étapes (roster annuaire+invités → **têtes de série** glisser-déposer →
+  réglages → formules), **arbre graphique** (tableau principal + repêchage), planning des
+  terrains, saisie de score par tout participant, **cascade d'invalidation** si un résultat
+  de tableau est corrigé (transaction Serializable), classement de poule (MJ/V/D + départage
+  confrontation directe). Voir aussi le **classement squashnet** ci-dessous (idée S).
 
-## 4. Délégation temporaire de droits
+## 4. Délégation temporaire de droits ✅ fait
 
 Un utilisateur **délègue momentanément ses droits** à un autre (ex. gérer les réservations
 d'une soirée à sa place).
 
-- **Statut** : 💡 à étudier · **Valeur** ⭐⭐ · **Effort** M–L · ⚠️ sensible sécurité
+- **Statut** : ✅ fait (gated `FEATURE_DELEGATION`) · **Valeur** ⭐⭐ · **Effort** M–L · ⚠️ sensible sécurité
 - **Notes / éval** : mécanisme « **agir au nom de** » avec **expiration** + **traçabilité**
   (qui a agi pour qui). **Surtout pas de partage du mot de passe ResaMania** → délégation
   **applicative** : un droit temporaire adossé aux sessions, la résa réelle se faisant avec
-  le jeton du délégant. Bien border la portée (quelles actions ? quelle durée ?).
-  **Verdict** : utile pour l'orga de soirées ; faisable mais **demande un design sécurité
-  soigné**.
+  le jeton du délégant.
+- **Livré** (gated `NEXT_PUBLIC_FEATURE_DELEGATION`) : modèle `Delegation` (délégant →
+  délégataire, expiration). `book`/`cancel-slot`/`bookings` prennent en compte `onBehalfOf`
+  (résa faite avec le **jeton du délégant** retrouvé par `getResaTokenForUser`, le
+  propriétaire réel restant le délégant ; `Booking.actingUserId` trace qui a agi). Cron
+  `keep-alive-delegations` rafraîchit le jeton du délégant tant qu'une délégation est active.
+  Notifications push à la **création** et à la **fin** (révocation/expiration) + bandeau
+  in-app côté délégataire. UI de gestion dans les Réglages.
 
 ## 5. Messagerie entre utilisateurs
 
@@ -231,6 +245,16 @@ réservé** via un code couleur (asso vs autre asso) — **comme en vue jour**.
     **rejoindre** la liste d'attente est **masquée** (le compteur reste visible, et se
     **retirer** reste possible si tu étais déjà inscrit). Le test « complet » exclut aussi
     le cas où tu as **ta propre réservation** à cet horaire.
+- **S. Classement fédéral (squashnet.fr)** · ✅ fait · ⭐⭐ · **M** · gated `FEATURE_RANKING`
+  Afficher le **classement FFSquash** des membres (badge dans l'annuaire) et **pré-remplir
+  l'ordre des têtes de série** au tournoi (idée 3). Source **publique** : squashnet.fr sert
+  son classement via un `POST index.php` (`ic_a=131079`) renvoyant un **fragment HTML** —
+  scrapé **côté serveur, sans auth** (`src/lib/squashnet/client.ts`, parsing sans dépendance,
+  testé sur fixture réelle). ResaMania n'expose pas de licence → **rapprochement nom + club**
+  conservateur (`match.ts` : une seule ligne du club « Squash de l'Yvette » qui colle sinon
+  rien). Modèle `SquashnetRanking` (1/membre) rafraîchi par le **cron mensuel**
+  `warm-rankings` (le 8). `/api/directory` expose `clt`/`rang`/`cat` (jamais licence ni
+  club). **ACTIVÉ EN PROD** (exception à la convention flags-off-en-prod).
 
 ---
 
@@ -247,10 +271,11 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 | A | Rappels de match (push) | ⭐⭐⭐ | M | — | ❌ **écarté** (porteur) |
 | 5a | Commentaires sur un tricount | ⭐⭐ | S–M | Tricount | ✅ **fait** (gated `FEATURE_TRICOUNT`) |
 | D | Liste d'attente | ⭐⭐⭐ | M (réel XS–S) | SlotAlert | ✅ **fait** (réutilise `SlotAlert`) |
-| 4 | Délégation de droits | ⭐⭐ | M–L | — | À cadrer (sécurité) |
+| 4 | Délégation de droits | ⭐⭐ | M–L | — | ✅ **fait** (gated `FEATURE_DELEGATION`) |
+| 3 | Tournois internes | ⭐⭐ | XL | 6 | ✅ **fait** (gated `FEATURE_TOURNAMENT`) |
+| S | Classement squashnet | ⭐⭐ | M | 3, 6 | ✅ **fait** (gated `FEATURE_RANKING`, **on en prod**) |
 | 2 | Reprise auto via « +1 » | ⭐⭐ | L | Attendance | À cadrer (risqué) |
 | 5b | Messagerie générale | ⭐⭐ | L–XL | 6 | Basse |
-| 3 | Tournois internes | ⭐⭐ | XL | 6 | Basse (si tournois fréquents) |
 
 ### Séquencement recommandé (par vagues)
 
@@ -259,27 +284,30 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 2. **Vague 2 — feature phare** : ~~**1 + 7b** (réservation groupée + sélection multiple)~~ ✅.
 3. **Vague 3 — engagement** *(close)* : ~~**D** (liste d'attente)~~ ✅, ~~**A** (rappels
    push)~~ ❌ écarté (porteur), ~~**5a** (commentaires tricount)~~ ✅ (gated `FEATURE_TRICOUNT`).
-4. **Vague 4 — gros / sensibles, à décider** : **4** (délégation, design sécurité),
-   **2** (auto-rebook, à cadrer), **3** (tournois, si fréquents), **5b** (messagerie).
+4. **Vague 4 — gros / sensibles** : ~~**4** (délégation)~~ ✅, ~~**3** (tournois)~~ ✅ +
+   ~~**S** (classement squashnet)~~ ✅. Restent **2** (auto-rebook, à cadrer) et **5b**
+   (messagerie générale).
 
-> **État au 2026-07-07** : **vagues 1, 2 et 3 closes**. Vague 3 : **D** (liste d'attente)
-> et **5a** (commentaires tricount, gated `FEATURE_TRICOUNT`, invisible en prod) **livrées**
-> sur `main` ; **A** (rappels push) **écartée** (décision porteur). **Prochaine étape =
-> vague 4** (gros / sensibles : **4** délégation, **2** auto-rebook, **3** tournois, **5b**
-> messagerie) — tous **à cadrer** avant tout code. _Idées B (stats perso) et A (rappels)
-> écartées._
+> **État au 2026-07-09** : **vagues 1 à 4 quasi closes**. Livrées depuis : **4** (délégation,
+> gated `FEATURE_DELEGATION`), **3** (tournois, gated `FEATURE_TOURNAMENT`) et **S**
+> (classement fédéral squashnet, gated `FEATURE_RANKING` — **activé en prod**, cf. idée S).
+> **Restent uniquement** : **2** (reprise auto via « +1 » — à cadrer, risqué ; **D** le
+> couvre déjà à ~80 %) et **5b** (messagerie générale — L/XL, dépend de l'annuaire). _Idées
+> B (stats perso) et A (rappels push) écartées._
 
 ### Lecture d'ensemble (qualité des idées)
 
 - **Les meilleures** : **7a** et **1/7b** (réservation) — pile sur le cœur de l'app, forte
   valeur, coût raisonnable, et **7a** presque « gratuite » vu que la donnée est déjà là.
   → **toutes deux livrées** (juillet 2026).
-- **Bon rapport valeur/effort** : **6, C, D** (livrées) et **5a** (à venir) — bricks utiles
-  et bornées. _(A était dans ce lot mais a été écarté par le porteur.)_
+- **Bon rapport valeur/effort** : **6, C, D, 5a** (toutes livrées) — bricks utiles et
+  bornées. _(A était dans ce lot mais a été écarté par le porteur.)_
 - **Séduisantes mais à cadrer** : **2** (fragile : cron quotidien + consentement +
-  concurrence avec le public → **D** est une alternative plus sûre) et **4** (sécurité).
-- **Lourdes pour la valeur** : **3** (tournois) et **5b** (messagerie générale) — à ne
-  lancer que si le besoin est confirmé et récurrent.
+  concurrence avec le public → **D** est une alternative plus sûre). **4** (délégation,
+  sécurité) a finalement été **livrée** avec un design applicatif « agir au nom de ».
+- **Lourdes pour la valeur** : **3** (tournois) — finalement **livrée** (+ classement
+  squashnet), le besoin s'étant confirmé — et **5b** (messagerie générale), à ne lancer que
+  si le besoin est confirmé et récurrent.
 
 ## Recoupements à garder en tête
 
