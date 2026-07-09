@@ -67,7 +67,9 @@ interface Detail {
   bracket: {
     rounds: number;
     byes: number;
-    ranking: { playerId: string; name: string; rank: number }[] | null;
+    ranking:
+      | { playerId: string; name: string; rank: number; played: number; wins: number; losses: number }[]
+      | null;
     matches: MatchView[];
   } | null;
   champion: PlayerRef | null;
@@ -538,11 +540,28 @@ export default function Tournament({ toast, onExpired }: Props) {
                 <section className="trn-block">
                   <h3>Tableau</h3>
                   {b.ranking && (
-                    <ol className="trn-ranking">
-                      {b.ranking.map((r) => (
-                        <li key={r.playerId}>{r.name}</li>
-                      ))}
-                    </ol>
+                    <table className="trn-standings">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Joueur</th>
+                          <th title="Matchs joués">MJ</th>
+                          <th title="Victoires">V</th>
+                          <th title="Défaites">D</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {b.ranking.map((r) => (
+                          <tr key={r.playerId}>
+                            <td>{r.rank}</td>
+                            <td>{r.name}</td>
+                            <td>{r.played}</td>
+                            <td>{r.wins}</td>
+                            <td>{r.losses}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   )}
                   {/* Arbre principal (chemin vers la 1re place) */}
                   <h4>Tableau principal</h4>

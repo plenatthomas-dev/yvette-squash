@@ -209,12 +209,33 @@ export function serializeTournament(t: FullTournament, userId: string) {
     })
     .sort((a, b) => a.round - b.round || a.slot - b.slot);
 
+  // MJ / V / D par joueur (seed), à partir des matchs RÉELS joués du tableau (byes exclus).
+  const stat = new Map<number, { played: number; wins: number; losses: number }>();
+  const bump = (seed: number | null, win: boolean) => {
+    if (seed === null || seed < 0) return;
+    const s = stat.get(seed) ?? { played: 0, wins: 0, losses: 0 };
+    s.played++;
+    if (win) s.wins++;
+    else s.losses++;
+    stat.set(seed, s);
+  };
+  for (const lm of live.matches) {
+    if (lm.status !== "done" || lm.p1 === null || lm.p2 === null || lm.winnerSeed === null) continue;
+    bump(lm.p1, lm.winnerSeed === lm.p1);
+    bump(lm.p2, lm.winnerSeed === lm.p2);
+  }
   const ranking =
-    live.ranking?.map((r) => ({
-      playerId: idBySeed.get(r.seed) as string,
-      name: name(idBySeed.get(r.seed) ?? null),
-      rank: r.rank,
-    })) ?? null;
+    live.ranking?.map((r) => {
+      const s = stat.get(r.seed) ?? { played: 0, wins: 0, losses: 0 };
+      return {
+        playerId: idBySeed.get(r.seed) as string,
+        name: name(idBySeed.get(r.seed) ?? null),
+        rank: r.rank,
+        played: s.played,
+        wins: s.wins,
+        losses: s.losses,
+      };
+    }) ?? null;
   const champion = ranking ? { id: ranking[0].playerId, name: ranking[0].name } : null;
 
   const status = t.status === "running" && ranking != null ? "done" : t.status;
