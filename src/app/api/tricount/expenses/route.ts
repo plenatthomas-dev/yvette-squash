@@ -10,6 +10,7 @@ import {
   MAX_PARTS,
 } from "@/lib/tricount";
 import { FEATURE_TRICOUNT } from "@/lib/features";
+import { blockEmailOnlyExpenseWrite } from "@/lib/tricount-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +28,8 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
+  const blocked = blockEmailOnlyExpenseWrite(session);
+  if (blocked) return blocked;
 
   const body = await req.json().catch(() => ({}));
   const { date, title, label, amountCents, payerId, participantIds, weights } = body as {

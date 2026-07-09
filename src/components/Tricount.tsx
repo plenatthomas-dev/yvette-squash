@@ -70,6 +70,8 @@ interface TricountItem {
 }
 interface TricountData {
   me: string;
+  // Compte « email seul » : gestion des dépenses masquée (le serveur refuse aussi).
+  emailOnly: boolean;
   members: Member[];
   tricounts: TricountItem[];
 }
@@ -504,11 +506,15 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
         </p>
       </div>
 
-      <div className="tri-actions">
-        <button onClick={openExpense} disabled={busy}>
-          ➕ Nouvelle dépense
-        </button>
-      </div>
+      {/* Comptes email-seul : pas de gestion de dépenses (mais remboursements,
+          messagerie et validation restent accessibles plus bas). */}
+      {!data.emailOnly && (
+        <div className="tri-actions">
+          <button onClick={openExpense} disabled={busy}>
+            ➕ Nouvelle dépense
+          </button>
+        </div>
+      )}
 
       {data.tricounts.length === 0 && (
         <p className="muted">
@@ -572,7 +578,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                         </span>
                         <span className="tri-amount">
                           <strong>{fmtEuros(e.amountCents)}</strong>
-                          {e.canEdit && !t.settled && (
+                          {e.canEdit && !t.settled && !data.emailOnly && (
                             <button
                               className="secondary tri-edit"
                               onClick={() => openEditExpense(t, e)}
@@ -582,7 +588,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                               Modifier
                             </button>
                           )}
-                          {e.canDelete && !t.settled && (
+                          {e.canDelete && !t.settled && !data.emailOnly && (
                             <button
                               className="cancel"
                               onClick={() => setConfirmDelete(e)}

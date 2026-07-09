@@ -48,6 +48,10 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     me: session.userId,
+    // Compte « email seul » (sans ResaMania) : l'IHM masque alors la gestion des
+    // dépenses (création/édition/suppression). Lecture, remboursements, messagerie
+    // et validation restent possibles. Le serveur reste la source de vérité (403).
+    emailOnly: session.resa === null,
     members: users.map((u) => ({ id: u.id, name: name(u.id), fullName: u.displayName })),
     tricounts: tricounts
       .map((t) => {

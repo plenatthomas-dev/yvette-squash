@@ -9,6 +9,7 @@ import {
   MAX_PARTS,
 } from "@/lib/tricount";
 import { FEATURE_TRICOUNT } from "@/lib/features";
+import { blockEmailOnlyExpenseWrite } from "@/lib/tricount-guard";
 
 export const runtime = "nodejs";
 
@@ -27,6 +28,8 @@ export async function DELETE(
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
+  const blocked = blockEmailOnlyExpenseWrite(session);
+  if (blocked) return blocked;
   const { id } = await params;
   const expense = await prisma.expense.findUnique({
     where: { id },
@@ -65,6 +68,8 @@ export async function PATCH(
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
+  const blocked = blockEmailOnlyExpenseWrite(session);
+  if (blocked) return blocked;
   const { id } = await params;
 
   const existingExpense = await prisma.expense.findUnique({
