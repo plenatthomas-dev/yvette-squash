@@ -318,6 +318,8 @@ export function placementBracket(n: number): PlacementBracket {
 export interface BracketResolution {
   ranking: { seed: number; rank: number }[]; // joueurs réels, rangs 1..N (byes retirés)
   playedBySeed: Map<number, number>; // matchs RÉELLEMENT joués (hors byes) par joueur
+  realMatches: number; // total de matchs réellement joués (hors byes)
+  realMatchesByRound: number[]; // matchs réels par tour (pour estimer la durée)
 }
 
 /**
@@ -358,14 +360,18 @@ export function resolveBracket(
     return res;
   }
 
-  // Compte les matchs réellement joués (deux vrais joueurs) par joueur.
+  // Compte les matchs réellement joués (deux vrais joueurs) par joueur et par tour.
   const played = new Map<number, number>();
+  const byRound: number[] = Array(bracket.rounds).fill(0);
+  let realMatches = 0;
   for (const m of bracket.matches) {
     const a = entrantSeed(m.a);
     const b = entrantSeed(m.b);
     if (a >= 0 && b >= 0) {
       played.set(a, (played.get(a) ?? 0) + 1);
       played.set(b, (played.get(b) ?? 0) + 1);
+      realMatches++;
+      byRound[m.round] = (byRound[m.round] ?? 0) + 1;
     }
   }
 
@@ -378,5 +384,153 @@ export function resolveBracket(
     .sort((x, y) => x.rank - y.rank)
     .map((r, i) => ({ seed: r.seed, rank: i + 1 })); // re-rangs 1..N après retrait des byes
 
-  return { ranking, playedBySeed: played };
+  return { ranking, playedBySeed: played, realMatches, realMatchesByRound: byRound };
+}
+
+// --- Choix de la formule ---------------------------------------------------
+// Objectif n°1 (cf. cadrage) : TOUT LE MONDE JOUE LE MÊME NOMBRE DE MATCHS. On génère des
+// candidats (poules de différentes tailles + tableau à repêchage) et on les classe par
+// score lexicographique : écart max−min d'abord, puis proximité à la cible, puis durée.
+
+export type FormatKind = "pools" | "bracket" | "pools_bracket";
+
+export interface FormatProposal {
+  kind: FormatKind;
+  label: string;
+  matchesPerPlayer: { min: number; max: number };
+  avgMatchesPerPlayer: number;
+  totalMatches: number;
+  producesChampion: boolean;
+  fullRanking: boolean; // classe-t-on 1..N ?
+  estimatedMinutes: number;
+  poolSizes?: number[];
+  bracketByes?: number;
+}
+
+const DEFAULT_MATCH_MINUTES = 25;
+
+/** Répartit `n` joueurs en `g` poules aussi égales que possible (tailles base ou base+1). */
+function poolsOfCount(n: number, g: number): number[] {
+  const base = Math.floor(n / g);
+  const extra = n % g;
+  return Array.from({ length: g }, (_, i) => base + (i < extra ? 1 : 0));
+}
+
+function poolsLabel(sizes: number[]): string {
+  const g = sizes.length;
+  const min = Math.min(...sizes);
+  const max = Math.max(...sizes);
+  const size = min === max ? `${min}` : `${min}-${max}`;
+  return g === 1 ? `1 poule de ${size}` : `${g} poules de ${size}`;
+}
+
+function poolsProposal(n: number, sizes: number[], courts: number, matchMin: number): FormatProposal {
+  const total = sizes.reduce((s, sz) => s + (sz * (sz - 1)) / 2, 0);
+  const min = Math.min(...sizes) - 1;
+  const max = Math.max(...sizes) - 1;
+  const g = sizes.length;
+  return {
+    kind: "pools",
+    label: poolsLabel(sizes),
+    matchesPerPlayer: { min, max },
+    avgMatchesPerPlayer: (2 * total) / n,
+    totalMatches: total,
+    producesChampion: g === 1, // une seule poule = round-robin intégral → un vainqueur
+    fullRanking: g === 1,
+    // Les matchs de poules se parallélisent librement sur les terrains.
+    estimatedMinutes: Math.ceil(total / Math.max(1, courts)) * matchMin,
+    poolSizes: sizes,
+  };
+}
+
+function bracketProposal(n: number, courts: number, matchMin: number): FormatProposal {
+  const b = placementBracket(n);
+  const res = resolveBracket(b, (_k, a, bb) => Math.min(a, bb)); // simulation canonique
+  const counts = Array.from({ length: n }, (_, s) => res.playedBySeed.get(s) ?? 0);
+  // Durée : les tours sont SÉQUENTIELS (un tour dépend des résultats du précédent).
+  const est = res.realMatchesByRound.reduce(
+    (acc, c) => acc + Math.ceil(c / Math.max(1, courts)) * matchMin,
+    0,
+  );
+  return {
+    kind: "bracket",
+    label: `Tableau à classement (${n})`,
+    matchesPerPlayer: { min: Math.min(...counts), max: Math.max(...counts) },
+    avgMatchesPerPlayer: (2 * res.realMatches) / n,
+    totalMatches: res.realMatches,
+    producesChampion: true,
+    fullRanking: true,
+    estimatedMinutes: est,
+    bracketByes: b.byes,
+  };
+}
+
+// Poids de l'inégalité de matchs. L'égalité est l'objectif n°1, mais PAS au point de
+// choisir « 2 matchs pour tous » quand on en veut 4 : un écart de 1 « coûte » jusqu'à
+// ~1,5 match d'éloignement à la cible. Au-delà, se rapprocher de la cible l'emporte.
+const SPREAD_WEIGHT = 1.5;
+
+// Score lexicographique (plus petit = meilleur) : 1) compromis égalité/proximité de la
+// cible ; 2) plus court ; 3) à tout le reste égal, on préfère un classement complet.
+function scoreOf(p: FormatProposal, target: number): number[] {
+  const spread = p.matchesPerPlayer.max - p.matchesPerPlayer.min;
+  const off = Math.abs(p.avgMatchesPerPlayer - target);
+  return [spread * SPREAD_WEIGHT + off, p.estimatedMinutes, p.fullRanking ? 0 : 1];
+}
+function lexLess(a: number[], b: number[]): boolean {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return a[i] < b[i];
+  }
+  return false;
+}
+
+/**
+ * Propose les meilleures formules pour `n` joueurs (6..16) et une cible de `target` matchs
+ * par joueur (2, 3 ou 4), triées de la meilleure à la moins bonne. Le tableau à repêchage
+ * n'est retenu que lorsqu'il reste raisonnable (peu de byes : ≤ 25 % des places).
+ */
+export function proposeFormats(
+  n: number,
+  target: number,
+  opts?: { courts?: number; matchMinutes?: number },
+): FormatProposal[] {
+  const courts = Math.max(1, opts?.courts ?? 2);
+  const matchMin = opts?.matchMinutes ?? DEFAULT_MATCH_MINUTES;
+
+  // Candidats « poules » : de 1 poule à des poules d'au moins 3 joueurs, taille ≤ 6.
+  const poolCandidates: FormatProposal[] = [];
+  for (let g = 1; g <= Math.floor(n / 3) || g === 1; g++) {
+    const sizes = poolsOfCount(n, g);
+    if (Math.min(...sizes) < 3 || Math.max(...sizes) > 6) continue;
+    poolCandidates.push(poolsProposal(n, sizes, courts, matchMin));
+  }
+  // Filet : si aucune poule « propre », on garde une poule unique.
+  if (poolCandidates.length === 0) {
+    poolCandidates.push(poolsProposal(n, [n], courts, matchMin));
+  }
+  // On ne garde que la MEILLEURE configuration de poules (évite d'inonder de variantes).
+  const bestPool = poolCandidates.reduce((best, p) =>
+    lexLess(scoreOf(p, target), scoreOf(best, target)) ? p : best,
+  );
+
+  const proposals: FormatProposal[] = [bestPool];
+
+  // Tableau à repêchage : proposé si les byes restent raisonnables (≤ 25 % des places).
+  const P = nextPow2(Math.max(2, n));
+  if ((P - n) * 4 <= P) {
+    proposals.push(bracketProposal(n, courts, matchMin));
+  }
+
+  return proposals.sort((a, b) =>
+    lexLess(scoreOf(a, target), scoreOf(b, target)) ? -1 : lexLess(scoreOf(b, target), scoreOf(a, target)) ? 1 : 0,
+  );
+}
+
+/** La formule recommandée (première de `proposeFormats`). */
+export function bestFormat(
+  n: number,
+  target: number,
+  opts?: { courts?: number; matchMinutes?: number },
+): FormatProposal {
+  return proposeFormats(n, target, opts)[0];
 }

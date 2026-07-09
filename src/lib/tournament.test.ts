@@ -6,6 +6,8 @@ import {
   scheduleMatches,
   placementBracket,
   resolveBracket,
+  proposeFormats,
+  bestFormat,
   type MatchResult,
 } from "./tournament";
 
@@ -244,6 +246,50 @@ describe("placementBracket", () => {
       // Matchs strictement ÉGAUX seulement en puissance de 2 (sans byes) : chacun joue log2(N).
       if (isPow2(n)) {
         for (const c of counts) expect(c).toBe(b.rounds);
+      }
+    }
+  });
+});
+
+describe("proposeFormats / bestFormat", () => {
+  it("cas propres : la meilleure formule donne EXACTEMENT la cible pour tous", () => {
+    // 8 joueurs / 3 matchs → 2 poules de 4 (ou tableau) : 3 matchs chacun.
+    expect(bestFormat(8, 3).matchesPerPlayer).toEqual({ min: 3, max: 3 });
+    // 6 / 2 → 2 poules de 3.
+    expect(bestFormat(6, 2).matchesPerPlayer).toEqual({ min: 2, max: 2 });
+    // 16 / 3 → 4 poules de 4.
+    expect(bestFormat(16, 3).matchesPerPlayer).toEqual({ min: 3, max: 3 });
+    // 10 / 4 → 2 poules de 5.
+    expect(bestFormat(10, 4).matchesPerPlayer).toEqual({ min: 4, max: 4 });
+  });
+
+  it("propose au moins une formule, meilleure en tête, avec durée estimée", () => {
+    const props = proposeFormats(8, 3, { courts: 2 });
+    expect(props.length).toBeGreaterThanOrEqual(1);
+    for (const p of props) expect(p.estimatedMinutes).toBeGreaterThan(0);
+    // 8/3 : le tableau à repêchage (puissance de 2) est proposé à côté des poules.
+    expect(props.some((p) => p.kind === "bracket")).toBe(true);
+    // La première proposition est bien la formule recommandée.
+    expect(props[0]).toEqual(bestFormat(8, 3, { courts: 2 }));
+  });
+
+  it("préfère les poules (matchs égaux) au tableau hors puissance de 2", () => {
+    // 12 / 3 : 4 poules de 4 = 3 matchs pile ; le tableau(12) a des byes → moins bon.
+    const best = bestFormat(12, 3);
+    expect(best.kind).toBe("pools");
+    expect(best.matchesPerPlayer).toEqual({ min: 3, max: 3 });
+  });
+
+  it("fuzz N=6..16 × cible 2..4 : écart ≤ 1 et proche de la cible", () => {
+    for (let n = 6; n <= 16; n++) {
+      for (const target of [2, 3, 4]) {
+        const best = bestFormat(n, target);
+        // Objectif n°1 : matchs quasi égaux (écart ≤ 1).
+        expect(best.matchesPerPlayer.max - best.matchesPerPlayer.min).toBeLessThanOrEqual(1);
+        // Proximité raisonnable de la cible.
+        expect(Math.abs(best.avgMatchesPerPlayer - target)).toBeLessThanOrEqual(1.5);
+        expect(best.totalMatches).toBeGreaterThan(0);
+        expect(best.estimatedMinutes).toBeGreaterThan(0);
       }
     }
   });
