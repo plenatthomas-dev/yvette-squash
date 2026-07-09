@@ -1340,6 +1340,21 @@ td.cell.past {
 .directory-list li {
   padding: 8px 4px;
   border-bottom: 1px solid var(--pico-card-border-color);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.directory-name { flex: 1; min-width: 0; }
+/* Badge classement fédéral (ex. « 5A ») dans l'annuaire. */
+.directory-clt {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: rgba(127, 127, 127, 0.22);
+  color: var(--pico-color);
+  font-variant-numeric: tabular-nums;
 }
 
 .directory-list li:last-child {
@@ -2469,6 +2484,17 @@ table.planning.week th.time.selhead {
   font-weight: 700;
 }
 .trn-seed-name { flex: 1; min-width: 0; }
+/* Badge classement fédéral (ex. « 5A ») à côté de la tête de série. */
+.trn-seed-clt {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: rgba(127, 127, 127, 0.22);
+  color: var(--pico-color);
+  font-variant-numeric: tabular-nums;
+}
 .trn-seed-arrows { display: flex; gap: 4px; flex: 0 0 auto; }
 .trn-seed-arrows button { width: 30px; margin: 0; padding: 2px 0; font-size: 0.9rem; }
 

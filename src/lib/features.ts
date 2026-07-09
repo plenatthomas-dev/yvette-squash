@@ -35,3 +35,8 @@ export const FEATURE_DELEGATION = isOn(process.env.NEXT_PUBLIC_FEATURE_DELEGATIO
 // Module d'organisation de tournois (idée 3) : UI « Tournoi » + routes /api/tournaments/**.
 // Poules / tableau à repêchage, invités hors asso, saisie de scores. OFF par défaut.
 export const FEATURE_TOURNAMENT = isOn(process.env.NEXT_PUBLIC_FEATURE_TOURNAMENT);
+
+// Classement fédéral (squashnet.fr, source publique) : affiché dans l'annuaire et proposé
+// comme ordre par défaut des têtes de série au tournoi. Rafraîchi par le cron warm-rankings.
+// N'affiche un classement que pour un membre opt-in (annuaire) rapproché de façon sûre.
+export const FEATURE_RANKING = isOn(process.env.NEXT_PUBLIC_FEATURE_RANKING);

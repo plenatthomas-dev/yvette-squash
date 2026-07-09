@@ -11,6 +11,8 @@ import { MIN_PLAYERS, MAX_PLAYERS } from "@/lib/tournament";
 interface Member {
   id: string;
   name: string;
+  clt?: string; // classement fédéral (si FEATURE_RANKING + rapprochement sûr)
+  rang?: number | null; // rang national (tri des têtes de série)
 }
 interface PlayerRef {
   id: string;
@@ -143,7 +145,7 @@ export default function Tournament({ toast, onExpired }: Props) {
   const [guestInput, setGuestInput] = useState("");
   // Ordre des têtes de série (glisser-déposer / flèches) : le 1er = tête de série n°1.
   const [seeded, setSeeded] = useState<
-    { key: string; label: string; userId: string | null; guestName: string | null }[]
+    { key: string; label: string; userId: string | null; guestName: string | null; clt?: string | null }[]
   >([]);
   const dragIndex = useRef<number | null>(null);
   const [name, setName] = useState("");
@@ -238,19 +240,32 @@ export default function Tournament({ toast, onExpired }: Props) {
     setGuestInput("");
   };
 
-  // Construit la liste ordonnée (têtes de série) à partir des joueurs choisis.
+  // Construit la liste ordonnée (têtes de série) à partir des joueurs choisis. ORDRE PAR
+  // DÉFAUT = classement fédéral (rang national croissant = plus fort en tête), les membres
+  // non classés puis les invités ensuite (ordre alpha). L'utilisateur ré-ordonne à la main.
   const buildSeeded = () => {
-    const memberItems = [...picked].map((id) => ({
+    const memberOf = (id: string) => members?.find((x) => x.id === id);
+    const sortedIds = [...picked].sort((a, b) => {
+      const ra = memberOf(a)?.rang ?? Infinity;
+      const rb = memberOf(b)?.rang ?? Infinity;
+      if (ra !== rb) return ra - rb;
+      return (memberOf(a)?.name ?? "").localeCompare(memberOf(b)?.name ?? "", "fr", {
+        sensitivity: "base",
+      });
+    });
+    const memberItems = sortedIds.map((id) => ({
       key: `m${id}`,
-      label: members?.find((m) => m.id === id)?.name ?? "?",
-      userId: id,
-      guestName: null,
+      label: memberOf(id)?.name ?? "?",
+      userId: id as string | null,
+      guestName: null as string | null,
+      clt: memberOf(id)?.clt ?? null,
     }));
     const guestItems = guests.map((g, i) => ({
       key: `g${i}`,
       label: g,
-      userId: null,
-      guestName: g,
+      userId: null as string | null,
+      guestName: g as string | null,
+      clt: null as string | null,
     }));
     setSeeded([...memberItems, ...guestItems]);
   };
@@ -719,6 +734,7 @@ export default function Tournament({ toast, onExpired }: Props) {
                 Classe les joueurs du plus fort (n°1) au plus faible — glisse-les ou utilise les
                 flèches. Ça crée les têtes de série : en poules le 1 et le 2 sont séparés ; en
                 tableau le 1 rencontre le dernier, et le 1/4 (puis 2/3) peuvent se croiser en demie.
+                {seeded.some((s) => s.clt) && " Ordre pré-rempli d'après le classement fédéral."}
               </p>
               <ol className="trn-seedlist">
                 {seeded.map((s, i) => (
@@ -734,6 +750,11 @@ export default function Tournament({ toast, onExpired }: Props) {
                   >
                     <span className="trn-seed-num">{i + 1}</span>
                     <span className="trn-seed-name">{s.label}</span>
+                    {s.clt && (
+                      <span className="trn-seed-clt" title="Classement fédéral">
+                        {s.clt}
+                      </span>
+                    )}
                     <span className="trn-seed-arrows">
                       <button
                         type="button"
