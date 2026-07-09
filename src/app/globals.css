@@ -1163,16 +1163,20 @@ td.cell.past {
   font-style: italic;
   font-weight: 700;
   line-height: 1;
-  border: 1px solid var(--pico-muted-border-color);
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: var(--pico-background-color);
-  color: var(--pico-muted-color);
-  cursor: pointer;
-}
-.info-tip-btn[aria-expanded="true"] {
+  /* Toujours rempli (bleu + « i » clair) pour rester lisible quel que soit le thème :
+     un « i » gris foncé sur fond sombre/bleuté était illisible. */
   background: var(--pico-primary);
   color: var(--pico-primary-inverse);
-  border-color: transparent;
+  cursor: pointer;
+}
+.info-tip-btn:hover {
+  background: var(--pico-primary-hover);
+}
+.info-tip-btn[aria-expanded="true"] {
+  /* État ouvert : anneau autour de la pastille pour marquer l'activation. */
+  box-shadow: 0 0 0 2px var(--pico-background-color), 0 0 0 4px var(--pico-primary);
 }
 .setting-info-text {
   margin: 0 0 10px;
@@ -1262,6 +1266,14 @@ td.cell.past {
 .check-row input {
   margin: 0;
   width: auto;
+}
+
+/* Interrupteur « annuaire » : la case Pico par défaut (fine barre bleue) était
+   trop discrète — on utilise le switch Pico, agrandi pour être bien visible. */
+.check-row input[role="switch"] {
+  flex: 0 0 auto;
+  width: 2.6em;
+  height: 1.5em;
 }
 
 /* --- Délégation de droits (idée 4) -------------------------------------- */

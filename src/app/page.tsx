@@ -650,6 +650,7 @@ function SettingsButton({
                 <label className="check-row">
                   <input
                     type="checkbox"
+                    role="switch"
                     checked={listedLocal}
                     disabled={savingListed}
                     onChange={(e) => toggleListed(e.target.checked)}
