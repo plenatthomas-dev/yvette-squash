@@ -2324,7 +2324,6 @@ table.planning.week th.time.selhead {
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
 }
-.trn-ranking { margin: 4px 0 12px 18px; font-size: 0.9rem; }
 .trn-round { margin-top: 6px; }
 
 /* Arbre graphique du tableau : colonnes = tours, chemin vers la 1re place. */
