@@ -239,6 +239,7 @@ export type BracketEntrant =
 export interface BracketMatch {
   key: string;
   round: number; // 0 = 1er tour
+  slot: number; // position dans le tour
   branch: string; // chemin (vainqueurs/perdants), pour l'unicité de la clé
   rankLow: number; // meilleur rang que ce sous-tableau attribue
   rankHigh: number;
@@ -290,6 +291,7 @@ export function placementBracket(n: number): PlacementBracket {
       matches.push({
         key,
         round,
+        slot: i / 2,
         branch,
         rankLow,
         rankHigh,
@@ -385,6 +387,103 @@ export function resolveBracket(
     .map((r, i) => ({ seed: r.seed, rank: i + 1 })); // re-rangs 1..N après retrait des byes
 
   return { ranking, playedBySeed: played, realMatches, realMatchesByRound: byRound };
+}
+
+export interface LiveBracketMatch {
+  key: string;
+  round: number;
+  slot: number;
+  branch: string;
+  phase: "winners" | "classification";
+  placeLabel?: string;
+  p1: number | null; // seed, ou null si pas encore connu
+  p2: number | null;
+  status: "pending" | "bye" | "done";
+  winnerSeed: number | null;
+}
+
+export interface LiveBracket {
+  rounds: number;
+  size: number;
+  byes: number;
+  matches: LiveBracketMatch[];
+  ranking: { seed: number; rank: number }[] | null; // non null quand tout est joué
+}
+
+/**
+ * État « en direct » du tableau à partir des résultats connus : `winnerSeed(key)` renvoie le
+ * SEED vainqueur d'un match RÉEL joué, sinon null. Résout au mieux (byes + résultats connus)
+ * pour donner, à l'instant T, les participants de chaque match, les byes et — quand tout est
+ * joué — le classement final. Sert à l'affichage et à valider qu'un match est jouable.
+ */
+export function bracketLive(
+  n: number,
+  winnerSeed: (matchKey: string) => number | null,
+): LiveBracket {
+  const bracket = placementBracket(n);
+  const byKey = new Map(bracket.matches.map((m) => [m.key, m]));
+  const memo = new Map<string, { winner: number | null; loser: number | null }>();
+
+  const entrant = (e: BracketEntrant): number | null => {
+    if (e.kind === "seed") return e.seed; // -1 = bye
+    const r = resolve(e.matchKey);
+    return e.take === "win" ? r.winner : r.loser;
+  };
+
+  function resolve(key: string): { winner: number | null; loser: number | null } {
+    const cached = memo.get(key);
+    if (cached) return cached;
+    const m = byKey.get(key);
+    if (!m) return { winner: null, loser: null };
+    const a = entrant(m.a);
+    const b = entrant(m.b);
+    let res: { winner: number | null; loser: number | null };
+    if (a === null || b === null) res = { winner: null, loser: null };
+    else if (a < 0 && b < 0) res = { winner: -1, loser: -1 };
+    else if (a < 0) res = { winner: b, loser: a };
+    else if (b < 0) res = { winner: a, loser: b };
+    else {
+      const w = winnerSeed(key);
+      res = w === null ? { winner: null, loser: null } : w === b ? { winner: b, loser: a } : { winner: a, loser: b };
+    }
+    memo.set(key, res);
+    return res;
+  }
+
+  const matches: LiveBracketMatch[] = bracket.matches.map((m) => {
+    const a = entrant(m.a);
+    const b = entrant(m.b);
+    const known = a !== null && b !== null;
+    const isBye = known && (a < 0 || b < 0);
+    const bothReal = known && a >= 0 && b >= 0;
+    const r = resolve(m.key);
+    return {
+      key: m.key,
+      round: m.round,
+      slot: m.slot ?? 0,
+      branch: m.branch,
+      phase: m.branch.includes("L") ? "classification" : "winners",
+      placeLabel: m.placeLabel,
+      p1: a !== null && a >= 0 ? a : null,
+      p2: b !== null && b >= 0 ? b : null,
+      status: isBye ? "bye" : bothReal && winnerSeed(m.key) !== null ? "done" : "pending",
+      winnerSeed: r.winner !== null && r.winner >= 0 ? r.winner : null,
+    };
+  });
+
+  const allResolved = bracket.matches.every((m) => resolve(m.key).winner !== null);
+  const ranking = allResolved
+    ? bracket.placements
+        .map((p) => ({
+          seed: p.take === "win" ? resolve(p.matchKey).winner : resolve(p.matchKey).loser,
+          rank: p.rank,
+        }))
+        .filter((x): x is { seed: number; rank: number } => x.seed !== null && x.seed >= 0)
+        .sort((x, y) => x.rank - y.rank)
+        .map((x, i) => ({ seed: x.seed, rank: i + 1 }))
+    : null;
+
+  return { rounds: bracket.rounds, size: bracket.size, byes: bracket.byes, matches, ranking };
 }
 
 // --- Choix de la formule ---------------------------------------------------

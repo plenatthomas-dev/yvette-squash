@@ -6,6 +6,7 @@ import {
   scheduleMatches,
   placementBracket,
   resolveBracket,
+  bracketLive,
   proposeFormats,
   bestFormat,
   type MatchResult,
@@ -248,6 +249,45 @@ describe("placementBracket", () => {
         for (const c of counts) expect(c).toBe(b.rounds);
       }
     }
+  });
+});
+
+describe("bracketLive", () => {
+  it("aucun résultat : classement null, byes marqués, 1er tour en attente", () => {
+    const live = bracketLive(6, () => null);
+    expect(live.ranking).toBeNull();
+    // Il existe des matchs « bye » (N=6 → 2 byes) et des matchs réels en attente.
+    expect(live.matches.some((m) => m.status === "bye")).toBe(true);
+    expect(live.matches.some((m) => m.status === "pending")).toBe(true);
+    // Un match bye n'a qu'un seul vrai joueur.
+    for (const m of live.matches) {
+      if (m.status === "bye") expect(m.p1 === null || m.p2 === null).toBe(true);
+    }
+  });
+
+  it("tous les résultats (petit seed gagne) : même classement que resolveBracket", () => {
+    // On rejoue le tableau : le vainqueur d'un match = le plus petit seed de ses participants.
+    const n = 8;
+    const bracket = placementBracket(n);
+    const lower = (_k: string, a: number, b: number) => Math.min(a, b);
+    const full = resolveBracket(bracket, lower);
+
+    // Construit une table clé -> seed vainqueur en résolvant nous-mêmes (petit seed gagne).
+    const winners = new Map<string, number>();
+    const livePass = bracketLive(n, (k) => winners.get(k) ?? null);
+    // On remplit les résultats tour par tour à partir des participants calculés.
+    for (let pass = 0; pass < bracket.rounds + 1; pass++) {
+      const l = bracketLive(n, (k) => winners.get(k) ?? null);
+      for (const m of l.matches) {
+        if (m.status === "pending" && m.p1 !== null && m.p2 !== null) {
+          winners.set(m.key, Math.min(m.p1, m.p2));
+        }
+      }
+    }
+    const live = bracketLive(n, (k) => winners.get(k) ?? null);
+    expect(live.ranking).not.toBeNull();
+    expect(live.ranking).toEqual(full.ranking);
+    expect(livePass.matches.length).toBe(bracket.matches.length);
   });
 });
 
