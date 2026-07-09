@@ -27,6 +27,7 @@ interface MatchView {
   terrain: string | null;
   order: number | null;
   round?: number;
+  slot?: number;
   branch?: string;
   phase?: string;
   placeLabel?: string | null;
@@ -304,15 +305,15 @@ export default function Tournament({ toast, onExpired }: Props) {
     }
   };
 
-  // --- Rendu d'un match (score ou saisie) ---
+  // --- Rendu d'un match (corps réutilisé en liste ET dans l'arbre) ---
   const canScore = !!detail && (detail.isParticipant || detail.isCreator);
-  const renderMatch = (m: MatchView, key: string) => {
+  const renderMatchBody = (m: MatchView) => {
     const done = m.status === "done";
     const bye = m.status === "bye";
     const p1 = m.p1?.name ?? "—";
     const p2 = m.p2?.name ?? "—";
     return (
-      <li key={key} className={"trn-match" + (done ? " done" : "")}>
+      <>
         <div className="trn-match-head">
           {m.terrain && m.status === "pending" && (
             <span className="trn-terrain">{m.terrain}</span>
@@ -348,9 +349,14 @@ export default function Tournament({ toast, onExpired }: Props) {
             ))}
           </div>
         )}
-      </li>
+      </>
     );
   };
+  const renderMatch = (m: MatchView, key: string) => (
+    <li key={key} className={"trn-match" + (m.status === "done" ? " done" : "")}>
+      {renderMatchBody(m)}
+    </li>
+  );
 
   // Liste des matchs planifiés (par ordre de passage / terrain) — les prochains d'abord.
   const scheduleMatches = (): MatchView[] => {
@@ -380,9 +386,8 @@ export default function Tournament({ toast, onExpired }: Props) {
           </div>
           <h2>
             🏆 {detail.name || `Tournoi du ${prettyDate(detail.date)}`}{" "}
-            <small className="muted">
-              · {detail.players.length} joueurs · {STATUS_LABEL[detail.status]}
-            </small>
+            <small className="muted">· {detail.players.length} joueurs</small>{" "}
+            <span className={"trn-status " + detail.status}>{STATUS_LABEL[detail.status]}</span>
           </h2>
           <p className="trn-formula muted tiny">
             Formule : <strong>{detail.formatLabel}</strong> ·{" "}
@@ -449,34 +454,69 @@ export default function Tournament({ toast, onExpired }: Props) {
             </section>
           ))}
 
-          {/* Tableau (bracket) par tour */}
-          {detail.bracket && (
-            <section className="trn-block">
-              <h3>Tableau</h3>
-              {detail.bracket.ranking && (
-                <ol className="trn-ranking">
-                  {detail.bracket.ranking.map((r) => (
-                    <li key={r.playerId}>{r.name}</li>
-                  ))}
-                </ol>
-              )}
-              {Array.from({ length: detail.bracket.rounds }).map((_, r) => {
-                const ms = detail
-                  .bracket!.matches.filter((m) => m.round === r)
-                  // Vainqueurs (tableau principal) d'abord, repêchage ensuite.
-                  .sort((a, b) => (a.phase === "winners" ? 0 : 1) - (b.phase === "winners" ? 0 : 1));
-                if (ms.length === 0) return null;
-                return (
-                  <div key={r} className="trn-round">
-                    <h4>Tour {r + 1} sur {detail.bracket!.rounds}</h4>
-                    <ul className="trn-matches">
-                      {ms.map((m, i) => renderMatch(m, `r${r}-${i}`))}
-                    </ul>
+          {/* Tableau (bracket) : arbre graphique du chemin principal + repêchage */}
+          {detail.bracket &&
+            (() => {
+              const b = detail.bracket!;
+              const winners = b.matches.filter((m) => m.phase === "winners");
+              const classif = b.matches.filter((m) => m.phase === "classification");
+              return (
+                <section className="trn-block">
+                  <h3>Tableau</h3>
+                  {b.ranking && (
+                    <ol className="trn-ranking">
+                      {b.ranking.map((r) => (
+                        <li key={r.playerId}>{r.name}</li>
+                      ))}
+                    </ol>
+                  )}
+                  {/* Arbre principal (chemin vers la 1re place) */}
+                  <div className="trn-tree">
+                    {Array.from({ length: b.rounds }).map((_, r) => {
+                      const col = winners
+                        .filter((m) => m.round === r)
+                        .sort((a, c) => (a.slot ?? 0) - (c.slot ?? 0));
+                      if (col.length === 0) return null;
+                      return (
+                        <div key={r} className="trn-tree-col">
+                          <div className="trn-tree-col-title">
+                            {r === b.rounds - 1 ? "Finale" : `Tour ${r + 1}`}
+                          </div>
+                          <div className="trn-tree-col-body">
+                            {col.map((m, i) => (
+                              <div
+                                key={i}
+                                className={
+                                  "trn-tree-match" +
+                                  (r > 0 ? " linked" : "") +
+                                  (m.status === "done" ? " done" : "")
+                                }
+                              >
+                                {renderMatchBody(m)}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
-            </section>
-          )}
+                  {/* Repêchage & matchs de classement (branches perdants) */}
+                  {classif.length > 0 && (
+                    <div className="trn-round">
+                      <h4>Repêchage &amp; classement</h4>
+                      <ul className="trn-matches">
+                        {classif
+                          .sort(
+                            (a, c) =>
+                              (a.round ?? 0) - (c.round ?? 0) || (a.slot ?? 0) - (c.slot ?? 0),
+                          )
+                          .map((m, i) => renderMatch(m, `cl-${i}`))}
+                      </ul>
+                    </div>
+                  )}
+                </section>
+              );
+            })()}
         </div>
       ) : (
         // --- Liste des tournois ---
@@ -497,7 +537,10 @@ export default function Tournament({ toast, onExpired }: Props) {
                   <button className="trn-list-item" onClick={() => setOpenId(t.id)}>
                     <strong>{t.name || `Tournoi du ${prettyDate(t.date)}`}</strong>
                     <small className="muted">
-                      {t.playerCount} joueurs · {STATUS_LABEL[t.status] ?? t.status}
+                      {t.playerCount} joueurs ·{" "}
+                      <span className={"trn-status " + t.status}>
+                        {STATUS_LABEL[t.status] ?? t.status}
+                      </span>
                     </small>
                   </button>
                 </li>
