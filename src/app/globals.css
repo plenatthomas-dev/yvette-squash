@@ -2288,6 +2288,8 @@ table.planning.week th.time.selhead {
 .trn-match-head { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; min-height: 4px; }
 .trn-place { font-size: 0.74rem; font-weight: 600; opacity: 0.8; }
 .trn-formula { margin: 0 0 12px; }
+/* Nombre de joueurs / méta : lisible (le gris « muted » système était trop pâle). */
+.trn-count { color: var(--pico-color); opacity: 0.85; font-weight: 500; }
 /* Badge de statut lisible (le gris « muted » était illisible). */
 .trn-status {
   display: inline-block;

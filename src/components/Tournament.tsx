@@ -358,6 +358,43 @@ export default function Tournament({ toast, onExpired }: Props) {
     </li>
   );
 
+  // Arbre graphique d'un jeu de matchs (colonnes = tours). Réutilisé pour le tableau
+  // principal (vainqueurs) ET le repêchage (perdants), qui a aussi ses demi/finales.
+  const renderTree = (ms: MatchView[], titleFn: (r: number) => string) => {
+    if (!detail?.bracket || ms.length === 0) return null;
+    const rounds = detail.bracket.rounds;
+    const minRound = Math.min(...ms.map((m) => m.round ?? 0));
+    return (
+      <div className="trn-tree">
+        {Array.from({ length: rounds }).map((_, r) => {
+          const col = ms
+            .filter((m) => m.round === r)
+            .sort((a, c) => (a.slot ?? 0) - (c.slot ?? 0));
+          if (col.length === 0) return null;
+          return (
+            <div key={r} className="trn-tree-col">
+              <div className="trn-tree-col-title">{titleFn(r)}</div>
+              <div className="trn-tree-col-body">
+                {col.map((m, i) => (
+                  <div
+                    key={i}
+                    className={
+                      "trn-tree-match" +
+                      (r > minRound ? " linked" : "") +
+                      (m.status === "done" ? " done" : "")
+                    }
+                  >
+                    {renderMatchBody(m)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   // Liste des matchs planifiés (par ordre de passage / terrain) — les prochains d'abord.
   const scheduleMatches = (): MatchView[] => {
     if (!detail) return [];
@@ -386,7 +423,7 @@ export default function Tournament({ toast, onExpired }: Props) {
           </div>
           <h2>
             🏆 {detail.name || `Tournoi du ${prettyDate(detail.date)}`}{" "}
-            <small className="muted">· {detail.players.length} joueurs</small>{" "}
+            <small className="trn-count">· {detail.players.length} joueurs</small>{" "}
             <span className={"trn-status " + detail.status}>{STATUS_LABEL[detail.status]}</span>
           </h2>
           <p className="trn-formula muted tiny">
@@ -471,48 +508,16 @@ export default function Tournament({ toast, onExpired }: Props) {
                     </ol>
                   )}
                   {/* Arbre principal (chemin vers la 1re place) */}
-                  <div className="trn-tree">
-                    {Array.from({ length: b.rounds }).map((_, r) => {
-                      const col = winners
-                        .filter((m) => m.round === r)
-                        .sort((a, c) => (a.slot ?? 0) - (c.slot ?? 0));
-                      if (col.length === 0) return null;
-                      return (
-                        <div key={r} className="trn-tree-col">
-                          <div className="trn-tree-col-title">
-                            {r === b.rounds - 1 ? "Finale" : `Tour ${r + 1}`}
-                          </div>
-                          <div className="trn-tree-col-body">
-                            {col.map((m, i) => (
-                              <div
-                                key={i}
-                                className={
-                                  "trn-tree-match" +
-                                  (r > 0 ? " linked" : "") +
-                                  (m.status === "done" ? " done" : "")
-                                }
-                              >
-                                {renderMatchBody(m)}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {/* Repêchage & matchs de classement (branches perdants) */}
+                  <h4>Tableau principal</h4>
+                  {renderTree(winners, (r) => (r === b.rounds - 1 ? "Finale" : `Tour ${r + 1}`))}
+                  {/* Repêchage : les perdants ont AUSSI leurs demi/finales, en arbre. */}
                   {classif.length > 0 && (
-                    <div className="trn-round">
+                    <>
                       <h4>Repêchage &amp; classement</h4>
-                      <ul className="trn-matches">
-                        {classif
-                          .sort(
-                            (a, c) =>
-                              (a.round ?? 0) - (c.round ?? 0) || (a.slot ?? 0) - (c.slot ?? 0),
-                          )
-                          .map((m, i) => renderMatch(m, `cl-${i}`))}
-                      </ul>
-                    </div>
+                      {renderTree(classif, (r) =>
+                        r === b.rounds - 1 ? "Finales de classement" : `Tour ${r + 1}`,
+                      )}
+                    </>
                   )}
                 </section>
               );
@@ -536,7 +541,7 @@ export default function Tournament({ toast, onExpired }: Props) {
                 <li key={t.id}>
                   <button className="trn-list-item" onClick={() => setOpenId(t.id)}>
                     <strong>{t.name || `Tournoi du ${prettyDate(t.date)}`}</strong>
-                    <small className="muted">
+                    <small className="trn-count">
                       {t.playerCount} joueurs ·{" "}
                       <span className={"trn-status " + t.status}>
                         {STATUS_LABEL[t.status] ?? t.status}
