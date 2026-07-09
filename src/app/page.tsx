@@ -905,6 +905,17 @@ function PrivacyNotice() {
                 inscrits. Tu peux quitter une liste d'attente à tout moment (🕒 « Ma liste
                 d'attente »).
               </p>
+              {FEATURE_TRICOUNT && (
+                <p>
+                  <strong>Partage de frais (« Frais »).</strong> Si le groupe utilise cette
+                  vue, les dépenses saisies (libellé, montant, date, qui a payé et pour qui),
+                  les remboursements et les éventuels messages sont visibles par
+                  <strong> tous les membres connectés</strong>. Pour lever toute ambiguïté sur
+                  les comptes, cette vue affiche le <strong>nom réel</strong> des membres (jamais
+                  le pseudonyme) et donc <strong>qui doit combien à qui</strong>. N'y saisis que
+                  des dépenses que tu acceptes de partager avec le groupe.
+                </p>
+              )}
               <p>
                 Hébergement en Union européenne : application sur Vercel, base
                 de données sur Neon.
