@@ -254,6 +254,13 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     });
   };
 
+  // Ajuste le nombre de parts d'un participant (boutons +/−), borné à [1, MAX_PARTS].
+  const adjustPart = (id: string, delta: number) =>
+    setWeights((prev) => ({
+      ...prev,
+      [id]: Math.max(1, Math.min(MAX_PARTS, (prev[id] ?? 1) + delta)),
+    }));
+
   const submitExpense = async (e: FormEvent) => {
     e.preventDefault();
     if (busy || !data) return;
@@ -666,7 +673,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                         >
                           <span>
                             <strong>{tr.fromName}</strong> rembourse{" "}
-                            <strong>{tr.toName}</strong>
+                            <strong>{tr.toName}</strong> :
                           </span>
                           <strong>{fmtEuros(tr.amountCents)}</strong>
                         </li>
@@ -852,23 +859,34 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                       </label>
                       {checked && splitMode === "shares" && (
                         <span className="tri-parts">
-                          <input
-                            type="number"
-                            min={1}
-                            max={MAX_PARTS}
-                            step={1}
-                            value={w}
-                            onChange={(e) =>
-                              setWeights((prev) => ({
-                                ...prev,
-                                [m.id]: Math.max(
-                                  1,
-                                  Math.min(MAX_PARTS, Math.floor(Number(e.target.value) || 1)),
-                                ),
-                              }))
-                            }
+                          <button
+                            type="button"
+                            className="tri-parts-btn"
+                            onClick={() => adjustPart(m.id, -1)}
+                            disabled={w <= 1}
+                            aria-label={`Moins de parts pour ${m.name}`}
+                          >
+                            −
+                          </button>
+                          <span
+                            className="tri-parts-value"
+                            role="spinbutton"
+                            aria-valuenow={w}
+                            aria-valuemin={1}
+                            aria-valuemax={MAX_PARTS}
                             aria-label={`Parts de ${m.name}`}
-                          />
+                          >
+                            {w}
+                          </span>
+                          <button
+                            type="button"
+                            className="tri-parts-btn"
+                            onClick={() => adjustPart(m.id, 1)}
+                            disabled={w >= MAX_PARTS}
+                            aria-label={`Plus de parts pour ${m.name}`}
+                          >
+                            +
+                          </button>
                           <span className="tri-parts-unit">{w > 1 ? "parts" : "part"}</span>
                         </span>
                       )}

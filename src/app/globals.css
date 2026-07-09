@@ -1985,12 +1985,30 @@ table.planning.week th.time.selhead {
   font-size: 0.75rem;
   color: var(--pico-muted-color);
 }
-.tri-parts input {
-  width: 48px;
+/* Sélecteur de parts : boutons − / + encadrant la valeur (en lecture seule). */
+.tri-parts-btn {
+  width: 26px;
+  height: 26px;
   margin: 0;
-  padding: 2px 4px;
-  font-size: 0.8rem;
+  padding: 0;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+  border-radius: 8px;
+}
+.tri-parts-btn:disabled {
+  opacity: 0.4;
+}
+.tri-parts-value {
+  min-width: 20px;
   text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--pico-color);
 }
 .tri-parts-unit {
   white-space: nowrap;
