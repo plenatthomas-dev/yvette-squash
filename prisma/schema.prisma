@@ -250,9 +250,12 @@ model Expense {
   id          String   @id @default(cuid())
   tricount    Tricount @relation(fields: [tricountId], references: [id], onDelete: Cascade)
   tricountId  String
-  payer       User     @relation("ExpensePayer", fields: [payerId], references: [id], onDelete: Cascade)
+  // Restrict (et pas Cascade) : supprimer un membre ne doit JAMAIS effacer en
+  // douce des dépenses et rééquilibrer l'historique d'argent. On bloque plutôt la
+  // suppression tant que le membre a des dépenses/parts (filet de sécurité DB).
+  payer       User     @relation("ExpensePayer", fields: [payerId], references: [id], onDelete: Restrict)
   payerId     String
-  creator     User     @relation("ExpenseCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  creator     User     @relation("ExpenseCreator", fields: [creatorId], references: [id], onDelete: Restrict)
   creatorId   String // qui a saisi la ligne (peut différer du payeur) : droit de suppression
   label       String
   amountCents Int
@@ -271,7 +274,9 @@ model ExpenseShare {
   id          String  @id @default(cuid())
   expense     Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
   expenseId   String
-  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Restrict : une part porte un solde ; supprimer un membre ne doit pas la faire
+  // disparaître silencieusement (cf. Expense.payer/creator).
+  user        User    @relation(fields: [userId], references: [id], onDelete: Restrict)
   userId      String
   amountCents Int
 
