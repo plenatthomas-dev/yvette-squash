@@ -178,6 +178,24 @@ export default function Tournament({ toast, onExpired }: Props) {
     else setDetail(null);
   }, [openId, loadDetail]);
 
+  // Rafraîchissement multi-utilisateur : plusieurs personnes saisissent des scores en
+  // parallèle. Au retour sur l'onglet (focus / redevenu visible), on recharge le tournoi
+  // ouvert — sauf pendant une saisie (busy) pour ne pas écraser l'action en cours.
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  useEffect(() => {
+    if (!openId) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible" && !busyRef.current) loadDetail(openId);
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [openId, loadDetail]);
+
   const totalPlayers = picked.size + guests.length;
 
   const openWizard = async () => {

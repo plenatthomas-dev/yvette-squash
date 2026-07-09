@@ -8,6 +8,7 @@ import {
   placementBracket,
   resolveBracket,
   bracketLive,
+  bracketDescendants,
   proposeFormats,
   bestFormat,
   type MatchResult,
@@ -324,6 +325,40 @@ describe("bracketLive", () => {
     expect(live.ranking).not.toBeNull();
     expect(live.ranking).toEqual(full.ranking);
     expect(livePass.matches.length).toBe(bracket.matches.length);
+  });
+});
+
+describe("bracketDescendants", () => {
+  it("n=4 : le 1er tour alimente la finale (via win) ET la petite finale (via lose)", () => {
+    // placementBracket(4) : M-0-0, M-0-1 (1er tour) → MW-1-0 (finale) + ML-1-0 (3e place).
+    const d = bracketDescendants(4, "M-0-0").sort();
+    expect(d).toEqual(["ML-1-0", "MW-1-0"]);
+    // Une finale n'a aucun descendant.
+    expect(bracketDescendants(4, "MW-1-0")).toEqual([]);
+  });
+
+  it("ne contient jamais la clé elle-même et reste dans le tableau", () => {
+    for (const n of [6, 8, 11, 16]) {
+      const bracket = placementBracket(n);
+      const keys = new Set(bracket.matches.map((m) => m.key));
+      for (const m of bracket.matches) {
+        const d = bracketDescendants(n, m.key);
+        expect(d).not.toContain(m.key);
+        for (const k of d) expect(keys.has(k)).toBe(true);
+      }
+    }
+  });
+
+  it("la finale (rang 1) est descendante de tout match du 1er tour (via la chaîne)", () => {
+    // Sur une puissance de 2, chaque match du 1er tour mène, par sa branche gagnante, à la
+    // finale MW…-… : elle doit figurer dans les descendants transitifs.
+    const n = 8;
+    const bracket = placementBracket(n);
+    const finalKey = bracket.matches.find((m) => m.placeLabel === "Finale")!.key;
+    const firstRound = bracket.matches.filter((m) => m.round === 0);
+    for (const m of firstRound) {
+      expect(bracketDescendants(n, m.key)).toContain(finalKey);
+    }
   });
 });
 
