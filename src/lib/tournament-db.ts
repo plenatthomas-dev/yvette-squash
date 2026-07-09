@@ -71,11 +71,23 @@ export function serializeTournament(t: FullTournament, userId: string) {
 
   if (t.format === "pools") {
     const poolMatches = t.matches.filter((m) => m.phase === "pool");
-    // Planning des terrains sur l'ensemble des matchs de poules.
+    // Planning des terrains : on ENTRELACE les poules (zip) pour qu'elles se jouent EN MÊME
+    // TEMPS (≈ un terrain par poule) au lieu de finir la poule A avant la B. L'ordre
+    // round-robin (méthode du cercle, à la création) espace déjà les matchs d'un même joueur.
+    const perPool = t.groups.map((g) =>
+      poolMatches.filter((m) => m.groupId === g.id && m.player1Id && m.player2Id),
+    );
+    const interleaved: typeof poolMatches = [];
+    const maxLen = Math.max(0, ...perPool.map((p) => p.length));
+    for (let k = 0; k < maxLen; k++) {
+      for (const pool of perPool) if (pool[k]) interleaved.push(pool[k]);
+    }
     const sched = scheduleMatches(
-      poolMatches
-        .filter((m) => m.player1Id && m.player2Id)
-        .map((m) => ({ key: m.id, p1: m.player1Id as string, p2: m.player2Id as string })),
+      interleaved.map((m) => ({
+        key: m.id,
+        p1: m.player1Id as string,
+        p2: m.player2Id as string,
+      })),
       t.courts,
     );
     const schedById = new Map(sched.map((s) => [s.key, s]));

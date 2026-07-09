@@ -2469,7 +2469,9 @@ table.planning.week th.time.selhead {
   padding: 12px;
   border: 1px solid var(--pico-muted-border-color);
   border-radius: 10px;
-  background: var(--pico-card-background-color);
+  /* MÊME recette que .trn-list-item (lisible) : --pico-background-color, pas
+     --pico-card-background-color qui rendait la carte blanche/illisible. */
+  background: var(--pico-background-color);
   color: var(--pico-color);
   cursor: pointer;
 }
