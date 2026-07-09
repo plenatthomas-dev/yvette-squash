@@ -2003,7 +2003,9 @@ table.planning.week th.time.selhead {
   opacity: 0.4;
 }
 .tri-parts-value {
-  min-width: 20px;
+  /* Largeur FIXE : sinon 1→2 chiffres décale les boutons + / − (et toute la ligne). */
+  width: 1.7em;
+  min-width: 1.7em;
   text-align: center;
   font-size: 0.85rem;
   font-weight: 600;
@@ -2011,6 +2013,9 @@ table.planning.week th.time.selhead {
   color: var(--pico-color);
 }
 .tri-parts-unit {
+  /* Réserve la place de « parts » pour que « part »/« parts » ne décale rien. */
+  display: inline-block;
+  min-width: 2.7em;
   white-space: nowrap;
 }
 .tri-share {
@@ -2283,6 +2288,17 @@ table.planning.week th.time.selhead {
 .trn-match-head { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; min-height: 4px; }
 .trn-place { font-size: 0.74rem; font-weight: 600; opacity: 0.8; }
 .trn-formula { margin: 0 0 12px; }
+/* Badge de statut lisible (le gris « muted » était illisible). */
+.trn-status {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.trn-status.done { background: var(--pico-primary); color: var(--pico-primary-inverse); }
+.trn-status.running { background: color-mix(in srgb, var(--pico-color) 16%, transparent); color: var(--pico-color); }
+.trn-status.draft { background: color-mix(in srgb, var(--pico-color) 10%, transparent); color: var(--pico-color); opacity: 0.85; }
 .trn-vs {
   display: flex;
   align-items: center;
@@ -2308,6 +2324,53 @@ table.planning.week th.time.selhead {
 }
 .trn-ranking { margin: 4px 0 12px 18px; font-size: 0.9rem; }
 .trn-round { margin-top: 6px; }
+
+/* Arbre graphique du tableau : colonnes = tours, chemin vers la 1re place. */
+.trn-tree {
+  display: flex;
+  gap: 20px;
+  overflow-x: auto;
+  padding: 4px 2px 12px;
+  -webkit-overflow-scrolling: touch;
+}
+.trn-tree-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 168px;
+  flex: 0 0 auto;
+}
+.trn-tree-col-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+  opacity: 0.7;
+  margin-bottom: 8px;
+}
+.trn-tree-col-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  flex: 1;
+  gap: 10px;
+}
+.trn-tree-match {
+  position: relative;
+  padding: 8px 10px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  background: var(--pico-card-background-color);
+}
+.trn-tree-match.done { opacity: 0.92; }
+/* Trait de liaison vers la colonne précédente (esthétique « bracket »). */
+.trn-tree-match.linked::before {
+  content: "";
+  position: absolute;
+  left: -20px;
+  top: 50%;
+  width: 20px;
+  border-top: 2px solid var(--pico-muted-border-color);
+}
+.trn-tree-match .trn-scorepick button { padding: 3px 8px; font-size: 0.8rem; }
 
 /* Assistant */
 .trn-roster {
@@ -2348,15 +2411,21 @@ table.planning.week th.time.selhead {
 .trn-choice legend { font-size: 0.85rem; opacity: 0.8; margin-bottom: 4px; }
 .trn-choice button {
   width: auto;
-  margin: 0 6px 0 0;
-  padding: 6px 14px;
-  border: 1px solid var(--pico-muted-border-color);
+  margin: 0 6px 6px 0;
+  padding: 8px 16px;
+  /* Bordure TOUJOURS présente et transparente + police constante : l'état sélectionné ne
+     change QUE la couleur (pas la taille). Fond neutre visible pour le non-sélectionné. */
+  border: 1px solid transparent;
   border-radius: 8px;
-  background: var(--pico-background-color);
+  background: color-mix(in srgb, var(--pico-color) 12%, transparent);
   color: var(--pico-color);
+  font-weight: 600;
   cursor: pointer;
 }
-.trn-choice button.on { border-color: transparent; background: var(--pico-primary); color: var(--pico-primary-inverse); font-weight: 600; }
+.trn-choice button.on {
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+}
 .trn-proposals { list-style: none; padding: 0; margin: 0; }
 .trn-proposals li { margin-bottom: 8px; }
 .trn-proposal {
@@ -2364,13 +2433,14 @@ table.planning.week th.time.selhead {
   text-align: left;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   padding: 12px;
   border: 1px solid var(--pico-muted-border-color);
   border-radius: 10px;
-  background: var(--pico-background-color);
+  background: var(--pico-card-background-color);
   color: var(--pico-color);
   cursor: pointer;
 }
-.trn-proposal strong { color: var(--pico-primary); }
-.trn-proposal small { color: var(--pico-color); opacity: 0.75; }
+/* Texte en pleine couleur (pas de primaire/gris sur fond coloré → illisible). */
+.trn-proposal strong { color: var(--pico-color); font-size: 0.95rem; }
+.trn-proposal small { color: var(--pico-color); opacity: 0.72; }
