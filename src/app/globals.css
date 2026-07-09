@@ -176,12 +176,13 @@ header.app h1 {
   line-height: 1.15;
 }
 
-/* Petit logo à côté du titre (badge blanc arrondi, lisible sur clair comme sombre) */
+/* Logo à côté du titre (badge blanc arrondi, lisible sur clair comme sombre). Agrandi
+   depuis que le header est désencombré (actions secondaires regroupées dans le menu ⋯). */
 .logo-mark {
-  width: 38px;
-  height: 38px;
+  width: 46px;
+  height: 46px;
   flex-shrink: 0;
-  border-radius: 9px;
+  border-radius: 11px;
   object-fit: contain;
   background: #fff;
 }
@@ -270,6 +271,97 @@ header.app .sub {
   font-weight: 700;
   line-height: 16px;
   text-align: center;
+}
+
+/* --- Menu déroulant du header (⋯) : actions secondaires regroupées ------- */
+.header-menu {
+  position: relative;
+}
+.header-menu .icon-btn {
+  position: relative;
+}
+/* Pastille discrète sur le déclencheur quand une action du menu appelle l'attention
+   (ex. montant à rembourser) — le détail chiffré est dans l'item du menu. */
+.header-menu .badge.dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  min-width: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--error-accent);
+}
+.header-menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 200;
+  min-width: 216px;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-card-border-color);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: modal-in 0.14s ease-out;
+}
+/* Scopé sous .header-menu-panel pour l'emporter sur la règle générique `.actions button`. */
+.header-menu-panel .header-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--pico-color);
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.header-menu-panel .header-menu-item:hover:not(:disabled) {
+  background: rgba(127, 127, 127, 0.15);
+}
+.header-menu-panel .header-menu-item.active {
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+}
+.header-menu-panel .header-menu-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.header-menu-panel .hm-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.header-menu-panel .hm-label {
+  flex: 1;
+  min-width: 0;
+}
+.header-menu-panel .header-menu-item .badge {
+  position: static;
+  flex: 0 0 auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--error-accent);
+  color: #fff;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.header-menu-panel .hm-soon {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
 }
 
 /* Liste des alertes dans la modale « Mes alertes » */
@@ -400,8 +492,8 @@ header.app .sub {
     display: none;
   }
   header.app .logo-mark {
-    width: 46px;
-    height: 46px;
+    width: 52px;
+    height: 52px;
   }
 }
 
@@ -1315,7 +1407,7 @@ td.cell.past {
 }
 
 /* Sélecteur « Pour moi / Pour X » dans la barre d'en-tête : même gabarit que les
-   icon-btn voisins (ShareButton, DirectoryButton…). */
+   icon-btn voisins (cloche, réglages, menu ⋯). */
 .acting-as-select {
   margin: 0;
   width: auto;
