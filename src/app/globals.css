@@ -2200,3 +2200,170 @@ table.planning.week th.time.selhead {
   flex-shrink: 0;
   font-size: 0.88rem;
 }
+
+/* --- Module Tournoi (idée 3) ------------------------------------------- */
+.tournament { margin-top: 6px; }
+.trn-actions { margin-bottom: 16px; }
+.trn-actions button { width: 100%; margin: 0; }
+.trn-list { list-style: none; padding: 0; margin: 0; }
+.trn-list li { margin-bottom: 8px; }
+.trn-list-item {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  background: var(--pico-card-background-color);
+  color: var(--pico-color);
+}
+.trn-detail-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.trn-detail-head button { width: auto; margin: 0; padding: 6px 10px; font-size: 0.85rem; }
+.trn-detail-head .cancel {
+  background: transparent;
+  color: var(--danger-fg);
+  border: 1px solid var(--danger-border);
+}
+.trn-block { margin-top: 20px; }
+.trn-block h3 { font-size: 1rem; margin-bottom: 8px; }
+.trn-block h4 { font-size: 0.9rem; margin: 12px 0 6px; }
+.trn-champion {
+  font-size: 1.05rem;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--pico-primary) 12%, transparent);
+}
+.trn-terrain {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+}
+.trn-schedule { list-style: none; padding: 0; margin: 0; }
+.trn-schedule li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--pico-card-border-color);
+  font-size: 0.9rem;
+}
+.trn-standings {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-bottom: 10px;
+}
+.trn-standings th, .trn-standings td {
+  text-align: left;
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--pico-card-border-color);
+}
+.trn-standings th { font-weight: 600; opacity: 0.75; }
+.trn-matches { list-style: none; padding: 0; margin: 0; }
+.trn-match {
+  padding: 8px 10px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  background: var(--pico-card-background-color);
+}
+.trn-match.done { opacity: 0.85; }
+.trn-match-head { display: flex; gap: 8px; align-items: center; margin-bottom: 2px; min-height: 4px; }
+.trn-place { font-size: 0.72rem; opacity: 0.7; }
+.trn-vs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.92rem;
+}
+.trn-vs .win { font-weight: 700; color: var(--pico-primary); }
+.trn-vs-sep, .trn-bye { opacity: 0.6; font-size: 0.8rem; }
+.trn-scoreval { font-variant-numeric: tabular-nums; }
+.trn-scorepick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.trn-scorepick button {
+  width: auto;
+  margin: 0;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.trn-ranking { margin: 4px 0 12px 18px; font-size: 0.9rem; }
+.trn-round { margin-top: 6px; }
+
+/* Assistant */
+.trn-roster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 44vh;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+.trn-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.trn-check.on { border-color: var(--pico-primary); background: color-mix(in srgb, var(--pico-primary) 12%, transparent); }
+.trn-check input { margin: 0; width: auto; }
+.trn-guests { list-style: none; padding: 0; margin: 0 0 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.trn-guests li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--pico-secondary-background, rgba(127,127,127,0.15));
+  font-size: 0.82rem;
+}
+.trn-guests .cancel { width: auto; margin: 0; padding: 0 4px; background: none; border: none; color: var(--danger-fg); }
+.trn-guest-add { display: flex; gap: 8px; }
+.trn-guest-add input { flex: 1; margin: 0; }
+.trn-guest-add button { width: auto; margin: 0; padding: 0 14px; }
+.trn-choice { border: none; padding: 0; margin: 6px 0 12px; }
+.trn-choice legend { font-size: 0.85rem; opacity: 0.8; margin-bottom: 4px; }
+.trn-choice button {
+  width: auto;
+  margin: 0 6px 0 0;
+  padding: 6px 12px;
+  border: 1px solid var(--pico-card-border-color);
+  background: transparent;
+  color: var(--pico-color);
+}
+.trn-choice button.on { border-color: var(--pico-primary); background: var(--pico-primary); color: var(--pico-primary-inverse); }
+.trn-proposals { list-style: none; padding: 0; margin: 0; }
+.trn-proposals li { margin-bottom: 8px; }
+.trn-proposal {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  background: var(--pico-card-background-color);
+  color: var(--pico-color);
+}

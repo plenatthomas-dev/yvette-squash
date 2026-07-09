@@ -10,6 +10,8 @@ import { Dialog } from "@/components/Dialog";
 // Tricount chargé à la demande (seulement à l'ouverture de la vue « Frais ») : son JS ne
 // pèse plus sur le bundle initial de la page. Rendu client uniquement (déjà dans "use client").
 const Tricount = dynamic(() => import("@/components/Tricount"), { ssr: false });
+// Idem pour le module Tournoi (vue « Tournoi ») : chargé seulement à l'ouverture.
+const Tournament = dynamic(() => import("@/components/Tournament"), { ssr: false });
 import { fmtTime, slotMinutes } from "@/lib/time";
 import { downloadIcs } from "@/lib/ics";
 import {
@@ -22,6 +24,7 @@ import {
   FEATURE_EMAIL_LOGIN,
   FEATURE_DIRECTORY,
   FEATURE_DELEGATION,
+  FEATURE_TOURNAMENT,
 } from "@/lib/features";
 import { DELEGATION_DURATIONS } from "@/lib/delegation-shared";
 
@@ -223,6 +226,17 @@ function EuroIcon() {
   return (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M17.5 5.5A7.5 7.5 0 0 0 6.8 8.5M17.5 18.5a7.5 7.5 0 0 1-10.7-3M4 10h9M4 14h8" />
+    </svg>
+  );
+}
+
+// Icône « trophée » pour le bouton Tournoi.
+function TrophyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 4h12v4a6 6 0 0 1-12 0V4Z" />
+      <path d="M6 6H3v2a3 3 0 0 0 3 3M18 6h3v2a3 3 0 0 1-3 3" />
+      <path d="M9 20h6M12 14v6" />
     </svg>
   );
 }
@@ -916,6 +930,15 @@ function PrivacyNotice() {
                   des dépenses que tu acceptes de partager avec le groupe.
                 </p>
               )}
+              {FEATURE_TOURNAMENT && (
+                <p>
+                  <strong>Tournois.</strong> Un tournoi enregistre la liste des participants
+                  (membres et <strong>prénoms d'invités hors asso</strong> que tu ajoutes), les
+                  matchs et leurs scores. Ces informations sont visibles par
+                  <strong> tous les membres connectés</strong>. N'ajoute un invité que si tu es
+                  d'accord pour que son prénom apparaisse dans le tournoi.
+                </p>
+              )}
               <p>
                 Hébergement en Union européenne : application sur Vercel, base
                 de données sur Neon.
@@ -1182,7 +1205,9 @@ export default function Home() {
   const [range, setRange] = useState<Range>("all");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
-  const [view, setView] = useState<"day" | "week" | "money">("day");
+  const [view, setView] = useState<"day" | "week" | "money" | "tourney">("day");
+  // Vues « plein écran » sans le chrome planning (Frais, Tournoi).
+  const isSpecial = view === "money" || view === "tourney";
   const [week, setWeek] = useState<{ date: string; planning: PlanningDay }[]>([]);
   const [busy, setBusy] = useState(false);
   // Mode « sélection multiple » (piloté depuis la barre de vue, appliqué dans la grille
@@ -1383,12 +1408,13 @@ export default function Home() {
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
 
-    const isView = (x: string | null): x is "day" | "week" | "money" =>
-      x === "day" || x === "week" || x === "money";
+    const isView = (x: string | null): x is "day" | "week" | "money" | "tourney" =>
+      x === "day" || x === "week" || x === "money" || x === "tourney";
     const vParam = p.get("view");
     const vLS = localStorage.getItem("view");
     let v = isView(vParam) ? vParam : isView(vLS) ? vLS : null;
     if (v === "money" && !FEATURE_TRICOUNT) v = "day"; // Frais désactivé : jamais cette vue
+    if (v === "tourney" && !FEATURE_TOURNAMENT) v = "day"; // Tournoi désactivé
     if (v) setView(v);
 
     const rParam = p.get("range");
@@ -1413,7 +1439,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!me || !hydrated) return;
-    if (view === "money") return; // la vue Frais charge ses propres données
+    if (view === "money" || view === "tourney") return; // ces vues chargent leurs propres données
     if (view === "week") loadWeek(date);
     else load(date);
   }, [me, hydrated, date, view, load, loadWeek]);
@@ -1425,7 +1451,7 @@ export default function Home() {
   }, [view, date]);
 
   const reload = useCallback(() => {
-    if (view === "money") return; // Tricount se recharge tout seul (montage + actions)
+    if (view === "money" || view === "tourney") return; // ces vues se rechargent seules
     if (view === "week") loadWeek(date);
     else load(date);
   }, [view, date, load, loadWeek]);
@@ -1858,6 +1884,25 @@ export default function Home() {
               <EuroIcon />
               {FEATURE_TRICOUNT && triOwed > 0 && <span className="badge">{triOwed}</span>}
             </button>
+            {/* Bouton Tournoi : actif si le flag est ON, sinon grisé « en dév ». */}
+            <button
+              className={
+                "secondary icon-btn tourney-btn" +
+                (view === "tourney" ? " active" : "") +
+                (FEATURE_TOURNAMENT ? "" : " coming-soon")
+              }
+              onClick={() =>
+                FEATURE_TOURNAMENT && setView(view === "tourney" ? "day" : "tourney")
+              }
+              disabled={!FEATURE_TOURNAMENT}
+              aria-label={
+                FEATURE_TOURNAMENT ? "Tournois" : "Tournois — en cours de développement"
+              }
+              aria-pressed={view === "tourney"}
+              title={FEATURE_TOURNAMENT ? "Tournois" : "🚧 En cours de développement"}
+            >
+              <TrophyIcon />
+            </button>
             <button
               className="secondary logout"
               onClick={logout}
@@ -1916,7 +1961,7 @@ export default function Home() {
 
       {/* Navigation de date : flèches + libellé (qui ouvre le calendrier natif) + pastille
           « Aujourd'hui » (toujours présente, inactive si on y est déjà), le tout sur UNE ligne. */}
-      {view !== "money" && (
+      {!isSpecial && (
       <div className="toolbar">
         <button className="secondary nav" aria-label="Jour précédent" onClick={() => setDate(addDays(date, view === "week" ? -7 : -1))}>←</button>
         <button
@@ -1961,7 +2006,7 @@ export default function Home() {
           <button className={view === "day" ? "active" : ""} aria-pressed={view === "day"} onClick={() => setView("day")}>Jour</button>
           <button className={view === "week" ? "active" : ""} aria-pressed={view === "week"} onClick={() => setView("week")}>Semaine</button>
         </div>
-        {view !== "money" && (
+        {!isSpecial && (
         <div className="viewbar-icons">
           <button
             type="button"
@@ -1987,7 +2032,7 @@ export default function Home() {
         )}
       </div>
 
-      {view !== "money" && (
+      {!isSpecial && (
       <div className="filters" role="group" aria-label="Plage horaire">
         {RANGES.map((r) => (
           <button
@@ -2025,13 +2070,17 @@ export default function Home() {
         {loading ? "Chargement du planning…" : error ? `Erreur : ${error}` : ""}
       </p>
 
-      {error && view !== "money" && <div className="notice error" role="alert">⚠️ {error}</div>}
+      {error && !isSpecial && <div className="notice error" role="alert">⚠️ {error}</div>}
 
       {FEATURE_TRICOUNT && view === "money" && (
         <Tricount toast={toast} onExpired={handleExpired} onOwedChange={setTriOwed} />
       )}
 
-      {view === "money"
+      {FEATURE_TOURNAMENT && view === "tourney" && (
+        <Tournament toast={toast} onExpired={handleExpired} />
+      )}
+
+      {isSpecial
         ? null
         : view === "day"
         ? planning
