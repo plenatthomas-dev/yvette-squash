@@ -1127,6 +1127,12 @@ td.cell.past {
 }
 
 /* --- Panneau paramètres ------------------------------------------------- */
+/* Dépense (création/édition) : plus large pour que la liste « Pour qui ? » en mode parts
+   (case + nom + − n + + part + montant) tienne sur une ligne sans écraser le nom. */
+.modal.expense {
+  max-width: 460px;
+}
+
 .modal.settings {
   max-width: 420px;
 }
@@ -1943,6 +1949,15 @@ table.planning.week th.time.selhead {
   padding: 4px 0;
 }
 .tri-check input { margin: 0; }
+/* Nom du participant : tronqué (…) plutôt que de passer à la ligne, sinon les lignes de
+   la liste « Pour qui ? » se déforment quand le mode « par parts » occupe la droite. */
+.tri-check-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Choix du mode de répartition (équitable / par parts) — segmenté compact. */
 .tri-splitmode {

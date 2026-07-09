@@ -769,6 +769,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
         <Dialog
           onClose={() => !busy && closeExpense()}
           closeOnOverlay={!busy}
+          className="expense"
           label={editingId ? "Modifier la dépense" : "Nouvelle dépense"}
         >
             <h3>{editingId ? "✏️ Modifier la dépense" : "➕ Nouvelle dépense"}</h3>
@@ -854,8 +855,10 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                     <div key={m.id} className={"tri-check-row" + (checked ? " on" : "")}>
                       <label className="tri-check">
                         <input type="checkbox" checked={checked} onChange={() => toggle(m.id)} />
-                        {m.name}
-                        {m.id === data.me ? " (toi)" : ""}
+                        <span className="tri-check-name">
+                          {m.name}
+                          {m.id === data.me ? " (toi)" : ""}
+                        </span>
                       </label>
                       {checked && splitMode === "shares" && (
                         <span className="tri-parts">
