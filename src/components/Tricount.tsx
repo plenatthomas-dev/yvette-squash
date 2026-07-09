@@ -109,6 +109,14 @@ function prettyDate(date: string): string {
   });
 }
 
+// Nom compact pour la liste « Pour qui ? » (mode parts) : « Prénom Nom » → « P. Nom »,
+// pour laisser le montant en € tenir dans la modale sur mobile.
+function shortName(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length < 2) return name;
+  return `${parts[0][0].toUpperCase()}. ${parts.slice(1).join(" ")}`;
+}
+
 /** Horodatage précis d'un remboursement : "03/07/2026 à 21:15". */
 function fmtStamp(iso: string): string {
   const d = new Date(iso);
@@ -856,7 +864,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                       <label className="tri-check">
                         <input type="checkbox" checked={checked} onChange={() => toggle(m.id)} />
                         <span className="tri-check-name">
-                          {m.name}
+                          {shortName(m.name)}
                           {m.id === data.me ? " (toi)" : ""}
                         </span>
                       </label>

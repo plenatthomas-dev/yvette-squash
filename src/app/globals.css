@@ -2002,7 +2002,7 @@ table.planning.week th.time.selhead {
 .tri-check-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 .tri-check-row .tri-check {
   flex: 1;
@@ -2011,31 +2011,32 @@ table.planning.week th.time.selhead {
 .tri-parts {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   font-size: 0.75rem;
   color: var(--pico-muted-color);
+  flex: 0 0 auto;
 }
-/* Sélecteur de parts : boutons − / + encadrant la valeur (en lecture seule). */
+/* Sélecteur de parts : boutons − / + compacts encadrant la valeur (en lecture seule). */
 .tri-parts-btn {
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   margin: 0;
   padding: 0;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 1rem;
+  font-size: 0.9rem;
   line-height: 1;
-  border-radius: 8px;
+  border-radius: 7px;
 }
 .tri-parts-btn:disabled {
   opacity: 0.4;
 }
 .tri-parts-value {
   /* Largeur FIXE : sinon 1→2 chiffres décale les boutons + / − (et toute la ligne). */
-  width: 1.7em;
-  min-width: 1.7em;
+  width: 1.4em;
+  min-width: 1.4em;
   text-align: center;
   font-size: 0.85rem;
   font-weight: 600;
@@ -2045,16 +2046,18 @@ table.planning.week th.time.selhead {
 .tri-parts-unit {
   /* Réserve la place de « parts » pour que « part »/« parts » ne décale rien. */
   display: inline-block;
-  min-width: 2.7em;
+  min-width: 2.3em;
   white-space: nowrap;
 }
 .tri-share {
-  min-width: 62px;
+  flex: 0 0 auto;
+  min-width: 54px;
   text-align: right;
   font-size: 0.85rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--pico-color);
+  white-space: nowrap;
 }
 
 /* --- Tricounts par jour (cartes d'historique) ---------------------------- */
