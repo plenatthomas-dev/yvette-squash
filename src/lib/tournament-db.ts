@@ -3,6 +3,7 @@ import {
   scheduleMatches,
   poolStandings,
   bracketLive,
+  snakeGroups,
   type MatchResult,
 } from "@/lib/tournament";
 import type { Prisma } from "@prisma/client";
@@ -230,12 +231,12 @@ export async function materialize(
   const n = players.length;
 
   if (format === "pools") {
-    // Répartition par TÊTE DE SÉRIE : la tête de série i (players trié par seed) va dans la
-    // poule i mod g. Ainsi les 1er, 2e, 3e… sont dans des poules différentes, et pour 2
-    // poules la A regroupe les seeds 1,3,5,7 et la B les 2,4,6,8 (comportement demandé).
+    // Répartition par TÊTES DE SÉRIE, méthode standard « pots + serpentin » : on découpe les
+    // seeds en pots de G (Pot 1 = seeds 1..G, Pot 2 = G+1..2G…), Pot 1 réparti A→…→G, Pot 2
+    // en sens INVERSE, etc. → poules équilibrées en force (le 1 tombe avec le 4, pas le 3).
     const g = poolSizes.length;
-    const buckets: string[][] = Array.from({ length: g }, () => []);
-    players.forEach((p, i) => buckets[i % g].push(p.id));
+    // Serpentin (cf. snakeGroups) : index de seed par poule → identifiants joueurs.
+    const buckets = snakeGroups(players.length, g).map((idx) => idx.map((i) => players[i].id));
 
     for (let gi = 0; gi < g; gi++) {
       const label = String.fromCharCode(65 + gi); // A, B, C…

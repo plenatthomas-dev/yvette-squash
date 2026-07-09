@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   splitPools,
+  snakeGroups,
   roundRobin,
   poolStandings,
   scheduleMatches,
@@ -34,6 +35,41 @@ describe("splitPools", () => {
         const p = splitPools(n, size);
         expect(sum(p)).toBe(n);
         expect(Math.max(...p) - Math.min(...p)).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+});
+
+describe("snakeGroups (têtes de série, serpentin)", () => {
+  it("2 poules de 4 : A={1,4,5,8}, B={2,3,6,7} (seeds 1-indexés)", () => {
+    const g = snakeGroups(8, 2).map((b) => b.map((s) => s + 1)); // 1-indexé pour lisibilité
+    expect(g[0]).toEqual([1, 4, 5, 8]);
+    expect(g[1]).toEqual([2, 3, 6, 7]);
+  });
+
+  it("3 poules de 4 : équilibrées, seeds 1/2/3 dans des poules différentes", () => {
+    const g = snakeGroups(12, 3).map((b) => b.map((s) => s + 1));
+    expect(g[0]).toEqual([1, 6, 7, 12]);
+    expect(g[1]).toEqual([2, 5, 8, 11]);
+    expect(g[2]).toEqual([3, 4, 9, 10]);
+    // sommes égales → poules équilibrées
+    const sums = g.map((b) => b.reduce((a, c) => a + c, 0));
+    expect(new Set(sums).size).toBe(1);
+  });
+
+  it("fuzz : chaque seed placé une fois, tailles à ±1, top-g séparés", () => {
+    for (let n = 6; n <= 16; n++) {
+      for (let g = 2; g <= 4; g++) {
+        const buckets = snakeGroups(n, g);
+        const all = buckets.flat().sort((a, b) => a - b);
+        expect(all).toEqual([...Array(n)].map((_, i) => i)); // permutation exacte
+        const sizes = buckets.map((b) => b.length);
+        expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThanOrEqual(1);
+        // Les g meilleurs (seeds 0..g-1) sont dans des poules distinctes.
+        const topPools = new Set(
+          [...Array(Math.min(g, n))].map((_, s) => buckets.findIndex((b) => b.includes(s))),
+        );
+        expect(topPools.size).toBe(Math.min(g, n));
       }
     }
   });

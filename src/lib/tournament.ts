@@ -22,6 +22,22 @@ export function splitPools(n: number, poolSize: number): number[] {
 }
 
 /**
+ * Répartition des têtes de série en `g` poules par la méthode standard « pots + serpentin » :
+ * les seeds 0..n-1 (0 = meilleur) sont découpés en pots de G ; Pot 1 réparti poule 0→G-1,
+ * Pot 2 en sens INVERSE, Pot 3 dans l'ordre, etc. → poules équilibrées en force (chaque poule
+ * a un joueur de chaque pot). Renvoie, pour chaque poule, la liste des index de seed.
+ */
+export function snakeGroups(n: number, g: number): number[][] {
+  const buckets: number[][] = Array.from({ length: Math.max(1, g) }, () => []);
+  for (let i = 0; i < n; i++) {
+    const pot = Math.floor(i / g);
+    const pos = i % g;
+    buckets[pot % 2 === 0 ? pos : g - 1 - pos].push(i);
+  }
+  return buckets;
+}
+
+/**
  * Calendrier round-robin d'une poule par la MÉTHODE DU CERCLE : chaque joueur rencontre
  * tous les autres exactement une fois, et à l'intérieur d'un « tour » personne ne joue
  * deux fois (utile pour paralléliser sur plusieurs terrains). Si le nombre de joueurs est
