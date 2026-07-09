@@ -502,6 +502,41 @@ export function bracketLive(
   return { rounds: bracket.rounds, size: bracket.size, byes: bracket.byes, matches, ranking };
 }
 
+/**
+ * Clés de TOUS les matchs situés en aval d'un match donné (ceux qui consomment, directement
+ * ou transitivement, son vainqueur OU son perdant). Sert à invalider la cascade quand on
+ * corrige un résultat : si le vainqueur change, les participants des matchs suivants changent
+ * et leurs résultats déjà saisis deviennent caducs. Ne contient pas `key` lui-même.
+ */
+export function bracketDescendants(n: number, key: string): string[] {
+  const bracket = placementBracket(n);
+  // parentKey → clés des matchs qui le consomment (via une réf win/lose).
+  const consumers = new Map<string, string[]>();
+  for (const m of bracket.matches) {
+    for (const e of [m.a, m.b]) {
+      if (e.kind === "ref") {
+        const arr = consumers.get(e.matchKey) ?? [];
+        arr.push(m.key);
+        consumers.set(e.matchKey, arr);
+      }
+    }
+  }
+  const out: string[] = [];
+  const seen = new Set<string>([key]);
+  const queue = [key];
+  while (queue.length) {
+    const k = queue.shift() as string;
+    for (const c of consumers.get(k) ?? []) {
+      if (!seen.has(c)) {
+        seen.add(c);
+        out.push(c);
+        queue.push(c);
+      }
+    }
+  }
+  return out;
+}
+
 // --- Choix de la formule ---------------------------------------------------
 // Objectif n°1 (cf. cadrage) : TOUT LE MONDE JOUE LE MÊME NOMBRE DE MATCHS. On génère des
 // candidats (poules de différentes tailles + tableau à repêchage) et on les classe par

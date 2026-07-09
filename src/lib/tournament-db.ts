@@ -137,7 +137,10 @@ export function serializeTournament(t: FullTournament, userId: string) {
         ? { id: pools[0].standings[0].playerId, name: pools[0].standings[0].name }
         : null;
 
-    const status = t.status === "running" && allDone ? "done" : t.status;
+    // Statut effectif BIDIRECTIONNEL : une fois généré (≠ draft), il vaut « done » si tout
+    // est joué, sinon « running » — y compris à la baisse (une correction en cascade peut
+    // remettre des matchs « à jouer » et donc ré-ouvrir un tournoi terminé).
+    const status = t.status === "draft" ? "draft" : allDone ? "done" : "running";
     const formatLabel = pools.length === 1 ? `1 poule de ${pools[0].standings.length}` : `${pools.length} poules`;
     return { ...base, status, formatLabel, pools, bracket: null, champion };
   }
@@ -238,7 +241,8 @@ export function serializeTournament(t: FullTournament, userId: string) {
     }) ?? null;
   const champion = ranking ? { id: ranking[0].playerId, name: ranking[0].name } : null;
 
-  const status = t.status === "running" && ranking != null ? "done" : t.status;
+  // Statut effectif bidirectionnel (cf. poules) : « done » ssi le classement est complet.
+  const status = t.status === "draft" ? "draft" : ranking != null ? "done" : "running";
   return {
     ...base,
     status,
