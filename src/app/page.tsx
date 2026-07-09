@@ -25,6 +25,7 @@ import {
   FEATURE_DIRECTORY,
   FEATURE_DELEGATION,
   FEATURE_TOURNAMENT,
+  FEATURE_RANKING,
 } from "@/lib/features";
 import { DELEGATION_DURATIONS } from "@/lib/delegation-shared";
 
@@ -291,7 +292,9 @@ function SettingInfo({ title, children }: { title: string; children: ReactNode }
 // à l'image du bouton Frais. Lecture seule ici (les usages — message, etc. — viendront).
 function DirectoryButton({ toast }: { toast: (type: ToastType, msg: string) => void }) {
   const [open, setOpen] = useState(false);
-  const [members, setMembers] = useState<{ id: string; name: string }[] | null>(null);
+  const [members, setMembers] = useState<{ id: string; name: string; clt?: string }[] | null>(
+    null,
+  );
   const [q, setQ] = useState("");
 
   // Charge la liste à l'ouverture (à chaque fois : elle peut avoir bougé).
@@ -353,7 +356,14 @@ function DirectoryButton({ toast }: { toast: (type: ToastType, msg: string) => v
             ) : (
               <ul className="directory-list">
                 {shown.map((m) => (
-                  <li key={m.id}>{m.name}</li>
+                  <li key={m.id}>
+                    <span className="directory-name">{m.name}</span>
+                    {m.clt && (
+                      <span className="directory-clt" title="Classement fédéral">
+                        {m.clt}
+                      </span>
+                    )}
+                  </li>
                 ))}
               </ul>
             )}
@@ -907,6 +917,16 @@ function PrivacyNotice() {
                   interne réservé aux membres connectés. <strong>Aucune autre donnée
                   n'y figure</strong> (ni e-mail, ni réservations). Tu peux t'en retirer
                   à tout moment depuis ⚙️ Paramètres › « Annuaire des membres ».
+                </p>
+              )}
+              {FEATURE_RANKING && (
+                <p>
+                  <strong>Classement fédéral.</strong> À côté de ton nom peut s'afficher ton
+                  classement de squash, <strong>issu de squashnet.fr</strong> (le classement
+                  officiel FFSquash, une <strong>source publique</strong>). Il est rapproché de
+                  ton nom uniquement si tu figures dans l'annuaire, et sert aussi à pré-remplir
+                  l'ordre des joueurs lors de la création d'un tournoi. Retire-toi de l'annuaire
+                  pour ne plus l'afficher.
                 </p>
               )}
               <p>
