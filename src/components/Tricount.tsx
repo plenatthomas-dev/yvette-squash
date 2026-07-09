@@ -496,22 +496,19 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
   // Répartition affichée en direct dans le formulaire : montant dû par chaque participant
   // coché, recalculé à chaque frappe (montant, sélection, mode, parts). Purement indicatif —
   // le serveur reste la source de vérité au moment de l'enregistrement.
-  const selectedIds = data
-    ? data.members.filter((m) => selected.has(m.id)).map((m) => m.id)
-    : [];
-  const previewCents = parseEuros(amount);
   const shareByMember = useMemo(() => {
     const map = new Map<string, number>();
-    if (previewCents === null || previewCents === 0 || selectedIds.length === 0) return map;
+    const previewCents = parseEuros(amount);
+    if (previewCents === null || previewCents === 0 || !data) return map;
+    const selectedIds = data.members.filter((m) => selected.has(m.id)).map((m) => m.id);
+    if (selectedIds.length === 0) return map;
     const parts =
       splitMode === "shares"
         ? splitByWeights(previewCents, selectedIds, selectedIds.map((id) => weights[id] ?? 1))
         : splitEqually(previewCents, selectedIds.length);
     selectedIds.forEach((id, i) => map.set(id, parts[i]));
     return map;
-    // selectedIds est dérivé de (data, selected) ; on liste ces sources pour eslint.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewCents, splitMode, weights, data, selected]);
+  }, [amount, splitMode, weights, data, selected]);
 
   if (loading && !data) return <p className="muted">Chargement des frais…</p>;
   if (error) return <div className="notice error" role="alert">⚠️ {error}</div>;
