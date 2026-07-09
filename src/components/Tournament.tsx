@@ -496,7 +496,9 @@ export default function Tournament({ toast, onExpired }: Props) {
                   <tr>
                     <th>#</th>
                     <th>Joueur</th>
-                    <th>V</th>
+                    <th title="Matchs joués">MJ</th>
+                    <th title="Victoires">V</th>
+                    <th title="Défaites">D</th>
                     <th>Jeux</th>
                   </tr>
                 </thead>
@@ -505,7 +507,9 @@ export default function Tournament({ toast, onExpired }: Props) {
                     <tr key={s.playerId}>
                       <td>{s.rank}</td>
                       <td>{s.name}</td>
+                      <td>{s.played}</td>
                       <td>{s.wins}</td>
+                      <td>{s.losses}</td>
                       <td>
                         {s.gamesFor}/{s.gamesAgainst}
                         <span className="muted">
