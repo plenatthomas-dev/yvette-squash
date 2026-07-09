@@ -2428,6 +2428,36 @@ table.planning.week th.time.selhead {
   background: var(--pico-primary);
   color: var(--pico-primary-inverse);
 }
+/* Classement des têtes de série (glisser / flèches). */
+.trn-seedlist { list-style: none; padding: 0; margin: 0 0 8px; }
+.trn-seedlist li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  background: var(--pico-card-background-color);
+  cursor: grab;
+}
+.trn-seed-num {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.trn-seed-name { flex: 1; min-width: 0; }
+.trn-seed-arrows { display: flex; gap: 4px; flex: 0 0 auto; }
+.trn-seed-arrows button { width: 30px; margin: 0; padding: 2px 0; font-size: 0.9rem; }
+
 .trn-proposals { list-style: none; padding: 0; margin: 0; }
 .trn-proposals li { margin-bottom: 8px; }
 .trn-proposal {

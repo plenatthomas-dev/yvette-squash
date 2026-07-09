@@ -230,17 +230,18 @@ export async function materialize(
   const n = players.length;
 
   if (format === "pools") {
-    // Remplissage séquentiel des poules par seed (A, B, C…).
-    let cursor = 0;
-    for (let gi = 0; gi < poolSizes.length; gi++) {
+    // Répartition par TÊTE DE SÉRIE : la tête de série i (players trié par seed) va dans la
+    // poule i mod g. Ainsi les 1er, 2e, 3e… sont dans des poules différentes, et pour 2
+    // poules la A regroupe les seeds 1,3,5,7 et la B les 2,4,6,8 (comportement demandé).
+    const g = poolSizes.length;
+    const buckets: string[][] = Array.from({ length: g }, () => []);
+    players.forEach((p, i) => buckets[i % g].push(p.id));
+
+    for (let gi = 0; gi < g; gi++) {
       const label = String.fromCharCode(65 + gi); // A, B, C…
-      const group = await tx.tournamentGroup.create({
-        data: { tournamentId, label },
-      });
-      const localIds: string[] = [];
-      for (let k = 0; k < poolSizes[gi]; k++) {
-        const pid = players[cursor++].id;
-        localIds.push(pid);
+      const group = await tx.tournamentGroup.create({ data: { tournamentId, label } });
+      const localIds = buckets[gi];
+      for (const pid of localIds) {
         await tx.tournamentPlayer.update({ where: { id: pid }, data: { groupId: group.id } });
       }
       // Round-robin de la poule.
