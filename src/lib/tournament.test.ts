@@ -4,6 +4,8 @@ import {
   roundRobin,
   poolStandings,
   scheduleMatches,
+  placementBracket,
+  resolveBracket,
   type MatchResult,
 } from "./tournament";
 
@@ -179,5 +181,70 @@ describe("scheduleMatches", () => {
     const sched = scheduleMatches(m, 1);
     expect(new Set(sched.map((s) => s.wave)).size).toBe(2); // 2 vagues distinctes
     for (const s of sched) expect(s.court).toBe(0);
+  });
+});
+
+describe("placementBracket", () => {
+  // Simulateur : le plus petit seed gagne toujours (ordre total transitif).
+  const lowerSeedWins = (_k: string, a: number, b: number) => Math.min(a, b);
+
+  it("puissance de 2 : structure attendue (N=8)", () => {
+    const b = placementBracket(8);
+    expect(b.size).toBe(8);
+    expect(b.rounds).toBe(3);
+    expect(b.byes).toBe(0);
+    expect(b.matches.length).toBe(12); // P/2 × rounds = 4 × 3
+    expect(b.placements.length).toBe(8); // un rang par joueur
+    // clés uniques
+    expect(new Set(b.matches.map((m) => m.key)).size).toBe(12);
+    // exactement une « Finale »
+    expect(b.matches.filter((m) => m.placeLabel === "Finale").length).toBe(1);
+  });
+
+  it("N=8 : chacun joue exactement 3 matchs, classement 1..8 complet", () => {
+    const b = placementBracket(8);
+    const { ranking, playedBySeed } = resolveBracket(b, lowerSeedWins);
+    // classement = permutation des seeds 0..7
+    expect(ranking.map((r) => r.seed).sort((x, y) => x - y)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(ranking.map((r) => r.rank)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    // le meilleur seed gagne
+    expect(ranking[0].seed).toBe(0);
+    // tout le monde joue 3
+    for (let s = 0; s < 8; s++) expect(playedBySeed.get(s)).toBe(3);
+  });
+
+  it("byes (N=6) : classement 1..6 complet, matchs/joueur à ±1", () => {
+    const b = placementBracket(6);
+    expect(b.size).toBe(8);
+    expect(b.byes).toBe(2);
+    const { ranking, playedBySeed } = resolveBracket(b, lowerSeedWins);
+    expect(ranking.map((r) => r.seed).sort((x, y) => x - y)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(ranking.map((r) => r.rank)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(ranking[0].seed).toBe(0); // champion = meilleur seed
+    const counts = [...Array(6)].map((_, s) => playedBySeed.get(s) ?? 0);
+    expect(Math.max(...counts) - Math.min(...counts)).toBeLessThanOrEqual(1);
+    expect(Math.min(...counts)).toBeGreaterThanOrEqual(b.rounds - 1);
+    expect(Math.max(...counts)).toBeLessThanOrEqual(b.rounds);
+  });
+
+  it("fuzz N=6..16 : classement complet 1..N pour tout N (correction byes)", () => {
+    const lowerWins = (_k: string, a: number, b: number) => Math.min(a, b);
+    const isPow2 = (x: number) => (x & (x - 1)) === 0;
+    for (let n = 6; n <= 16; n++) {
+      const b = placementBracket(n);
+      const { ranking, playedBySeed } = resolveBracket(b, lowerWins);
+      // Correctness (vrai pour TOUT N) : permutation exacte des N joueurs, champion = seed 0.
+      expect(ranking.map((r) => r.seed).sort((x, y) => x - y)).toEqual(
+        [...Array(n)].map((_, i) => i),
+      );
+      expect(ranking.map((r) => r.rank)).toEqual([...Array(n)].map((_, i) => i + 1));
+      expect(ranking[0].seed).toBe(0);
+      const counts = [...Array(n)].map((_, s) => playedBySeed.get(s) ?? 0);
+      for (const c of counts) expect(c).toBeGreaterThanOrEqual(1);
+      // Matchs strictement ÉGAUX seulement en puissance de 2 (sans byes) : chacun joue log2(N).
+      if (isPow2(n)) {
+        for (const c of counts) expect(c).toBe(b.rounds);
+      }
+    }
   });
 });

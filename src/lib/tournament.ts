@@ -200,3 +200,183 @@ export function scheduleMatches(
   out.forEach((s, i) => (s.order = i));
   return out;
 }
+
+// --- Tableau à classement intégral (repêchage complet) ---------------------
+// Personne n'est éliminé : le perdant bascule dans une branche « classement » et continue.
+// Chacun joue log2(P) tours (P = puissance de 2 ≥ N), on classe TOUS les joueurs 1→N.
+// N non puissance de 2 → byes : les slots au-delà de N sont fictifs (le vrai joueur passe
+// sans jouer). Un bye fait donc jouer 1 match de moins à celui qui le croise.
+
+function nextPow2(n: number): number {
+  let p = 1;
+  while (p < n) p *= 2;
+  return p;
+}
+
+/**
+ * Ordre de placement « tête de série » standard sur une taille puissance de 2 : la position
+ * i affronte la position P−1−i au 1er tour (1 contre P, 2 contre P−1…). Ainsi les byes
+ * (seeds les plus élevés) tombent face aux mieux classés.
+ */
+function seedOrder(size: number): number[] {
+  let order = [0];
+  while (order.length < size) {
+    const m = order.length * 2;
+    const next: number[] = [];
+    for (const s of order) {
+      next.push(s);
+      next.push(m - 1 - s);
+    }
+    order = next;
+  }
+  return order;
+}
+
+export type BracketEntrant =
+  | { kind: "seed"; seed: number } // seed -1 = BYE
+  | { kind: "ref"; matchKey: string; take: "win" | "lose" };
+
+export interface BracketMatch {
+  key: string;
+  round: number; // 0 = 1er tour
+  branch: string; // chemin (vainqueurs/perdants), pour l'unicité de la clé
+  rankLow: number; // meilleur rang que ce sous-tableau attribue
+  rankHigh: number;
+  placeLabel?: string; // posé sur les matchs « de placement » (2 rangs adjacents)
+  a: BracketEntrant;
+  b: BracketEntrant;
+}
+
+export interface PlacementRule {
+  matchKey: string;
+  take: "win" | "lose";
+  rank: number; // rang (1..P) attribué au vainqueur/perdant de ce match
+}
+
+export interface PlacementBracket {
+  size: number; // P = puissance de 2 ≥ N
+  rounds: number; // log2(P) = matchs par joueur (hors byes)
+  byes: number; // P − N
+  matches: BracketMatch[];
+  placements: PlacementRule[];
+}
+
+function placeLabelFor(rankLow: number): string {
+  if (rankLow === 1) return "Finale";
+  if (rankLow === 3) return "Petite finale (3e-4e place)";
+  return `Places ${rankLow}-${rankLow + 1}`;
+}
+
+/** Génère la structure complète du tableau à repêchage pour `n` joueurs (6..16). */
+export function placementBracket(n: number): PlacementBracket {
+  const P = nextPow2(Math.max(2, n));
+  const rounds = Math.round(Math.log2(P));
+  const root: BracketEntrant[] = seedOrder(P).map((seed) => ({
+    kind: "seed",
+    seed: seed < n ? seed : -1, // seed ≥ n → BYE
+  }));
+  const matches: BracketMatch[] = [];
+  const placements: PlacementRule[] = [];
+
+  const build = (entrants: BracketEntrant[], round: number, branch: string, rankBase: number) => {
+    const m = entrants.length;
+    if (m === 1) return; // rang attribué par le match parent (via placements)
+    const rankLow = rankBase;
+    const rankHigh = rankBase + m - 1;
+    const winners: BracketEntrant[] = [];
+    const losers: BracketEntrant[] = [];
+    for (let i = 0; i < m; i += 2) {
+      const key = `${branch}-${round}-${i / 2}`;
+      matches.push({
+        key,
+        round,
+        branch,
+        rankLow,
+        rankHigh,
+        a: entrants[i],
+        b: entrants[i + 1],
+        ...(m === 2 ? { placeLabel: placeLabelFor(rankLow) } : {}),
+      });
+      winners.push({ kind: "ref", matchKey: key, take: "win" });
+      losers.push({ kind: "ref", matchKey: key, take: "lose" });
+      if (m === 2) {
+        placements.push({ matchKey: key, take: "win", rank: rankLow });
+        placements.push({ matchKey: key, take: "lose", rank: rankLow + 1 });
+      }
+    }
+    if (m > 2) {
+      // Branche encodée entièrement (W pour vainqueurs, L pour perdants) → clés uniques :
+      // sinon « perdant des vainqueurs » et « vainqueur des perdants » entreraient en collision.
+      build(winners, round + 1, branch + "W", rankBase); // haut du classement
+      build(losers, round + 1, branch + "L", rankBase + m / 2); // bas du classement (repêchage)
+    }
+  };
+  build(root, 0, "M", 1);
+  return { size: P, rounds, byes: P - n, matches, placements };
+}
+
+export interface BracketResolution {
+  ranking: { seed: number; rank: number }[]; // joueurs réels, rangs 1..N (byes retirés)
+  playedBySeed: Map<number, number>; // matchs RÉELLEMENT joués (hors byes) par joueur
+}
+
+/**
+ * Déroule le tableau : `winnerOf(matchKey, seedA, seedB)` renvoie le SEED vainqueur d'un
+ * match réel (jamais appelé quand un côté est un bye : le vrai joueur passe d'office).
+ * Renvoie le classement final 1..N et le nombre de matchs réellement joués par joueur.
+ */
+export function resolveBracket(
+  bracket: PlacementBracket,
+  winnerOf: (matchKey: string, seedA: number, seedB: number) => number,
+): BracketResolution {
+  const byKey = new Map(bracket.matches.map((m) => [m.key, m]));
+  const memo = new Map<string, { winner: number; loser: number }>();
+
+  const entrantSeed = (e: BracketEntrant): number =>
+    e.kind === "seed"
+      ? e.seed
+      : e.take === "win"
+        ? resolve(e.matchKey).winner
+        : resolve(e.matchKey).loser;
+
+  function resolve(key: string): { winner: number; loser: number } {
+    const cached = memo.get(key);
+    if (cached) return cached;
+    const m = byKey.get(key);
+    if (!m) return { winner: -1, loser: -1 };
+    const a = entrantSeed(m.a);
+    const b = entrantSeed(m.b);
+    let res: { winner: number; loser: number };
+    if (a < 0 && b < 0) res = { winner: -1, loser: -1 };
+    else if (a < 0) res = { winner: b, loser: a };
+    else if (b < 0) res = { winner: a, loser: b };
+    else {
+      const w = winnerOf(key, a, b);
+      res = w === b ? { winner: b, loser: a } : { winner: a, loser: b };
+    }
+    memo.set(key, res);
+    return res;
+  }
+
+  // Compte les matchs réellement joués (deux vrais joueurs) par joueur.
+  const played = new Map<number, number>();
+  for (const m of bracket.matches) {
+    const a = entrantSeed(m.a);
+    const b = entrantSeed(m.b);
+    if (a >= 0 && b >= 0) {
+      played.set(a, (played.get(a) ?? 0) + 1);
+      played.set(b, (played.get(b) ?? 0) + 1);
+    }
+  }
+
+  const ranking = bracket.placements
+    .map((p) => ({
+      seed: p.take === "win" ? resolve(p.matchKey).winner : resolve(p.matchKey).loser,
+      rank: p.rank,
+    }))
+    .filter((r) => r.seed >= 0)
+    .sort((x, y) => x.rank - y.rank)
+    .map((r, i) => ({ seed: r.seed, rank: i + 1 })); // re-rangs 1..N après retrait des byes
+
+  return { ranking, playedBySeed: played };
+}
