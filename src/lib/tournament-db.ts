@@ -95,6 +95,7 @@ export function serializeTournament(t: FullTournament, userId: string) {
           gPlayers.map((p) => p.id),
           results,
         ).map((s) => ({ ...s, name: name(s.playerId) }));
+        const gCount = gMatches.length;
         return {
           label: g.label,
           matches: gMatches
@@ -109,7 +110,8 @@ export function serializeTournament(t: FullTournament, userId: string) {
               terrain: schedById.has(m.id) ? terrain(schedById.get(m.id)!.court) : null,
               order: schedById.get(m.id)?.order ?? null,
             }))
-            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+            .map((m, i) => ({ ...m, stage: `Poule ${g.label} · match ${i + 1}/${gCount}` })),
           standings,
         };
       })
@@ -122,7 +124,9 @@ export function serializeTournament(t: FullTournament, userId: string) {
         ? { id: pools[0].standings[0].playerId, name: pools[0].standings[0].name }
         : null;
 
-    return { ...base, pools, bracket: null, champion };
+    const status = t.status === "running" && allDone ? "done" : t.status;
+    const formatLabel = pools.length === 1 ? `1 poule de ${pools[0].standings.length}` : `${pools.length} poules`;
+    return { ...base, status, formatLabel, pools, bracket: null, champion };
   }
 
   // --- Format tableau (bracket) ---
@@ -151,6 +155,21 @@ export function serializeTournament(t: FullTournament, userId: string) {
     }
   }
 
+  // Stade d'un match du tableau : « Finale / Demi-finale / Quart de finale… » côté vainqueurs,
+  // le libellé de placement pour les finales de branche, « Repêchage » sinon.
+  const winnersStage: Record<number, string> = {
+    1: "Demi-finale",
+    2: "Quart de finale",
+    3: "8e de finale",
+    4: "16e de finale",
+  };
+  const stageOf = (lm: (typeof live.matches)[number]): string => {
+    if (lm.placeLabel) return lm.placeLabel;
+    const d = live.rounds - 1 - lm.round; // distance à la finale
+    if (lm.phase === "winners") return winnersStage[d] ?? `Tour ${lm.round + 1}`;
+    return "Repêchage";
+  };
+
   const matches = live.matches
     .map((lm) => {
       const db = dbByKey.get(lm.key);
@@ -164,6 +183,7 @@ export function serializeTournament(t: FullTournament, userId: string) {
         branch: lm.branch,
         phase: lm.phase,
         placeLabel: lm.placeLabel ?? null,
+        stage: stageOf(lm),
         p1: playerRef(p1Id),
         p2: playerRef(p2Id),
         score1: db?.score1 ?? null,
@@ -184,8 +204,11 @@ export function serializeTournament(t: FullTournament, userId: string) {
     })) ?? null;
   const champion = ranking ? { id: ranking[0].playerId, name: ranking[0].name } : null;
 
+  const status = t.status === "running" && ranking != null ? "done" : t.status;
   return {
     ...base,
+    status,
+    formatLabel: `Tableau à repêchage (${n})`,
     pools: null,
     bracket: { rounds: live.rounds, byes: live.byes, ranking, matches },
     champion,

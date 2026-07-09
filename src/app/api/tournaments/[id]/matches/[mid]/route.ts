@@ -80,14 +80,12 @@ export async function PATCH(
     },
   });
 
-  // Le tournoi est-il terminé ? (toutes les poules jouées, ou tableau entièrement classé)
+  // Le tournoi est-il terminé ? serializeTournament calcule un statut « done » effectif
+  // (poules toutes jouées, ou tableau entièrement classé) — on le fige en base.
   const after = await prisma.tournament.findUnique({ where: { id }, include: tournamentInclude });
-  if (after) {
+  if (after && after.status !== "done") {
     const v2 = serializeTournament(after, session.userId);
-    const done = v2.pools
-      ? v2.pools.every((p) => p.matches.every((mm) => mm.status === "done"))
-      : v2.bracket?.ranking != null;
-    if (done && after.status !== "done") {
+    if (v2.status === "done") {
       await prisma.tournament.update({ where: { id }, data: { status: "done" } });
     }
   }

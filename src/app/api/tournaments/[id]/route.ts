@@ -21,7 +21,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!t) {
     return NextResponse.json({ error: "Tournoi introuvable" }, { status: 404 });
   }
-  return NextResponse.json(serializeTournament(t, session.userId));
+  const view = serializeTournament(t, session.userId);
+  // Auto-cicatrisation : si le tournoi est en fait terminé mais encore "running" en base
+  // (dernier score saisi ailleurs, etc.), on fige le statut pour que la LISTE soit juste.
+  if (view.status === "done" && t.status !== "done") {
+    await prisma.tournament.update({ where: { id }, data: { status: "done" } }).catch(() => {});
+  }
+  return NextResponse.json(view);
 }
 
 // DELETE /api/tournaments/{id} : créateur seulement (supprime tout en cascade).

@@ -30,6 +30,7 @@ interface MatchView {
   branch?: string;
   phase?: string;
   placeLabel?: string | null;
+  stage?: string;
 }
 interface StandingView {
   playerId: string;
@@ -54,6 +55,7 @@ interface Detail {
   date: string;
   status: "draft" | "running" | "done";
   format: string;
+  formatLabel: string;
   targetMatches: number;
   bestOf: number;
   courts: number;
@@ -315,7 +317,7 @@ export default function Tournament({ toast, onExpired }: Props) {
           {m.terrain && m.status === "pending" && (
             <span className="trn-terrain">{m.terrain}</span>
           )}
-          {m.placeLabel && <span className="trn-place">{m.placeLabel}</span>}
+          {m.stage && <span className="trn-place">{m.stage}</span>}
         </div>
         <div className="trn-vs">
           <span className={done && m.winnerId === m.p1?.id ? "win" : ""}>{p1}</span>
@@ -382,6 +384,10 @@ export default function Tournament({ toast, onExpired }: Props) {
               · {detail.players.length} joueurs · {STATUS_LABEL[detail.status]}
             </small>
           </h2>
+          <p className="trn-formula muted tiny">
+            Formule : <strong>{detail.formatLabel}</strong> ·{" "}
+            {detail.bestOf === 5 ? "3 jeux gagnants" : "2 jeux gagnants"}
+          </p>
 
           {detail.champion && (
             <p className="trn-champion">🥇 Vainqueur : <strong>{detail.champion.name}</strong></p>
@@ -455,11 +461,14 @@ export default function Tournament({ toast, onExpired }: Props) {
                 </ol>
               )}
               {Array.from({ length: detail.bracket.rounds }).map((_, r) => {
-                const ms = detail.bracket!.matches.filter((m) => m.round === r);
+                const ms = detail
+                  .bracket!.matches.filter((m) => m.round === r)
+                  // Vainqueurs (tableau principal) d'abord, repêchage ensuite.
+                  .sort((a, b) => (a.phase === "winners" ? 0 : 1) - (b.phase === "winners" ? 0 : 1));
                 if (ms.length === 0) return null;
                 return (
                   <div key={r} className="trn-round">
-                    <h4>Tour {r + 1}</h4>
+                    <h4>Tour {r + 1} sur {detail.bracket!.rounds}</h4>
                     <ul className="trn-matches">
                       {ms.map((m, i) => renderMatch(m, `r${r}-${i}`))}
                     </ul>
