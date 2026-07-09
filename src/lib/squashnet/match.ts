@@ -18,6 +18,7 @@ export interface MemberIdentity {
 
 export interface RankingMatch {
   clt: string;
+  rang: number | null; // rang national (plus petit = plus fort), pour trier les têtes de série
   licence: string;
   cat: string;
   club: string;
@@ -79,7 +80,15 @@ export function matchRanking(
   );
   if (candidates.length !== 1) return null; // 0 ou homonymes → on n'affirme rien
   const c = candidates[0];
-  return { clt: c.clt, licence: c.licence, cat: c.cat, club: c.club, name: c.name };
+  const rangNum = parseInt(c.rang.replace(/\s/g, ""), 10);
+  return {
+    clt: c.clt,
+    rang: Number.isFinite(rangNum) ? rangNum : null,
+    licence: c.licence,
+    cat: c.cat,
+    club: c.club,
+    name: c.name,
+  };
 }
 
 /** Terme de recherche squashnet pour un membre : le nom de famille (le plus discriminant). */

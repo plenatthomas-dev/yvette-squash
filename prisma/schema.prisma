@@ -40,6 +40,8 @@ model User {
   // Tournois (idée 3) : ceux que j'ai créés + les participations où je suis membre.
   tournamentsCreated  Tournament[]       @relation("TournamentCreator")
   tournamentPlayers   TournamentPlayer[]
+  // Classement fédéral (idée squashnet) : dernier classement rapproché, source publique.
+  squashnetRanking    SquashnetRanking?
 }
 
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
@@ -371,4 +373,20 @@ model Match {
 
   @@index([tournamentId])
   @@index([groupId])
+}
+
+// Classement fédéral (FFSquash) rapproché depuis squashnet.fr (source PUBLIQUE), rafraîchi
+// mensuellement par un cron. Un enregistrement par membre : présent uniquement quand le
+// rapprochement nom+club est SÛR (cf. squashnet/match). L'absence = pas de classement affiché.
+model SquashnetRanking {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String   @unique
+  clt       String // classement affiché, ex. "5A", "NC"
+  rang      Int? // rang national (plus petit = plus fort) — sert au tri des têtes de série
+  licence   String? // n° de licence FFSquash lu sur squashnet (traçabilité)
+  cat       String? // catégorie d'âge, ex. "+55", "Senior"
+  club      String // libellé du club rapproché (audit)
+  month     String // période de classement, "YYYY-MM-DD"
+  fetchedAt DateTime @updatedAt // dernier rafraîchissement
 }

@@ -36,6 +36,13 @@ describe("matchRanking", () => {
     expect(matchRanking(jerome, rows)).toMatchObject({ clt: "5A", licence: "0124215" });
   });
 
+  it("parse le rang national en entier (espaces retirés) ; non-numérique → null", () => {
+    const withRang = [row({ name: "COURTAUT JEROME", club: YVETTE_CLUB, rang: "3 184" })];
+    expect(matchRanking(jerome, withRang)?.rang).toBe(3184);
+    const noRang = [row({ name: "COURTAUT JEROME", club: YVETTE_CLUB, rang: "NC" })];
+    expect(matchRanking(jerome, noRang)?.rang).toBeNull();
+  });
+
   it("ignore un homonyme dans un AUTRE club (filtre club)", () => {
     const rows = [
       row({ name: "COURTAUT JEROME", club: "Squash Club de Rennes", clt: "2C" }),
