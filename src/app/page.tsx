@@ -28,6 +28,7 @@ import {
   FEATURE_RANKING,
 } from "@/lib/features";
 import { DELEGATION_DURATIONS } from "@/lib/delegation-shared";
+import { fetchDirectory, type DirectoryMember } from "@/lib/directoryCache";
 
 function toISODate(d: Date): string {
   return d.toLocaleDateString("en-CA"); // YYYY-MM-DD local
@@ -315,17 +316,16 @@ function DirectoryModal({
   >(null);
   const [q, setQ] = useState("");
 
-  // Charge la liste à l'ouverture (à chaque fois : elle peut avoir bougé).
+  // Charge la liste à l'ouverture. Cache mémoire court (cf. fetchDirectory) : une
+  // réouverture rapprochée (ou après passage par Réglages) ne refait pas d'aller-retour.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setMembers(null);
     (async () => {
       try {
-        const res = await fetch("/api/directory");
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
-        if (!cancelled) setMembers(data.members ?? []);
+        const members = await fetchDirectory();
+        if (!cancelled) setMembers(members);
       } catch (e) {
         if (!cancelled) {
           setMembers([]);
@@ -439,14 +439,15 @@ function SettingsButton({
     let cancelled = false;
     (async () => {
       try {
-        const [dirRes, delRes] = await Promise.all([
-          fetch("/api/directory"),
+        // Annuaire via le cache mémoire partagé (dédupliqué avec la modale Annuaire) ;
+        // délégation sortante en parallèle (spécifique, non cachée).
+        const [members, delRes] = await Promise.all([
+          fetchDirectory().catch(() => [] as DirectoryMember[]),
           fetch("/api/delegations"),
         ]);
-        const dir = await dirRes.json().catch(() => ({}));
         const del = await delRes.json().catch(() => ({}));
         if (cancelled) return;
-        setDelegateMembers(dirRes.ok ? (dir.members ?? []) : []);
+        setDelegateMembers(members);
         setOutgoingDelegation(delRes.ok ? (del.outgoing ?? null) : null);
       } catch {
         if (!cancelled) {
@@ -1938,6 +1939,8 @@ export default function Home() {
                 src="/logo_squash.jpeg"
                 alt="Squash de l'Yvette"
                 className="logo-mark"
+                width={46}
+                height={46}
               />
               <span className="brand-title" aria-hidden="true">
                 Squash de l'Yvette
