@@ -3,6 +3,7 @@ import {
   scheduleMatches,
   poolStandings,
   bracketLive,
+  snakeGroups,
   type MatchResult,
 } from "@/lib/tournament";
 import type { Prisma } from "@prisma/client";
@@ -230,17 +231,18 @@ export async function materialize(
   const n = players.length;
 
   if (format === "pools") {
-    // Remplissage séquentiel des poules par seed (A, B, C…).
-    let cursor = 0;
-    for (let gi = 0; gi < poolSizes.length; gi++) {
+    // Répartition par TÊTES DE SÉRIE, méthode standard « pots + serpentin » : on découpe les
+    // seeds en pots de G (Pot 1 = seeds 1..G, Pot 2 = G+1..2G…), Pot 1 réparti A→…→G, Pot 2
+    // en sens INVERSE, etc. → poules équilibrées en force (le 1 tombe avec le 4, pas le 3).
+    const g = poolSizes.length;
+    // Serpentin (cf. snakeGroups) : index de seed par poule → identifiants joueurs.
+    const buckets = snakeGroups(players.length, g).map((idx) => idx.map((i) => players[i].id));
+
+    for (let gi = 0; gi < g; gi++) {
       const label = String.fromCharCode(65 + gi); // A, B, C…
-      const group = await tx.tournamentGroup.create({
-        data: { tournamentId, label },
-      });
-      const localIds: string[] = [];
-      for (let k = 0; k < poolSizes[gi]; k++) {
-        const pid = players[cursor++].id;
-        localIds.push(pid);
+      const group = await tx.tournamentGroup.create({ data: { tournamentId, label } });
+      const localIds = buckets[gi];
+      for (const pid of localIds) {
         await tx.tournamentPlayer.update({ where: { id: pid }, data: { groupId: group.id } });
       }
       // Round-robin de la poule.

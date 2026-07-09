@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog } from "@/components/Dialog";
 import { MIN_PLAYERS, MAX_PLAYERS } from "@/lib/tournament";
 
@@ -132,13 +132,18 @@ export default function Tournament({ toast, onExpired }: Props) {
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  // Assistant de création
+  // Assistant de création (1 roster, 2 têtes de série, 3 réglages, 4 formules)
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [members, setMembers] = useState<Member[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [guests, setGuests] = useState<string[]>([]);
   const [guestInput, setGuestInput] = useState("");
+  // Ordre des têtes de série (glisser-déposer / flèches) : le 1er = tête de série n°1.
+  const [seeded, setSeeded] = useState<
+    { key: string; label: string; userId: string | null; guestName: string | null }[]
+  >([]);
+  const dragIndex = useRef<number | null>(null);
   const [name, setName] = useState("");
   const [date, setDate] = useState(todayISO());
   const [target, setTarget] = useState<2 | 3 | 4>(3);
@@ -184,6 +189,7 @@ export default function Tournament({ toast, onExpired }: Props) {
     setBestOf(3);
     setProposals(null);
     setDraftId(null);
+    setSeeded([]);
     setWizardOpen(true);
     if (members === null) {
       const r = await fetch("/api/directory");
@@ -212,17 +218,44 @@ export default function Tournament({ toast, onExpired }: Props) {
     setGuestInput("");
   };
 
+  // Construit la liste ordonnée (têtes de série) à partir des joueurs choisis.
+  const buildSeeded = () => {
+    const memberItems = [...picked].map((id) => ({
+      key: `m${id}`,
+      label: members?.find((m) => m.id === id)?.name ?? "?",
+      userId: id,
+      guestName: null,
+    }));
+    const guestItems = guests.map((g, i) => ({
+      key: `g${i}`,
+      label: g,
+      userId: null,
+      guestName: g,
+    }));
+    setSeeded([...memberItems, ...guestItems]);
+  };
+
+  // Déplace une tête de série (flèches ou glisser-déposer).
+  const moveSeed = (from: number, to: number) =>
+    setSeeded((prev) => {
+      if (to < 0 || to >= prev.length || from === to) return prev;
+      const a = [...prev];
+      const [x] = a.splice(from, 1);
+      a.splice(to, 0, x);
+      return a;
+    });
+
   const fetchProposals = async () => {
-    if (totalPlayers < MIN_PLAYERS || totalPlayers > MAX_PLAYERS) {
+    if (seeded.length < MIN_PLAYERS || seeded.length > MAX_PLAYERS) {
       toast("err", `Il faut de ${MIN_PLAYERS} à ${MAX_PLAYERS} joueurs`);
       return;
     }
     setBusy(true);
     try {
-      const players = [
-        ...[...picked].map((userId) => ({ userId })),
-        ...guests.map((guestName) => ({ guestName })),
-      ];
+      // Ordre = têtes de série (seed = position dans la liste).
+      const players = seeded.map((s) =>
+        s.userId ? { userId: s.userId } : { guestName: s.guestName as string },
+      );
       const res = await fetch("/api/tournaments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -233,7 +266,7 @@ export default function Tournament({ toast, onExpired }: Props) {
       if (!res.ok) throw new Error(j.error ?? `Erreur ${res.status}`);
       setDraftId(j.id);
       setProposals(j.proposals ?? []);
-      setStep(3);
+      setStep(4);
     } catch (e) {
       toast("err", "Impossible : " + (e as Error).message);
     } finally {
@@ -358,6 +391,43 @@ export default function Tournament({ toast, onExpired }: Props) {
     </li>
   );
 
+  // Arbre graphique d'un jeu de matchs (colonnes = tours). Réutilisé pour le tableau
+  // principal (vainqueurs) ET le repêchage (perdants), qui a aussi ses demi/finales.
+  const renderTree = (ms: MatchView[], titleFn: (r: number) => string) => {
+    if (!detail?.bracket || ms.length === 0) return null;
+    const rounds = detail.bracket.rounds;
+    const minRound = Math.min(...ms.map((m) => m.round ?? 0));
+    return (
+      <div className="trn-tree">
+        {Array.from({ length: rounds }).map((_, r) => {
+          const col = ms
+            .filter((m) => m.round === r)
+            .sort((a, c) => (a.slot ?? 0) - (c.slot ?? 0));
+          if (col.length === 0) return null;
+          return (
+            <div key={r} className="trn-tree-col">
+              <div className="trn-tree-col-title">{titleFn(r)}</div>
+              <div className="trn-tree-col-body">
+                {col.map((m, i) => (
+                  <div
+                    key={i}
+                    className={
+                      "trn-tree-match" +
+                      (r > minRound ? " linked" : "") +
+                      (m.status === "done" ? " done" : "")
+                    }
+                  >
+                    {renderMatchBody(m)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   // Liste des matchs planifiés (par ordre de passage / terrain) — les prochains d'abord.
   const scheduleMatches = (): MatchView[] => {
     if (!detail) return [];
@@ -386,7 +456,7 @@ export default function Tournament({ toast, onExpired }: Props) {
           </div>
           <h2>
             🏆 {detail.name || `Tournoi du ${prettyDate(detail.date)}`}{" "}
-            <small className="muted">· {detail.players.length} joueurs</small>{" "}
+            <small className="trn-count">· {detail.players.length} joueurs</small>{" "}
             <span className={"trn-status " + detail.status}>{STATUS_LABEL[detail.status]}</span>
           </h2>
           <p className="trn-formula muted tiny">
@@ -471,49 +541,26 @@ export default function Tournament({ toast, onExpired }: Props) {
                     </ol>
                   )}
                   {/* Arbre principal (chemin vers la 1re place) */}
-                  <div className="trn-tree">
-                    {Array.from({ length: b.rounds }).map((_, r) => {
-                      const col = winners
-                        .filter((m) => m.round === r)
-                        .sort((a, c) => (a.slot ?? 0) - (c.slot ?? 0));
-                      if (col.length === 0) return null;
+                  <h4>Tableau principal</h4>
+                  {renderTree(winners, (r) => (r === b.rounds - 1 ? "Finale" : `Tour ${r + 1}`))}
+                  {/* Repêchage : les perdants (dès le 1er tour) ont AUSSI leur arbre —
+                      leurs demi-finales puis leurs finales de classement. */}
+                  {classif.length > 0 &&
+                    (() => {
+                      const minR = Math.min(...classif.map((m) => m.round ?? 0));
                       return (
-                        <div key={r} className="trn-tree-col">
-                          <div className="trn-tree-col-title">
-                            {r === b.rounds - 1 ? "Finale" : `Tour ${r + 1}`}
-                          </div>
-                          <div className="trn-tree-col-body">
-                            {col.map((m, i) => (
-                              <div
-                                key={i}
-                                className={
-                                  "trn-tree-match" +
-                                  (r > 0 ? " linked" : "") +
-                                  (m.status === "done" ? " done" : "")
-                                }
-                              >
-                                {renderMatchBody(m)}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
+                        <>
+                          <h4>Tableau des perdants (repêchage)</h4>
+                          {renderTree(classif, (r) =>
+                            r === b.rounds - 1
+                              ? "Finales de classement"
+                              : r === minR
+                                ? "Demi-finales des perdants"
+                                : `Repêchage ${r - minR + 1}`,
+                          )}
+                        </>
                       );
-                    })}
-                  </div>
-                  {/* Repêchage & matchs de classement (branches perdants) */}
-                  {classif.length > 0 && (
-                    <div className="trn-round">
-                      <h4>Repêchage &amp; classement</h4>
-                      <ul className="trn-matches">
-                        {classif
-                          .sort(
-                            (a, c) =>
-                              (a.round ?? 0) - (c.round ?? 0) || (a.slot ?? 0) - (c.slot ?? 0),
-                          )
-                          .map((m, i) => renderMatch(m, `cl-${i}`))}
-                      </ul>
-                    </div>
-                  )}
+                    })()}
                 </section>
               );
             })()}
@@ -536,7 +583,7 @@ export default function Tournament({ toast, onExpired }: Props) {
                 <li key={t.id}>
                   <button className="trn-list-item" onClick={() => setOpenId(t.id)}>
                     <strong>{t.name || `Tournoi du ${prettyDate(t.date)}`}</strong>
-                    <small className="muted">
+                    <small className="trn-count">
                       {t.playerCount} joueurs ·{" "}
                       <span className={"trn-status " + t.status}>
                         {STATUS_LABEL[t.status] ?? t.status}
@@ -613,7 +660,10 @@ export default function Tournament({ toast, onExpired }: Props) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setStep(2)}
+                  onClick={() => {
+                    buildSeeded();
+                    setStep(2);
+                  }}
                   disabled={totalPlayers < MIN_PLAYERS || totalPlayers > MAX_PLAYERS}
                 >
                   Suivant
@@ -623,6 +673,61 @@ export default function Tournament({ toast, onExpired }: Props) {
           )}
 
           {step === 2 && (
+            <>
+              <p className="muted tiny">
+                Classe les joueurs du plus fort (n°1) au plus faible — glisse-les ou utilise les
+                flèches. Ça crée les têtes de série : en poules le 1 et le 2 sont séparés ; en
+                tableau le 1 rencontre le dernier, et le 1/4 (puis 2/3) peuvent se croiser en demie.
+              </p>
+              <ol className="trn-seedlist">
+                {seeded.map((s, i) => (
+                  <li
+                    key={s.key}
+                    draggable
+                    onDragStart={() => (dragIndex.current = i)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => {
+                      if (dragIndex.current !== null) moveSeed(dragIndex.current, i);
+                      dragIndex.current = null;
+                    }}
+                  >
+                    <span className="trn-seed-num">{i + 1}</span>
+                    <span className="trn-seed-name">{s.label}</span>
+                    <span className="trn-seed-arrows">
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={i === 0}
+                        onClick={() => moveSeed(i, i - 1)}
+                        aria-label={`Monter ${s.label}`}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={i === seeded.length - 1}
+                        onClick={() => moveSeed(i, i + 1)}
+                        aria-label={`Descendre ${s.label}`}
+                      >
+                        ↓
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+              <div className="modal-actions">
+                <button type="button" className="secondary" onClick={() => setStep(1)}>
+                  Retour
+                </button>
+                <button type="button" onClick={() => setStep(3)}>
+                  Suivant
+                </button>
+              </div>
+            </>
+          )}
+
+          {step === 3 && (
             <>
               <label className="tri-field">
                 Nom (optionnel)
@@ -669,7 +774,7 @@ export default function Tournament({ toast, onExpired }: Props) {
                 </button>
               </fieldset>
               <div className="modal-actions">
-                <button type="button" className="secondary" onClick={() => setStep(1)}>
+                <button type="button" className="secondary" onClick={() => setStep(2)}>
                   Retour
                 </button>
                 <button type="button" onClick={fetchProposals} disabled={busy}>
@@ -679,9 +784,9 @@ export default function Tournament({ toast, onExpired }: Props) {
             </>
           )}
 
-          {step === 3 && proposals && (
+          {step === 4 && proposals && (
             <>
-              <p className="muted tiny">Choisis une formule ({totalPlayers} joueurs) :</p>
+              <p className="muted tiny">Choisis une formule ({seeded.length} joueurs) :</p>
               <ul className="trn-proposals">
                 {proposals.map((p, i) => (
                   <li key={i}>
@@ -704,7 +809,7 @@ export default function Tournament({ toast, onExpired }: Props) {
                 ))}
               </ul>
               <div className="modal-actions">
-                <button type="button" className="secondary" onClick={() => setStep(2)}>
+                <button type="button" className="secondary" onClick={() => setStep(3)}>
                   Retour
                 </button>
               </div>

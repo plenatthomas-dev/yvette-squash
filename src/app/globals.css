@@ -2288,6 +2288,8 @@ table.planning.week th.time.selhead {
 .trn-match-head { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; min-height: 4px; }
 .trn-place { font-size: 0.74rem; font-weight: 600; opacity: 0.8; }
 .trn-formula { margin: 0 0 12px; }
+/* Nombre de joueurs / méta : lisible (le gris « muted » système était trop pâle). */
+.trn-count { color: var(--pico-color); opacity: 0.85; font-weight: 500; }
 /* Badge de statut lisible (le gris « muted » était illisible). */
 .trn-status {
   display: inline-block;
@@ -2297,8 +2299,8 @@ table.planning.week th.time.selhead {
   font-weight: 700;
 }
 .trn-status.done { background: var(--pico-primary); color: var(--pico-primary-inverse); }
-.trn-status.running { background: color-mix(in srgb, var(--pico-color) 16%, transparent); color: var(--pico-color); }
-.trn-status.draft { background: color-mix(in srgb, var(--pico-color) 10%, transparent); color: var(--pico-color); opacity: 0.85; }
+.trn-status.running { background: rgba(127, 127, 127, 0.28); color: var(--pico-color); }
+.trn-status.draft { background: rgba(127, 127, 127, 0.18); color: var(--pico-color); opacity: 0.9; }
 .trn-vs {
   display: flex;
   align-items: center;
@@ -2413,11 +2415,11 @@ table.planning.week th.time.selhead {
   width: auto;
   margin: 0 6px 6px 0;
   padding: 8px 16px;
-  /* Bordure TOUJOURS présente et transparente + police constante : l'état sélectionné ne
-     change QUE la couleur (pas la taille). Fond neutre visible pour le non-sélectionné. */
-  border: 1px solid transparent;
+  /* PAS de bordure + police constante → l'état sélectionné ne change QUE la couleur, jamais
+     la taille. Fond gris SOLIDE (rgba, supporté partout) : jamais blanc/illisible. */
+  border: none;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--pico-color) 12%, transparent);
+  background: rgba(127, 127, 127, 0.22);
   color: var(--pico-color);
   font-weight: 600;
   cursor: pointer;
@@ -2426,6 +2428,36 @@ table.planning.week th.time.selhead {
   background: var(--pico-primary);
   color: var(--pico-primary-inverse);
 }
+/* Classement des têtes de série (glisser / flèches). */
+.trn-seedlist { list-style: none; padding: 0; margin: 0 0 8px; }
+.trn-seedlist li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  background: var(--pico-card-background-color);
+  cursor: grab;
+}
+.trn-seed-num {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.trn-seed-name { flex: 1; min-width: 0; }
+.trn-seed-arrows { display: flex; gap: 4px; flex: 0 0 auto; }
+.trn-seed-arrows button { width: 30px; margin: 0; padding: 2px 0; font-size: 0.9rem; }
+
 .trn-proposals { list-style: none; padding: 0; margin: 0; }
 .trn-proposals li { margin-bottom: 8px; }
 .trn-proposal {
