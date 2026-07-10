@@ -320,11 +320,23 @@ header.app .sub {
   border: none;
   border-radius: 8px;
   background: transparent;
+  /* Pico traite tout <button> comme un bouton et REDÉFINIT --pico-color en blanc :
+     le label + les icônes SVG (currentColor) devenaient blanc sur blanc (invisibles),
+     seuls les émojis 🚧 restaient. On rétablit l'héritage de la carte. */
+  --pico-color: inherit;
   color: var(--pico-color);
   font-size: 0.9rem;
   font-weight: 500;
   text-align: left;
   cursor: pointer;
+}
+/* Pico réapplique --pico-color = blanc au survol/focus/actif : on rétablit l'héritage
+   dans tous ces états, sinon le texte repasse invisible. */
+.header-menu-panel .header-menu-item:hover:not(:disabled),
+.header-menu-panel .header-menu-item:focus,
+.header-menu-panel .header-menu-item:active {
+  --pico-color: inherit;
+  color: var(--pico-color);
 }
 .header-menu-panel .header-menu-item:hover:not(:disabled) {
   background: rgba(127, 127, 127, 0.15);
