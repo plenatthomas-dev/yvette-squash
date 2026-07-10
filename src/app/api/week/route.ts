@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPlanning } from "@/lib/resamania/client";
+import { getPlanning, getStudios } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { baseHandle, buildHandleMap } from "@/lib/handle";
@@ -112,84 +112,68 @@ export async function GET(req: NextRequest) {
   }
 
   // --- Chemin ResaMania (avec jeton) : fetch live → snapshots bruts → annotation. ---
+  // Tolérant aux pannes : un jour dont le fetch ResaMania échoue ou traîne (timeout ~8 s,
+  // cf. RESA_FETCH_TIMEOUT_MS) retombe sur son snapshot au lieu de bloquer toute la semaine.
+  // On utilise Promise.allSettled (pas Promise.all) : sinon UN seul jour coincé gelait tout
+  // /api/week ~60 s → login figé quand l'URL ouvre directement la vue Semaine.
   const resa = session.resa;
   try {
-    // [MESURE TEMPORAIRE] On chronomètre chaque phase pour un en-tête Server-Timing.
-    // Clé du diagnostic : comparer le temps MUR des 7 fetches (resaWall) à la SOMME des
-    // durées individuelles (resaSum) → si resaWall ≈ resaMax, c'est parallèle ; si
-    // resaWall ≈ resaSum, c'est sérialisé (goulot à isoler).
-    const perDay: number[] = [];
-    const tResa0 = Date.now();
-    const days = await Promise.all(
-      dates.map(async (d) => {
-        const t = Date.now();
-        const planning = await getPlanning(d, resa.accessToken);
-        perDay.push(Date.now() - t);
-        return { date: d, planning };
-      }),
-    );
-    const resaWall = Date.now() - tResa0;
-    const resaSum = perDay.reduce((a, b) => a + b, 0);
-    const resaMax = perDay.length ? Math.max(...perDay) : 0;
-
-    // Snapshot BRUT (avant annotation) de chaque jour → alimente le cache des comptes
-    // « email seul » : ils verront TOUTE la semaine consultée ici, pas seulement les jours
-    // ouverts en vue Jour. Écriture CONDITIONNELLE : une seule lecture batchée des 7 jours,
-    // puis on n'upsert QUE les jours dont le planning a changé (souvent aucun → 0 écriture).
-    const tSnap0 = Date.now();
+    // Snapshots existants : servent de repli (jour en échec) ET de base au diff d'upsert.
     const prevSnaps = await prisma.planningSnapshot.findMany({
       where: { date: { in: dates } },
-      select: { date: true, payloadJson: true },
+      select: { date: true, payloadJson: true, updatedAt: true },
     });
-    const prevByDate = new Map(prevSnaps.map((s) => [s.date, s.payloadJson]));
+    const prevByDate = new Map(prevSnaps.map((s) => [s.date, s]));
+
+    // Studios chargés UNE fois, partagés par les 7 jours (au lieu de 7 appels /studios
+    // concurrents → moitié moins de connexions simultanées vers ResaMania). Best-effort :
+    // un échec ⇒ map vide (noms de terrains = ID bruts), on ne bloque pas la semaine.
+    const studios = await getStudios(resa.accessToken).catch(
+      () => new Map<string, string>(),
+    );
+
+    const settled = await Promise.allSettled(
+      dates.map((d) => getPlanning(d, resa.accessToken, studios)),
+    );
+
+    // Jours réellement récupérés (à re-snapshotter) ; les échecs retombent sur le snapshot.
+    const fetched = new Map<string, PlanningDay>();
+    const days = dates.map((d, i) => {
+      const r = settled[i];
+      if (r.status === "fulfilled") {
+        fetched.set(d, r.value);
+        return { date: d, planning: r.value };
+      }
+      const snap = prevByDate.get(d);
+      const planning: PlanningDay = snap
+        ? {
+            ...(JSON.parse(snap.payloadJson) as PlanningDay),
+            cached: true,
+            cachedAt: snap.updatedAt.toISOString(),
+          }
+        : { date: d, clubId: "", courts: [], slots: [], cached: true, cachedAt: null };
+      return { date: d, planning };
+    });
+
+    // Snapshot BRUT (avant annotation) → alimente le cache des comptes « email seul ».
+    // On n'upsert QUE les jours réellement récupérés ET modifiés (jamais écraser un bon
+    // snapshot par un jour en échec ; souvent aucun changement → 0 écriture).
     await Promise.all(
-      days
-        .map((day) => ({ day, payloadJson: JSON.stringify(day.planning) }))
-        .filter(({ day, payloadJson }) => prevByDate.get(day.date) !== payloadJson)
-        .map(({ day, payloadJson }) =>
+      [...fetched.entries()]
+        .map(([d, planning]) => ({ d, payloadJson: JSON.stringify(planning) }))
+        .filter(({ d, payloadJson }) => prevByDate.get(d)?.payloadJson !== payloadJson)
+        .map(({ d, payloadJson }) =>
           prisma.planningSnapshot.upsert({
-            where: { date: day.date },
+            where: { date: d },
             update: { payloadJson, updatedById: session.userId },
-            create: { date: day.date, payloadJson, updatedById: session.userId },
+            create: { date: d, payloadJson, updatedById: session.userId },
           }),
         ),
     );
-    const snapMs = Date.now() - tSnap0;
 
-    const tAnn0 = Date.now();
     await annotateWeek(days, session.userId);
-    const annMs = Date.now() - tAnn0;
 
-    // [MESURE TEMPORAIRE] Ligne de log lisible via `vercel logs` — évite DevTools.
-    // perDay = durée de chaque fetch ; si resaWall ≈ resaMax → parallèle, sinon sérialisé.
-    console.log(
-      "WEEK-TIMING " +
-        JSON.stringify({
-          date,
-          resaWall,
-          resaSum,
-          resaMax,
-          perDay,
-          dbSnap: snapMs,
-          dbAnnotate: annMs,
-          days: dates.length,
-        }),
-    );
-
-    const res = NextResponse.json(days);
-    // [MESURE TEMPORAIRE] Lisible dans DevTools → Réseau → onglet « Timing » de /api/week.
-    res.headers.set(
-      "Server-Timing",
-      [
-        `resaWall;desc="7 fetches ResaMania (mur)";dur=${resaWall}`,
-        `resaSum;desc="somme durees fetches";dur=${resaSum}`,
-        `resaMax;desc="fetch le plus lent";dur=${resaMax}`,
-        `dbSnap;desc="snapshots read+upsert";dur=${snapMs}`,
-        `dbAnnotate;desc="annotation";dur=${annMs}`,
-        `days;desc="jours";dur=${dates.length}`,
-      ].join(", "),
-    );
-    return res;
+    return NextResponse.json(days);
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
   }

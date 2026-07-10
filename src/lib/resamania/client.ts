@@ -214,10 +214,15 @@ async function apiGet<T>(path: string, token: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+// Timeout par requête ResaMania (studios/planning) : sans lui, une connexion calée pend
+// jusqu'au timeout réseau (~60 s) et bloque toute la vue Semaine. Avec, elle échoue vite et
+// le jour concerné retombe sur son snapshot (cf. /api/week, Promise.allSettled).
+const RESA_FETCH_TIMEOUT_MS = 8_000;
+
 // Cache des noms de courts (studios). On demande du ld+json pour obtenir les @id (IRI),
 // que le format json simple omet.
 let studiosCache: { iri: string; name: string }[] | null = null;
-async function getStudios(token: string): Promise<Map<string, string>> {
+export async function getStudios(token: string): Promise<Map<string, string>> {
   if (!studiosCache) {
     const res = await fetch(
       `${API}/${TENANT}/studios?club=${encodeURIComponent(CLUB_ID)}`,
@@ -226,6 +231,7 @@ async function getStudios(token: string): Promise<Map<string, string>> {
           authorization: `Bearer ${token}`,
           accept: "application/ld+json",
         },
+        signal: AbortSignal.timeout(RESA_FETCH_TIMEOUT_MS),
       },
     );
     // Ne JAMAIS mettre en cache un échec ou un résultat vide : sinon `[]` (qui n'est pas
@@ -278,6 +284,8 @@ export function invalidatePlanningCache(date?: string): void {
 export async function getPlanning(
   date: string,
   accessToken?: string,
+  // Map studios pré-chargée (vue Semaine : évite 7 appels /studios concurrents).
+  studios?: Map<string, string>,
 ): Promise<PlanningDay> {
   if (USE_MOCK || !accessToken) {
     return mockPlanning(date, CLUB_ID);
@@ -290,7 +298,7 @@ export async function getPlanning(
     return structuredClone(cached.data);
   }
 
-  const studios = await getStudios(accessToken);
+  const studioMap = studios ?? (await getStudios(accessToken));
   const params = new URLSearchParams();
   params.set("club", CLUB_ID);
   params.set("activity", ACTIVITY_ID);
@@ -305,6 +313,7 @@ export async function getPlanning(
       authorization: `Bearer ${accessToken}`,
       accept: "application/ld+json",
     },
+    signal: AbortSignal.timeout(RESA_FETCH_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`Planning indisponible (${res.status})`);
   const json = (await res.json()) as {
@@ -319,7 +328,7 @@ export async function getPlanning(
     return {
       id: e["@id"],
       courtId: e.studio,
-      courtName: studios.get(e.studio) ?? e.studio.split("/").pop() ?? "?",
+      courtName: studioMap.get(e.studio) ?? e.studio.split("/").pop() ?? "?",
       // ResaMania renvoie une heure murale sans fuseau → on la fige en instant absolu
       // (interprétée comme heure du club), sinon décalage selon où tourne le code.
       startsAt: toInstant(e.startedAt),
