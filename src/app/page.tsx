@@ -471,14 +471,16 @@ function SettingsButton({
   const toggleDelegate = (id: string, on: boolean) =>
     setPickedDelegates((prev) => (on ? [...prev, id] : prev.filter((x) => x !== id)));
 
-  const createDelegations = async () => {
-    if (pickedDelegates.length === 0) return;
+  // POST partagé création / prolongation : le serveur renouvelle (révoque + recrée) toute
+  // délégation active vers les mêmes délégués — prolonger = re-poster le même membre avec
+  // la durée choisie. Renvoie true en cas de succès (pour vider la sélection, etc.).
+  const postDelegations = async (ids: string[], okMsg: string): Promise<boolean> => {
     setDelegating(true);
     try {
       const res = await fetch("/api/delegations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ delegateIds: pickedDelegates, hours: pickedHours }),
+        body: JSON.stringify({ delegateIds: ids, hours: pickedHours }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
@@ -488,20 +490,37 @@ function SettingsButton({
         ...created.map((d) => ({
           id: d.id,
           delegateId: d.delegateId,
-          delegateName: nameById.get(d.delegateId) ?? "ce membre",
+          // Nom : annuaire, sinon l'ancienne entrée (délégué sorti de l'annuaire entre-temps).
+          delegateName:
+            nameById.get(d.delegateId) ??
+            prev.find((p) => p.delegateId === d.delegateId)?.delegateName ??
+            "ce membre",
           expiresAt: data.expiresAt,
         })),
         // Un délégué recréé côté serveur (renouvellement) remplace son ancienne entrée.
         ...prev.filter((p) => !created.some((c) => c.delegateId === p.delegateId)),
       ]);
-      setPickedDelegates([]);
-      toast("ok", created.length > 1 ? "Délégations activées" : "Délégation activée");
+      toast("ok", okMsg);
+      return true;
     } catch (e) {
       toast("err", (e as Error).message);
+      return false;
     } finally {
       setDelegating(false);
     }
   };
+
+  const createDelegations = async () => {
+    if (pickedDelegates.length === 0) return;
+    const ok = await postDelegations(
+      pickedDelegates,
+      pickedDelegates.length > 1 ? "Délégations activées" : "Délégation activée",
+    );
+    if (ok) setPickedDelegates([]);
+  };
+
+  const extendDelegation = (delegateId: string) =>
+    postDelegations([delegateId], "Délégation prolongée");
 
   const revokeDelegation = async (id: string) => {
     setDelegating(true);
@@ -726,45 +745,57 @@ function SettingsButton({
                           })}
                           .
                         </p>
-                        <button
-                          className="secondary"
-                          onClick={() => revokeDelegation(d.id)}
-                          disabled={delegating}
-                        >
-                          {delegating ? "…" : "Révoquer"}
-                        </button>
+                        <div className="delegation-row-actions">
+                          <button
+                            className="secondary"
+                            onClick={() => extendDelegation(d.delegateId)}
+                            disabled={delegating}
+                            title="Repart pour la durée choisie ci-dessous, à compter de maintenant"
+                          >
+                            {delegating ? "…" : "Prolonger"}
+                          </button>
+                          <button
+                            className="secondary"
+                            onClick={() => revokeDelegation(d.id)}
+                            disabled={delegating}
+                          >
+                            {delegating ? "…" : "Révoquer"}
+                          </button>
+                        </div>
                       </li>
                     ))}
                   </ul>
                 )}
                 {delegateMembers === null ? (
                   <p className="muted tiny">Chargement…</p>
-                ) : availableDelegates.length === 0 ? (
-                  outgoingDelegations.length === 0 ? (
-                    <p className="muted tiny">Aucun autre membre disponible pour l'instant.</p>
-                  ) : null
+                ) : availableDelegates.length === 0 && outgoingDelegations.length === 0 ? (
+                  <p className="muted tiny">Aucun autre membre disponible pour l'instant.</p>
                 ) : (
                   <div className="delegation-form">
-                    <div
-                      className="delegate-picklist"
-                      role="group"
-                      aria-label="Choisir un ou plusieurs délégués"
-                    >
-                      {availableDelegates.map((m) => (
-                        <label key={m.id} className="check-row">
-                          <input
-                            type="checkbox"
-                            checked={pickedDelegates.includes(m.id)}
-                            onChange={(e) => toggleDelegate(m.id, e.target.checked)}
-                          />
-                          <span>{m.name}</span>
-                        </label>
-                      ))}
-                    </div>
+                    {availableDelegates.length > 0 && (
+                      <div
+                        className="delegate-picklist"
+                        role="group"
+                        aria-label="Choisir un ou plusieurs délégués"
+                      >
+                        {availableDelegates.map((m) => (
+                          <label key={m.id} className="check-row">
+                            <input
+                              type="checkbox"
+                              checked={pickedDelegates.includes(m.id)}
+                              onChange={(e) => toggleDelegate(m.id, e.target.checked)}
+                            />
+                            <span>{m.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    {/* Durée : sert aux nouvelles délégations ET aux prolongations —
+                        reste visible tant qu'il y a quelque chose à créer ou prolonger. */}
                     <select
                       value={pickedHours}
                       onChange={(e) => setPickedHours(Number(e.target.value))}
-                      aria-label="Durée de la délégation"
+                      aria-label="Durée de la délégation (nouvelle ou prolongée)"
                     >
                       {DELEGATION_DURATIONS.map((d) => (
                         <option key={d.hours} value={d.hours}>
@@ -772,16 +803,18 @@ function SettingsButton({
                         </option>
                       ))}
                     </select>
-                    <button
-                      onClick={createDelegations}
-                      disabled={delegating || pickedDelegates.length === 0}
-                    >
-                      {delegating
-                        ? "…"
-                        : pickedDelegates.length > 1
-                          ? `Déléguer (${pickedDelegates.length})`
-                          : "Déléguer"}
-                    </button>
+                    {availableDelegates.length > 0 && (
+                      <button
+                        onClick={createDelegations}
+                        disabled={delegating || pickedDelegates.length === 0}
+                      >
+                        {delegating
+                          ? "…"
+                          : pickedDelegates.length > 1
+                            ? `Déléguer (${pickedDelegates.length})`
+                            : "Déléguer"}
+                      </button>
+                    )}
                   </div>
                 )}
               </section>
@@ -937,89 +970,74 @@ function PrivacyNotice() {
             <h3>Confidentialité &amp; données</h3>
             <div className="privacy-body">
               <p>
-                Application indépendante, <strong>non affiliée à ResaMania /
-                Stadline ni au club</strong>. Elle facilite la réservation des
-                terrains de squash du Complexe de Bures via ton compte
-                ResaMania.
+                Application indépendante, <strong>non affiliée à ResaMania / Stadline ni au
+                club</strong> : elle facilite la réservation des terrains de squash du
+                Complexe de Bures via ton compte ResaMania.
               </p>
               <p>
-                Ton mot de passe ResaMania n'est <strong>jamais conservé</strong>.
-                Il ne sert qu'au moment de la connexion, pour t'authentifier
-                auprès de ResaMania. L'appli ne garde ensuite qu'un jeton de
-                session <strong>chiffré</strong> (AES-256-GCM), pour t'éviter de
-                te reconnecter à chaque visite.
+                <strong>Ce qu'on garde.</strong> Ton nom (fourni par ResaMania), ton e-mail,
+                ton éventuel pseudonyme, les réservations faites ici et ton IP de connexion
+                (anti-abus). Ton mot de passe ResaMania n'est <strong>jamais conservé</strong> —
+                seulement un jeton de session <strong>chiffré</strong> (AES-256-GCM).
               </p>
               <p>
-                Si tu te connectes via cette appli, sont enregistrés : ton nom
-                (fourni par ResaMania), ton adresse e-mail, un éventuel
-                pseudonyme que tu choisis, les réservations faites via l'appli,
-                et ton adresse IP de connexion (uniquement pour limiter les
-                tentatives abusives).
-              </p>
-              <p>
-                Ces données servent seulement à te connecter, afficher et gérer
-                les réservations, et protéger le service contre les abus. Elles
-                ne sont ni revendues ni transmises à des tiers (hormis
-                ResaMania, le service que tu utilises déjà).
+                <strong>Ce qu'on en fait.</strong> Te connecter, gérer les réservations,
+                protéger le service. Rien n'est revendu ni transmis à des tiers (hormis
+                ResaMania, que tu utilises déjà). Hébergement en <strong>Union
+                européenne</strong> (Vercel, base Neon).
               </p>
               {FEATURE_DIRECTORY && (
                 <p>
-                  <strong>Annuaire des membres.</strong> Pour faciliter l'entraide
-                  entre joueurs, ton nom (ou pseudonyme) est visible dans un annuaire
-                  interne réservé aux membres connectés. <strong>Aucune autre donnée
-                  n'y figure</strong> (ni e-mail, ni réservations). Tu peux t'en retirer
-                  à tout moment depuis ⚙️ Paramètres › « Annuaire des membres ».
+                  <strong>Annuaire des membres.</strong> Ton nom (ou pseudonyme) est visible
+                  des membres connectés — <strong>rien d'autre</strong> (ni e-mail, ni
+                  réservations). Retrait à tout moment : ⚙️ Paramètres › « Annuaire des
+                  membres ».
                 </p>
               )}
               {FEATURE_RANKING && (
                 <p>
-                  <strong>Classement fédéral.</strong> À côté de ton nom peut s'afficher ton
-                  classement de squash, <strong>issu de squashnet.fr</strong> (le classement
-                  officiel FFSquash, une <strong>source publique</strong>). Il est rapproché de
-                  ton nom uniquement si tu figures dans l'annuaire, et sert aussi à pré-remplir
-                  l'ordre des joueurs lors de la création d'un tournoi. Retire-toi de l'annuaire
-                  pour ne plus l'afficher.
+                  <strong>Classement fédéral.</strong> Ton classement FFSquash
+                  (<strong>squashnet.fr</strong>, source publique) peut s'afficher à côté de
+                  ton nom si tu es dans l'annuaire, et pré-remplir les têtes de série d'un
+                  tournoi. Retire-toi de l'annuaire pour le masquer.
                 </p>
               )}
               <p>
-                <strong>Liste d'attente &amp; notifications.</strong> Sur un créneau
-                complet, tu peux demander à être prévenu qu'un terrain se libère : on
-                enregistre alors le créneau visé et, si tu l'autorises, un abonnement aux
-                notifications de ton navigateur (pour t'envoyer l'alerte). Le
-                <strong> nombre de membres en attente</strong> et <strong>ta position</strong>
-                sont affichés aux membres connectés — <strong>jamais le nom</strong> des
-                inscrits. Tu peux quitter une liste d'attente à tout moment (🕒 « Ma liste
-                d'attente »).
+                <strong>Liste d'attente &amp; notifications.</strong> Sur un créneau complet,
+                on enregistre le créneau visé et, si tu l'autorises, un abonnement aux
+                notifications de ton navigateur. Les membres voient le
+                <strong> nombre d'inscrits</strong> et <strong>ta position</strong> —
+                <strong> jamais les noms</strong>.
               </p>
               {FEATURE_TRICOUNT && (
                 <p>
-                  <strong>Partage de frais (« Frais »).</strong> Si le groupe utilise cette
-                  vue, les dépenses saisies (libellé, montant, date, qui a payé et pour qui),
-                  les remboursements et les éventuels messages sont visibles par
-                  <strong> tous les membres connectés</strong>. Pour lever toute ambiguïté sur
-                  les comptes, cette vue affiche le <strong>nom réel</strong> des membres (jamais
-                  le pseudonyme) et donc <strong>qui doit combien à qui</strong>. N'y saisis que
-                  des dépenses que tu acceptes de partager avec le groupe.
+                  <strong>Partage de frais (« Frais »).</strong> Dépenses, remboursements et
+                  messages y sont visibles de <strong>tous les membres connectés</strong>,
+                  avec le <strong>nom réel</strong> (jamais le pseudonyme) — donc qui doit
+                  combien à qui. N'y saisis que ce que tu acceptes de partager.
                 </p>
               )}
               {FEATURE_TOURNAMENT && (
                 <p>
-                  <strong>Tournois.</strong> Un tournoi enregistre la liste des participants
-                  (membres et <strong>prénoms d'invités hors asso</strong> que tu ajoutes), les
-                  matchs et leurs scores. Ces informations sont visibles par
-                  <strong> tous les membres connectés</strong>. N'ajoute un invité que si tu es
-                  d'accord pour que son prénom apparaisse dans le tournoi.
+                  <strong>Tournois.</strong> Participants (dont <strong>prénoms d'invités hors
+                  asso</strong>), matchs et scores sont visibles de <strong>tous les membres
+                  connectés</strong>. N'ajoute un invité qu'avec son accord.
+                </p>
+              )}
+              {FEATURE_DELEGATION && (
+                <p>
+                  <strong>Délégation de droits.</strong> Si tu délègues tes droits
+                  (⚙️ Paramètres), les membres choisis peuvent réserver/annuler
+                  <strong> en ton nom</strong> pendant la durée fixée ; ils en sont notifiés,
+                  la réservation reste sur ton compte et l'appli enregistre <strong>qui
+                  délègue à qui et qui a agi</strong> (traçabilité, non publique).
+                  Révocable à tout moment.
                 </p>
               )}
               <p>
-                Hébergement en Union européenne : application sur Vercel, base
-                de données sur Neon.
-              </p>
-              <p>
-                Tu peux demander à consulter ou supprimer tes données à tout
-                moment — la déconnexion efface déjà ta session. Une question, ou
-                envie d'exercer ces droits ? Une fois connecté, écris-nous
-                depuis ⚙️ Paramètres › « Un commentaire&nbsp;? ».
+                <strong>Tes droits.</strong> Consultation ou suppression de tes données à
+                tout moment : une fois connecté, écris-nous via ⚙️ Paramètres › « Un
+                commentaire&nbsp;? ». La déconnexion efface déjà ta session.
               </p>
             </div>
             <div className="modal-actions">

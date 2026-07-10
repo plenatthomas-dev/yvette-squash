@@ -113,6 +113,14 @@ créneau redevient réservable, puis désactive l'alerte. L'abonnement de l'appa
 
 ---
 
+## Branches & déploiements
+
+Le flux `feature/* → main → Recette`, les environnements Vercel et la promotion par
+feature flags sont décrits dans **[docs/flux-branches.md](docs/flux-branches.md)**.
+Le backlog des idées vit dans [docs/idees-developpement.md](docs/idees-developpement.md).
+
+---
+
 ## Sécurité — règles
 
 - Jamais de mot de passe en clair (chiffrement AES-256-GCM, clé hors du dépôt).
