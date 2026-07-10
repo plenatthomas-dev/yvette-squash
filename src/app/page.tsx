@@ -434,6 +434,9 @@ function SettingsButton({
   const [delegating, setDelegating] = useState(false);
   // Délégué dont on est en train de choisir la durée de prolongation (boutons inline).
   const [extending, setExtending] = useState<string | null>(null);
+  // Échéance de MA session ResaMania : plafond de fonctionnement des délégations
+  // (30 j non glissants après connexion — cf. docs/delegation-droits.md).
+  const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !FEATURE_DELEGATION) return;
@@ -451,10 +454,12 @@ function SettingsButton({
         if (cancelled) return;
         setDelegateMembers(members);
         setOutgoingDelegations(delRes.ok ? (del.outgoing ?? []) : []);
+        setSessionExpiresAt(delRes.ok ? (del.sessionExpiresAt ?? null) : null);
       } catch {
         if (!cancelled) {
           setDelegateMembers([]);
           setOutgoingDelegations([]);
+          setSessionExpiresAt(null);
         }
       }
     })();
@@ -853,6 +858,19 @@ function SettingsButton({
                           : "Déléguer"}
                     </button>
                   </div>
+                )}
+                {sessionExpiresAt && (
+                  <p className="muted tiny">
+                    ⏳ Ta connexion ResaMania est valable jusqu'au{" "}
+                    {new Date(sessionExpiresAt).toLocaleString("fr-FR", {
+                      day: "numeric",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}{" "}
+                    : une délégation ne peut pas fonctionner au-delà. Reconnecte-toi pour
+                    repartir sur 30 jours.
+                  </p>
                 )}
               </section>
             )}

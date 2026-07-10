@@ -238,6 +238,22 @@ export async function getResaTokenForUser(userId: string): Promise<ResaSession |
   return resa ?? null; // undefined (email-seule) ne devrait pas arriver ici, traité pareil
 }
 
+/**
+ * Échéance de la session ResaMania utilisée pour ce user — la même ligne que celle que
+ * `getResaTokenForUser` retiendra (la plus récente encore valide). C'est le PLAFOND de
+ * fonctionnement d'une délégation : `Session.expiresAt` est fixé à la connexion
+ * (30 jours, non glissants), le cron keep-alive rafraîchit le jeton ResaMania mais ne
+ * prolonge pas la session. `null` si aucune session ResaMania valide.
+ */
+export async function getResaSessionExpiry(userId: string): Promise<Date | null> {
+  const s = await prisma.session.findFirst({
+    where: { userId, refreshTokenEnc: { not: null }, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: "desc" },
+    select: { expiresAt: true },
+  });
+  return s?.expiresAt ?? null;
+}
+
 export async function destroySession(sid: string | undefined): Promise<void> {
   if (sid) await prisma.session.delete({ where: { id: sid } }).catch(() => {});
 }

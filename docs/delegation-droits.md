@@ -168,6 +168,11 @@ expiré ») plutôt qu'un échec silencieux.
 - TTL dur et court par défaut (24h à 5j max) plutôt qu'une délégation permanente.
 - Au plus une délégation active par couple délégant/délégué (multi-délégués possible
   depuis 07/2026, borné à 20 par requête).
+- **Plafond de session** (07/2026) : une délégation ne peut pas fonctionner au-delà de
+  `Session.expiresAt` du délégant (30 j non glissants après sa connexion — le cron
+  keep-alive rafraîchit le jeton ResaMania mais ne prolonge pas la session). Le POST
+  **refuse** (409) toute échéance qui dépasse, avec invitation à se reconnecter ; l'UI
+  affiche la date de validité de la connexion dans la section délégation.
 - Cron de maintien scopé **uniquement** aux délégations actives (pas toutes les
   sessions du club).
 - Note de confidentialité (RGPD, contrainte 4) à compléter : nouvelle finalité —

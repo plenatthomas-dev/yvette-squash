@@ -8,9 +8,11 @@ const h = vi.hoisted(() => ({
   incoming: [] as Array<Record<string, unknown>>,
   // POST : utilisateurs « trouvés » par prisma.user.findMany + espions de la transaction.
   foundUsers: [] as Array<{ id: string }>,
-  // Délégations actives existantes lues DANS la transaction (chemin extend).
-  txExisting: [] as Array<{ delegateId: string; expiresAt: Date }>,
-  txFindMany: vi.fn(),
+  // Délégations actives existantes (lues hors transaction, chemin extend).
+  activeExisting: [] as Array<{ delegateId: string; expiresAt: Date }>,
+  activeFindMany: vi.fn(),
+  // Plafond de fonctionnement : échéance de la session ResaMania du délégant.
+  sessionExpiry: null as Date | null,
   updateMany: vi.fn(),
   create: vi.fn(),
   pushToUser: vi.fn(),
@@ -21,18 +23,22 @@ vi.mock("@/lib/features", () => ({
     return h.featureOn;
   },
 }));
-vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
+vi.mock("@/lib/session", () => ({
+  getSession: vi.fn(async () => h.session),
+  getResaSessionExpiry: vi.fn(async () => h.sessionExpiry),
+}));
 vi.mock("@/lib/db", () => ({
   prisma: {
     user: {
       findMany: vi.fn(async () => h.foundUsers),
       findUnique: vi.fn(async () => ({ displayName: "Moi Même", nickname: null })),
     },
+    delegation: { findMany: h.activeFindMany },
     // La transaction relaie vers les espions : on vérifie révocation (renouvellement)
     // et créations sans base réelle.
     $transaction: vi.fn(async (cb: (tx: unknown) => unknown) =>
       cb({
-        delegation: { findMany: h.txFindMany, updateMany: h.updateMany, create: h.create },
+        delegation: { updateMany: h.updateMany, create: h.create },
       }),
     ),
   },
@@ -60,8 +66,9 @@ beforeEach(() => {
   h.outgoing = [];
   h.incoming = [];
   h.foundUsers = [];
-  h.txExisting = [];
-  h.txFindMany.mockReset().mockImplementation(async () => h.txExisting);
+  h.activeExisting = [];
+  h.activeFindMany.mockReset().mockImplementation(async () => h.activeExisting);
+  h.sessionExpiry = new Date(Date.now() + 30 * 864e5); // session fraîche par défaut
   h.updateMany.mockReset().mockResolvedValue({ count: 0 });
   h.create
     .mockReset()
@@ -133,6 +140,12 @@ describe("GET /api/delegations", () => {
     const body = await res.json();
     expect(body.outgoing).toEqual([]);
   });
+
+  it("renvoie l'échéance de MA session ResaMania (plafond des délégations)", async () => {
+    const res = await GET(req());
+    const body = await res.json();
+    expect(body.sessionExpiresAt).toBe(h.sessionExpiry?.toISOString());
+  });
 });
 
 describe("POST /api/delegations", () => {
@@ -196,7 +209,7 @@ describe("POST /api/delegations", () => {
   it("prolongation (extend) : part de l'échéance ACTUELLE, pas de maintenant", async () => {
     h.foundUsers = [{ id: "a" }];
     const currentEnd = new Date(Date.now() + 50 * 3_600_000); // délégation encore active 50 h
-    h.txExisting = [{ delegateId: "a", expiresAt: currentEnd }];
+    h.activeExisting = [{ delegateId: "a", expiresAt: currentEnd }];
     const res = await POST(postReq({ delegateIds: ["a"], hours: 12, extend: true }));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -210,7 +223,7 @@ describe("POST /api/delegations", () => {
 
   it("prolongation sans délégation active : retombe sur maintenant + durée", async () => {
     h.foundUsers = [{ id: "a" }];
-    h.txExisting = []; // rien d'actif (expirée entre-temps)
+    h.activeExisting = []; // rien d'actif (expirée entre-temps)
     const before = Date.now();
     const res = await POST(postReq({ delegateIds: ["a"], hours: 12, extend: true }));
     const body = await res.json();
@@ -219,10 +232,37 @@ describe("POST /api/delegations", () => {
     expect(end).toBeLessThan(before + 13 * 3_600_000);
   });
 
-  it("création simple : la transaction ne lit PAS les délégations existantes", async () => {
+  it("création simple : ne lit PAS les délégations existantes", async () => {
     h.foundUsers = [{ id: "a" }];
     await POST(postReq({ delegateIds: ["a"], hours: 3 }));
-    expect(h.txFindMany).not.toHaveBeenCalled();
+    expect(h.activeFindMany).not.toHaveBeenCalled();
+  });
+
+  it("409 si l'échéance dépasse la session ResaMania du délégant", async () => {
+    h.foundUsers = [{ id: "a" }];
+    h.sessionExpiry = new Date(Date.now() + 3_600_000); // session encore valable 1 h
+    const res = await POST(postReq({ delegateIds: ["a"], hours: 3 })); // vise +3 h
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toContain("Reconnecte-toi");
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it("409 si la PROLONGATION dépasse la session (échéance actuelle + durée)", async () => {
+    h.foundUsers = [{ id: "a" }];
+    const currentEnd = new Date(Date.now() + 10 * 3_600_000);
+    h.activeExisting = [{ delegateId: "a", expiresAt: currentEnd }];
+    h.sessionExpiry = new Date(Date.now() + 15 * 3_600_000); // 10 h + 12 h > 15 h
+    const res = await POST(postReq({ delegateIds: ["a"], hours: 12, extend: true }));
+    expect(res.status).toBe(409);
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it("pas de blocage si aucune session ResaMania trouvée (garde-fou ouvert)", async () => {
+    h.foundUsers = [{ id: "a" }];
+    h.sessionExpiry = null;
+    const res = await POST(postReq({ delegateIds: ["a"], hours: 3 }));
+    expect(res.status).toBe(200);
   });
 
   it("renouvellement : révoque l'existante des MÊMES délégués, endNotifiedAt posé", async () => {

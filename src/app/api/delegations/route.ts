@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, getResaSessionExpiry } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { FEATURE_DELEGATION } from "@/lib/features";
 import { pushToUser } from "@/lib/push";
@@ -13,6 +13,16 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Format d'échéance des messages (push, erreurs) : « 12 juil., 14:30 » heure de Paris.
+const fmtParis = (d: Date) =>
+  d.toLocaleString("fr-FR", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Paris",
+  });
+
 // GET /api/delegations -> mes délégations actives : celles que je donne (outgoing, une par
 // délégué, plusieurs simultanées) et celles que je reçois (incoming, plusieurs délégants).
 export async function GET(req: NextRequest) {
@@ -23,11 +33,15 @@ export async function GET(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
-  const [outgoing, incoming] = await Promise.all([
+  const [outgoing, incoming, sessionExpiry] = await Promise.all([
     getActiveOutgoingDelegations(session.userId),
     getActiveIncomingDelegations(session.userId),
+    getResaSessionExpiry(session.userId),
   ]);
   return NextResponse.json({
+    // Plafond de fonctionnement des délégations sortantes : l'échéance de MA session
+    // ResaMania (30 j non glissants) — l'UI affiche l'avertissement correspondant.
+    sessionExpiresAt: sessionExpiry?.toISOString() ?? null,
     // Tableau (éventuellement vide) : une entrée par délégué actif.
     outgoing: outgoing.map((d) => ({
       id: d.id,
@@ -111,20 +125,46 @@ export async function POST(req: NextRequest) {
   }
 
   const now = Date.now();
+  // Prolongation : lire les délégations actives vers ces délégués pour partir de leur
+  // échéance actuelle (et non de maintenant).
+  const existing = extend
+    ? await prisma.delegation.findMany({
+        where: {
+          delegatorId: session.userId,
+          delegateId: { in: delegateIds },
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        select: { delegateId: true, expiresAt: true },
+      })
+    : [];
+  const targetExpiries = new Map(
+    delegateIds.map((id) => {
+      const prev = existing.find((e) => e.delegateId === id);
+      return [
+        id,
+        new Date((extend && prev ? prev.expiresAt.getTime() : now) + hours * 3_600_000),
+      ] as const;
+    }),
+  );
+
+  // Garde-fou : une délégation s'appuie sur la session ResaMania du délégant
+  // (Session.expiresAt, 30 j NON glissants — le cron keep-alive rafraîchit le jeton,
+  // pas la session). Au-delà de cette échéance le délégué prendrait des erreurs à chaque
+  // action : on refuse de promettre une échéance que la session ne peut pas tenir.
+  const sessionExpiry = await getResaSessionExpiry(session.userId);
+  if (sessionExpiry && [...targetExpiries.values()].some((d) => d > sessionExpiry)) {
+    return NextResponse.json(
+      {
+        error:
+          `Ta connexion ResaMania expire le ${fmtParis(sessionExpiry)} : la délégation ne ` +
+          `fonctionnerait plus au-delà. Reconnecte-toi à l'appli pour repartir sur 30 jours.`,
+      },
+      { status: 409 },
+    );
+  }
+
   const delegations = await prisma.$transaction(async (tx) => {
-    // Prolongation : on lit d'abord les délégations actives vers ces délégués pour partir
-    // de leur échéance actuelle (et non de maintenant).
-    const existing = extend
-      ? await tx.delegation.findMany({
-          where: {
-            delegatorId: session.userId,
-            delegateId: { in: delegateIds },
-            revokedAt: null,
-            expiresAt: { gt: new Date() },
-          },
-          select: { delegateId: true, expiresAt: true },
-        })
-      : [];
     // Renouvellement : révoque toute délégation active vers CES délégués (au plus une par
     // couple), sans toucher celles données à d'autres membres. endNotifiedAt posé pour que
     // le cron d'expiration ne pousse pas un « délégation terminée » trompeur alors qu'une
@@ -140,13 +180,14 @@ export async function POST(req: NextRequest) {
     });
     const created = [];
     for (const delegateId of delegateIds) {
-      const prev = existing.find((e) => e.delegateId === delegateId);
-      const expiresAt = new Date(
-        (extend && prev ? prev.expiresAt.getTime() : now) + hours * 3_600_000,
-      );
       created.push(
         await tx.delegation.create({
-          data: { delegatorId: session.userId, delegateId, scope: DELEGATION_SCOPE, expiresAt },
+          data: {
+            delegatorId: session.userId,
+            delegateId,
+            scope: DELEGATION_SCOPE,
+            expiresAt: targetExpiries.get(delegateId) ?? new Date(now + hours * 3_600_000),
+          },
         }),
       );
     }
@@ -160,21 +201,13 @@ export async function POST(req: NextRequest) {
     select: { displayName: true, nickname: true },
   });
   const delegatorName = delegator?.nickname ?? delegator?.displayName ?? "Un membre";
-  const fmtWhen = (d: Date) =>
-    d.toLocaleString("fr-FR", {
-      day: "numeric",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZone: "Europe/Paris",
-    });
   await Promise.all(
     delegations.map((d) =>
       pushToUser(d.delegateId, {
         title: extend ? "Délégation prolongée 🤝" : "Tu as reçu une délégation 🤝",
         body: extend
-          ? `${delegatorName} a prolongé ta délégation (réserver/annuler en son nom) jusqu'au ${fmtWhen(d.expiresAt)}.`
-          : `${delegatorName} t'a délégué ses droits (réserver/annuler en son nom) jusqu'au ${fmtWhen(d.expiresAt)}.`,
+          ? `${delegatorName} a prolongé ta délégation (réserver/annuler en son nom) jusqu'au ${fmtParis(d.expiresAt)}.`
+          : `${delegatorName} t'a délégué ses droits (réserver/annuler en son nom) jusqu'au ${fmtParis(d.expiresAt)}.`,
         url: "/",
         tag: `delegation-${d.id}`,
       }).catch(() => {}),
