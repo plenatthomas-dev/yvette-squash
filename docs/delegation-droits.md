@@ -20,8 +20,9 @@ Contexte général : voir idée **4** dans [`idees-developpement.md`](./idees-de
   utilisé par book/cancel-slot/bookings pour résoudre soit sa propre session, soit celle
   du délégant si `onBehalfOf` est fourni et couvert par une délégation active.
 - **API** : `GET/POST /api/delegations` (créer — `delegateIds[]`, une délégation par membre
-  choisi ; si un membre avait déjà une délégation active de ma part, elle est renouvelée
-  avec la nouvelle échéance), `DELETE /api/delegations/{id}` (révoquer, délégant uniquement).
+  choisi ; si un membre avait déjà une délégation active de ma part, elle est renouvelée.
+  `extend: true` = prolongation **additive** : échéance actuelle + durée, et non maintenant
+  + durée), `DELETE /api/delegations/{id}` (révoquer, délégant uniquement).
 - **`onBehalfOf`** branché dans `POST /api/book`, `POST /api/cancel-slot`,
   `DELETE /api/bookings/{id}` : la règle « un seul terrain par horaire » et le
   `Booking.userId` portent sur le **délégant** (propriétaire réel), `actingUserId` trace le

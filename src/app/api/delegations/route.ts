@@ -49,10 +49,13 @@ export async function GET(req: NextRequest) {
 // requête forgée qui créerait des délégations en masse.
 const MAX_DELEGATES = 20;
 
-// POST /api/delegations { delegateIds: string[], hours } -> crée une délégation par membre
-// choisi (moi = délégant). Plusieurs délégués simultanés possibles ; si un des membres a
-// déjà une délégation active de ma part, elle est renouvelée (révoquée + recréée) avec la
-// nouvelle échéance. Rétro-compat : accepte aussi { delegateId } (ancien client mono).
+// POST /api/delegations { delegateIds: string[], hours, extend? } -> crée une délégation
+// par membre choisi (moi = délégant). Plusieurs délégués simultanés possibles ; si un des
+// membres a déjà une délégation active de ma part, elle est renouvelée (révoquée + recréée).
+// Échéance : maintenant + hours, SAUF si `extend` est vrai (prolongation) — alors échéance
+// ACTUELLE + hours pour un délégué déjà actif (c'est ce que promet le bouton « +24 h »).
+// Chaque prolongation reste bornée par les préréglages et exige une action du délégant.
+// Rétro-compat : accepte aussi { delegateId } (ancien client mono).
 export async function POST(req: NextRequest) {
   if (!FEATURE_DELEGATION) {
     return NextResponse.json({ error: "Délégation désactivée" }, { status: 404 });
@@ -71,7 +74,9 @@ export async function POST(req: NextRequest) {
     delegateIds?: unknown;
     delegateId?: unknown;
     hours?: unknown;
+    extend?: unknown;
   };
+  const extend = body.extend === true;
   const rawIds = Array.isArray(body.delegateIds)
     ? body.delegateIds
     : typeof body.delegateId === "string"
@@ -105,8 +110,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Membre introuvable" }, { status: 404 });
   }
 
-  const expiresAt = new Date(Date.now() + hours * 3_600_000);
+  const now = Date.now();
   const delegations = await prisma.$transaction(async (tx) => {
+    // Prolongation : on lit d'abord les délégations actives vers ces délégués pour partir
+    // de leur échéance actuelle (et non de maintenant).
+    const existing = extend
+      ? await tx.delegation.findMany({
+          where: {
+            delegatorId: session.userId,
+            delegateId: { in: delegateIds },
+            revokedAt: null,
+            expiresAt: { gt: new Date() },
+          },
+          select: { delegateId: true, expiresAt: true },
+        })
+      : [];
     // Renouvellement : révoque toute délégation active vers CES délégués (au plus une par
     // couple), sans toucher celles données à d'autres membres. endNotifiedAt posé pour que
     // le cron d'expiration ne pousse pas un « délégation terminée » trompeur alors qu'une
@@ -122,6 +140,10 @@ export async function POST(req: NextRequest) {
     });
     const created = [];
     for (const delegateId of delegateIds) {
+      const prev = existing.find((e) => e.delegateId === delegateId);
+      const expiresAt = new Date(
+        (extend && prev ? prev.expiresAt.getTime() : now) + hours * 3_600_000,
+      );
       created.push(
         await tx.delegation.create({
           data: { delegatorId: session.userId, delegateId, scope: DELEGATION_SCOPE, expiresAt },
@@ -138,18 +160,21 @@ export async function POST(req: NextRequest) {
     select: { displayName: true, nickname: true },
   });
   const delegatorName = delegator?.nickname ?? delegator?.displayName ?? "Un membre";
-  const whenStr = expiresAt.toLocaleString("fr-FR", {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Europe/Paris",
-  });
+  const fmtWhen = (d: Date) =>
+    d.toLocaleString("fr-FR", {
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Europe/Paris",
+    });
   await Promise.all(
     delegations.map((d) =>
       pushToUser(d.delegateId, {
-        title: "Tu as reçu une délégation 🤝",
-        body: `${delegatorName} t'a délégué ses droits (réserver/annuler en son nom) jusqu'au ${whenStr}.`,
+        title: extend ? "Délégation prolongée 🤝" : "Tu as reçu une délégation 🤝",
+        body: extend
+          ? `${delegatorName} a prolongé ta délégation (réserver/annuler en son nom) jusqu'au ${fmtWhen(d.expiresAt)}.`
+          : `${delegatorName} t'a délégué ses droits (réserver/annuler en son nom) jusqu'au ${fmtWhen(d.expiresAt)}.`,
         url: "/",
         tag: `delegation-${d.id}`,
       }).catch(() => {}),
@@ -158,7 +183,13 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    expiresAt: expiresAt.toISOString(),
-    delegations: delegations.map((d) => ({ id: d.id, delegateId: d.delegateId })),
+    // Rétro-compat (clients pas encore rechargés) ; l'échéance qui fait foi est celle de
+    // chaque entrée de `delegations` (elle varie en cas de prolongation).
+    expiresAt: new Date(now + hours * 3_600_000).toISOString(),
+    delegations: delegations.map((d) => ({
+      id: d.id,
+      delegateId: d.delegateId,
+      expiresAt: d.expiresAt.toISOString(),
+    })),
   });
 }

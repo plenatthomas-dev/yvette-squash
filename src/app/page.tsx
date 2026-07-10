@@ -481,18 +481,23 @@ function SettingsButton({
     ids: string[],
     okMsg: string,
     hours = pickedHours,
+    extend = false,
   ): Promise<boolean> => {
     setDelegating(true);
     try {
       const res = await fetch("/api/delegations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ delegateIds: ids, hours }),
+        body: JSON.stringify({ delegateIds: ids, hours, extend }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
       const nameById = new Map((delegateMembers ?? []).map((m) => [m.id, m.name]));
-      const created = (data.delegations ?? []) as { id: string; delegateId: string }[];
+      const created = (data.delegations ?? []) as {
+        id: string;
+        delegateId: string;
+        expiresAt?: string;
+      }[];
       setOutgoingDelegations((prev) => [
         ...created.map((d) => ({
           id: d.id,
@@ -502,7 +507,8 @@ function SettingsButton({
             nameById.get(d.delegateId) ??
             prev.find((p) => p.delegateId === d.delegateId)?.delegateName ??
             "ce membre",
-          expiresAt: data.expiresAt,
+          // Échéance par entrée : une prolongation part de l'échéance actuelle du délégué.
+          expiresAt: d.expiresAt ?? data.expiresAt,
         })),
         // Un délégué recréé côté serveur (renouvellement) remplace son ancienne entrée.
         ...prev.filter((p) => !created.some((c) => c.delegateId === p.delegateId)),
@@ -527,7 +533,7 @@ function SettingsButton({
   };
 
   const extendDelegation = async (delegateId: string, hours: number) => {
-    const ok = await postDelegations([delegateId], "Délégation prolongée", hours);
+    const ok = await postDelegations([delegateId], "Délégation prolongée", hours, true);
     if (ok) setExtending(null);
   };
 
@@ -756,7 +762,7 @@ function SettingsButton({
                         </p>
                         {extending === d.delegateId ? (
                           // Choix de la durée de prolongation, inline : « Prolonger » a
-                          // laissé place aux préréglages (nouvelle échéance = maintenant + durée).
+                          // laissé place aux préréglages (échéance ACTUELLE + durée).
                           <div className="delegation-row-actions">
                             {DELEGATION_DURATIONS.map((opt) => (
                               <button
@@ -764,7 +770,7 @@ function SettingsButton({
                                 className="secondary"
                                 onClick={() => extendDelegation(d.delegateId, opt.hours)}
                                 disabled={delegating}
-                                title={`Jusqu'à maintenant + ${opt.label}`}
+                                title={`Ajoute ${opt.label} à l'échéance actuelle`}
                               >
                                 {delegating ? "…" : `+${opt.label}`}
                               </button>
