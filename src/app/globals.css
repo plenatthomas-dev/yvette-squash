@@ -1390,6 +1390,7 @@ td.cell.past {
 .delegation-form {
   display: flex;
   flex-wrap: wrap;
+  align-items: center; /* centre la bulle « i » sur la ligne durée + Déléguer */
   gap: 8px;
 }
 
@@ -1419,7 +1420,9 @@ td.cell.past {
 
 .delegation-form select {
   margin: 0;
-  flex: 1 1 auto;
+  /* Compact (largeur du contenu) : durée + « Déléguer » + bulle « i » doivent tenir
+     sur une seule ligne d'un écran de téléphone. */
+  flex: 0 1 auto;
   width: auto;
 }
 
