@@ -114,17 +114,29 @@ export async function GET(req: NextRequest) {
   // --- Chemin ResaMania (avec jeton) : fetch live → snapshots bruts → annotation. ---
   const resa = session.resa;
   try {
+    // [MESURE TEMPORAIRE] On chronomètre chaque phase pour un en-tête Server-Timing.
+    // Clé du diagnostic : comparer le temps MUR des 7 fetches (resaWall) à la SOMME des
+    // durées individuelles (resaSum) → si resaWall ≈ resaMax, c'est parallèle ; si
+    // resaWall ≈ resaSum, c'est sérialisé (goulot à isoler).
+    const perDay: number[] = [];
+    const tResa0 = Date.now();
     const days = await Promise.all(
-      dates.map(async (d) => ({
-        date: d,
-        planning: await getPlanning(d, resa.accessToken),
-      })),
+      dates.map(async (d) => {
+        const t = Date.now();
+        const planning = await getPlanning(d, resa.accessToken);
+        perDay.push(Date.now() - t);
+        return { date: d, planning };
+      }),
     );
+    const resaWall = Date.now() - tResa0;
+    const resaSum = perDay.reduce((a, b) => a + b, 0);
+    const resaMax = perDay.length ? Math.max(...perDay) : 0;
 
     // Snapshot BRUT (avant annotation) de chaque jour → alimente le cache des comptes
     // « email seul » : ils verront TOUTE la semaine consultée ici, pas seulement les jours
     // ouverts en vue Jour. Écriture CONDITIONNELLE : une seule lecture batchée des 7 jours,
     // puis on n'upsert QUE les jours dont le planning a changé (souvent aucun → 0 écriture).
+    const tSnap0 = Date.now();
     const prevSnaps = await prisma.planningSnapshot.findMany({
       where: { date: { in: dates } },
       select: { date: true, payloadJson: true },
@@ -142,10 +154,26 @@ export async function GET(req: NextRequest) {
           }),
         ),
     );
+    const snapMs = Date.now() - tSnap0;
 
+    const tAnn0 = Date.now();
     await annotateWeek(days, session.userId);
+    const annMs = Date.now() - tAnn0;
 
-    return NextResponse.json(days);
+    const res = NextResponse.json(days);
+    // [MESURE TEMPORAIRE] Lisible dans DevTools → Réseau → onglet « Timing » de /api/week.
+    res.headers.set(
+      "Server-Timing",
+      [
+        `resaWall;desc="7 fetches ResaMania (mur)";dur=${resaWall}`,
+        `resaSum;desc="somme durees fetches";dur=${resaSum}`,
+        `resaMax;desc="fetch le plus lent";dur=${resaMax}`,
+        `dbSnap;desc="snapshots read+upsert";dur=${snapMs}`,
+        `dbAnnotate;desc="annotation";dur=${annMs}`,
+        `days;desc="jours";dur=${dates.length}`,
+      ].join(", "),
+    );
+    return res;
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
   }
