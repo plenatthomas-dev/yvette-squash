@@ -23,6 +23,9 @@ export async function GET(req: NextRequest) {
   const me = users.find((u) => u.id === session.userId);
   const handle = buildHandleMap(users).get(session.userId) ?? null;
   return NextResponse.json({
+    // Id interne du membre : permet au client de se reconnaître dans les listes
+    // issues de l'annuaire (ex. s'exclure du choix des délégués).
+    id: session.userId,
     displayName: session.displayName,
     nickname: me?.nickname ?? null,
     // Visibilité annuaire (idée 6) : pilote la case opt-out des paramètres.

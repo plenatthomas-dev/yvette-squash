@@ -397,11 +397,13 @@ function DirectoryModal({
 
 // Panneau de paramètres : choix du thème (dont « Short Rose ») + choix du pseudonyme.
 function SettingsButton({
+  myId,
   nickname,
   listed,
   onProfileSaved,
   toast,
 }: {
+  myId: string | null;
   nickname: string | null;
   listed: boolean;
   onProfileSaved: () => void;
@@ -460,8 +462,10 @@ function SettingsButton({
 
   // Membres à qui je ne délègue pas encore : seuls eux sont proposés dans la liste à
   // cocher (renouveler/étendre une délégation en cours = révoquer puis redonner).
+  // Moi-même exclu : l'annuaire me liste, mais se déléguer ses propres droits n'a
+  // pas de sens (le serveur le refuse déjà, autant ne pas le proposer).
   const availableDelegates = (delegateMembers ?? []).filter(
-    (m) => !outgoingDelegations.some((d) => d.delegateId === m.id),
+    (m) => m.id !== myId && !outgoingDelegations.some((d) => d.delegateId === m.id),
   );
 
   const toggleDelegate = (id: string, on: boolean) =>
@@ -1341,6 +1345,7 @@ interface AlertItem {
 
 export default function Home() {
   const [me, setMe] = useState<string | null | undefined>(undefined); // undefined = chargement
+  const [myId, setMyId] = useState<string | null>(null); // id interne (se reconnaître dans l'annuaire)
   const [myHandle, setMyHandle] = useState<string>(""); // token créneau (pseudo tronqué / Tho.P)
   const [nickname, setNickname] = useState<string | null>(null); // pseudonyme choisi
   const [listed, setListed] = useState(true); // visibilité annuaire (idée 6, opt-out)
@@ -1425,12 +1430,14 @@ export default function Home() {
     if (res.ok) {
       const data = await res.json();
       setMe(data.displayName);
+      setMyId(data.id ?? null);
       setMyHandle(data.handle ?? "");
       setNickname(data.nickname ?? null);
       setListed(data.listed ?? true);
       setCanBook(data.canBook ?? true);
     } else {
       setMe(null);
+      setMyId(null);
       setMyHandle("");
       setNickname(null);
     }
@@ -2011,6 +2018,7 @@ export default function Home() {
             )}
             {/* Réglages : accès DIRECT (hors menu ⋯), comme les notifications. */}
             <SettingsButton
+              myId={myId}
               nickname={nickname}
               listed={listed}
               onProfileSaved={checkMe}
