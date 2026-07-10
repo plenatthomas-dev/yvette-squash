@@ -1393,6 +1393,30 @@ td.cell.past {
   gap: 8px;
 }
 
+/* Liste à cocher des délégués possibles (multi-sélection). Bornée en hauteur :
+   l'annuaire peut être long, le panneau Réglages ne doit pas devenir un ascenseur. */
+.delegate-picklist {
+  flex: 1 1 100%;
+  max-height: 11rem;
+  overflow-y: auto;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--pico-border-radius);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Une délégation active par ligne, chacune avec son bouton « Révoquer ». */
+.delegation-active-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .delegation-form select {
   margin: 0;
   flex: 1 1 auto;

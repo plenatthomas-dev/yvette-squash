@@ -12,9 +12,13 @@ export function isDelegationActive(d: Pick<Delegation, "revokedAt" | "expiresAt"
   return !d.revokedAt && d.expiresAt.getTime() > Date.now();
 }
 
-/** Délégation que JE (delegatorId) donne actuellement — v1 : une seule à la fois. */
-export function getActiveOutgoingDelegation(delegatorId: string) {
-  return prisma.delegation.findFirst({
+/**
+ * Délégations que JE (delegatorId) donne actuellement. Plusieurs délégués simultanés
+ * possibles (une délégation active au plus par couple délégant/délégué — le POST
+ * renouvelle celle d'un même délégué au lieu d'en empiler).
+ */
+export function getActiveOutgoingDelegations(delegatorId: string) {
+  return prisma.delegation.findMany({
     where: { delegatorId, revokedAt: null, expiresAt: { gt: new Date() } },
     orderBy: { createdAt: "desc" },
     include: { delegate: { select: { id: true, displayName: true, nickname: true } } },
