@@ -432,10 +432,13 @@ function SettingsButton({
   const [pickedDelegates, setPickedDelegates] = useState<string[]>([]);
   const [pickedHours, setPickedHours] = useState<number>(DELEGATION_DURATIONS[0].hours);
   const [delegating, setDelegating] = useState(false);
+  // Délégué dont on est en train de choisir la durée de prolongation (boutons inline).
+  const [extending, setExtending] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !FEATURE_DELEGATION) return;
     let cancelled = false;
+    setExtending(null); // réouverture du panneau : pas de choix de durée résiduel
     (async () => {
       try {
         // Annuaire via le cache mémoire partagé (dédupliqué avec la modale Annuaire) ;
@@ -474,13 +477,17 @@ function SettingsButton({
   // POST partagé création / prolongation : le serveur renouvelle (révoque + recrée) toute
   // délégation active vers les mêmes délégués — prolonger = re-poster le même membre avec
   // la durée choisie. Renvoie true en cas de succès (pour vider la sélection, etc.).
-  const postDelegations = async (ids: string[], okMsg: string): Promise<boolean> => {
+  const postDelegations = async (
+    ids: string[],
+    okMsg: string,
+    hours = pickedHours,
+  ): Promise<boolean> => {
     setDelegating(true);
     try {
       const res = await fetch("/api/delegations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ delegateIds: ids, hours: pickedHours }),
+        body: JSON.stringify({ delegateIds: ids, hours }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
@@ -519,8 +526,10 @@ function SettingsButton({
     if (ok) setPickedDelegates([]);
   };
 
-  const extendDelegation = (delegateId: string) =>
-    postDelegations([delegateId], "Délégation prolongée");
+  const extendDelegation = async (delegateId: string, hours: number) => {
+    const ok = await postDelegations([delegateId], "Délégation prolongée", hours);
+    if (ok) setExtending(null);
+  };
 
   const revokeDelegation = async (id: string) => {
     setDelegating(true);
@@ -745,57 +754,81 @@ function SettingsButton({
                           })}
                           .
                         </p>
-                        <div className="delegation-row-actions">
-                          <button
-                            className="secondary"
-                            onClick={() => extendDelegation(d.delegateId)}
-                            disabled={delegating}
-                            title="Repart pour la durée choisie ci-dessous, à compter de maintenant"
-                          >
-                            {delegating ? "…" : "Prolonger"}
-                          </button>
-                          <button
-                            className="secondary"
-                            onClick={() => revokeDelegation(d.id)}
-                            disabled={delegating}
-                          >
-                            {delegating ? "…" : "Révoquer"}
-                          </button>
-                        </div>
+                        {extending === d.delegateId ? (
+                          // Choix de la durée de prolongation, inline : « Prolonger » a
+                          // laissé place aux préréglages (nouvelle échéance = maintenant + durée).
+                          <div className="delegation-row-actions">
+                            {DELEGATION_DURATIONS.map((opt) => (
+                              <button
+                                key={opt.hours}
+                                className="secondary"
+                                onClick={() => extendDelegation(d.delegateId, opt.hours)}
+                                disabled={delegating}
+                                title={`Jusqu'à maintenant + ${opt.label}`}
+                              >
+                                {delegating ? "…" : `+${opt.label}`}
+                              </button>
+                            ))}
+                            <button
+                              className="secondary icon-btn"
+                              onClick={() => setExtending(null)}
+                              disabled={delegating}
+                              aria-label="Annuler la prolongation"
+                              title="Annuler"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="delegation-row-actions">
+                            <button
+                              className="secondary"
+                              onClick={() => setExtending(d.delegateId)}
+                              disabled={delegating}
+                            >
+                              Prolonger
+                            </button>
+                            <button
+                              className="secondary"
+                              onClick={() => revokeDelegation(d.id)}
+                              disabled={delegating}
+                            >
+                              {delegating ? "…" : "Révoquer"}
+                            </button>
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>
                 )}
                 {delegateMembers === null ? (
                   <p className="muted tiny">Chargement…</p>
-                ) : availableDelegates.length === 0 && outgoingDelegations.length === 0 ? (
-                  <p className="muted tiny">Aucun autre membre disponible pour l'instant.</p>
+                ) : availableDelegates.length === 0 ? (
+                  outgoingDelegations.length === 0 ? (
+                    <p className="muted tiny">Aucun autre membre disponible pour l'instant.</p>
+                  ) : null
                 ) : (
                   <div className="delegation-form">
-                    {availableDelegates.length > 0 && (
-                      <div
-                        className="delegate-picklist"
-                        role="group"
-                        aria-label="Choisir un ou plusieurs délégués"
-                      >
-                        {availableDelegates.map((m) => (
-                          <label key={m.id} className="check-row">
-                            <input
-                              type="checkbox"
-                              checked={pickedDelegates.includes(m.id)}
-                              onChange={(e) => toggleDelegate(m.id, e.target.checked)}
-                            />
-                            <span>{m.name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                    {/* Durée : sert aux nouvelles délégations ET aux prolongations —
-                        reste visible tant qu'il y a quelque chose à créer ou prolonger. */}
+                    <div
+                      className="delegate-picklist"
+                      role="group"
+                      aria-label="Choisir un ou plusieurs délégués"
+                    >
+                      {availableDelegates.map((m) => (
+                        <label key={m.id} className="check-row">
+                          <input
+                            type="checkbox"
+                            checked={pickedDelegates.includes(m.id)}
+                            onChange={(e) => toggleDelegate(m.id, e.target.checked)}
+                          />
+                          <span>{m.name}</span>
+                        </label>
+                      ))}
+                    </div>
                     <select
                       value={pickedHours}
                       onChange={(e) => setPickedHours(Number(e.target.value))}
-                      aria-label="Durée de la délégation (nouvelle ou prolongée)"
+                      aria-label="Durée de la délégation"
                     >
                       {DELEGATION_DURATIONS.map((d) => (
                         <option key={d.hours} value={d.hours}>
@@ -803,18 +836,16 @@ function SettingsButton({
                         </option>
                       ))}
                     </select>
-                    {availableDelegates.length > 0 && (
-                      <button
-                        onClick={createDelegations}
-                        disabled={delegating || pickedDelegates.length === 0}
-                      >
-                        {delegating
-                          ? "…"
-                          : pickedDelegates.length > 1
-                            ? `Déléguer (${pickedDelegates.length})`
-                            : "Déléguer"}
-                      </button>
-                    )}
+                    <button
+                      onClick={createDelegations}
+                      disabled={delegating || pickedDelegates.length === 0}
+                    >
+                      {delegating
+                        ? "…"
+                        : pickedDelegates.length > 1
+                          ? `Déléguer (${pickedDelegates.length})`
+                          : "Déléguer"}
+                    </button>
                   </div>
                 )}
               </section>
