@@ -1248,9 +1248,11 @@ td.cell.past {
 /* Le panneau s'est étoffé (thème, pseudo, annuaire, délégation, commentaire…) : une
    fine ligne sépare les sections pour la lisibilité. Sélecteur de voisinage : la ligne
    n'apparaît qu'ENTRE deux sections rendues (pas au-dessus de la première), quels que
-   soient les feature flags actifs. */
+   soient les feature flags actifs. Couleur dérivée du texte courant (currentColor
+   atténué) : contrastée sur TOUS les thèmes — la variable Pico « muted-border » était
+   invisible sur le thème sombre. */
 .setting + .setting {
-  border-top: 1px solid var(--pico-muted-border-color);
+  border-top: 1px solid color-mix(in srgb, currentColor 30%, transparent);
   padding-top: 14px;
 }
 
