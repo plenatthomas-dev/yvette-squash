@@ -102,14 +102,19 @@ créneau redevient réservable, puis désactive l'alerte. L'abonnement de l'appa
 
 ---
 
-## Roadmap
+## Roadmap & état des lieux
 
-- [x] Squelette : stack, schéma BDD, adaptateur, planning factice, UI grille
-- [] **#1** Câbler l'API ResaMania depuis le HAR (login / planning / réservation)
-- [ ] **#5** Réservation à la demande depuis l'appli
-- [ ] **#6** Journal partagé (qui a réservé quoi) + identité des joueurs
-- [ ] **#7** Déploiement gratuit (Vercel + Neon) + lien partageable
-- [ ] _Bonus_ Réservation **programmée** à l'ouverture des créneaux (la « killer feature » du squash)
+Le socle historique (adaptateur ResaMania, réservation, journal partagé, déploiement
+Vercel + Neon) est **en production** depuis 2026. S'y sont ajoutés : vue semaine,
+réservation groupée multi-créneaux, alertes & liste d'attente (Web Push), annuaire des
+membres, partage de frais (« tricount »), module tournois, classement fédéral
+(squashnet.fr), délégation temporaire de droits, note de confidentialité RGPD.
+
+Les fonctions sensibles restent derrière des **feature flags** (`src/lib/features.ts`),
+testées sur la branche `Recette` avant activation en prod.
+
+- **Backlog vivant** (idées, statuts, priorisation) : [docs/idees-developpement.md](docs/idees-developpement.md)
+- **Flux de branches & promotion** : [docs/flux-branches.md](docs/flux-branches.md)
 
 ---
 

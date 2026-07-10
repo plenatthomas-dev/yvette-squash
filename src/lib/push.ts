@@ -42,6 +42,12 @@ export async function pushToUser(userId: string, payload: PushPayload): Promise<
         const code = (e as { statusCode?: number }).statusCode;
         if (code === 404 || code === 410) {
           await prisma.pushSubscription.delete({ where: { id: s.id } }).catch(() => {});
+        } else {
+          // Échec non lié à un abonnement mort (réseau, VAPID, quota…) : à tracer dans
+          // les logs Vercel — sinon les notifications perdues sont indiagnosticables.
+          console.warn(
+            `[push] envoi échoué (user ${userId}, code ${code ?? "?"}) : ${(e as Error).message}`,
+          );
         }
       }
     }),
