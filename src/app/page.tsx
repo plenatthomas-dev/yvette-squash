@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { PlanningGrid } from "@/components/PlanningGrid";
@@ -8,9 +8,25 @@ import { WeekGrid } from "@/components/WeekGrid";
 import { Dialog } from "@/components/Dialog";
 import { SettingsButton } from "@/components/SettingsButton";
 import { DirectoryModal } from "@/components/DirectoryModal";
-import { PrivacyNotice, InfoIcon } from "@/components/PrivacyNotice";
+import { PrivacyNotice } from "@/components/PrivacyNotice";
 import { ShareModal } from "@/components/ShareModal";
 import { HeaderMenu } from "@/components/HeaderMenu";
+import { LoginScreen } from "@/components/LoginScreen";
+import { LegendInfo } from "@/components/LegendInfo";
+import { Skeleton, EmptyState } from "@/components/Placeholders";
+import { Toasts, type Toast, type ToastType } from "@/components/Toasts";
+import { ConfirmDialog, type ConfirmOpts, type ConfirmState } from "@/components/ConfirmDialog";
+import {
+  LogoutIcon,
+  EuroIcon,
+  TrophyIcon,
+  BellIcon,
+  UsersIcon,
+  ShareIcon,
+  RefreshIcon,
+  CalendarIcon,
+  MultiSelectIcon,
+} from "@/components/icons";
 // Tricount chargé à la demande (seulement à l'ouverture de la vue « Frais ») : son JS ne
 // pèse plus sur le bundle initial de la page. Rendu client uniquement (déjà dans "use client").
 const Tricount = dynamic(() => import("@/components/Tricount"), { ssr: false });
@@ -25,7 +41,6 @@ import {
 } from "@/lib/pushClient";
 import {
   FEATURE_TRICOUNT,
-  FEATURE_EMAIL_LOGIN,
   FEATURE_DIRECTORY,
   FEATURE_DELEGATION,
   FEATURE_TOURNAMENT,
@@ -101,175 +116,6 @@ function inRange(iso: string, r: Range): boolean {
   }
 }
 
-// Icône « déconnexion » (flèche sortant d'une porte)
-function LogoutIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="18"
-      height="18"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-      <polyline points="16 17 21 12 16 7" />
-      <line x1="21" y1="12" x2="9" y2="12" />
-    </svg>
-  );
-}
-
-// Icône « cloche » (alertes « créneau libéré »)
-// Icône « € » (accès aux frais partagés / tricount)
-function EuroIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M17.5 5.5A7.5 7.5 0 0 0 6.8 8.5M17.5 18.5a7.5 7.5 0 0 1-10.7-3M4 10h9M4 14h8" />
-    </svg>
-  );
-}
-
-// Icône « trophée » pour le bouton Tournoi.
-function TrophyIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M6 4h12v4a6 6 0 0 1-12 0V4Z" />
-      <path d="M6 6H3v2a3 3 0 0 0 3 3M18 6h3v2a3 3 0 0 1-3 3" />
-      <path d="M9 20h6M12 14v6" />
-    </svg>
-  );
-}
-
-function BellIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-    </svg>
-  );
-}
-
-// Icône « membres » (deux silhouettes) pour le bouton annuaire.
-function UsersIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}
-
-// --- Toasts & confirmation (remplacent alert()/confirm() natifs, moches sur mobile) ----
-type ToastType = "ok" | "err" | "info";
-type Toast = { id: number; type: ToastType; msg: string };
-const TOAST_ICON: Record<ToastType, string> = { ok: "✅", err: "⚠️", info: "ℹ️" };
-function Toasts({ items }: { items: Toast[] }) {
-  return (
-    <div className="toasts" role="status" aria-live="polite">
-      {items.map((t) => (
-        <div key={t.id} className={`toast ${t.type}`}>
-          {TOAST_ICON[t.type]} {t.msg}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-type ConfirmOpts = {
-  title: string;
-  body: string;
-  lines?: string[]; // si fourni, affiché en liste (une réservation par ligne) sous le body
-  confirmLabel: string;
-  danger?: boolean;
-};
-type ConfirmState = (ConfirmOpts & { resolve: (v: boolean) => void }) | null;
-function ConfirmDialog({
-  state,
-  onResolve,
-}: {
-  state: ConfirmState;
-  onResolve: (v: boolean) => void;
-}) {
-  if (!state) return null;
-  return (
-    <Dialog onClose={() => onResolve(false)} label={state.title}>
-      <h3>{state.title}</h3>
-      <p>{state.body}</p>
-      {state.lines && state.lines.length > 0 && (
-        <ul className="confirm-lines">
-          {state.lines.map((l, i) => (
-            <li key={i}>{l}</li>
-          ))}
-        </ul>
-      )}
-      <div className="modal-actions">
-        <button className="secondary" onClick={() => onResolve(false)}>
-          Retour
-        </button>
-        <button
-          className={state.danger ? "danger" : ""}
-          onClick={() => onResolve(true)}
-        >
-          {state.confirmLabel}
-        </button>
-      </div>
-    </Dialog>
-  );
-}
-
-// Icône « partager »
-function ShareIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="18" cy="5" r="3" />
-      <circle cx="6" cy="12" r="3" />
-      <circle cx="18" cy="19" r="3" />
-      <line x1="8.6" y1="13.5" x2="15.4" y2="17.5" />
-      <line x1="15.4" y1="6.5" x2="8.6" y2="10.5" />
-    </svg>
-  );
-}
-// Icône « rafraîchir »
-function RefreshIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polyline points="23 4 23 10 17 10" />
-      <polyline points="1 20 1 14 7 14" />
-      <path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15" />
-    </svg>
-  );
-}
-
-// Squelette de chargement (à la place du texte « Chargement… »)
-function Skeleton() {
-  return (
-    <div className="grid-wrap skel" aria-hidden="true">
-      {Array.from({ length: 8 }).map((_, i) => (
-        <div className="skel-row" key={i}>
-          <span className="skel-cell time" />
-          <span className="skel-cell" />
-          <span className="skel-cell" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// État vide « présentable » (petit visuel + message) plutôt qu'un simple texte gris.
-function EmptyState({ icon, text }: { icon: string; text: string }) {
-  return (
-    <div className="empty">
-      <span className="empty-icon" aria-hidden="true">{icon}</span>
-      <p>{text}</p>
-    </div>
-  );
-}
-
 interface JournalEntry {
   id: string;
   displayName: string;
@@ -277,57 +123,6 @@ interface JournalEntry {
   startsAt: string;
   endsAt: string;
   mine: boolean;
-}
-
-// Icône calendrier (déclencheur du sélecteur de date natif).
-function CalendarIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="4" width="18" height="17" rx="2" />
-      <path d="M3 9h18M8 2v4M16 2v4" />
-    </svg>
-  );
-}
-
-// Icône « réserver plusieurs créneaux » (calendrier + coche).
-function MultiSelectIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M21 11V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6" />
-      <path d="M3 9h18M8 2v4M16 2v4" />
-      <path d="M15 18l2 2 4-4" />
-    </svg>
-  );
-}
-
-// Légende des couleurs, repliée dans un petit popover ⓘ pour libérer une ligne à l'écran.
-// (Réutilise le composant InfoIcon défini plus haut pour la note de confidentialité.)
-function LegendInfo() {
-  const [open, setOpen] = useState(false);
-  return (
-    <span className="legend-info">
-      <button
-        type="button"
-        className="secondary icon-btn"
-        aria-label="Légende des couleurs"
-        aria-expanded={open}
-        title="Légende"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <InfoIcon />
-      </button>
-      {open && (
-        <>
-          <div className="legend-backdrop" onClick={() => setOpen(false)} />
-          <div className="legend-pop" role="dialog" aria-label="Légende des couleurs">
-            <span><i style={{ background: "var(--free)" }} /> Libre</span>
-            <span><i style={{ background: "var(--group)" }} /> Réservé (asso)</span>
-            <span><i style={{ background: "var(--booked)" }} /> Réservé (autre)</span>
-          </div>
-        </>
-      )}
-    </span>
-  );
 }
 
 interface AlertItem {
@@ -1349,262 +1144,6 @@ export default function Home() {
 
       <Toasts items={toasts} />
       <ConfirmDialog state={confirmState} onResolve={resolveConfirm} />
-    </main>
-  );
-}
-
-// Icône « œil » (afficher/masquer le mot de passe). `off` = œil barré (masqué).
-function EyeIcon({ off }: { off: boolean }) {
-  const p = {
-    viewBox: "0 0 24 24",
-    width: 20,
-    height: 20,
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 2,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-    "aria-hidden": true,
-  };
-  if (off) {
-    return (
-      <svg {...p}>
-        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20C5 20 1 12 1 12a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-        <line x1="1" y1="1" x2="23" y2="23" />
-      </svg>
-    );
-  }
-  return (
-    <svg {...p}>
-      <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  );
-}
-
-function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
-  const [tab, setTab] = useState<"resa" | "email">("resa");
-  // ResaMania
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPwd, setShowPwd] = useState(false);
-  // Connexion par email (OTP)
-  const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [name, setName] = useState("");
-  const [codeSent, setCodeSent] = useState(false);
-
-  const [err, setErr] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const submitResa = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setErr(null);
-    try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Connexion impossible");
-      onLoggedIn();
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const requestCode = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setErr(null);
-    setInfo(null);
-    try {
-      const res = await fetch("/api/auth/otp/request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Envoi impossible");
-      setCodeSent(true);
-      setInfo(`Code envoyé à ${email}. Regarde tes mails (et les spams).`);
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const verifyCode = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setErr(null);
-    try {
-      const res = await fetch("/api/auth/otp/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, code, name: name.trim() || undefined }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Code invalide");
-      onLoggedIn();
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const switchTab = (t: "resa" | "email") => {
-    setTab(t);
-    setErr(null);
-    setInfo(null);
-  };
-
-  return (
-    <main className="login">
-      <h1 className="sr-only">Squash de l'Yvette</h1>
-      <img src="/logo_squash.jpeg" alt="Squash de l'Yvette" className="logo-hero" />
-
-      {/* Onglet « Par email » : actif si le flag est ON ; sinon affiché grisé (désactivé)
-          avec un tooltip « en cours de développement ». Seule ResaMania reste utilisable. */}
-      <div className="login-tabs" role="group" aria-label="Méthode de connexion">
-        <button
-          type="button"
-          className={tab === "resa" ? "active" : "secondary"}
-          aria-pressed={tab === "resa"}
-          onClick={() => switchTab("resa")}
-        >
-          ResaMania
-        </button>
-        <button
-          type="button"
-          className={
-            (tab === "email" ? "active" : "secondary") +
-            (FEATURE_EMAIL_LOGIN ? "" : " coming-soon")
-          }
-          aria-pressed={tab === "email"}
-          onClick={() => FEATURE_EMAIL_LOGIN && switchTab("email")}
-          disabled={!FEATURE_EMAIL_LOGIN}
-          title={FEATURE_EMAIL_LOGIN ? undefined : "🚧 En cours de développement"}
-        >
-          Par email
-        </button>
-      </div>
-
-      {tab === "resa" || !FEATURE_EMAIL_LOGIN ? (
-        <>
-          <p className="muted">
-            Connecte-toi avec ton compte ResaMania (Le Complexe Bures).
-          </p>
-          <form onSubmit={submitResa}>
-            <input
-              type="text"
-              placeholder="Identifiant (email)"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoComplete="username"
-            />
-            <div className="pwd-field">
-              <input
-                type={showPwd ? "text" : "password"}
-                placeholder="Mot de passe"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-              />
-              <button
-                type="button"
-                className="pwd-toggle"
-                onClick={() => setShowPwd((v) => !v)}
-                aria-label={showPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-                aria-pressed={showPwd}
-                title={showPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-              >
-                <EyeIcon off={showPwd} />
-              </button>
-            </div>
-            <button type="submit" disabled={busy}>
-              {busy ? "Connexion…" : "Se connecter"}
-            </button>
-          </form>
-          <p className="muted tiny">
-            Ton mot de passe sert seulement à te connecter à ResaMania ; il n'est jamais
-            conservé. L'appli mémorise uniquement que tu es connecté, de façon sécurisée.
-          </p>
-        </>
-      ) : (
-        <>
-          <p className="muted">
-            Pas d'accès ResaMania (suspendu, pas encore inscrit…) ? Connecte-toi par email.
-            Utilise le <strong>même email que sur ResaMania</strong> pour retrouver ton
-            historique le jour où tu t'y reconnecteras.
-          </p>
-          {!codeSent ? (
-            <form onSubmit={requestCode}>
-              <input
-                type="email"
-                placeholder="Ton email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
-              />
-              <button type="submit" disabled={busy || !email.trim()}>
-                {busy ? "Envoi…" : "Recevoir un code"}
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={verifyCode}>
-              <input
-                type="text"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                placeholder="Code à 6 chiffres"
-                value={code}
-                maxLength={6}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-              />
-              <input
-                type="text"
-                placeholder="Ton nom (si première connexion)"
-                value={name}
-                maxLength={60}
-                onChange={(e) => setName(e.target.value)}
-                autoComplete="name"
-              />
-              <button type="submit" disabled={busy || code.length !== 6}>
-                {busy ? "Vérification…" : "Se connecter"}
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => {
-                  setCodeSent(false);
-                  setCode("");
-                  setInfo(null);
-                  setErr(null);
-                }}
-                disabled={busy}
-              >
-                Changer d'email / renvoyer un code
-              </button>
-            </form>
-          )}
-          <p className="muted tiny">
-            En connexion email, tu peux consulter le planning et le Tricount, mais pas réserver
-            de terrain (ça reste sur ResaMania).
-          </p>
-        </>
-      )}
-
-      {info && <div className="notice info">{info}</div>}
-      {err && <div className="notice error">⚠️ {err}</div>}
-      <PrivacyNotice />
     </main>
   );
 }
