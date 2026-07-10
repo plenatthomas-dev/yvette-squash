@@ -160,6 +160,22 @@ export async function GET(req: NextRequest) {
     await annotateWeek(days, session.userId);
     const annMs = Date.now() - tAnn0;
 
+    // [MESURE TEMPORAIRE] Ligne de log lisible via `vercel logs` — évite DevTools.
+    // perDay = durée de chaque fetch ; si resaWall ≈ resaMax → parallèle, sinon sérialisé.
+    console.log(
+      "WEEK-TIMING " +
+        JSON.stringify({
+          date,
+          resaWall,
+          resaSum,
+          resaMax,
+          perDay,
+          dbSnap: snapMs,
+          dbAnnotate: annMs,
+          days: dates.length,
+        }),
+    );
+
     const res = NextResponse.json(days);
     // [MESURE TEMPORAIRE] Lisible dans DevTools → Réseau → onglet « Timing » de /api/week.
     res.headers.set(
