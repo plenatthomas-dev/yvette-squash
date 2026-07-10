@@ -8,6 +8,9 @@ const h = vi.hoisted(() => ({
   incoming: [] as Array<Record<string, unknown>>,
   // POST : utilisateurs « trouvés » par prisma.user.findMany + espions de la transaction.
   foundUsers: [] as Array<{ id: string }>,
+  // Délégations actives existantes lues DANS la transaction (chemin extend).
+  txExisting: [] as Array<{ delegateId: string; expiresAt: Date }>,
+  txFindMany: vi.fn(),
   updateMany: vi.fn(),
   create: vi.fn(),
   pushToUser: vi.fn(),
@@ -28,7 +31,9 @@ vi.mock("@/lib/db", () => ({
     // La transaction relaie vers les espions : on vérifie révocation (renouvellement)
     // et créations sans base réelle.
     $transaction: vi.fn(async (cb: (tx: unknown) => unknown) =>
-      cb({ delegation: { updateMany: h.updateMany, create: h.create } }),
+      cb({
+        delegation: { findMany: h.txFindMany, updateMany: h.updateMany, create: h.create },
+      }),
     ),
   },
 }));
@@ -55,11 +60,16 @@ beforeEach(() => {
   h.outgoing = [];
   h.incoming = [];
   h.foundUsers = [];
+  h.txExisting = [];
+  h.txFindMany.mockReset().mockImplementation(async () => h.txExisting);
   h.updateMany.mockReset().mockResolvedValue({ count: 0 });
-  h.create.mockReset().mockImplementation(async ({ data }: { data: { delegateId: string } }) => ({
-    id: `new-${data.delegateId}`,
-    delegateId: data.delegateId,
-  }));
+  h.create
+    .mockReset()
+    .mockImplementation(async ({ data }: { data: { delegateId: string; expiresAt: Date } }) => ({
+      id: `new-${data.delegateId}`,
+      delegateId: data.delegateId,
+      expiresAt: data.expiresAt,
+    }));
   h.pushToUser.mockReset().mockResolvedValue(undefined);
 });
 
@@ -174,13 +184,45 @@ describe("POST /api/delegations", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.delegations).toEqual([
-      { id: "new-a", delegateId: "a" },
-      { id: "new-b", delegateId: "b" },
+      { id: "new-a", delegateId: "a", expiresAt: expect.any(String) },
+      { id: "new-b", delegateId: "b", expiresAt: expect.any(String) },
     ]);
     expect(new Date(body.expiresAt).getTime()).toBeGreaterThan(Date.now());
     expect(h.create).toHaveBeenCalledTimes(2);
     expect(h.pushToUser).toHaveBeenCalledTimes(2);
     expect(h.pushToUser.mock.calls.map((c) => c[0])).toEqual(["a", "b"]);
+  });
+
+  it("prolongation (extend) : part de l'échéance ACTUELLE, pas de maintenant", async () => {
+    h.foundUsers = [{ id: "a" }];
+    const currentEnd = new Date(Date.now() + 50 * 3_600_000); // délégation encore active 50 h
+    h.txExisting = [{ delegateId: "a", expiresAt: currentEnd }];
+    const res = await POST(postReq({ delegateIds: ["a"], hours: 12, extend: true }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // Nouvelle échéance = actuelle + 12 h (à la milliseconde près).
+    expect(new Date(body.delegations[0].expiresAt).getTime()).toBe(
+      currentEnd.getTime() + 12 * 3_600_000,
+    );
+    // Push de prolongation, pas de « nouvelle délégation ».
+    expect(h.pushToUser.mock.calls[0][1].title).toContain("prolongée");
+  });
+
+  it("prolongation sans délégation active : retombe sur maintenant + durée", async () => {
+    h.foundUsers = [{ id: "a" }];
+    h.txExisting = []; // rien d'actif (expirée entre-temps)
+    const before = Date.now();
+    const res = await POST(postReq({ delegateIds: ["a"], hours: 12, extend: true }));
+    const body = await res.json();
+    const end = new Date(body.delegations[0].expiresAt).getTime();
+    expect(end).toBeGreaterThanOrEqual(before + 12 * 3_600_000);
+    expect(end).toBeLessThan(before + 13 * 3_600_000);
+  });
+
+  it("création simple : la transaction ne lit PAS les délégations existantes", async () => {
+    h.foundUsers = [{ id: "a" }];
+    await POST(postReq({ delegateIds: ["a"], hours: 3 }));
+    expect(h.txFindMany).not.toHaveBeenCalled();
   });
 
   it("renouvellement : révoque l'existante des MÊMES délégués, endNotifiedAt posé", async () => {
@@ -210,6 +252,8 @@ describe("POST /api/delegations", () => {
     const res = await POST(postReq({ delegateId: "a", hours: 3 }));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.delegations).toEqual([{ id: "new-a", delegateId: "a" }]);
+    expect(body.delegations).toEqual([
+      { id: "new-a", delegateId: "a", expiresAt: expect.any(String) },
+    ]);
   });
 });
