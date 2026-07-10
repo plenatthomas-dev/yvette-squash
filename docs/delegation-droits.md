@@ -15,19 +15,19 @@ Contexte général : voir idée **4** dans [`idees-developpement.md`](./idees-de
   (partagée), exposant `getResaTokenForUser(userId)` — récupère/rafraîchit le jeton
   ResaMania d'un AUTRE user par son id, sans dépendre de son cookie.
 - **`src/lib/delegation.ts`** (+ `delegation-shared.ts` pour les constantes côté client) :
-  `getActiveOutgoingDelegation`, `getActiveIncomingDelegation`, `findActiveDelegation`,
+  `getActiveOutgoingDelegations`, `getActiveIncomingDelegations`, `findActiveDelegation`,
   et surtout `resolveActingContext(session, onBehalfOf, message)` — point d'entrée unique
   utilisé par book/cancel-slot/bookings pour résoudre soit sa propre session, soit celle
   du délégant si `onBehalfOf` est fourni et couvert par une délégation active.
-- **API** : `GET/POST /api/delegations` (créer — remplace silencieusement toute délégation
-  sortante déjà active, v1 = une seule à la fois), `DELETE /api/delegations/{id}` (révoquer,
-  délégant uniquement).
+- **API** : `GET/POST /api/delegations` (créer — `delegateIds[]`, une délégation par membre
+  choisi ; si un membre avait déjà une délégation active de ma part, elle est renouvelée
+  avec la nouvelle échéance), `DELETE /api/delegations/{id}` (révoquer, délégant uniquement).
 - **`onBehalfOf`** branché dans `POST /api/book`, `POST /api/cancel-slot`,
   `DELETE /api/bookings/{id}` : la règle « un seul terrain par horaire » et le
   `Booking.userId` portent sur le **délégant** (propriétaire réel), `actingUserId` trace le
   délégué.
-- **UI** : Réglages → section « Déléguer mes droits » (choix membre via `/api/directory`,
-  durée 24h/3j/5j, révocation). En-tête : sélecteur « Pour moi / Pour {délégant} » si une
+- **UI** : Réglages → section « Déléguer mes droits » (choix d'un ou plusieurs membres via
+  `/api/directory`, durée 24h/3j/5j, révocation individuelle par délégué). En-tête : sélecteur « Pour moi / Pour {délégant} » si une
   délégation entrante est active, poussé dans les 4 appels de réservation/annulation.
 - **Cron `keep-alive-delegations`** (`vercel.json`, quotidien 5h) : rafraîchit le jeton de
   chaque délégant ayant une délégation active via `getResaTokenForUser`, scope limité aux
@@ -157,14 +157,16 @@ expiré ») plutôt qu'un échec silencieux.
 - Le délégant peut **révoquer à tout moment** (bouton, `revokedAt`).
 - Côté délégué : si délégation active entrante, un sélecteur avant de réserver
   (« Pour moi » / « Pour <nom du délégant> »).
-- **V1 : une seule délégation active à la fois** par délégant (pas de multi-délégué
-  simultané) — évite une UI de bascule complexe.
+- ~~V1 : une seule délégation active à la fois par délégant~~ **Évolution 07/2026 :
+  plusieurs délégués simultanés** (liste à cocher dans Réglages, une révocation par
+  délégué). Reste : au plus une délégation active par couple délégant/délégué.
 
 ## Bornes V1 volontaires (pour rester cadré, pas usine à gaz)
 
 - Scope = `book`/`cancel` seulement (pas présence, pas tricount, pas profil).
 - TTL dur et court par défaut (24h à 5j max) plutôt qu'une délégation permanente.
-- Un seul délégué actif par délégant à la fois.
+- Au plus une délégation active par couple délégant/délégué (multi-délégués possible
+  depuis 07/2026, borné à 20 par requête).
 - Cron de maintien scopé **uniquement** aux délégations actives (pas toutes les
   sessions du club).
 - Note de confidentialité (RGPD, contrainte 4) à compléter : nouvelle finalité —

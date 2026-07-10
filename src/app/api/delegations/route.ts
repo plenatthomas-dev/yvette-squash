@@ -7,14 +7,14 @@ import {
   DELEGATION_DURATIONS_H,
   DELEGATION_SCOPE,
   getActiveIncomingDelegations,
-  getActiveOutgoingDelegation,
+  getActiveOutgoingDelegations,
 } from "@/lib/delegation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// GET /api/delegations -> mes délégations actives : celle que je donne (outgoing, au plus
-// une, v1) et CELLES que je reçois (incoming, plusieurs délégants possibles simultanément).
+// GET /api/delegations -> mes délégations actives : celles que je donne (outgoing, une par
+// délégué, plusieurs simultanées) et celles que je reçois (incoming, plusieurs délégants).
 export async function GET(req: NextRequest) {
   if (!FEATURE_DELEGATION) {
     return NextResponse.json({ error: "Délégation désactivée" }, { status: 404 });
@@ -24,18 +24,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
   const [outgoing, incoming] = await Promise.all([
-    getActiveOutgoingDelegation(session.userId),
+    getActiveOutgoingDelegations(session.userId),
     getActiveIncomingDelegations(session.userId),
   ]);
   return NextResponse.json({
-    outgoing: outgoing
-      ? {
-          id: outgoing.id,
-          delegateId: outgoing.delegateId,
-          delegateName: outgoing.delegate.nickname ?? outgoing.delegate.displayName,
-          expiresAt: outgoing.expiresAt.toISOString(),
-        }
-      : null,
+    // Tableau (éventuellement vide) : une entrée par délégué actif.
+    outgoing: outgoing.map((d) => ({
+      id: d.id,
+      delegateId: d.delegateId,
+      delegateName: d.delegate.nickname ?? d.delegate.displayName,
+      expiresAt: d.expiresAt.toISOString(),
+    })),
     // Tableau (éventuellement vide) : une entrée par délégant actif.
     incoming: incoming.map((d) => ({
       id: d.id,
@@ -46,9 +45,14 @@ export async function GET(req: NextRequest) {
   });
 }
 
-// POST /api/delegations { delegateId, hours } -> crée une délégation (moi = délégant).
-// Remplace silencieusement toute délégation sortante déjà active (v1 : une seule à la fois,
-// cf. docs/delegation-droits.md).
+// Garde-fou : bien au-delà d'un usage réel (l'annuaire d'un club), mais borne une
+// requête forgée qui créerait des délégations en masse.
+const MAX_DELEGATES = 20;
+
+// POST /api/delegations { delegateIds: string[], hours } -> crée une délégation par membre
+// choisi (moi = délégant). Plusieurs délégués simultanés possibles ; si un des membres a
+// déjà une délégation active de ma part, elle est renouvelée (révoquée + recréée) avec la
+// nouvelle échéance. Rétro-compat : accepte aussi { delegateId } (ancien client mono).
 export async function POST(req: NextRequest) {
   if (!FEATURE_DELEGATION) {
     return NextResponse.json({ error: "Délégation désactivée" }, { status: 404 });
@@ -63,37 +67,71 @@ export async function POST(req: NextRequest) {
       { status: 403 },
     );
   }
-  const { delegateId, hours } = await req.json().catch(() => ({}));
-  if (typeof delegateId !== "string" || !delegateId) {
+  const body = (await req.json().catch(() => ({}))) as {
+    delegateIds?: unknown;
+    delegateId?: unknown;
+    hours?: unknown;
+  };
+  const rawIds = Array.isArray(body.delegateIds)
+    ? body.delegateIds
+    : typeof body.delegateId === "string"
+      ? [body.delegateId]
+      : [];
+  if (rawIds.length === 0 || rawIds.some((x) => typeof x !== "string" || !x)) {
     return NextResponse.json({ error: "Membre invalide" }, { status: 400 });
   }
-  if (delegateId === session.userId) {
+  const delegateIds = [...new Set(rawIds as string[])];
+  if (delegateIds.includes(session.userId)) {
     return NextResponse.json(
       { error: "Impossible de se déléguer des droits à soi-même" },
       { status: 400 },
     );
   }
+  if (delegateIds.length > MAX_DELEGATES) {
+    return NextResponse.json(
+      { error: `Trop de membres sélectionnés (max ${MAX_DELEGATES}).` },
+      { status: 400 },
+    );
+  }
+  const { hours } = body;
   if (typeof hours !== "number" || !DELEGATION_DURATIONS_H.includes(hours as never)) {
     return NextResponse.json({ error: "Durée invalide" }, { status: 400 });
   }
-  const delegate = await prisma.user.findUnique({ where: { id: delegateId } });
-  if (!delegate) {
+  const found = await prisma.user.findMany({
+    where: { id: { in: delegateIds } },
+    select: { id: true },
+  });
+  if (found.length !== delegateIds.length) {
     return NextResponse.json({ error: "Membre introuvable" }, { status: 404 });
   }
 
   const expiresAt = new Date(Date.now() + hours * 3_600_000);
-  const delegation = await prisma.$transaction(async (tx) => {
-    // Remplace toute délégation sortante déjà active (une seule à la fois, v1).
+  const delegations = await prisma.$transaction(async (tx) => {
+    // Renouvellement : révoque toute délégation active vers CES délégués (au plus une par
+    // couple), sans toucher celles données à d'autres membres. endNotifiedAt posé pour que
+    // le cron d'expiration ne pousse pas un « délégation terminée » trompeur alors qu'une
+    // nouvelle la remplace.
     await tx.delegation.updateMany({
-      where: { delegatorId: session.userId, revokedAt: null, expiresAt: { gt: new Date() } },
-      data: { revokedAt: new Date() },
+      where: {
+        delegatorId: session.userId,
+        delegateId: { in: delegateIds },
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      data: { revokedAt: new Date(), endNotifiedAt: new Date() },
     });
-    return tx.delegation.create({
-      data: { delegatorId: session.userId, delegateId, scope: DELEGATION_SCOPE, expiresAt },
-    });
+    const created = [];
+    for (const delegateId of delegateIds) {
+      created.push(
+        await tx.delegation.create({
+          data: { delegatorId: session.userId, delegateId, scope: DELEGATION_SCOPE, expiresAt },
+        }),
+      );
+    }
+    return created;
   });
 
-  // Notifie le délégataire (push web) qu'il vient de recevoir des droits. Best-effort :
+  // Notifie chaque délégataire (push web) qu'il vient de recevoir des droits. Best-effort :
   // un échec d'envoi ne doit jamais faire échouer la délégation elle-même.
   const delegator = await prisma.user.findUnique({
     where: { id: session.userId },
@@ -107,16 +145,20 @@ export async function POST(req: NextRequest) {
     minute: "2-digit",
     timeZone: "Europe/Paris",
   });
-  await pushToUser(delegateId, {
-    title: "Tu as reçu une délégation 🤝",
-    body: `${delegatorName} t'a délégué ses droits (réserver/annuler en son nom) jusqu'au ${whenStr}.`,
-    url: "/",
-    tag: `delegation-${delegation.id}`,
-  }).catch(() => {});
+  await Promise.all(
+    delegations.map((d) =>
+      pushToUser(d.delegateId, {
+        title: "Tu as reçu une délégation 🤝",
+        body: `${delegatorName} t'a délégué ses droits (réserver/annuler en son nom) jusqu'au ${whenStr}.`,
+        url: "/",
+        tag: `delegation-${d.id}`,
+      }).catch(() => {}),
+    ),
+  );
 
   return NextResponse.json({
     ok: true,
-    id: delegation.id,
-    expiresAt: delegation.expiresAt.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+    delegations: delegations.map((d) => ({ id: d.id, delegateId: d.delegateId })),
   });
 }

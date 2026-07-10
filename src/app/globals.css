@@ -320,11 +320,23 @@ header.app .sub {
   border: none;
   border-radius: 8px;
   background: transparent;
+  /* Pico traite tout <button> comme un bouton et REDÉFINIT --pico-color en blanc :
+     le label + les icônes SVG (currentColor) devenaient blanc sur blanc (invisibles),
+     seuls les émojis 🚧 restaient. On rétablit l'héritage de la carte. */
+  --pico-color: inherit;
   color: var(--pico-color);
   font-size: 0.9rem;
   font-weight: 500;
   text-align: left;
   cursor: pointer;
+}
+/* Pico réapplique --pico-color = blanc au survol/focus/actif : on rétablit l'héritage
+   dans tous ces états, sinon le texte repasse invisible. */
+.header-menu-panel .header-menu-item:hover:not(:disabled),
+.header-menu-panel .header-menu-item:focus,
+.header-menu-panel .header-menu-item:active {
+  --pico-color: inherit;
+  color: var(--pico-color);
 }
 .header-menu-panel .header-menu-item:hover:not(:disabled) {
   background: rgba(127, 127, 127, 0.15);
@@ -1379,6 +1391,30 @@ td.cell.past {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* Liste à cocher des délégués possibles (multi-sélection). Bornée en hauteur :
+   l'annuaire peut être long, le panneau Réglages ne doit pas devenir un ascenseur. */
+.delegate-picklist {
+  flex: 1 1 100%;
+  max-height: 11rem;
+  overflow-y: auto;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--pico-border-radius);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Une délégation active par ligne, chacune avec son bouton « Révoquer ». */
+.delegation-active-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .delegation-form select {

@@ -28,7 +28,7 @@ import {
   FEATURE_RANKING,
 } from "@/lib/features";
 import { DELEGATION_DURATIONS } from "@/lib/delegation-shared";
-import { fetchDirectory, type DirectoryMember } from "@/lib/directoryCache";
+import { fetchDirectory, invalidateDirectory, type DirectoryMember } from "@/lib/directoryCache";
 
 function toISODate(d: Date): string {
   return d.toLocaleDateString("en-CA"); // YYYY-MM-DD local
@@ -419,18 +419,15 @@ function SettingsButton({
   // Doit rester synchronisé avec MAX_LEN côté serveur (api/feedback/route.ts).
   const COMMENT_MAX = 1000;
 
-  // Délégation (idée 4) : liste des membres (pour choisir un délégué) + délégation
-  // sortante active éventuelle. Chargées à l'ouverture du panneau (peuvent avoir bougé).
+  // Délégation (idée 4) : liste des membres (pour choisir des délégués) + délégations
+  // sortantes actives (une par délégué). Chargées à l'ouverture du panneau (peuvent avoir bougé).
   const [delegateMembers, setDelegateMembers] = useState<
     { id: string; name: string }[] | null
   >(null);
-  const [outgoingDelegation, setOutgoingDelegation] = useState<{
-    id: string;
-    delegateId: string;
-    delegateName: string;
-    expiresAt: string;
-  } | null>(null);
-  const [pickedDelegate, setPickedDelegate] = useState("");
+  const [outgoingDelegations, setOutgoingDelegations] = useState<
+    { id: string; delegateId: string; delegateName: string; expiresAt: string }[]
+  >([]);
+  const [pickedDelegates, setPickedDelegates] = useState<string[]>([]);
   const [pickedHours, setPickedHours] = useState<number>(DELEGATION_DURATIONS[0].hours);
   const [delegating, setDelegating] = useState(false);
 
@@ -440,7 +437,7 @@ function SettingsButton({
     (async () => {
       try {
         // Annuaire via le cache mémoire partagé (dédupliqué avec la modale Annuaire) ;
-        // délégation sortante en parallèle (spécifique, non cachée).
+        // délégations sortantes en parallèle (spécifique, non caché).
         const [members, delRes] = await Promise.all([
           fetchDirectory().catch(() => [] as DirectoryMember[]),
           fetch("/api/delegations"),
@@ -448,11 +445,11 @@ function SettingsButton({
         const del = await delRes.json().catch(() => ({}));
         if (cancelled) return;
         setDelegateMembers(members);
-        setOutgoingDelegation(delRes.ok ? (del.outgoing ?? null) : null);
+        setOutgoingDelegations(delRes.ok ? (del.outgoing ?? []) : []);
       } catch {
         if (!cancelled) {
           setDelegateMembers([]);
-          setOutgoingDelegation(null);
+          setOutgoingDelegations([]);
         }
       }
     })();
@@ -461,25 +458,40 @@ function SettingsButton({
     };
   }, [open]);
 
-  const createDelegation = async () => {
-    if (!pickedDelegate) return;
+  // Membres à qui je ne délègue pas encore : seuls eux sont proposés dans la liste à
+  // cocher (renouveler/étendre une délégation en cours = révoquer puis redonner).
+  const availableDelegates = (delegateMembers ?? []).filter(
+    (m) => !outgoingDelegations.some((d) => d.delegateId === m.id),
+  );
+
+  const toggleDelegate = (id: string, on: boolean) =>
+    setPickedDelegates((prev) => (on ? [...prev, id] : prev.filter((x) => x !== id)));
+
+  const createDelegations = async () => {
+    if (pickedDelegates.length === 0) return;
     setDelegating(true);
     try {
       const res = await fetch("/api/delegations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ delegateId: pickedDelegate, hours: pickedHours }),
+        body: JSON.stringify({ delegateIds: pickedDelegates, hours: pickedHours }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
-      const delegate = (delegateMembers ?? []).find((m) => m.id === pickedDelegate);
-      setOutgoingDelegation({
-        id: data.id,
-        delegateId: pickedDelegate,
-        delegateName: delegate?.name ?? "ce membre",
-        expiresAt: data.expiresAt,
-      });
-      toast("ok", "Délégation activée");
+      const nameById = new Map((delegateMembers ?? []).map((m) => [m.id, m.name]));
+      const created = (data.delegations ?? []) as { id: string; delegateId: string }[];
+      setOutgoingDelegations((prev) => [
+        ...created.map((d) => ({
+          id: d.id,
+          delegateId: d.delegateId,
+          delegateName: nameById.get(d.delegateId) ?? "ce membre",
+          expiresAt: data.expiresAt,
+        })),
+        // Un délégué recréé côté serveur (renouvellement) remplace son ancienne entrée.
+        ...prev.filter((p) => !created.some((c) => c.delegateId === p.delegateId)),
+      ]);
+      setPickedDelegates([]);
+      toast("ok", created.length > 1 ? "Délégations activées" : "Délégation activée");
     } catch (e) {
       toast("err", (e as Error).message);
     } finally {
@@ -487,15 +499,14 @@ function SettingsButton({
     }
   };
 
-  const revokeDelegation = async () => {
-    if (!outgoingDelegation) return;
+  const revokeDelegation = async (id: string) => {
     setDelegating(true);
     try {
-      const res = await fetch(`/api/delegations/${outgoingDelegation.id}`, {
+      const res = await fetch(`/api/delegations/${id}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error(`Erreur ${res.status}`);
-      setOutgoingDelegation(null);
+      setOutgoingDelegations((prev) => prev.filter((d) => d.id !== id));
       toast("ok", "Délégation révoquée");
     } catch (e) {
       toast("err", (e as Error).message);
@@ -538,6 +549,9 @@ function SettingsButton({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      // Le nom affiché dans l'annuaire vient de changer : purge le cache client pour
+      // qu'une ouverture immédiate de l'annuaire (< TTL) montre le nouveau pseudo.
+      invalidateDirectory();
       toast("ok", value ? "Pseudonyme enregistré" : "Pseudonyme retiré");
       onProfileSaved();
       if (close) setOpen(false);
@@ -562,6 +576,8 @@ function SettingsButton({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      // La composition de l'annuaire vient de changer : même purge que pour le pseudo.
+      invalidateDirectory();
       toast("ok", next ? "Tu apparais dans l'annuaire" : "Tu es retiré de l'annuaire");
       onProfileSaved();
     } catch (e) {
@@ -687,49 +703,60 @@ function SettingsButton({
             {FEATURE_DELEGATION && (
               <section className="setting">
                 <SettingInfo title="Déléguer mes droits">
-                  Autorise un autre membre à réserver/annuler en ton nom pendant une durée
-                  limitée (ex. il gère les résas d'une soirée à ta place pendant que tu es
-                  indisponible). La réservation reste sous ton compte ResaMania ; on trace
-                  qui a agi.
+                  Autorise un ou plusieurs membres à réserver/annuler en ton nom pendant une
+                  durée limitée (ex. ils gèrent les résas d'une soirée à ta place pendant que
+                  tu es indisponible). La réservation reste sous ton compte ResaMania ; on
+                  trace qui a agi.
                 </SettingInfo>
-                {outgoingDelegation ? (
-                  <div className="delegation-active">
-                    <p className="tiny">
-                      Délégué à <strong>{outgoingDelegation.delegateName}</strong> jusqu'au{" "}
-                      {new Date(outgoingDelegation.expiresAt).toLocaleString("fr-FR", {
-                        day: "numeric",
-                        month: "short",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                      .
-                    </p>
-                    <button
-                      className="secondary"
-                      onClick={revokeDelegation}
-                      disabled={delegating}
-                    >
-                      {delegating ? "…" : "Révoquer"}
-                    </button>
-                  </div>
-                ) : delegateMembers === null ? (
+                {outgoingDelegations.length > 0 && (
+                  <ul className="delegation-active-list">
+                    {outgoingDelegations.map((d) => (
+                      <li key={d.id} className="delegation-active">
+                        <p className="tiny">
+                          Délégué à <strong>{d.delegateName}</strong> jusqu'au{" "}
+                          {new Date(d.expiresAt).toLocaleString("fr-FR", {
+                            day: "numeric",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                          .
+                        </p>
+                        <button
+                          className="secondary"
+                          onClick={() => revokeDelegation(d.id)}
+                          disabled={delegating}
+                        >
+                          {delegating ? "…" : "Révoquer"}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {delegateMembers === null ? (
                   <p className="muted tiny">Chargement…</p>
-                ) : delegateMembers.length === 0 ? (
-                  <p className="muted tiny">Aucun autre membre disponible pour l'instant.</p>
+                ) : availableDelegates.length === 0 ? (
+                  outgoingDelegations.length === 0 ? (
+                    <p className="muted tiny">Aucun autre membre disponible pour l'instant.</p>
+                  ) : null
                 ) : (
                   <div className="delegation-form">
-                    <select
-                      value={pickedDelegate}
-                      onChange={(e) => setPickedDelegate(e.target.value)}
-                      aria-label="Choisir un délégué"
+                    <div
+                      className="delegate-picklist"
+                      role="group"
+                      aria-label="Choisir un ou plusieurs délégués"
                     >
-                      <option value="">— Choisir un membre —</option>
-                      {delegateMembers.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
+                      {availableDelegates.map((m) => (
+                        <label key={m.id} className="check-row">
+                          <input
+                            type="checkbox"
+                            checked={pickedDelegates.includes(m.id)}
+                            onChange={(e) => toggleDelegate(m.id, e.target.checked)}
+                          />
+                          <span>{m.name}</span>
+                        </label>
                       ))}
-                    </select>
+                    </div>
                     <select
                       value={pickedHours}
                       onChange={(e) => setPickedHours(Number(e.target.value))}
@@ -741,8 +768,15 @@ function SettingsButton({
                         </option>
                       ))}
                     </select>
-                    <button onClick={createDelegation} disabled={delegating || !pickedDelegate}>
-                      {delegating ? "…" : "Déléguer"}
+                    <button
+                      onClick={createDelegations}
+                      disabled={delegating || pickedDelegates.length === 0}
+                    >
+                      {delegating
+                        ? "…"
+                        : pickedDelegates.length > 1
+                          ? `Déléguer (${pickedDelegates.length})`
+                          : "Déléguer"}
                     </button>
                   </div>
                 )}
