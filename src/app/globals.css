@@ -1245,6 +1245,15 @@ td.cell.past {
   margin-bottom: 18px;
 }
 
+/* Le panneau s'est étoffé (thème, pseudo, annuaire, délégation, commentaire…) : une
+   fine ligne sépare les sections pour la lisibilité. Sélecteur de voisinage : la ligne
+   n'apparaît qu'ENTRE deux sections rendues (pas au-dessus de la première), quels que
+   soient les feature flags actifs. */
+.setting + .setting {
+  border-top: 1px solid var(--pico-muted-border-color);
+  padding-top: 14px;
+}
+
 .setting h4 {
   margin: 0 0 8px;
   font-size: 0.95rem;
