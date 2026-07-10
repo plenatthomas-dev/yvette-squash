@@ -364,6 +364,10 @@ export default function Home() {
     let v = isView(vParam) ? vParam : isView(vLS) ? vLS : null;
     if (v === "money" && !FEATURE_TRICOUNT) v = "day"; // Frais désactivé : jamais cette vue
     if (v === "tourney" && !FEATURE_TOURNAMENT) v = "day"; // Tournoi désactivé
+    // Au LANCEMENT, on n'ouvre jamais directement la vue Semaine : /api/week (7 fetches
+    // ResaMania) est lourd sur le chemin critique du démarrage. La Semaine reste à un clic
+    // une fois l'appli chargée. (Comme la DATE, ce n'est volontairement pas restauré.)
+    if (v === "week") v = "day";
     if (v) setView(v);
 
     const rParam = p.get("range");
