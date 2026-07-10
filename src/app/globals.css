@@ -1442,11 +1442,13 @@ td.cell.past {
   width: auto;
 }
 
-/* Paire Prolonger / Révoquer d'une délégation active : reste groupée au rétrécissement. */
+/* Actions d'une délégation active : Prolonger/Révoquer, ou les préréglages de durée
+   (+24 h / +3 jours / +5 jours / ✕) une fois « Prolonger » touché. */
 .delegation-row-actions {
   display: flex;
   gap: 6px;
   flex: 0 0 auto;
+  flex-wrap: wrap;
 }
 
 /* Sélecteur « Pour moi / Pour X » dans la barre d'en-tête : même gabarit que les
