@@ -435,8 +435,10 @@ function SettingsButton({
   // Délégué dont on est en train de choisir la durée de prolongation (boutons inline).
   const [extending, setExtending] = useState<string | null>(null);
   // Échéance de MA session ResaMania : plafond de fonctionnement des délégations
-  // (30 j non glissants après connexion — cf. docs/delegation-droits.md).
+  // (30 j non glissants après connexion — cf. docs/delegation-droits.md). Affichée dans
+  // une bulle « i » repliée (la phrase entière encombrait la modale sur téléphone).
   const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null);
+  const [sessionInfoOpen, setSessionInfoOpen] = useState(false);
 
   useEffect(() => {
     if (!open || !FEATURE_DELEGATION) return;
@@ -857,10 +859,22 @@ function SettingsButton({
                           ? `Déléguer (${pickedDelegates.length})`
                           : "Déléguer"}
                     </button>
+                    {sessionExpiresAt && (
+                      <button
+                        type="button"
+                        className="info-tip-btn"
+                        aria-expanded={sessionInfoOpen}
+                        aria-label={`${sessionInfoOpen ? "Masquer" : "Afficher"} l'info : durée maximale d'une délégation`}
+                        title="Durée maximale d'une délégation"
+                        onClick={() => setSessionInfoOpen((o) => !o)}
+                      >
+                        i
+                      </button>
+                    )}
                   </div>
                 )}
-                {sessionExpiresAt && (
-                  <p className="muted tiny">
+                {sessionInfoOpen && sessionExpiresAt && (
+                  <p className="muted tiny setting-info-text">
                     ⏳ Ta connexion ResaMania est valable jusqu'au{" "}
                     {new Date(sessionExpiresAt).toLocaleString("fr-FR", {
                       day: "numeric",
