@@ -431,14 +431,16 @@ function SettingsButton({
   >([]);
   const [pickedDelegates, setPickedDelegates] = useState<string[]>([]);
   const [pickedHours, setPickedHours] = useState<number>(DELEGATION_DURATIONS[0].hours);
-  const [delegating, setDelegating] = useState(false);
+  // Opération délégation en cours : "create" (formulaire) ou l'id de la ligne concernée
+  // (prolongation/révocation). Un seul appel à la fois, mais le « … » ne s'affiche que
+  // sur le bouton réellement actif (les autres sont juste désactivés).
+  const [busy, setBusy] = useState<string | null>(null);
   // Délégué dont on est en train de choisir la durée de prolongation (boutons inline).
   const [extending, setExtending] = useState<string | null>(null);
   // Échéance de MA session ResaMania : plafond de fonctionnement des délégations
-  // (30 j non glissants après connexion — cf. docs/delegation-droits.md). Affichée dans
-  // une bulle « i » repliée (la phrase entière encombrait la modale sur téléphone).
+  // (30 j non glissants après connexion — cf. docs/delegation-droits.md). Intégrée à la
+  // bulle « i » du titre de section (toujours accessible, même sans formulaire).
   const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null);
-  const [sessionInfoOpen, setSessionInfoOpen] = useState(false);
 
   useEffect(() => {
     if (!open || !FEATURE_DELEGATION) return;
@@ -486,11 +488,10 @@ function SettingsButton({
   // la durée choisie. Renvoie true en cas de succès (pour vider la sélection, etc.).
   const postDelegations = async (
     ids: string[],
-    okMsg: string,
-    hours = pickedHours,
-    extend = false,
+    opts: { okMsg: string; busyKey: string; hours?: number; extend?: boolean },
   ): Promise<boolean> => {
-    setDelegating(true);
+    const { okMsg, busyKey, hours = pickedHours, extend = false } = opts;
+    setBusy(busyKey);
     try {
       const res = await fetch("/api/delegations", {
         method: "POST",
@@ -526,26 +527,32 @@ function SettingsButton({
       toast("err", (e as Error).message);
       return false;
     } finally {
-      setDelegating(false);
+      setBusy(null);
     }
   };
 
   const createDelegations = async () => {
     if (pickedDelegates.length === 0) return;
-    const ok = await postDelegations(
-      pickedDelegates,
-      pickedDelegates.length > 1 ? "Délégations activées" : "Délégation activée",
-    );
+    const ok = await postDelegations(pickedDelegates, {
+      okMsg: pickedDelegates.length > 1 ? "Délégations activées" : "Délégation activée",
+      busyKey: "create",
+    });
     if (ok) setPickedDelegates([]);
   };
 
-  const extendDelegation = async (delegateId: string, hours: number) => {
-    const ok = await postDelegations([delegateId], "Délégation prolongée", hours, true);
+  // `rowId` = id de la délégation (la ligne affichée) ; le POST vise le délégué.
+  const extendDelegation = async (rowId: string, delegateId: string, hours: number) => {
+    const ok = await postDelegations([delegateId], {
+      okMsg: "Délégation prolongée",
+      busyKey: rowId,
+      hours,
+      extend: true,
+    });
     if (ok) setExtending(null);
   };
 
   const revokeDelegation = async (id: string) => {
-    setDelegating(true);
+    setBusy(id);
     try {
       const res = await fetch(`/api/delegations/${id}`, {
         method: "DELETE",
@@ -556,7 +563,7 @@ function SettingsButton({
     } catch (e) {
       toast("err", (e as Error).message);
     } finally {
-      setDelegating(false);
+      setBusy(null);
     }
   };
 
@@ -752,6 +759,20 @@ function SettingsButton({
                   durée limitée (ex. ils gèrent les résas d'une soirée à ta place pendant que
                   tu es indisponible). La réservation reste sous ton compte ResaMania ; on
                   trace qui a agi.
+                  {sessionExpiresAt && (
+                    <>
+                      {" "}
+                      ⏳ Ta connexion ResaMania est valable jusqu'au{" "}
+                      {new Date(sessionExpiresAt).toLocaleString("fr-FR", {
+                        day: "numeric",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}{" "}
+                      : une délégation ne peut pas fonctionner au-delà (reconnecte-toi pour
+                      repartir sur 30 jours).
+                    </>
+                  )}
                 </SettingInfo>
                 {outgoingDelegations.length > 0 && (
                   <ul className="delegation-active-list">
@@ -775,17 +796,17 @@ function SettingsButton({
                               <button
                                 key={opt.hours}
                                 className="secondary"
-                                onClick={() => extendDelegation(d.delegateId, opt.hours)}
-                                disabled={delegating}
+                                onClick={() => extendDelegation(d.id, d.delegateId, opt.hours)}
+                                disabled={busy !== null}
                                 title={`Ajoute ${opt.label} à l'échéance actuelle`}
                               >
-                                {delegating ? "…" : `+${opt.label}`}
+                                {busy === d.id ? "…" : `+${opt.label}`}
                               </button>
                             ))}
                             <button
                               className="secondary icon-btn"
                               onClick={() => setExtending(null)}
-                              disabled={delegating}
+                              disabled={busy !== null}
                               aria-label="Annuler la prolongation"
                               title="Annuler"
                             >
@@ -797,16 +818,16 @@ function SettingsButton({
                             <button
                               className="secondary"
                               onClick={() => setExtending(d.delegateId)}
-                              disabled={delegating}
+                              disabled={busy !== null}
                             >
                               Prolonger
                             </button>
                             <button
                               className="secondary"
                               onClick={() => revokeDelegation(d.id)}
-                              disabled={delegating}
+                              disabled={busy !== null}
                             >
-                              {delegating ? "…" : "Révoquer"}
+                              {busy === d.id ? "…" : "Révoquer"}
                             </button>
                           </div>
                         )}
@@ -851,40 +872,15 @@ function SettingsButton({
                     </select>
                     <button
                       onClick={createDelegations}
-                      disabled={delegating || pickedDelegates.length === 0}
+                      disabled={busy !== null || pickedDelegates.length === 0}
                     >
-                      {delegating
+                      {busy === "create"
                         ? "…"
                         : pickedDelegates.length > 1
                           ? `Déléguer (${pickedDelegates.length})`
                           : "Déléguer"}
                     </button>
-                    {sessionExpiresAt && (
-                      <button
-                        type="button"
-                        className="info-tip-btn"
-                        aria-expanded={sessionInfoOpen}
-                        aria-label={`${sessionInfoOpen ? "Masquer" : "Afficher"} l'info : durée maximale d'une délégation`}
-                        title="Durée maximale d'une délégation"
-                        onClick={() => setSessionInfoOpen((o) => !o)}
-                      >
-                        i
-                      </button>
-                    )}
                   </div>
-                )}
-                {sessionInfoOpen && sessionExpiresAt && (
-                  <p className="muted tiny setting-info-text">
-                    ⏳ Ta connexion ResaMania est valable jusqu'au{" "}
-                    {new Date(sessionExpiresAt).toLocaleString("fr-FR", {
-                      day: "numeric",
-                      month: "short",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}{" "}
-                    : une délégation ne peut pas fonctionner au-delà. Reconnecte-toi pour
-                    repartir sur 30 jours.
-                  </p>
                 )}
               </section>
             )}
