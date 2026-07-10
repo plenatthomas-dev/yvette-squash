@@ -20,7 +20,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
 
-  const [users, tricounts] = await Promise.all([
+  // Pagination : on ne renvoie jamais TOUT l'historique d'un coup (il grossit sans fin).
+  // ?limit borne le nombre de tricounts (les plus récents d'abord) ; le client demande
+  // simplement un limit plus grand pour « charger plus » — ce qui préserve le tri global
+  // (en cours en haut, équilibrés en bas) fait ensuite sur la fenêtre renvoyée.
+  const DEFAULT_LIMIT = 25;
+  const MAX_LIMIT = 200;
+  const rawLimit = Number(req.nextUrl.searchParams.get("limit"));
+  const limit =
+    Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(Math.floor(rawLimit), MAX_LIMIT)
+      : DEFAULT_LIMIT;
+
+  const [users, rows] = await Promise.all([
     prisma.user.findMany({
       select: { id: true, displayName: true },
       orderBy: { createdAt: "asc" },
@@ -38,8 +50,12 @@ export async function GET(req: NextRequest) {
         },
       },
       orderBy: { date: "desc" },
+      take: limit + 1, // +1 pour savoir s'il reste des tricounts plus anciens
     }),
   ]);
+  // S'il y a une ligne de trop, c'est qu'il reste de l'historique : on la retire.
+  const hasMore = rows.length > limit;
+  const tricounts = hasMore ? rows.slice(0, limit) : rows;
 
   // Tricount : on affiche TOUJOURS le prénom/nom réel (displayName), jamais le pseudo —
   // pour savoir sans ambiguïté qui a payé quoi et à qui rendre l'argent.
@@ -48,6 +64,12 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     me: session.userId,
+    // Compte « email seul » (sans ResaMania) : l'IHM masque alors la gestion des
+    // dépenses (création/édition/suppression). Lecture, remboursements, messagerie
+    // et validation restent possibles. Le serveur reste la source de vérité (403).
+    emailOnly: session.resa === null,
+    // Reste-t-il des tricounts plus anciens à charger ? (bouton « Charger plus »)
+    hasMore,
     members: users.map((u) => ({ id: u.id, name: name(u.id), fullName: u.displayName })),
     tricounts: tricounts
       .map((t) => {
@@ -71,17 +93,23 @@ export async function GET(req: NextRequest) {
           name: name(p),
           approved: approved.has(p),
         })),
-        expenses: t.expenses.map((e) => ({
-          id: e.id,
-          label: e.label,
-          amountCents: e.amountCents,
-          isRefund: e.isRefund,
-          spentAt: e.spentAt.toISOString(),
-          payerId: e.payerId,
-          payerName: name(e.payerId),
-          participantNames: e.shares.map((s) => name(s.userId)),
-          canDelete: e.creatorId === session.userId || e.payerId === session.userId,
-        })),
+        expenses: t.expenses.map((e) => {
+          const mine = e.creatorId === session.userId || e.payerId === session.userId;
+          return {
+            id: e.id,
+            label: e.label,
+            amountCents: e.amountCents,
+            isRefund: e.isRefund,
+            spentAt: e.spentAt.toISOString(),
+            payerId: e.payerId,
+            payerName: name(e.payerId),
+            participantIds: e.shares.map((s) => s.userId),
+            participantNames: e.shares.map((s) => name(s.userId)),
+            canDelete: mine,
+            // Édition réservée aux vraies dépenses (un remboursement se supprime/refait).
+            canEdit: mine && !e.isRefund,
+          };
+        }),
         balances: [...balances]
           .map(([userId, cents]) => ({ userId, name: name(userId), cents }))
           .sort((a, b) => b.cents - a.cents),

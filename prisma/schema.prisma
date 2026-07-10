@@ -34,6 +34,14 @@ model User {
   expenseShares   ExpenseShare[]
   tricountApprovals TricountApproval[]
   tricountComments  TricountComment[]
+  // Délégation temporaire de droits (idée 4) : ce que je donne / ce qu'on me donne.
+  delegationsGiven    Delegation[] @relation("DelegationGiven")
+  delegationsReceived Delegation[] @relation("DelegationReceived")
+  // Tournois (idée 3) : ceux que j'ai créés + les participations où je suis membre.
+  tournamentsCreated  Tournament[]       @relation("TournamentCreator")
+  tournamentPlayers   TournamentPlayer[]
+  // Classement fédéral (idée squashnet) : dernier classement rapproché, source publique.
+  squashnetRanking    SquashnetRanking?
 }
 
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
@@ -65,6 +73,10 @@ model Booking {
   endsAt       DateTime
   status       String   @default("booked") // booked | cancelled
   createdAt    DateTime @default(now())
+  // Délégation (idée 4) : qui a physiquement déclenché l'action, si différent de `userId`
+  // (le propriétaire réel de la résa ResaMania reste `userId` = le délégant). NULL = résa
+  // faite pour soi-même. Pas de relation Prisma formelle (comme `PlanningSnapshot.updatedById`).
+  actingUserId String?
 
   // Une seule ligne par (joueur, créneau) : empêche les doublons de réservation.
   // book/route.ts fait un upsert sur cette clé (rebooking = on repasse la même ligne
@@ -168,6 +180,30 @@ model SlotAlert {
   @@index([active, date])
 }
 
+// Délégation temporaire de droits de réservation (idée 4, cf. docs/delegation-droits.md) :
+// le délégant autorise le délégué à réserver/annuler en son nom pendant une fenêtre bornée.
+// La résa réelle reste sous l'identité ResaMania du délégant (jamais de partage de mot de
+// passe) — cf. `getResaTokenForUser` — et `Booking.actingUserId` trace qui a agi. « Un seul
+// délégué actif à la fois » (v1) est imposé en application, pas en base (pas de contrainte
+// unique praticable sur une condition dépendant de l'heure courante).
+model Delegation {
+  id          String    @id @default(cuid())
+  delegator   User      @relation("DelegationGiven", fields: [delegatorId], references: [id], onDelete: Cascade)
+  delegatorId String
+  delegate    User      @relation("DelegationReceived", fields: [delegateId], references: [id], onDelete: Cascade)
+  delegateId  String
+  scope       String    @default("book_cancel") // v1 : "book_cancel" uniquement (pas plus large)
+  expiresAt   DateTime // borne dure (24h à 5j côté UI) — limite le rayon si compromis
+  revokedAt   DateTime? // révocation manuelle par le délégant, avant expiresAt
+  // Push « délégation terminée » envoyé au délégataire (révocation OU fin naturelle) :
+  // marqueur d'idempotence pour ne notifier la fin qu'UNE seule fois.
+  endNotifiedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([delegateId, expiresAt])
+  @@index([delegatorId])
+}
+
 // ---- Partage de frais (type Tricount) ----
 // Un « tricount » regroupe les dépenses d'UN jour donné (repas, sortie…) : un seul
 // tricount par date, séparé des autres jours → l'historique liste ces tricounts.
@@ -219,9 +255,12 @@ model Expense {
   id          String   @id @default(cuid())
   tricount    Tricount @relation(fields: [tricountId], references: [id], onDelete: Cascade)
   tricountId  String
-  payer       User     @relation("ExpensePayer", fields: [payerId], references: [id], onDelete: Cascade)
+  // Restrict (et pas Cascade) : supprimer un membre ne doit JAMAIS effacer en
+  // douce des dépenses et rééquilibrer l'historique d'argent. On bloque plutôt la
+  // suppression tant que le membre a des dépenses/parts (filet de sécurité DB).
+  payer       User     @relation("ExpensePayer", fields: [payerId], references: [id], onDelete: Restrict)
   payerId     String
-  creator     User     @relation("ExpenseCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  creator     User     @relation("ExpenseCreator", fields: [creatorId], references: [id], onDelete: Restrict)
   creatorId   String // qui a saisi la ligne (peut différer du payeur) : droit de suppression
   label       String
   amountCents Int
@@ -240,10 +279,114 @@ model ExpenseShare {
   id          String  @id @default(cuid())
   expense     Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
   expenseId   String
-  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Restrict : une part porte un solde ; supprimer un membre ne doit pas la faire
+  // disparaître silencieusement (cf. Expense.payer/creator).
+  user        User    @relation(fields: [userId], references: [id], onDelete: Restrict)
   userId      String
   amountCents Int
 
   @@unique([expenseId, userId])
   @@index([userId])
+}
+
+// --- Tournois (idée 3) -----------------------------------------------------
+// Un tournoi = un roster (membres + invités hors asso), un format calculé (poules,
+// tableau à repêchage, ou poules + phase finale) et ses matchs. Scores en JEUX gagnés.
+model Tournament {
+  id            String   @id @default(cuid())
+  name          String?
+  date          String // "YYYY-MM-DD" (comme Tricount)
+  createdById   String
+  createdBy     User     @relation("TournamentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  status        String   @default("draft") // draft | running | done
+  format        String // pools | bracket | pools_bracket
+  targetMatches Int // nombre de matchs visé par joueur (2, 3 ou 4)
+  bestOf        Int      @default(3) // 3 => 2 jeux gagnants ; 5 => 3 jeux gagnants
+  courts        Int      @default(2)
+  createdAt     DateTime @default(now())
+  players       TournamentPlayer[]
+  groups        TournamentGroup[]
+  matches       Match[]
+
+  @@index([date])
+}
+
+// Un participant : soit un MEMBRE (userId) soit un INVITÉ hors asso (guestName, prénom
+// libre). displayName est FIGÉ à la création — supprimer un membre (userId -> null) ne
+// casse pas l'historique.
+model TournamentPlayer {
+  id           String     @id @default(cuid())
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  tournamentId String
+  user         User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId       String?
+  guestName    String? // invité hors asso (null pour un membre)
+  displayName  String // figé : nom du membre ou prénom de l'invité
+  seed         Int?
+  group        TournamentGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  groupId      String?
+
+  @@index([tournamentId])
+  @@index([userId])
+}
+
+// Une poule (round-robin). Absente pour un tournoi 100 % tableau.
+model TournamentGroup {
+  id           String     @id @default(cuid())
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  tournamentId String
+  label        String // "A", "B"...
+  players      TournamentPlayer[]
+  matches      Match[]
+
+  @@index([tournamentId])
+}
+
+// Un match. En poule : rattaché à un group. En tableau : round/slot/branch + liens
+// nextWin/nextLose (le vainqueur monte, le perdant bascule dans la branche de classement).
+model Match {
+  id           String     @id @default(cuid())
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  tournamentId String
+  phase        String // pool | winners | classification
+  group        TournamentGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  groupId      String?
+  round        Int? // tableau : 0 = 1er tour
+  slot         Int?
+  branch       String? // "main" | "cons-5-8" ... (branche du tableau)
+  placeLabel   String? // "Finale", "3e place", "Finale perdants"...
+  // Participants (nullables : un slot de tableau se remplit quand le match amont est joué).
+  player1Id    String?
+  player2Id    String?
+  // Résultat en JEUX gagnés.
+  score1       Int?
+  score2       Int?
+  winnerId     String?
+  status       String   @default("pending") // pending | bye | done
+  courtName    String?
+  order        Int? // ordre de passage global
+  // Aiguillage tableau : où vont le vainqueur / le perdant.
+  nextWinMatchId  String?
+  nextWinSlot     Int?
+  nextLoseMatchId String?
+  nextLoseSlot    Int?
+
+  @@index([tournamentId])
+  @@index([groupId])
+}
+
+// Classement fédéral (FFSquash) rapproché depuis squashnet.fr (source PUBLIQUE), rafraîchi
+// mensuellement par un cron. Un enregistrement par membre : présent uniquement quand le
+// rapprochement nom+club est SÛR (cf. squashnet/match). L'absence = pas de classement affiché.
+model SquashnetRanking {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String   @unique
+  clt       String // classement affiché, ex. "5A", "NC"
+  rang      Int? // rang national (plus petit = plus fort) — sert au tri des têtes de série
+  licence   String? // n° de licence FFSquash lu sur squashnet (traçabilité)
+  cat       String? // catégorie d'âge, ex. "+55", "Senior"
+  club      String // libellé du club rapproché (audit)
+  month     String // période de classement, "YYYY-MM-DD"
+  fetchedAt DateTime @updatedAt // dernier rafraîchissement
 }

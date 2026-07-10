@@ -3,6 +3,9 @@ import { buildHandleMap } from "./handle";
 import type { AppSession } from "./session";
 
 export interface MePayload {
+  // Id interne du membre : permet au client de se reconnaître dans les listes issues de
+  // l'annuaire (ex. s'exclure du choix des délégués).
+  id: string;
   displayName: string;
   nickname: string | null;
   listed: boolean;
@@ -20,6 +23,7 @@ export async function buildMePayload(session: AppSession): Promise<MePayload> {
   const me = users.find((u) => u.id === session.userId);
   const handle = buildHandleMap(users).get(session.userId) ?? null;
   return {
+    id: session.userId,
     displayName: session.displayName,
     nickname: me?.nickname ?? null,
     listed: me?.listed ?? true,

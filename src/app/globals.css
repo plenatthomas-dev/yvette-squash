@@ -176,12 +176,13 @@ header.app h1 {
   line-height: 1.15;
 }
 
-/* Petit logo à côté du titre (badge blanc arrondi, lisible sur clair comme sombre) */
+/* Logo à côté du titre (badge blanc arrondi, lisible sur clair comme sombre). Agrandi
+   depuis que le header est désencombré (actions secondaires regroupées dans le menu ⋯). */
 .logo-mark {
-  width: 38px;
-  height: 38px;
+  width: 46px;
+  height: 46px;
   flex-shrink: 0;
-  border-radius: 9px;
+  border-radius: 11px;
   object-fit: contain;
   background: #fff;
 }
@@ -270,6 +271,109 @@ header.app .sub {
   font-weight: 700;
   line-height: 16px;
   text-align: center;
+}
+
+/* --- Menu déroulant du header (⋯) : actions secondaires regroupées ------- */
+.header-menu {
+  position: relative;
+}
+.header-menu .icon-btn {
+  position: relative;
+}
+/* Pastille discrète sur le déclencheur quand une action du menu appelle l'attention
+   (ex. montant à rembourser) — le détail chiffré est dans l'item du menu. */
+.header-menu .badge.dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  min-width: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--error-accent);
+}
+.header-menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 200;
+  min-width: 216px;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-card-border-color);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: modal-in 0.14s ease-out;
+}
+/* Scopé sous .header-menu-panel pour l'emporter sur la règle générique `.actions button`. */
+.header-menu-panel .header-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  /* Pico traite tout <button> comme un bouton et REDÉFINIT --pico-color en blanc :
+     le label + les icônes SVG (currentColor) devenaient blanc sur blanc (invisibles),
+     seuls les émojis 🚧 restaient. On rétablit l'héritage de la carte. */
+  --pico-color: inherit;
+  color: var(--pico-color);
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+/* Pico réapplique --pico-color = blanc au survol/focus/actif : on rétablit l'héritage
+   dans tous ces états, sinon le texte repasse invisible. */
+.header-menu-panel .header-menu-item:hover:not(:disabled),
+.header-menu-panel .header-menu-item:focus,
+.header-menu-panel .header-menu-item:active {
+  --pico-color: inherit;
+  color: var(--pico-color);
+}
+.header-menu-panel .header-menu-item:hover:not(:disabled) {
+  background: rgba(127, 127, 127, 0.15);
+}
+.header-menu-panel .header-menu-item.active {
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+}
+.header-menu-panel .header-menu-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.header-menu-panel .hm-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.header-menu-panel .hm-label {
+  flex: 1;
+  min-width: 0;
+}
+.header-menu-panel .header-menu-item .badge {
+  position: static;
+  flex: 0 0 auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--error-accent);
+  color: #fff;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.header-menu-panel .hm-soon {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
 }
 
 /* Liste des alertes dans la modale « Mes alertes » */
@@ -400,8 +504,8 @@ header.app .sub {
     display: none;
   }
   header.app .logo-mark {
-    width: 46px;
-    height: 46px;
+    width: 52px;
+    height: 52px;
   }
 }
 
@@ -625,11 +729,21 @@ table.planning thead th.time {
 
 /* Liste d'attente (idée D) : pastille dans l'en-tête d'horaire (vue jour) d'un créneau
    complet — « 🕒 N » + action rejoindre/quitter. */
+/* Le badge « 🕒 N » est en position absolue (bas de l'en-tête d'horaire) : ainsi il ne
+   s'ajoute pas au flux et ne rallonge PLUS la cellule — la ligne garde la hauteur des
+   autres. La colonne « Heure » (déjà sticky) sert de bloc conteneur ; on aligne son
+   contenu en haut pour laisser la place au badge sans chevauchement. */
+table.planning:not(.week) tbody th.time {
+  vertical-align: top;
+}
 .wait-btn {
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-top: 3px;
   padding: 1px 6px;
   font-size: 0.6rem;
   line-height: 1.4;
@@ -901,6 +1015,37 @@ td.cell.past {
 .readonly-note {
   margin-top: 4px;
 }
+
+/* Bandeau « on t'a délégué des droits » : texte + bouton fermer aligné à droite. */
+.deleg-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 4px;
+}
+.deleg-banner span {
+  flex: 1;
+}
+.deleg-banner-close {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  line-height: 1;
+  background: transparent;
+  border: none;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.deleg-banner-close:hover {
+  opacity: 1;
+}
 .cache-note {
   margin: -4px 0 10px;
 }
@@ -1086,6 +1231,12 @@ td.cell.past {
 }
 
 /* --- Panneau paramètres ------------------------------------------------- */
+/* Dépense (création/édition) : plus large pour que la liste « Pour qui ? » en mode parts
+   (case + nom + − n + + part + montant) tienne sur une ligne sans écraser le nom. */
+.modal.expense {
+  max-width: 460px;
+}
+
 .modal.settings {
   max-width: 420px;
 }
@@ -1094,9 +1245,62 @@ td.cell.past {
   margin-bottom: 18px;
 }
 
+/* Le panneau s'est étoffé (thème, pseudo, annuaire, délégation, commentaire…) : une
+   fine ligne sépare les sections pour la lisibilité. Sélecteur de voisinage : la ligne
+   n'apparaît qu'ENTRE deux sections rendues (pas au-dessus de la première), quels que
+   soient les feature flags actifs. Couleur dérivée du texte courant (currentColor
+   atténué) : contrastée sur TOUS les thèmes — la variable Pico « muted-border » était
+   invisible sur le thème sombre. */
+.setting + .setting {
+  border-top: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  padding-top: 14px;
+}
+
 .setting h4 {
   margin: 0 0 8px;
   font-size: 0.95rem;
+}
+
+/* En-tête de section avec bouton d'info : titre à gauche, pastille « i » à droite. */
+.setting-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.setting-head h4 {
+  margin: 0;
+}
+.info-tip-btn {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  /* Toujours rempli (bleu + « i » clair) pour rester lisible quel que soit le thème :
+     un « i » gris foncé sur fond sombre/bleuté était illisible. */
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+  cursor: pointer;
+}
+.info-tip-btn:hover {
+  background: var(--pico-primary-hover);
+}
+.info-tip-btn[aria-expanded="true"] {
+  /* État ouvert : anneau autour de la pastille pour marquer l'activation. */
+  box-shadow: 0 0 0 2px var(--pico-background-color), 0 0 0 4px var(--pico-primary);
+}
+.setting-info-text {
+  margin: 0 0 10px;
 }
 
 .setting p {
@@ -1185,6 +1389,91 @@ td.cell.past {
   width: auto;
 }
 
+/* Interrupteur « annuaire » : la case Pico par défaut (fine barre bleue) était
+   trop discrète — on utilise le switch Pico, agrandi pour être bien visible. */
+.check-row input[role="switch"] {
+  flex: 0 0 auto;
+  width: 2.6em;
+  height: 1.5em;
+}
+
+/* --- Délégation de droits (idée 4) -------------------------------------- */
+.delegation-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center; /* centre la bulle « i » sur la ligne durée + Déléguer */
+  gap: 8px;
+}
+
+/* Liste à cocher des délégués possibles (multi-sélection). Bornée en hauteur :
+   l'annuaire peut être long, le panneau Réglages ne doit pas devenir un ascenseur. */
+.delegate-picklist {
+  flex: 1 1 100%;
+  max-height: 11rem;
+  overflow-y: auto;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--pico-border-radius);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Une délégation active par ligne, chacune avec son bouton « Révoquer ». */
+.delegation-active-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.delegation-form select {
+  margin: 0;
+  /* Compact (largeur du contenu) : durée + « Déléguer » + bulle « i » doivent tenir
+     sur une seule ligne d'un écran de téléphone. */
+  flex: 0 1 auto;
+  width: auto;
+}
+
+.delegation-form button {
+  margin: 0;
+  width: auto;
+  white-space: nowrap;
+}
+
+.delegation-active {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.delegation-active button {
+  margin: 0;
+  width: auto;
+}
+
+/* Actions d'une délégation active : Prolonger/Révoquer, ou les préréglages de durée
+   (+24 h / +3 jours / +5 jours / ✕) une fois « Prolonger » touché. */
+.delegation-row-actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+/* Sélecteur « Pour moi / Pour X » dans la barre d'en-tête : même gabarit que les
+   icon-btn voisins (cloche, réglages, menu ⋯). */
+.acting-as-select {
+  margin: 0;
+  width: auto;
+  font-size: 0.8rem;
+  padding: 6px 10px;
+}
+
 /* --- Annuaire des membres ---------------------------------------------- */
 .directory-search {
   width: 100%;
@@ -1202,6 +1491,21 @@ td.cell.past {
 .directory-list li {
   padding: 8px 4px;
   border-bottom: 1px solid var(--pico-card-border-color);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.directory-name { flex: 1; min-width: 0; }
+/* Badge classement fédéral (ex. « 5A ») dans l'annuaire. */
+.directory-clt {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: rgba(127, 127, 127, 0.22);
+  color: var(--pico-color);
+  font-variant-numeric: tabular-nums;
 }
 
 .directory-list li:last-child {
@@ -1693,6 +1997,18 @@ table.planning.week th.time.selhead {
 }
 
 .tri-block { margin-top: 22px; }
+
+/* Bouton « charger l'historique plus ancien » (pagination). */
+.tri-loadmore {
+  display: flex;
+  justify-content: center;
+  margin: 14px 0 4px;
+}
+.tri-loadmore button {
+  width: auto;
+  margin: 0;
+  font-size: 0.85rem;
+}
 .tri-block h2 {
   font-size: 1.05rem;
   margin-bottom: 10px;
@@ -1755,6 +2071,14 @@ table.planning.week th.time.selhead {
   color: var(--danger-fg);
   border: 1px solid var(--danger-border);
 }
+/* Bouton « Modifier » d'une dépense : même gabarit compact que « Suppr. »,
+   couleur neutre (action non destructive). */
+.tri-amount button.tri-edit {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  width: auto;
+}
 
 /* Formulaire d'ajout (dans la modale) */
 .tri-form {
@@ -1791,6 +2115,101 @@ table.planning.week th.time.selhead {
   padding: 4px 0;
 }
 .tri-check input { margin: 0; }
+/* Nom du participant : tronqué (…) plutôt que de passer à la ligne, sinon les lignes de
+   la liste « Pour qui ? » se déforment quand le mode « par parts » occupe la droite. */
+.tri-check-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Choix du mode de répartition (équitable / par parts) — segmenté compact. */
+.tri-splitmode {
+  display: flex;
+  gap: 6px;
+  margin: 2px 0 8px;
+}
+.tri-splitmode button {
+  flex: 1;
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 0.78rem;
+  background: var(--pico-background-color);
+  color: var(--pico-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.tri-splitmode button.on {
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+/* Ligne participant : case à cocher (flexible) + parts éventuelles + montant en direct. */
+.tri-check-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tri-check-row .tri-check {
+  flex: 1;
+  min-width: 0;
+}
+.tri-parts {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.75rem;
+  color: var(--pico-muted-color);
+  flex: 0 0 auto;
+}
+/* Sélecteur de parts : boutons − / + compacts encadrant la valeur (en lecture seule). */
+.tri-parts-btn {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  line-height: 1;
+  border-radius: 7px;
+}
+.tri-parts-btn:disabled {
+  opacity: 0.4;
+}
+.tri-parts-value {
+  /* Largeur FIXE : sinon 1→2 chiffres décale les boutons + / − (et toute la ligne). */
+  width: 1.4em;
+  min-width: 1.4em;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--pico-color);
+}
+.tri-parts-unit {
+  /* Réserve la place de « parts » pour que « part »/« parts » ne décale rien. */
+  display: inline-block;
+  min-width: 2.3em;
+  white-space: nowrap;
+}
+.tri-share {
+  flex: 0 0 auto;
+  min-width: 54px;
+  text-align: right;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--pico-color);
+  white-space: nowrap;
+}
 
 /* --- Tricounts par jour (cartes d'historique) ---------------------------- */
 .money-btn.active {
@@ -1969,4 +2388,312 @@ table.planning.week th.time.selhead {
   margin: 0;
   flex-shrink: 0;
   font-size: 0.88rem;
+}
+
+/* --- Module Tournoi (idée 3) ------------------------------------------- */
+.tournament { margin-top: 6px; }
+.trn-actions { margin-bottom: 16px; }
+.trn-actions button { width: 100%; margin: 0; }
+.trn-list { list-style: none; padding: 0; margin: 0; }
+.trn-list li { margin-bottom: 8px; }
+.trn-list-item {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 10px;
+  background: var(--pico-background-color);
+  color: var(--pico-color);
+  cursor: pointer;
+}
+.trn-detail-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.trn-detail-head button { width: auto; margin: 0; padding: 6px 10px; font-size: 0.85rem; }
+.trn-detail-head .cancel {
+  background: transparent;
+  color: var(--danger-fg);
+  border: 1px solid var(--danger-border);
+}
+.trn-block { margin-top: 20px; }
+.trn-block h3 { font-size: 1rem; margin-bottom: 8px; }
+.trn-block h4 { font-size: 0.9rem; margin: 12px 0 6px; }
+.trn-champion {
+  font-size: 1.05rem;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--pico-primary) 12%, transparent);
+}
+.trn-terrain {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+}
+.trn-schedule { list-style: none; padding: 0; margin: 0; }
+.trn-schedule li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--pico-card-border-color);
+  font-size: 0.9rem;
+}
+.trn-standings {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-bottom: 10px;
+}
+.trn-standings th, .trn-standings td {
+  text-align: left;
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--pico-card-border-color);
+}
+.trn-standings th { font-weight: 600; opacity: 0.75; }
+.trn-matches { list-style: none; padding: 0; margin: 0; }
+.trn-match {
+  padding: 8px 10px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  background: var(--pico-card-background-color);
+}
+.trn-match.done { opacity: 0.85; }
+.trn-match-head { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; min-height: 4px; }
+.trn-place { font-size: 0.74rem; font-weight: 600; opacity: 0.8; }
+.trn-formula { margin: 0 0 12px; }
+/* Nombre de joueurs / méta : lisible (le gris « muted » système était trop pâle). */
+.trn-count { color: var(--pico-color); opacity: 0.85; font-weight: 500; }
+/* Badge de statut lisible (le gris « muted » était illisible). */
+.trn-status {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.trn-status.done { background: var(--pico-primary); color: var(--pico-primary-inverse); }
+.trn-status.running { background: rgba(127, 127, 127, 0.28); color: var(--pico-color); }
+.trn-status.draft { background: rgba(127, 127, 127, 0.18); color: var(--pico-color); opacity: 0.9; }
+.trn-vs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.92rem;
+}
+.trn-vs .win { font-weight: 700; color: var(--pico-primary); }
+.trn-vs-sep, .trn-bye { opacity: 0.6; font-size: 0.8rem; }
+.trn-scoreval { font-variant-numeric: tabular-nums; }
+.trn-scorepick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.trn-scorepick button {
+  width: auto;
+  margin: 0;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.trn-round { margin-top: 6px; }
+
+/* Arbre graphique du tableau : colonnes = tours, chemin vers la 1re place. */
+.trn-tree {
+  display: flex;
+  gap: 20px;
+  overflow-x: auto;
+  padding: 4px 2px 12px;
+  -webkit-overflow-scrolling: touch;
+}
+.trn-tree-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 168px;
+  flex: 0 0 auto;
+}
+.trn-tree-col-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+  opacity: 0.7;
+  margin-bottom: 8px;
+}
+.trn-tree-col-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  flex: 1;
+  gap: 10px;
+}
+.trn-tree-match {
+  position: relative;
+  padding: 8px 10px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  background: var(--pico-card-background-color);
+}
+.trn-tree-match.done { opacity: 0.92; }
+/* Trait de liaison vers la colonne précédente (esthétique « bracket »). */
+.trn-tree-match.linked::before {
+  content: "";
+  position: absolute;
+  left: -20px;
+  top: 50%;
+  width: 20px;
+  border-top: 2px solid var(--pico-muted-border-color);
+}
+.trn-tree-match .trn-scorepick button { padding: 3px 8px; font-size: 0.8rem; }
+
+/* Assistant */
+.trn-roster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 44vh;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+.trn-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.trn-check.on { border-color: var(--pico-primary); background: color-mix(in srgb, var(--pico-primary) 12%, transparent); }
+.trn-check input { margin: 0; width: auto; }
+.trn-guests { list-style: none; padding: 0; margin: 0 0 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.trn-guests li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--pico-secondary-background, rgba(127,127,127,0.15));
+  font-size: 0.82rem;
+}
+.trn-guests .cancel { width: auto; margin: 0; padding: 0 4px; background: none; border: none; color: var(--danger-fg); }
+.trn-guest-add { display: flex; gap: 8px; }
+.trn-guest-add input { flex: 1; margin: 0; }
+.trn-guest-add button { width: auto; margin: 0; padding: 0 14px; }
+.trn-choice { border: none; padding: 0; margin: 6px 0 12px; }
+.trn-choice legend { font-size: 0.85rem; opacity: 0.8; margin-bottom: 4px; }
+.trn-choice button {
+  width: auto;
+  margin: 0 6px 6px 0;
+  padding: 8px 16px;
+  /* PAS de bordure + police constante → l'état sélectionné ne change QUE la couleur, jamais
+     la taille. Fond gris SOLIDE (rgba, supporté partout) : jamais blanc/illisible. */
+  border: none;
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.22);
+  color: var(--pico-color);
+  font-weight: 600;
+  cursor: pointer;
+}
+.trn-choice button.on {
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+}
+/* Classement des têtes de série (glisser / flèches). */
+.trn-seedlist { list-style: none; padding: 0; margin: 0 0 8px; }
+.trn-seedlist li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 10px;
+  background: var(--pico-card-background-color);
+  cursor: grab;
+}
+.trn-seed-num {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.trn-seed-name { flex: 1; min-width: 0; }
+/* Badge classement fédéral (ex. « 5A ») à côté de la tête de série. */
+.trn-seed-clt {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: rgba(127, 127, 127, 0.22);
+  color: var(--pico-color);
+  font-variant-numeric: tabular-nums;
+}
+.trn-seed-arrows { display: flex; gap: 4px; flex: 0 0 auto; }
+.trn-seed-arrows button { width: 30px; margin: 0; padding: 2px 0; font-size: 0.9rem; }
+
+.trn-proposals { list-style: none; padding: 0; margin: 0; }
+.trn-proposals li { margin-bottom: 8px; }
+.trn-proposal {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 10px;
+  /* MÊME recette que .trn-list-item (lisible) : --pico-background-color, pas
+     --pico-card-background-color qui rendait la carte blanche/illisible. */
+  background: var(--pico-background-color);
+  color: var(--pico-color);
+  cursor: pointer;
+}
+/* Texte en pleine couleur (pas de primaire/gris sur fond coloré → illisible). */
+.trn-proposal strong { color: var(--pico-color); font-size: 0.95rem; }
+.trn-proposal small { color: var(--pico-color); opacity: 0.72; }
+
+/* --- Respect du réglage « réduire les animations » (a11y / WCAG 2.3.3) -----
+   Pour les personnes sensibles au mouvement : on neutralise les animations
+   décoratives (shimmer du skeleton en boucle, roue du rafraîchissement) et on
+   réduit à un simple fondu quasi instantané les entrées de toasts/modales.
+   Les transitions courtes (hover, etc.) restent, elles ne posent pas problème. */
+@media (prefers-reduced-motion: reduce) {
+  /* Coupe net les animations en boucle (skeleton, spinner de rafraîchissement). */
+  .skel-cell,
+  .refresh.spin svg {
+    animation: none !important;
+  }
+  /* Le skeleton garde un fond statique lisible plutôt qu'un dégradé figé à mi-course. */
+  .skel-cell {
+    background: var(--pico-card-border-color);
+  }
+  /* Entrées d'UI (toasts, overlay + boîtes de modale, menu ⋯ déroulant) : on
+     ramène l'animation à une durée quasi nulle → apparition sans translation/scale. */
+  .toast,
+  .modal-overlay,
+  .modal,
+  .header-menu-panel {
+    animation-duration: 0.01ms !important;
+  }
 }

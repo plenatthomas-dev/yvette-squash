@@ -33,3 +33,5 @@ npm-debug.log*
 
 # revue de code (document de travail, ne pas committer)
 revue-code-yvette-squash.pdf
+.vercel
+.env*

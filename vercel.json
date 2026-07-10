@@ -7,6 +7,14 @@
     {
       "path": "/api/cron/check-alerts",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/keep-alive-delegations",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/warm-rankings",
+      "schedule": "0 4 8 * *"
     }
   ]
 }

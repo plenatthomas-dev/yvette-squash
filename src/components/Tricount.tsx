@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { MAX_COMMENT_LEN } from "@/lib/tricount";
+import {
+  MAX_COMMENT_LEN,
+  MAX_PARTS,
+  splitEqually,
+  splitByWeights,
+} from "@/lib/tricount";
+import { Dialog } from "@/components/Dialog";
 
 // Vue « Frais » : tricounts par jour (un tricount = les dépenses d'une date),
 // avec historique, validation des payeurs puis remboursements guidés.
@@ -20,8 +26,10 @@ interface ExpenseItem {
   spentAt: string;
   payerId: string;
   payerName: string;
+  participantIds: string[];
   participantNames: string[];
   canDelete: boolean;
+  canEdit: boolean;
 }
 interface PayerStatus {
   id: string;
@@ -63,9 +71,16 @@ interface TricountItem {
 }
 interface TricountData {
   me: string;
+  // Compte « email seul » : gestion des dépenses masquée (le serveur refuse aussi).
+  emailOnly: boolean;
+  // Reste-t-il des tricounts plus anciens au-delà de la fenêtre demandée ?
+  hasMore: boolean;
   members: Member[];
   tricounts: TricountItem[];
 }
+
+// Nombre de tricounts chargés au départ, et pas d'agrandissement de « Charger plus ».
+const TRICOUNT_PAGE = 25;
 
 /** 1234 -> "12,34 €" (format français, toujours 2 décimales). */
 export function fmtEuros(cents: number): string {
@@ -84,12 +99,22 @@ export function parseEuros(input: string): number | null {
   return Math.round(parseFloat(s) * 100);
 }
 
+// Format court pour tenir dans l'en-tête de carte : « mer. 8 juil. » (au lieu de
+// « mercredi 8 juillet », qui débordait sur mobile).
 function prettyDate(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString("fr-FR", {
-    weekday: "long",
+    weekday: "short",
     day: "numeric",
-    month: "long",
+    month: "short",
   });
+}
+
+// Nom compact pour la liste « Pour qui ? » (mode parts) : « Prénom Nom » → « P. Nom »,
+// pour laisser le montant en € tenir dans la modale sur mobile.
+function shortName(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length < 2) return name;
+  return `${parts[0][0].toUpperCase()}. ${parts.slice(1).join(" ")}`;
 }
 
 /** Horodatage précis d'un remboursement : "03/07/2026 à 21:15". */
@@ -131,9 +156,12 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
   const [busy, setBusy] = useState(false);
   // Tricount déplié (au plus un ; "" = tous repliés, null = pas encore initialisé)
   const [openId, setOpenId] = useState<string | null>(null);
+  // Pagination : combien de tricounts on demande (agrandi par « Charger plus »).
+  const [limit, setLimit] = useState(TRICOUNT_PAGE);
 
-  // Formulaire « nouvelle dépense »
+  // Formulaire « nouvelle dépense » (réutilisé en édition : editingId non nul).
   const [expenseOpen, setExpenseOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   // Tricount cible : soit la date d'un tricount existant, soit "new" (nouvelle date).
   const [tcChoice, setTcChoice] = useState<string>("new");
   const [date, setDate] = useState(todayISO());
@@ -141,6 +169,9 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
   const [amount, setAmount] = useState("");
   const [payerId, setPayerId] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Répartition : « equal » = à parts égales ; « shares » = pondérée (nb de parts/pers.).
+  const [splitMode, setSplitMode] = useState<"equal" | "shares">("equal");
+  const [weights, setWeights] = useState<Record<string, number>>({});
 
   // Formulaire « j'ai remboursé » (rattaché à UN tricount prêt ; le rembourseur
   // est TOUJOURS l'utilisateur connecté)
@@ -156,7 +187,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const r = await fetch("/api/tricount");
+      const r = await fetch(`/api/tricount?limit=${limit}`);
       if (onExpired(r.status)) return;
       const j = await r.json();
       if (!r.ok) throw new Error(j.error ?? `Erreur ${r.status}`);
@@ -166,7 +197,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [onExpired]);
+  }, [onExpired, limit]);
 
   useEffect(() => {
     load();
@@ -193,7 +224,33 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     setAmount("");
     setPayerId(data.me);
     setSelected(new Set(data.members.map((m) => m.id)));
+    setSplitMode("equal");
+    setWeights(Object.fromEntries(data.members.map((m) => [m.id, 1])));
+    setEditingId(null);
     setExpenseOpen(true);
+  };
+
+  // Édition d'une dépense existante : on rouvre la MÊME modale, préremplie. Le jour
+  // (donc le tricount) est figé. Les parts d'origine ne sont pas stockées (seuls les
+  // montants le sont) : on repart en mode « équitable », l'utilisateur repasse en
+  // « par parts » s'il le souhaite.
+  const openEditExpense = (t: TricountItem, e: ExpenseItem) => {
+    if (!data) return;
+    setDate(t.date);
+    setTcChoice(t.date);
+    setLabel(e.label);
+    setAmount((e.amountCents / 100).toFixed(2).replace(".", ","));
+    setPayerId(e.payerId);
+    setSelected(new Set(e.participantIds));
+    setSplitMode("equal");
+    setWeights(Object.fromEntries(data.members.map((m) => [m.id, 1])));
+    setEditingId(e.id);
+    setExpenseOpen(true);
+  };
+
+  const closeExpense = () => {
+    setExpenseOpen(false);
+    setEditingId(null);
   };
 
   const toggle = (id: string) => {
@@ -204,6 +261,13 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
       return next;
     });
   };
+
+  // Ajuste le nombre de parts d'un participant (boutons +/−), borné à [1, MAX_PARTS].
+  const adjustPart = (id: string, delta: number) =>
+    setWeights((prev) => ({
+      ...prev,
+      [id]: Math.max(1, Math.min(MAX_PARTS, (prev[id] ?? 1) + delta)),
+    }));
 
   const submitExpense = async (e: FormEvent) => {
     e.preventDefault();
@@ -223,24 +287,45 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     }
     // Date cible : celle du tricount existant choisi, ou la nouvelle date saisie.
     const targetDate = tcChoice === "new" ? date : tcChoice;
+    const participantIds = [...selected];
+    // En mode « parts », on transmet le poids de chaque participant coché ; le serveur
+    // fait la répartition pondérée. En mode « équitable », rien (partage égal côté serveur).
+    const weightsPayload =
+      splitMode === "shares"
+        ? Object.fromEntries(participantIds.map((id) => [id, weights[id] ?? 1]))
+        : undefined;
     setBusy(true);
     try {
-      const res = await fetch("/api/tricount/expenses", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          date: targetDate,
-          label: label.trim(),
-          amountCents: cents,
-          payerId,
-          participantIds: [...selected],
-        }),
-      });
+      // Édition : PATCH sur la ligne (le jour/tricount ne bouge pas). Création : POST.
+      const res = editingId
+        ? await fetch(`/api/tricount/expenses/${editingId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              label: label.trim(),
+              amountCents: cents,
+              payerId,
+              participantIds,
+              ...(weightsPayload ? { weights: weightsPayload } : {}),
+            }),
+          })
+        : await fetch("/api/tricount/expenses", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              date: targetDate,
+              label: label.trim(),
+              amountCents: cents,
+              payerId,
+              participantIds,
+              ...(weightsPayload ? { weights: weightsPayload } : {}),
+            }),
+          });
       if (onExpired(res.status)) return;
       const j = await res.json();
       if (!res.ok) throw new Error(j.error ?? `Erreur ${res.status}`);
-      toast("ok", "Dépense enregistrée");
-      setExpenseOpen(false);
+      toast("ok", editingId ? "Dépense modifiée" : "Dépense enregistrée");
+      closeExpense();
       load();
     } catch (e) {
       toast("err", "Enregistrement impossible : " + (e as Error).message);
@@ -408,6 +493,23 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     onOwedChange(n);
   }, [data, onOwedChange]);
 
+  // Répartition affichée en direct dans le formulaire : montant dû par chaque participant
+  // coché, recalculé à chaque frappe (montant, sélection, mode, parts). Purement indicatif —
+  // le serveur reste la source de vérité au moment de l'enregistrement.
+  const shareByMember = useMemo(() => {
+    const map = new Map<string, number>();
+    const previewCents = parseEuros(amount);
+    if (previewCents === null || previewCents === 0 || !data) return map;
+    const selectedIds = data.members.filter((m) => selected.has(m.id)).map((m) => m.id);
+    if (selectedIds.length === 0) return map;
+    const parts =
+      splitMode === "shares"
+        ? splitByWeights(previewCents, selectedIds, selectedIds.map((id) => weights[id] ?? 1))
+        : splitEqually(previewCents, selectedIds.length);
+    selectedIds.forEach((id, i) => map.set(id, parts[i]));
+    return map;
+  }, [amount, splitMode, weights, data, selected]);
+
   if (loading && !data) return <p className="muted">Chargement des frais…</p>;
   if (error) return <div className="notice error" role="alert">⚠️ {error}</div>;
   if (!data) return null;
@@ -424,11 +526,15 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
         </p>
       </div>
 
-      <div className="tri-actions">
-        <button onClick={openExpense} disabled={busy}>
-          ➕ Nouvelle dépense
-        </button>
-      </div>
+      {/* Comptes email-seul : pas de gestion de dépenses (mais remboursements,
+          messagerie et validation restent accessibles plus bas). */}
+      {!data.emailOnly && (
+        <div className="tri-actions">
+          <button onClick={openExpense} disabled={busy}>
+            ➕ Nouvelle dépense
+          </button>
+        </div>
+      )}
 
       {data.tricounts.length === 0 && (
         <p className="muted">
@@ -492,7 +598,17 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                         </span>
                         <span className="tri-amount">
                           <strong>{fmtEuros(e.amountCents)}</strong>
-                          {e.canDelete && !t.settled && (
+                          {e.canEdit && !t.settled && !data.emailOnly && (
+                            <button
+                              className="secondary tri-edit"
+                              onClick={() => openEditExpense(t, e)}
+                              disabled={busy}
+                              aria-label={`Modifier « ${e.label} »`}
+                            >
+                              Modifier
+                            </button>
+                          )}
+                          {e.canDelete && !t.settled && !data.emailOnly && (
                             <button
                               className="cancel"
                               onClick={() => setConfirmDelete(e)}
@@ -562,7 +678,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                         >
                           <span>
                             <strong>{tr.fromName}</strong> rembourse{" "}
-                            <strong>{tr.toName}</strong>
+                            <strong>{tr.toName}</strong> :
                           </span>
                           <strong>{fmtEuros(tr.amountCents)}</strong>
                         </li>
@@ -640,34 +756,56 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
         );
       })}
 
-      {/* Modale « nouvelle dépense » */}
-      {expenseOpen && (
-        <div className="modal-overlay" onClick={() => !busy && setExpenseOpen(false)}>
-          <div
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Nouvelle dépense"
-            onClick={(e) => e.stopPropagation()}
+      {/* Historique paginé : charge les tricounts plus anciens à la demande. */}
+      {data.hasMore && (
+        <div className="tri-loadmore">
+          <button
+            className="secondary"
+            onClick={() => setLimit((l) => l + TRICOUNT_PAGE)}
+            disabled={loading}
           >
-            <h3>➕ Nouvelle dépense</h3>
+            {loading ? "Chargement…" : "Charger l'historique plus ancien"}
+          </button>
+        </div>
+      )}
+
+      {/* Modale « nouvelle dépense » (aussi utilisée pour l'édition) */}
+      {expenseOpen && (
+        <Dialog
+          onClose={() => !busy && closeExpense()}
+          closeOnOverlay={!busy}
+          className="expense"
+          label={editingId ? "Modifier la dépense" : "Nouvelle dépense"}
+        >
+            <h3>{editingId ? "✏️ Modifier la dépense" : "➕ Nouvelle dépense"}</h3>
             <form onSubmit={submitExpense} className="tri-form">
-              <label className="tri-field">
-                Tricount
-                <select value={tcChoice} onChange={(e) => setTcChoice(e.target.value)}>
-                  {data.tricounts.map((t) => (
-                    <option key={t.id} value={t.date}>
-                      Tricount du {prettyDate(t.date)}
-                    </option>
-                  ))}
-                  <option value="new">➕ Nouvelle date…</option>
-                </select>
-              </label>
-              {tcChoice === "new" && (
-                <label className="tri-field">
-                  Jour du tricount
-                  <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-                </label>
+              {editingId ? (
+                // En édition, le jour (donc le tricount) est figé : on l'affiche seulement.
+                <p className="muted tiny">Tricount du {prettyDate(date)}</p>
+              ) : (
+                <>
+                  <label className="tri-field">
+                    Tricount
+                    <select value={tcChoice} onChange={(e) => setTcChoice(e.target.value)}>
+                      {data.tricounts.map((t) => (
+                        <option key={t.id} value={t.date}>
+                          Tricount du {prettyDate(t.date)}
+                        </option>
+                      ))}
+                      <option value="new">➕ Nouvelle date…</option>
+                    </select>
+                  </label>
+                  {tcChoice === "new" && (
+                    <label className="tri-field">
+                      Jour du tricount
+                      <input
+                        type="date"
+                        value={date}
+                        onChange={(e) => setDate(e.target.value)}
+                      />
+                    </label>
+                  )}
+                </>
               )}
               <input
                 type="text"
@@ -696,46 +834,105 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
               </label>
               <fieldset className="tri-participants">
                 <legend>Pour qui ? ({selected.size})</legend>
-                {data.members.map((m) => (
-                  <label key={m.id} className="tri-check">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(m.id)}
-                      onChange={() => toggle(m.id)}
-                    />
-                    {m.name}
-                    {m.id === data.me ? " (toi)" : ""}
-                  </label>
-                ))}
+                <div className="tri-splitmode" role="group" aria-label="Mode de répartition">
+                  <button
+                    type="button"
+                    className={splitMode === "equal" ? "on" : ""}
+                    aria-pressed={splitMode === "equal"}
+                    onClick={() => setSplitMode("equal")}
+                  >
+                    Équitable
+                  </button>
+                  <button
+                    type="button"
+                    className={splitMode === "shares" ? "on" : ""}
+                    aria-pressed={splitMode === "shares"}
+                    onClick={() => setSplitMode("shares")}
+                  >
+                    Par parts
+                  </button>
+                </div>
+                {data.members.map((m) => {
+                  const checked = selected.has(m.id);
+                  const share = shareByMember.get(m.id);
+                  const w = weights[m.id] ?? 1;
+                  return (
+                    <div key={m.id} className={"tri-check-row" + (checked ? " on" : "")}>
+                      <label className="tri-check">
+                        <input type="checkbox" checked={checked} onChange={() => toggle(m.id)} />
+                        <span className="tri-check-name">
+                          {shortName(m.name)}
+                          {m.id === data.me ? " (toi)" : ""}
+                        </span>
+                      </label>
+                      {checked && splitMode === "shares" && (
+                        <span className="tri-parts">
+                          <button
+                            type="button"
+                            className="tri-parts-btn"
+                            onClick={() => adjustPart(m.id, -1)}
+                            disabled={w <= 1}
+                            aria-label={`Moins de parts pour ${m.name}`}
+                          >
+                            −
+                          </button>
+                          <span
+                            className="tri-parts-value"
+                            role="spinbutton"
+                            aria-valuenow={w}
+                            aria-valuemin={1}
+                            aria-valuemax={MAX_PARTS}
+                            aria-label={`Parts de ${m.name}`}
+                          >
+                            {w}
+                          </span>
+                          <button
+                            type="button"
+                            className="tri-parts-btn"
+                            onClick={() => adjustPart(m.id, 1)}
+                            disabled={w >= MAX_PARTS}
+                            aria-label={`Plus de parts pour ${m.name}`}
+                          >
+                            +
+                          </button>
+                          <span className="tri-parts-unit">{w > 1 ? "parts" : "part"}</span>
+                        </span>
+                      )}
+                      {checked && share !== undefined && (
+                        <span className="tri-share">{fmtEuros(share)}</span>
+                      )}
+                    </div>
+                  );
+                })}
               </fieldset>
               <div className="modal-actions">
                 <button
                   type="button"
                   className="secondary"
-                  onClick={() => setExpenseOpen(false)}
+                  onClick={closeExpense}
                   disabled={busy}
                 >
                   Annuler
                 </button>
                 <button type="submit" disabled={busy}>
-                  {busy ? "Enregistrement…" : "Enregistrer"}
+                  {busy
+                    ? "Enregistrement…"
+                    : editingId
+                      ? "Enregistrer les modifications"
+                      : "Enregistrer"}
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Dialog>
       )}
 
       {/* Modale « j'ai remboursé » */}
       {refundFor && (
-        <div className="modal-overlay" onClick={() => !busy && setRefundFor(null)}>
-          <div
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Enregistrer un remboursement"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog
+          onClose={() => !busy && setRefundFor(null)}
+          closeOnOverlay={!busy}
+          label="Enregistrer un remboursement"
+        >
             <h3>💸 Remboursement</h3>
             <p className="muted tiny">
               Tricount du {prettyDate(refundFor.date)}. La date et l'heure du
@@ -783,20 +980,12 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Dialog>
       )}
 
       {/* Confirmation de suppression */}
       {confirmDelete && (
-        <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
-          <div
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Supprimer la ligne"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog onClose={() => setConfirmDelete(null)} label="Supprimer la ligne">
             <h3>Supprimer cette ligne ?</h3>
             <p>
               {confirmDelete.label} — {fmtEuros(confirmDelete.amountCents)} (
@@ -816,8 +1005,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                 Supprimer
               </button>
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
     </section>
   );

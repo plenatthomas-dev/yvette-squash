@@ -3,36 +3,44 @@ import { book, invalidatePlanningCache } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { isClassEventId } from "@/lib/validation";
+import { resolveActingContext } from "@/lib/delegation";
 
 export const runtime = "nodejs";
 
-// POST /api/book { classEventId, courtName, startsAt, endsAt }
+// POST /api/book { classEventId, courtName, startsAt, endsAt, onBehalfOf? }
+// onBehalfOf (idée 4) : userId du délégant, si on réserve en son nom (délégation active).
 export async function POST(req: NextRequest) {
   const session = await getSession(req.cookies.get("sid")?.value);
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
-  if (!session.resa) {
-    return NextResponse.json(
-      { error: "La réservation nécessite une connexion ResaMania." },
-      { status: 403 },
-    );
-  }
-  const resa = session.resa;
-  const { classEventId, courtName, startsAt, endsAt } = await req
+  const { classEventId, courtName, startsAt, endsAt, onBehalfOf } = await req
     .json()
     .catch(() => ({}));
+
+  const acting = await resolveActingContext(
+    session,
+    onBehalfOf,
+    "La réservation nécessite une connexion ResaMania.",
+  );
+  if (!acting.ok) {
+    return NextResponse.json({ error: acting.error }, { status: acting.status });
+  }
+  const { resa, bookingOwnerId, actingUserId } = acting.ctx;
+
   if (!isClassEventId(classEventId)) {
     return NextResponse.json({ error: "classEventId invalide" }, { status: 400 });
   }
 
   // Blocage « même créneau » : ResaMania interdit de réserver 2 terrains au même horaire.
   // 1) Court-circuit local si on connaît déjà une résa à cet horaire → évite un appel
-  //    voué à échouer et affiche tout de suite une notif d'information.
+  //    voué à échouer et affiche tout de suite une notif d'information. Vérifié sur le
+  //    PROPRIÉTAIRE de la résa (le délégant, en cas de délégation) : c'est son compte
+  //    ResaMania qui réserve, la règle s'applique à lui.
   if (startsAt) {
     const clash = await prisma.booking.findFirst({
       where: {
-        userId: session.userId,
+        userId: bookingOwnerId,
         status: "booked",
         startsAt: new Date(startsAt),
         NOT: { classEventId },
@@ -70,7 +78,7 @@ export async function POST(req: NextRequest) {
   // lieu de créer un doublon. La contrainte @@unique garantit l'unicité côté base.
   await prisma.booking.upsert({
     where: {
-      userId_classEventId: { userId: session.userId, classEventId },
+      userId_classEventId: { userId: bookingOwnerId, classEventId },
     },
     update: {
       attendeeId: r.attendeeId ?? null,
@@ -78,15 +86,17 @@ export async function POST(req: NextRequest) {
       startsAt: new Date(startsAt),
       endsAt: new Date(endsAt),
       status: "booked",
+      actingUserId,
     },
     create: {
-      userId: session.userId,
+      userId: bookingOwnerId,
       attendeeId: r.attendeeId ?? null,
       classEventId,
       courtName: courtName ?? "?",
       startsAt: new Date(startsAt),
       endsAt: new Date(endsAt),
       status: "booked",
+      actingUserId,
     },
   });
   // Le créneau vient de passer « réservé » : purge le cache planning pour que la prochaine

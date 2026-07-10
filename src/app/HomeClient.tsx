@@ -5,9 +5,17 @@ import dynamic from "next/dynamic";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { PlanningGrid } from "@/components/PlanningGrid";
 import { WeekGrid } from "@/components/WeekGrid";
+import { Dialog } from "@/components/Dialog";
+import { SettingsButton } from "@/components/SettingsButton";
+import { DirectoryModal } from "@/components/DirectoryModal";
+import { PrivacyNotice, InfoIcon } from "@/components/PrivacyNotice";
+import { ShareModal } from "@/components/ShareModal";
+import { HeaderMenu } from "@/components/HeaderMenu";
 // Tricount chargé à la demande (seulement à l'ouverture de la vue « Frais ») : son JS ne
 // pèse plus sur le bundle initial de la page. Rendu client uniquement (déjà dans "use client").
 const Tricount = dynamic(() => import("@/components/Tricount"), { ssr: false });
+// Idem pour le module Tournoi (vue « Tournoi ») : chargé seulement à l'ouverture.
+const Tournament = dynamic(() => import("@/components/Tournament"), { ssr: false });
 import { fmtTime, slotMinutes } from "@/lib/time";
 import { toISODate, addDays } from "@/lib/date";
 import { downloadIcs } from "@/lib/ics";
@@ -16,7 +24,13 @@ import {
   pushSupported,
   pushEnabledOnServer,
 } from "@/lib/pushClient";
-import { FEATURE_TRICOUNT, FEATURE_EMAIL_LOGIN, FEATURE_DIRECTORY } from "@/lib/features";
+import {
+  FEATURE_TRICOUNT,
+  FEATURE_EMAIL_LOGIN,
+  FEATURE_DIRECTORY,
+  FEATURE_DELEGATION,
+  FEATURE_TOURNAMENT,
+} from "@/lib/features";
 import type { MePayload } from "@/lib/me-payload";
 
 function prettyDate(date: string): string {
@@ -95,113 +109,23 @@ function LogoutIcon() {
   );
 }
 
-// Thèmes disponibles. "rose" = variante « pinky » (voir globals.css). Persisté en localStorage.
-type Theme = "system" | "light" | "dark" | "rose";
-const THEMES: { key: Theme; label: string }[] = [
-  { key: "system", label: "Système" },
-  { key: "light", label: "Clair" },
-  { key: "dark", label: "Sombre" },
-  { key: "rose", label: "Short Rose" },
-];
-function isTheme(v: unknown): v is Theme {
-  return v === "system" || v === "light" || v === "dark" || v === "rose";
-}
-function applyTheme(t: Theme) {
-  const el = document.documentElement;
-  if (t === "system") el.removeAttribute("data-theme"); // Pico suit prefers-color-scheme
-  else el.setAttribute("data-theme", t);
-}
-// Icône par thème : soleil (clair), lune (sombre), écran (système), short (rose).
-function ThemeIcon({ theme }: { theme: Theme }) {
-  const p = {
-    width: 20,
-    height: 20,
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 2,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-    "aria-hidden": true,
-  };
-  if (theme === "light") {
-    return (
-      <svg {...p}>
-        <circle cx="12" cy="12" r="4" />
-        <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-      </svg>
-    );
-  }
-  if (theme === "dark") {
-    return (
-      <svg {...p}>
-        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
-      </svg>
-    );
-  }
-  if (theme === "rose") {
-    // Short (bermuda) : ceinture + deux jambes avec échancrure centrale.
-    return (
-      <svg {...p}>
-        <path d="M5 5H19L18 19H13L12 11L11 19H6Z" />
-        <path d="M5 8H19" />
-      </svg>
-    );
-  }
-  // Système : écran + pied.
-  return (
-    <svg {...p}>
-      <rect x="2" y="4" width="20" height="13" rx="2" />
-      <path d="M8 21h8M12 17v4" />
-    </svg>
-  );
-}
-// Icône « roue crantée » (paramètres)
-function GearIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="18"
-      height="18"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </svg>
-  );
-}
-
-// Icône « RAZ » (flèche de réinitialisation) — efface le pseudonyme.
-function ResetIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="18"
-      height="18"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <polyline points="1 4 1 10 7 10" />
-      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-    </svg>
-  );
-}
-
 // Icône « cloche » (alertes « créneau libéré »)
 // Icône « € » (accès aux frais partagés / tricount)
 function EuroIcon() {
   return (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M17.5 5.5A7.5 7.5 0 0 0 6.8 8.5M17.5 18.5a7.5 7.5 0 0 1-10.7-3M4 10h9M4 14h8" />
+    </svg>
+  );
+}
+
+// Icône « trophée » pour le bouton Tournoi.
+function TrophyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 4h12v4a6 6 0 0 1-12 0V4Z" />
+      <path d="M6 6H3v2a3 3 0 0 0 3 3M18 6h3v2a3 3 0 0 1-3 3" />
+      <path d="M9 20h6M12 14v6" />
     </svg>
   );
 }
@@ -224,348 +148,6 @@ function UsersIcon() {
       <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
       <path d="M16 3.13a4 4 0 0 1 0 7.75" />
     </svg>
-  );
-}
-
-// Annuaire des membres (idée 6). Bouton d'en-tête → modale listant les joueurs opt-in,
-// avec une recherche par nom. Gated par FEATURE_DIRECTORY : grisé (« bientôt ») si OFF,
-// à l'image du bouton Frais. Lecture seule ici (les usages — message, etc. — viendront).
-function DirectoryButton({ toast }: { toast: (type: ToastType, msg: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [members, setMembers] = useState<{ id: string; name: string }[] | null>(null);
-  const [q, setQ] = useState("");
-
-  // Charge la liste à l'ouverture (à chaque fois : elle peut avoir bougé).
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    setMembers(null);
-    (async () => {
-      try {
-        const res = await fetch("/api/directory");
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
-        if (!cancelled) setMembers(data.members ?? []);
-      } catch (e) {
-        if (!cancelled) {
-          setMembers([]);
-          toast("err", (e as Error).message);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [open, toast]);
-
-  const needle = q.trim().toLowerCase();
-  const shown = (members ?? []).filter((m) => m.name.toLowerCase().includes(needle));
-
-  return (
-    <>
-      <button
-        className={"secondary icon-btn" + (FEATURE_DIRECTORY ? "" : " coming-soon")}
-        onClick={() => FEATURE_DIRECTORY && setOpen(true)}
-        disabled={!FEATURE_DIRECTORY}
-        aria-label={FEATURE_DIRECTORY ? "Annuaire des membres" : "Annuaire — en cours de développement"}
-        title={FEATURE_DIRECTORY ? "Annuaire des membres" : "🚧 En cours de développement"}
-      >
-        <UsersIcon />
-      </button>
-      {open && (
-        <div className="modal-overlay" onClick={() => setOpen(false)}>
-          <div
-            className="modal directory"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Annuaire des membres"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3>Annuaire des membres</h3>
-            <input
-              type="search"
-              className="directory-search"
-              placeholder="Rechercher un membre…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              aria-label="Rechercher un membre"
-            />
-            {members === null ? (
-              <p className="muted tiny">Chargement…</p>
-            ) : shown.length === 0 ? (
-              <p className="muted tiny">
-                {members.length === 0
-                  ? "Aucun membre visible pour le moment."
-                  : "Aucun résultat."}
-              </p>
-            ) : (
-              <ul className="directory-list">
-                {shown.map((m) => (
-                  <li key={m.id}>{m.name}</li>
-                ))}
-              </ul>
-            )}
-            <p className="muted tiny">
-              Seuls les membres ayant choisi d'apparaître sont listés. Pour t'ajouter ou te
-              retirer : ⚙️ Paramètres › « Annuaire des membres ».
-            </p>
-            <div className="modal-actions">
-              <button className="secondary" onClick={() => setOpen(false)}>
-                Fermer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-// Panneau de paramètres : choix du thème (dont « Short Rose ») + choix du pseudonyme.
-function SettingsButton({
-  nickname,
-  listed,
-  onProfileSaved,
-  toast,
-}: {
-  nickname: string | null;
-  listed: boolean;
-  onProfileSaved: () => void;
-  toast: (type: ToastType, msg: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [theme, setTheme] = useState<Theme>("system");
-  const [nick, setNick] = useState(nickname ?? "");
-  const [saving, setSaving] = useState(false);
-  // État optimiste de la case « annuaire » : bascule tout de suite, se resync sur `listed`.
-  const [listedLocal, setListedLocal] = useState(listed);
-  const [savingListed, setSavingListed] = useState(false);
-  const [comment, setComment] = useState("");
-  const [sending, setSending] = useState(false);
-  // Doit rester synchronisé avec MAX_LEN côté serveur (api/feedback/route.ts).
-  const COMMENT_MAX = 1000;
-
-  useEffect(() => {
-    const saved = localStorage.getItem("theme");
-    const t: Theme = isTheme(saved) ? saved : "system";
-    setTheme(t);
-    applyTheme(t);
-  }, []);
-
-  // Resynchronise le champ quand le pseudo change côté serveur / à l'ouverture.
-  useEffect(() => {
-    if (open) setNick(nickname ?? "");
-  }, [open, nickname]);
-
-  // Idem pour la case annuaire.
-  useEffect(() => {
-    setListedLocal(listed);
-  }, [listed]);
-
-  const pickTheme = (t: Theme) => {
-    setTheme(t);
-    localStorage.setItem("theme", t);
-    applyTheme(t);
-  };
-
-  // Enregistre un pseudo (ou null pour l'effacer). `close` ferme le panneau après succès.
-  const persist = async (value: string | null, close: boolean) => {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nickname: value }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
-      toast("ok", value ? "Pseudonyme enregistré" : "Pseudonyme retiré");
-      onProfileSaved();
-      if (close) setOpen(false);
-    } catch (e) {
-      toast("err", (e as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  };
-  const saveNick = () => persist(nick.trim() ? nick : null, true);
-
-  // Bascule la visibilité dans l'annuaire (opt-out). Optimiste : on met à jour la case tout
-  // de suite, puis on PATCH ; en cas d'échec on revient en arrière.
-  const toggleListed = async (next: boolean) => {
-    setListedLocal(next);
-    setSavingListed(true);
-    try {
-      const res = await fetch("/api/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ listed: next }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
-      toast("ok", next ? "Tu apparais dans l'annuaire" : "Tu es retiré de l'annuaire");
-      onProfileSaved();
-    } catch (e) {
-      setListedLocal(!next); // rollback
-      toast("err", (e as Error).message);
-    } finally {
-      setSavingListed(false);
-    }
-  };
-  const clearNick = () => {
-    setNick("");
-    persist(null, false); // RAZ : efface le pseudo, panneau ouvert pour resaisir
-  };
-
-  const sendComment = async () => {
-    if (!comment.trim()) return;
-    setSending(true);
-    try {
-      const res = await fetch("/api/feedback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: comment }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
-      toast("ok", "Merci ! Ton message a été envoyé.");
-      setComment("");
-    } catch (e) {
-      toast("err", (e as Error).message);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  return (
-    <>
-      <button
-        className="secondary icon-btn"
-        onClick={() => setOpen(true)}
-        aria-label="Paramètres"
-        title="Paramètres"
-      >
-        <GearIcon />
-      </button>
-      {open && (
-        <div className="modal-overlay" onClick={() => setOpen(false)}>
-          <div
-            className="modal settings"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Paramètres"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3>Paramètres</h3>
-
-            <section className="setting">
-              <h4>Thème</h4>
-              <div className="theme-choices" role="group" aria-label="Thème">
-                {THEMES.map((t) => (
-                  <button
-                    key={t.key}
-                    className={
-                      "theme-chip" +
-                      (t.key === "rose" ? " theme-chip--rose" : "") +
-                      (theme === t.key ? " active" : "")
-                    }
-                    aria-pressed={theme === t.key}
-                    aria-label={t.label}
-                    title={t.label}
-                    onClick={() => pickTheme(t.key)}
-                  >
-                    <ThemeIcon theme={t.key} />
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="setting">
-              <h4>Pseudonyme</h4>
-              <p className="muted tiny">
-                Affiché à la place de ton prénom. Laisse vide pour revenir au prénom.
-              </p>
-              <div className="nick-field">
-                <input
-                  type="text"
-                  value={nick}
-                  maxLength={24}
-                  placeholder="Ton pseudo"
-                  onChange={(e) => setNick(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") saveNick();
-                  }}
-                />
-                <button onClick={saveNick} disabled={saving}>
-                  {saving ? "…" : "Enregistrer"}
-                </button>
-                {(nickname || nick.trim()) && (
-                  <button
-                    className="secondary icon-btn"
-                    onClick={clearNick}
-                    disabled={saving}
-                    aria-label="Effacer le pseudonyme"
-                    title="Effacer le pseudonyme"
-                  >
-                    <ResetIcon />
-                  </button>
-                )}
-              </div>
-            </section>
-
-            {FEATURE_DIRECTORY && (
-              <section className="setting">
-                <h4>Annuaire des membres</h4>
-                <p className="muted tiny">
-                  Par défaut, ton nom (ou pseudo) apparaît dans l'annuaire des membres pour
-                  faciliter l'entraide entre joueurs. Tu peux t'en retirer à tout moment.
-                </p>
-                <label className="check-row">
-                  <input
-                    type="checkbox"
-                    checked={listedLocal}
-                    disabled={savingListed}
-                    onChange={(e) => toggleListed(e.target.checked)}
-                  />
-                  <span>Apparaître dans l'annuaire</span>
-                </label>
-              </section>
-            )}
-
-            <section className="setting">
-              <h4>Un commentaire ?</h4>
-              <p className="muted tiny">
-                Une question, une idée, un bug ? Écris-le ici, ça m'est envoyé par e-mail.
-              </p>
-              <textarea
-                className="comment-field"
-                value={comment}
-                maxLength={COMMENT_MAX}
-                rows={3}
-                placeholder="Ton message…"
-                onChange={(e) => setComment(e.target.value)}
-              />
-              <div
-                className="muted tiny"
-                style={{ textAlign: "right" }}
-                aria-live="polite"
-              >
-                {comment.length} / {COMMENT_MAX}
-              </div>
-              <button onClick={sendComment} disabled={sending || !comment.trim()}>
-                {sending ? "Envoi…" : "Envoyer"}
-              </button>
-            </section>
-
-            <div className="modal-actions">
-              <button className="secondary" onClick={() => setOpen(false)}>
-                Fermer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
   );
 }
 
@@ -602,35 +184,28 @@ function ConfirmDialog({
 }) {
   if (!state) return null;
   return (
-    <div className="modal-overlay" onClick={() => onResolve(false)}>
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3>{state.title}</h3>
-        <p>{state.body}</p>
-        {state.lines && state.lines.length > 0 && (
-          <ul className="confirm-lines">
-            {state.lines.map((l, i) => (
-              <li key={i}>{l}</li>
-            ))}
-          </ul>
-        )}
-        <div className="modal-actions">
-          <button className="secondary" onClick={() => onResolve(false)}>
-            Retour
-          </button>
-          <button
-            className={state.danger ? "danger" : ""}
-            onClick={() => onResolve(true)}
-          >
-            {state.confirmLabel}
-          </button>
-        </div>
+    <Dialog onClose={() => onResolve(false)} label={state.title}>
+      <h3>{state.title}</h3>
+      <p>{state.body}</p>
+      {state.lines && state.lines.length > 0 && (
+        <ul className="confirm-lines">
+          {state.lines.map((l, i) => (
+            <li key={i}>{l}</li>
+          ))}
+        </ul>
+      )}
+      <div className="modal-actions">
+        <button className="secondary" onClick={() => onResolve(false)}>
+          Retour
+        </button>
+        <button
+          className={state.danger ? "danger" : ""}
+          onClick={() => onResolve(true)}
+        >
+          {state.confirmLabel}
+        </button>
       </div>
-    </div>
+    </Dialog>
   );
 }
 
@@ -654,262 +229,6 @@ function RefreshIcon() {
       <polyline points="1 20 1 14 7 14" />
       <path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15" />
     </svg>
-  );
-}
-
-// Icône « information » (cercle + i) — ouvre la note de confidentialité.
-function InfoIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" />
-      <line x1="12" y1="11" x2="12" y2="16" />
-      <line x1="12" y1="8" x2="12" y2="8" />
-    </svg>
-  );
-}
-
-// Pied de page : petite note « Confidentialité & données » (obligation d'information RGPD).
-// Placée en bas de page (convention pour ce type de mention), sur l'écran de connexion
-// comme sur l'appli. La modale réutilise le style .modal existant.
-function PrivacyNotice() {
-  const [open, setOpen] = useState(false);
-  return (
-    <footer className="app-footer">
-      <button
-        type="button"
-        className="footer-info"
-        onClick={() => setOpen(true)}
-        aria-label="Confidentialité et données"
-        title="Confidentialité et données"
-      >
-        <InfoIcon />
-        <span>Confidentialité &amp; données</span>
-      </button>
-      {open && (
-        <div className="modal-overlay" onClick={() => setOpen(false)}>
-          <div
-            className="modal privacy"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Confidentialité et données"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3>Confidentialité &amp; données</h3>
-            <div className="privacy-body">
-              <p>
-                Application indépendante, <strong>non affiliée à ResaMania /
-                Stadline ni au club</strong>. Elle facilite la réservation des
-                terrains de squash du Complexe de Bures via ton compte
-                ResaMania.
-              </p>
-              <p>
-                Ton mot de passe ResaMania n'est <strong>jamais conservé</strong>.
-                Il ne sert qu'au moment de la connexion, pour t'authentifier
-                auprès de ResaMania. L'appli ne garde ensuite qu'un jeton de
-                session <strong>chiffré</strong> (AES-256-GCM), pour t'éviter de
-                te reconnecter à chaque visite.
-              </p>
-              <p>
-                Si tu te connectes via cette appli, sont enregistrés : ton nom
-                (fourni par ResaMania), ton adresse e-mail, un éventuel
-                pseudonyme que tu choisis, les réservations faites via l'appli,
-                et ton adresse IP de connexion (uniquement pour limiter les
-                tentatives abusives).
-              </p>
-              <p>
-                Ces données servent seulement à te connecter, afficher et gérer
-                les réservations, et protéger le service contre les abus. Elles
-                ne sont ni revendues ni transmises à des tiers (hormis
-                ResaMania, le service que tu utilises déjà).
-              </p>
-              {FEATURE_DIRECTORY && (
-                <p>
-                  <strong>Annuaire des membres.</strong> Pour faciliter l'entraide
-                  entre joueurs, ton nom (ou pseudonyme) est visible dans un annuaire
-                  interne réservé aux membres connectés. <strong>Aucune autre donnée
-                  n'y figure</strong> (ni e-mail, ni réservations). Tu peux t'en retirer
-                  à tout moment depuis ⚙️ Paramètres › « Annuaire des membres ».
-                </p>
-              )}
-              <p>
-                <strong>Liste d'attente &amp; notifications.</strong> Sur un créneau
-                complet, tu peux demander à être prévenu qu'un terrain se libère : on
-                enregistre alors le créneau visé et, si tu l'autorises, un abonnement aux
-                notifications de ton navigateur (pour t'envoyer l'alerte). Le
-                <strong> nombre de membres en attente</strong> et <strong>ta position</strong>
-                sont affichés aux membres connectés — <strong>jamais le nom</strong> des
-                inscrits. Tu peux quitter une liste d'attente à tout moment (🕒 « Ma liste
-                d'attente »).
-              </p>
-              <p>
-                Hébergement en Union européenne : application sur Vercel, base
-                de données sur Neon.
-              </p>
-              <p>
-                Tu peux demander à consulter ou supprimer tes données à tout
-                moment — la déconnexion efface déjà ta session. Une question, ou
-                envie d'exercer ces droits ? Une fois connecté, écris-nous
-                depuis ⚙️ Paramètres › « Un commentaire&nbsp;? ».
-              </p>
-            </div>
-            <div className="modal-actions">
-              <button className="secondary" onClick={() => setOpen(false)}>
-                Fermer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </footer>
-  );
-}
-
-// Bouton « partager » : Web Share natif (mobile) sinon copie du lien.
-// Partage : notre PROPRE QR code (logo raquette au centre + « Squash de l'Yvette »),
-// scannable/partageable/téléchargeable. Contrairement au QR du menu natif du téléphone,
-// on maîtrise ici l'icône centrale et le texte.
-function ShareButton({ toast }: { toast: (type: ToastType, msg: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  // URL racine de l'appli (sans les filtres de la vue courante) → QR stable.
-  const appUrl = () =>
-    typeof window !== "undefined" ? `${window.location.origin}/` : "";
-
-  useEffect(() => {
-    if (!open) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    let cancelled = false;
-
-    (async () => {
-      // QRCode chargé à la demande (seulement à l'ouverture du partage) : son JS ne pèse
-      // pas sur le bundle initial de la page.
-      const { default: QRCode } = await import("qrcode");
-      if (cancelled) return;
-      // 1) QR dans un canvas temporaire (correction d'erreurs « H » → logo central OK).
-      const qr = document.createElement("canvas");
-      await QRCode.toCanvas(qr, appUrl(), {
-        width: 320,
-        margin: 2,
-        errorCorrectionLevel: "H",
-        color: { dark: "#0f1115", light: "#ffffff" },
-      });
-      if (cancelled) return;
-
-      // 2) Composition finale : QR + légende (fond toujours blanc pour rester scannable).
-      const W = 320;
-      const H = 372;
-      canvas.width = W;
-      canvas.height = H;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, W, H);
-      ctx.drawImage(qr, 0, 0, 320, 320);
-      ctx.fillStyle = "#0f1115";
-      ctx.textAlign = "center";
-      ctx.font = "600 20px system-ui, -apple-system, sans-serif";
-      ctx.fillText("Squash de l'Yvette", W / 2, 352);
-
-      // 3) Logo raquette au centre, sur une pastille blanche (préserve la lisibilité du QR).
-      const img = new Image();
-      img.onload = () => {
-        if (cancelled) return;
-        const s = 86; // taille du logo central (QR en correction « H » → reste scannable)
-        const x = (320 - s) / 2;
-        const y = (320 - s) / 2;
-        const pad = 8;
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(x - pad, y - pad, s + pad * 2, s + pad * 2);
-        ctx.drawImage(img, x, y, s, s);
-      };
-      img.src = "/logo_squash.jpeg";
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
-
-  const copyLink = async () => {
-    try {
-      await navigator.clipboard.writeText(appUrl());
-      toast("ok", "Lien copié ✅");
-    } catch {
-      toast("err", "Copie impossible");
-    }
-  };
-
-  // Partage l'IMAGE du QR (menu natif si dispo), sinon la télécharge.
-  const shareQr = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    canvas.toBlob(async (blob) => {
-      if (!blob) return;
-      const file = new File([blob], "squash-yvette-qr.png", { type: "image/png" });
-      try {
-        if (navigator.canShare?.({ files: [file] })) {
-          await navigator.share({
-            files: [file],
-            title: "Squash de l'Yvette",
-            text: "Réserve un terrain de squash 🎾",
-          });
-        } else {
-          const a = document.createElement("a");
-          a.href = URL.createObjectURL(blob);
-          a.download = "squash-yvette-qr.png";
-          a.click();
-          URL.revokeObjectURL(a.href);
-          toast("ok", "QR code téléchargé");
-        }
-      } catch {
-        /* partage annulé par l'utilisateur */
-      }
-    }, "image/png");
-  };
-
-  return (
-    <>
-      <button
-        className="secondary icon-btn"
-        onClick={() => setOpen(true)}
-        aria-label="Partager l'appli"
-        title="Partager l'appli"
-      >
-        <ShareIcon />
-      </button>
-      {open && (
-        <div className="modal-overlay" onClick={() => setOpen(false)}>
-          <div
-            className="modal share"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Partager l'appli"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3>Partager l'appli</h3>
-            <p className="muted tiny">
-              Scanne ce QR code pour ouvrir l'appli, ou copie le lien.
-            </p>
-            <div className="qr-wrap">
-              <canvas ref={canvasRef} className="qr-canvas" aria-label="QR code de l'appli" />
-            </div>
-            <div className="share-actions">
-              <button onClick={shareQr}>Partager le QR</button>
-              <button className="secondary" onClick={copyLink}>
-                Copier le lien
-              </button>
-            </div>
-            <div className="modal-actions">
-              <button className="secondary" onClick={() => setOpen(false)}>
-                Fermer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
   );
 }
 
@@ -1025,6 +344,7 @@ export default function HomeClient({
   const [me, setMe] = useState<string | null | undefined>(
     initialMe === undefined ? undefined : initialMe ? initialMe.displayName : null,
   );
+  const [myId, setMyId] = useState<string | null>(initialMe?.id ?? null); // id interne (se reconnaître dans l'annuaire)
   const [myHandle, setMyHandle] = useState<string>(initialMe?.handle ?? ""); // token créneau (pseudo tronqué / Tho.P)
   const [nickname, setNickname] = useState<string | null>(initialMe?.nickname ?? null); // pseudonyme choisi
   const [listed, setListed] = useState(initialMe?.listed ?? true); // visibilité annuaire (idée 6, opt-out)
@@ -1042,7 +362,9 @@ export default function HomeClient({
   const [range, setRange] = useState<Range>("all");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
-  const [view, setView] = useState<"day" | "week" | "money">("day");
+  const [view, setView] = useState<"day" | "week" | "money" | "tourney">("day");
+  // Vues « plein écran » sans le chrome planning (Frais, Tournoi).
+  const isSpecial = view === "money" || view === "tourney";
   const [week, setWeek] = useState<{ date: string; planning: PlanningDay }[]>([]);
   const [busy, setBusy] = useState(false);
   // Mode « sélection multiple » (piloté depuis la barre de vue, appliqué dans la grille
@@ -1062,6 +384,19 @@ export default function HomeClient({
   // sont ouverts (action possible « rembourser »). Alimenté au chargement/focus et,
   // en direct, par le composant Tricount quand la vue Frais est ouverte.
   const [triOwed, setTriOwed] = useState(0);
+  // Délégation (idée 4) : délégations entrantes actives (plusieurs membres peuvent m'avoir
+  // délégué leurs droits simultanément) + pour qui j'agis actuellement (null = moi-même).
+  const [incomingDelegations, setIncomingDelegations] = useState<
+    { delegatorId: string; delegatorName: string; expiresAt: string }[]
+  >([]);
+  const [actingAsId, setActingAsId] = useState<string | null>(null);
+  // Bandeaux « on t'a délégué des droits » : un par délégant, masquables individuellement.
+  // Chaque bandeau masqué est mémorisé par une clé identité (délégant + échéance) → il se
+  // ré-affiche si la délégation change (nouvelle échéance) ou si un nouveau délégant arrive.
+  const [delegBannerDismissed, setDelegBannerDismissed] = useState<string[]>([]);
+  // Modales du menu ⋯ (partage / annuaire), pilotées depuis HeaderMenu.
+  const [shareOpen, setShareOpen] = useState(false);
+  const [directoryOpen, setDirectoryOpen] = useState(false);
   const today = toISODate(new Date());
   // Notifications disponibles seulement une fois monté (évite un décalage d'hydratation)
   // ET si le navigateur les supporte ET si les clés VAPID sont configurées côté serveur.
@@ -1099,12 +434,14 @@ export default function HomeClient({
     if (res.ok) {
       const data = await res.json();
       setMe(data.displayName);
+      setMyId(data.id ?? null);
       setMyHandle(data.handle ?? "");
       setNickname(data.nickname ?? null);
       setListed(data.listed ?? true);
       setCanBook(data.canBook ?? true);
     } else {
       setMe(null);
+      setMyId(null);
       setMyHandle("");
       setNickname(null);
     }
@@ -1158,6 +495,30 @@ export default function HomeClient({
   useEffect(() => {
     if (me && FEATURE_TRICOUNT) loadTriOwed();
   }, [me, loadTriOwed]);
+
+  // Délégation reçue (idée 4) : si un autre membre m'a délégué ses droits, je peux agir
+  // « en son nom ». `actingAs` = pour qui j'agis actuellement (null = moi-même).
+  const loadIncomingDelegation = useCallback(async () => {
+    const r = await fetch("/api/delegations");
+    if (!r.ok) {
+      setIncomingDelegations([]);
+      return;
+    }
+    const d = (await r.json()) as {
+      incoming: { delegatorId: string; delegatorName: string; expiresAt: string }[];
+    };
+    setIncomingDelegations(d.incoming ?? []);
+  }, []);
+  useEffect(() => {
+    if (me && FEATURE_DELEGATION) loadIncomingDelegation();
+  }, [me, loadIncomingDelegation]);
+  // Sécurité : si le délégant sélectionné n'est plus dans les délégations entrantes actives
+  // (révoquée, expirée), on retombe sur « moi-même ».
+  useEffect(() => {
+    if (actingAsId && !incomingDelegations.some((d) => d.delegatorId === actingAsId)) {
+      setActingAsId(null);
+    }
+  }, [actingAsId, incomingDelegations]);
 
   const load = useCallback(
     // skipPlanning : le SSR a déjà servi `planning` pour cette date (initialPlanning) — on
@@ -1222,12 +583,13 @@ export default function HomeClient({
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
 
-    const isView = (x: string | null): x is "day" | "week" | "money" =>
-      x === "day" || x === "week" || x === "money";
+    const isView = (x: string | null): x is "day" | "week" | "money" | "tourney" =>
+      x === "day" || x === "week" || x === "money" || x === "tourney";
     const vParam = p.get("view");
     const vLS = localStorage.getItem("view");
     let v = isView(vParam) ? vParam : isView(vLS) ? vLS : null;
     if (v === "money" && !FEATURE_TRICOUNT) v = "day"; // Frais désactivé : jamais cette vue
+    if (v === "tourney" && !FEATURE_TOURNAMENT) v = "day"; // Tournoi désactivé
     if (v) setView(v);
 
     const rParam = p.get("range");
@@ -1252,7 +614,7 @@ export default function HomeClient({
 
   useEffect(() => {
     if (!me || !hydrated) return;
-    if (view === "money") return; // la vue Frais charge ses propres données
+    if (view === "money" || view === "tourney") return; // ces vues chargent leurs propres données
     if (skipFirstLoad.current) {
       skipFirstLoad.current = false;
       // Le SSR n'a préchargé que la vue "day" à `initialDate` : si l'URL/localStorage
@@ -1273,7 +635,7 @@ export default function HomeClient({
   }, [view, date]);
 
   const reload = useCallback(() => {
-    if (view === "money") return; // Tricount se recharge tout seul (montage + actions)
+    if (view === "money" || view === "tourney") return; // ces vues se rechargent seules
     if (view === "week") loadWeek(date);
     else load(date);
   }, [view, date, load, loadWeek]);
@@ -1345,6 +707,7 @@ export default function HomeClient({
           courtName: slot.courtName,
           startsAt: slot.startsAt,
           endsAt: slot.endsAt,
+          onBehalfOf: actingAsId ?? undefined,
         }),
       });
       if (handleExpired(res.status)) return;
@@ -1377,7 +740,11 @@ export default function HomeClient({
     if (!ok) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/bookings/${b.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/bookings/${b.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ onBehalfOf: actingAsId ?? undefined }),
+      });
       if (handleExpired(res.status)) return;
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
@@ -1405,7 +772,7 @@ export default function HomeClient({
       const res = await fetch("/api/cancel-slot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ classEventId: slot.id }),
+        body: JSON.stringify({ classEventId: slot.id, onBehalfOf: actingAsId ?? undefined }),
       });
       if (handleExpired(res.status)) return;
       const data = await res.json();
@@ -1518,6 +885,7 @@ export default function HomeClient({
               courtName: slot.courtName,
               startsAt: slot.startsAt,
               endsAt: slot.endsAt,
+              onBehalfOf: actingAsId ?? undefined,
             }),
           });
           if (res.status === 401) {
@@ -1637,6 +1005,8 @@ export default function HomeClient({
                 src="/logo_squash.jpeg"
                 alt="Squash de l'Yvette"
                 className="logo-mark"
+                width={46}
+                height={46}
               />
               <span className="brand-title" aria-hidden="true">
                 Squash de l'Yvette
@@ -1644,6 +1014,22 @@ export default function HomeClient({
             </h1>
           </div>
           <div className="actions">
+            {FEATURE_DELEGATION && incomingDelegations.length > 0 && (
+              <select
+                className="acting-as-select"
+                value={actingAsId ?? ""}
+                onChange={(e) => setActingAsId(e.target.value || null)}
+                aria-label="Réserver pour"
+                title="Réserver pour"
+              >
+                <option value="">Pour moi</option>
+                {incomingDelegations.map((d) => (
+                  <option key={d.delegatorId} value={d.delegatorId}>
+                    Pour {d.delegatorName}
+                  </option>
+                ))}
+              </select>
+            )}
             {canNotify && (
               <button
                 className="secondary icon-btn alerts-btn"
@@ -1655,52 +1041,102 @@ export default function HomeClient({
                 {alerts.length > 0 && <span className="badge">{alerts.length}</span>}
               </button>
             )}
-            <ShareButton toast={toast} />
-            <DirectoryButton toast={toast} />
+            {/* Réglages : accès DIRECT (hors menu ⋯), comme les notifications. */}
             <SettingsButton
+              myId={myId}
               nickname={nickname}
               listed={listed}
               onProfileSaved={checkMe}
               toast={toast}
             />
-            {/* Bouton Frais : actif si le flag est ON ; sinon affiché grisé (désactivé)
-                avec un tooltip « en cours de développement » (feature bientôt dispo). */}
-            <button
-              className={
-                "secondary icon-btn money-btn" +
-                (view === "money" ? " active" : "") +
-                (FEATURE_TRICOUNT ? "" : " coming-soon")
-              }
-              onClick={() =>
-                FEATURE_TRICOUNT && setView(view === "money" ? "day" : "money")
-              }
-              disabled={!FEATURE_TRICOUNT}
-              aria-label={
-                FEATURE_TRICOUNT
-                  ? `Frais partagés (tricount)${triOwed ? ` — ${triOwed} à rembourser` : ""}`
-                  : "Frais partagés — en cours de développement"
-              }
-              aria-pressed={view === "money"}
-              title={FEATURE_TRICOUNT ? "Frais partagés" : "🚧 En cours de développement"}
-            >
-              <EuroIcon />
-              {FEATURE_TRICOUNT && triOwed > 0 && <span className="badge">{triOwed}</span>}
-            </button>
-            <button
-              className="secondary logout"
-              onClick={logout}
-              aria-label="Déconnexion"
-              title="Déconnexion"
-            >
-              <LogoutIcon />
-              <span className="label">Déconnexion</span>
-            </button>
+            {/* Menu ⋯ : regroupe les actions secondaires pour dégager le logo. */}
+            <HeaderMenu
+              items={[
+                {
+                  key: "money",
+                  label: "Frais partagés",
+                  icon: <EuroIcon />,
+                  active: view === "money",
+                  badge: FEATURE_TRICOUNT && triOwed > 0 ? triOwed : undefined,
+                  disabled: !FEATURE_TRICOUNT,
+                  comingSoon: !FEATURE_TRICOUNT,
+                  onClick: () => setView(view === "money" ? "day" : "money"),
+                },
+                {
+                  key: "tourney",
+                  label: "Tournois",
+                  icon: <TrophyIcon />,
+                  active: view === "tourney",
+                  disabled: !FEATURE_TOURNAMENT,
+                  comingSoon: !FEATURE_TOURNAMENT,
+                  onClick: () => setView(view === "tourney" ? "day" : "tourney"),
+                },
+                {
+                  key: "directory",
+                  label: "Annuaire des membres",
+                  icon: <UsersIcon />,
+                  disabled: !FEATURE_DIRECTORY,
+                  comingSoon: !FEATURE_DIRECTORY,
+                  onClick: () => setDirectoryOpen(true),
+                },
+                {
+                  key: "share",
+                  label: "Partager l'appli",
+                  icon: <ShareIcon />,
+                  onClick: () => setShareOpen(true),
+                },
+                {
+                  key: "logout",
+                  label: "Déconnexion",
+                  icon: <LogoutIcon />,
+                  onClick: logout,
+                },
+              ]}
+            />
           </div>
         </div>
         {/* Sous-titre pleine largeur : accueil + lieu réunis sur une seule ligne
             (l'ancienne ligne « Bonjour » séparée est supprimée pour gagner de la place). */}
         <div className="sub">Bonjour {nickname || me.split(" ")[0]} 👋 · Le Complexe, Bures</div>
       </header>
+
+      {/* Modales du menu ⋯ (rendues hors du menu pour survivre à sa fermeture). */}
+      <ShareModal open={shareOpen} onClose={() => setShareOpen(false)} toast={toast} />
+      <DirectoryModal
+        open={directoryOpen}
+        onClose={() => setDirectoryOpen(false)}
+        toast={toast}
+      />
+
+      {FEATURE_DELEGATION &&
+        incomingDelegations.map((deleg) => {
+          const key = `${deleg.delegatorId}|${deleg.expiresAt}`;
+          if (delegBannerDismissed.includes(key)) return null;
+          return (
+            <div key={key} className="notice info deleg-banner" role="status">
+              <span>
+                🤝 <strong>{deleg.delegatorName}</strong> t'a délégué ses droits : tu peux
+                réserver / annuler en son nom jusqu'au{" "}
+                {new Date(deleg.expiresAt).toLocaleString("fr-FR", {
+                  day: "numeric",
+                  month: "short",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+                . Sélectionne « Pour {deleg.delegatorName} » en haut à droite pour agir en son
+                nom.
+              </span>
+              <button
+                type="button"
+                className="deleg-banner-close"
+                aria-label="Masquer ce message"
+                onClick={() => setDelegBannerDismissed((prev) => [...prev, key])}
+              >
+                ✕
+              </button>
+            </div>
+          );
+        })}
 
       {!canBook && (
         <div className="notice info readonly-note">
@@ -1712,7 +1148,7 @@ export default function HomeClient({
 
       {/* Navigation de date : flèches + libellé (qui ouvre le calendrier natif) + pastille
           « Aujourd'hui » (toujours présente, inactive si on y est déjà), le tout sur UNE ligne. */}
-      {view !== "money" && (
+      {!isSpecial && (
       <div className="toolbar">
         <button className="secondary nav" aria-label="Jour précédent" onClick={() => setDate(addDays(date, view === "week" ? -7 : -1))}>←</button>
         <button
@@ -1757,7 +1193,7 @@ export default function HomeClient({
           <button className={view === "day" ? "active" : ""} aria-pressed={view === "day"} onClick={() => setView("day")}>Jour</button>
           <button className={view === "week" ? "active" : ""} aria-pressed={view === "week"} onClick={() => setView("week")}>Semaine</button>
         </div>
-        {view !== "money" && (
+        {!isSpecial && (
         <div className="viewbar-icons">
           <button
             type="button"
@@ -1783,7 +1219,7 @@ export default function HomeClient({
         )}
       </div>
 
-      {view !== "money" && (
+      {!isSpecial && (
       <div className="filters" role="group" aria-label="Plage horaire">
         {RANGES.map((r) => (
           <button
@@ -1821,13 +1257,17 @@ export default function HomeClient({
         {loading ? "Chargement du planning…" : error ? `Erreur : ${error}` : ""}
       </p>
 
-      {error && view !== "money" && <div className="notice error" role="alert">⚠️ {error}</div>}
+      {error && !isSpecial && <div className="notice error" role="alert">⚠️ {error}</div>}
 
       {FEATURE_TRICOUNT && view === "money" && (
         <Tricount toast={toast} onExpired={handleExpired} onOwedChange={setTriOwed} />
       )}
 
-      {view === "money"
+      {FEATURE_TOURNAMENT && view === "tourney" && (
+        <Tournament toast={toast} onExpired={handleExpired} />
+      )}
+
+      {isSpecial
         ? null
         : view === "day"
         ? planning
@@ -1900,14 +1340,7 @@ export default function HomeClient({
 
       <PrivacyNotice />
       {alertsOpen && (
-        <div className="modal-overlay" onClick={() => setAlertsOpen(false)}>
-          <div
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Ma liste d'attente"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog onClose={() => setAlertsOpen(false)} label="Ma liste d'attente">
             <h3>🕒 Ma liste d'attente</h3>
             {alerts.length === 0 ? (
               <p className="muted">
@@ -1941,8 +1374,7 @@ export default function HomeClient({
                 Fermer
               </button>
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
 
       <Toasts items={toasts} />

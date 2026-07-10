@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { fmtTime } from "@/lib/time";
 
@@ -69,13 +69,19 @@ export function PlanningGrid({
   // Alerte « préviens-moi si ça se libère » : proposée sur les créneaux réservés HORS asso
   // (les créneaux asso servent, eux, à signaler sa présence — cf. onTogglePresence).
   const watchable = !!(canWatch && onWatch);
-  // Lignes = horaires distincts triés ; colonnes = terrains.
-  const times = [...new Set(planning.slots.map((s) => s.startsAt))].sort();
-  const byKey = new Map(
-    planning.slots.map((s) => [s.courtId + "|" + s.startsAt, s]),
-  );
-  // Fin du créneau pour chaque horaire (pour afficher « début – fin »).
-  const endByTime = new Map(planning.slots.map((s) => [s.startsAt, s.endsAt]));
+  // Index dérivés de la grille : recalculés uniquement quand les créneaux changent
+  // (et non à chaque rendu déclenché par un toast, un changement de sélection, etc.).
+  // - times   : lignes = horaires distincts triés
+  // - byKey   : accès O(1) au créneau d'un (terrain, horaire)
+  // - endByTime : fin de chaque horaire (pour afficher « début – fin »)
+  const { times, byKey, endByTime } = useMemo(() => {
+    const times = [...new Set(planning.slots.map((s) => s.startsAt))].sort();
+    const byKey = new Map(
+      planning.slots.map((s) => [s.courtId + "|" + s.startsAt, s]),
+    );
+    const endByTime = new Map(planning.slots.map((s) => [s.startsAt, s.endsAt]));
+    return { times, byKey, endByTime };
+  }, [planning.slots]);
   const now = Date.now();
 
   if (planning.courts.length === 0) {
