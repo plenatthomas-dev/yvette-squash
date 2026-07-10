@@ -99,6 +99,12 @@ d'une soirée à sa place).
   `keep-alive-delegations` rafraîchit le jeton du délégant tant qu'une délégation est active.
   Notifications push à la **création** et à la **fin** (révocation/expiration) + bandeau
   in-app côté délégataire. UI de gestion dans les Réglages.
+- **Affinages (10/07/2026)** : **plusieurs délégués simultanés** (liste à cocher, une
+  délégation par couple, révocation individuelle), **prolongation additive** inline
+  (+24 h/+3 j/+5 j sur l'échéance ACTUELLE, push « délégation prolongée »), **plafond de
+  session** (le POST refuse en 409 toute échéance au-delà de `Session.expiresAt` du
+  délégant, bulle « i » de validité dans les Réglages), paragraphe **RGPD** dédié dans la
+  note de confidentialité, tests de la route (GET/POST). Détail : `docs/delegation-droits.md`.
 
 ## 5. Messagerie entre utilisateurs
 
