@@ -3,9 +3,14 @@ import type { NextRequest } from "next/server";
 
 const h = vi.hoisted(() => ({
   featureOn: true,
-  session: null as null | { userId: string },
+  session: null as null | { userId: string; resa?: unknown },
   outgoing: [] as Array<Record<string, unknown>>,
   incoming: [] as Array<Record<string, unknown>>,
+  // POST : utilisateurs « trouvés » par prisma.user.findMany + espions de la transaction.
+  foundUsers: [] as Array<{ id: string }>,
+  updateMany: vi.fn(),
+  create: vi.fn(),
+  pushToUser: vi.fn(),
 }));
 
 vi.mock("@/lib/features", () => ({
@@ -14,8 +19,20 @@ vi.mock("@/lib/features", () => ({
   },
 }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
-vi.mock("@/lib/db", () => ({ prisma: {} }));
-vi.mock("@/lib/push", () => ({ pushToUser: vi.fn() }));
+vi.mock("@/lib/db", () => ({
+  prisma: {
+    user: {
+      findMany: vi.fn(async () => h.foundUsers),
+      findUnique: vi.fn(async () => ({ displayName: "Moi Même", nickname: null })),
+    },
+    // La transaction relaie vers les espions : on vérifie révocation (renouvellement)
+    // et créations sans base réelle.
+    $transaction: vi.fn(async (cb: (tx: unknown) => unknown) =>
+      cb({ delegation: { updateMany: h.updateMany, create: h.create } }),
+    ),
+  },
+}));
+vi.mock("@/lib/push", () => ({ pushToUser: h.pushToUser }));
 vi.mock("@/lib/delegation", () => ({
   DELEGATION_DURATIONS_H: [3, 12],
   DELEGATION_SCOPE: "booking",
@@ -23,15 +40,27 @@ vi.mock("@/lib/delegation", () => ({
   getActiveIncomingDelegations: vi.fn(async () => h.incoming),
 }));
 
-import { GET } from "./route";
+import { GET, POST } from "./route";
 
 const req = () => ({ cookies: { get: () => undefined } }) as unknown as NextRequest;
+const postReq = (body: unknown) =>
+  ({
+    cookies: { get: () => undefined },
+    json: async () => body,
+  }) as unknown as NextRequest;
 
 beforeEach(() => {
   h.featureOn = true;
-  h.session = { userId: "u1" };
+  h.session = { userId: "u1", resa: { token: "t" } };
   h.outgoing = [];
   h.incoming = [];
+  h.foundUsers = [];
+  h.updateMany.mockReset().mockResolvedValue({ count: 0 });
+  h.create.mockReset().mockImplementation(async ({ data }: { data: { delegateId: string } }) => ({
+    id: `new-${data.delegateId}`,
+    delegateId: data.delegateId,
+  }));
+  h.pushToUser.mockReset().mockResolvedValue(undefined);
 });
 
 describe("GET /api/delegations", () => {
@@ -93,5 +122,94 @@ describe("GET /api/delegations", () => {
     const res = await GET(req());
     const body = await res.json();
     expect(body.outgoing).toEqual([]);
+  });
+});
+
+describe("POST /api/delegations", () => {
+  it("404 si la fonction est désactivée", async () => {
+    h.featureOn = false;
+    expect((await POST(postReq({ delegateIds: ["a"], hours: 3 }))).status).toBe(404);
+  });
+
+  it("401 si non authentifié", async () => {
+    h.session = null;
+    expect((await POST(postReq({ delegateIds: ["a"], hours: 3 }))).status).toBe(401);
+  });
+
+  it("403 sans session ResaMania (compte email-seul)", async () => {
+    h.session = { userId: "u1" }; // pas de resa
+    expect((await POST(postReq({ delegateIds: ["a"], hours: 3 }))).status).toBe(403);
+  });
+
+  it("400 si aucun membre / entrée non-string", async () => {
+    expect((await POST(postReq({ delegateIds: [], hours: 3 }))).status).toBe(400);
+    expect((await POST(postReq({ hours: 3 }))).status).toBe(400);
+    expect((await POST(postReq({ delegateIds: ["a", 42], hours: 3 }))).status).toBe(400);
+    expect((await POST(postReq({ delegateIds: [""], hours: 3 }))).status).toBe(400);
+  });
+
+  it("400 si on se délègue à soi-même (y compris au milieu d'une liste)", async () => {
+    expect((await POST(postReq({ delegateIds: ["a", "u1"], hours: 3 }))).status).toBe(400);
+  });
+
+  it("400 si durée hors des préréglages", async () => {
+    h.foundUsers = [{ id: "a" }];
+    expect((await POST(postReq({ delegateIds: ["a"], hours: 999 }))).status).toBe(400);
+    expect((await POST(postReq({ delegateIds: ["a"], hours: "3" }))).status).toBe(400);
+  });
+
+  it("400 au-delà du plafond de membres", async () => {
+    const ids = Array.from({ length: 21 }, (_, i) => `m${i}`);
+    expect((await POST(postReq({ delegateIds: ids, hours: 3 }))).status).toBe(400);
+  });
+
+  it("404 si un des membres n'existe pas", async () => {
+    h.foundUsers = [{ id: "a" }]; // « b » introuvable
+    expect((await POST(postReq({ delegateIds: ["a", "b"], hours: 3 }))).status).toBe(404);
+  });
+
+  it("crée UNE délégation par membre choisi + push à chacun", async () => {
+    h.foundUsers = [{ id: "a" }, { id: "b" }];
+    const res = await POST(postReq({ delegateIds: ["a", "b"], hours: 3 }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.delegations).toEqual([
+      { id: "new-a", delegateId: "a" },
+      { id: "new-b", delegateId: "b" },
+    ]);
+    expect(new Date(body.expiresAt).getTime()).toBeGreaterThan(Date.now());
+    expect(h.create).toHaveBeenCalledTimes(2);
+    expect(h.pushToUser).toHaveBeenCalledTimes(2);
+    expect(h.pushToUser.mock.calls.map((c) => c[0])).toEqual(["a", "b"]);
+  });
+
+  it("renouvellement : révoque l'existante des MÊMES délégués, endNotifiedAt posé", async () => {
+    h.foundUsers = [{ id: "a" }, { id: "b" }];
+    await POST(postReq({ delegateIds: ["a", "b"], hours: 12 }));
+    expect(h.updateMany).toHaveBeenCalledTimes(1);
+    const arg = h.updateMany.mock.calls[0][0];
+    expect(arg.where).toMatchObject({
+      delegatorId: "u1",
+      delegateId: { in: ["a", "b"] },
+      revokedAt: null,
+    });
+    // endNotifiedAt posé → le cron d'expiration ne re-notifiera pas une délégation remplacée.
+    expect(arg.data.revokedAt).toBeInstanceOf(Date);
+    expect(arg.data.endNotifiedAt).toBeInstanceOf(Date);
+  });
+
+  it("dédoublonne les ids répétés (une seule création)", async () => {
+    h.foundUsers = [{ id: "a" }];
+    const res = await POST(postReq({ delegateIds: ["a", "a"], hours: 3 }));
+    expect(res.status).toBe(200);
+    expect(h.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rétro-compat : accepte l'ancien { delegateId } mono", async () => {
+    h.foundUsers = [{ id: "a" }];
+    const res = await POST(postReq({ delegateId: "a", hours: 3 }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.delegations).toEqual([{ id: "new-a", delegateId: "a" }]);
   });
 });
