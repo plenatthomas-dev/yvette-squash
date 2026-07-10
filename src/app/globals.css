@@ -1442,6 +1442,13 @@ td.cell.past {
   width: auto;
 }
 
+/* Paire Prolonger / Révoquer d'une délégation active : reste groupée au rétrécissement. */
+.delegation-row-actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
 /* Sélecteur « Pour moi / Pour X » dans la barre d'en-tête : même gabarit que les
    icon-btn voisins (cloche, réglages, menu ⋯). */
 .acting-as-select {
