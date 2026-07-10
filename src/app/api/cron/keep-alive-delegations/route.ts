@@ -31,11 +31,25 @@ export async function GET(req: NextRequest) {
   let failed = 0;
   for (const { delegatorId } of delegations) {
     // getResaTokenForUser rafraîchit et persiste si besoin, ou renvoie null si le jeton
-    // est irrécupérable (session révoquée ailleurs…) — rien de plus à faire ici, le
-    // délégué aura un message d'erreur clair à sa prochaine tentative d'action.
+    // est irrécupérable (session révoquée ailleurs, expirée…).
     const resa = await getResaTokenForUser(delegatorId);
-    if (resa) refreshed++;
-    else failed++;
+    if (resa) {
+      refreshed++;
+      continue;
+    }
+    failed++;
+    // La délégation est inopérante tant que le délégant ne se reconnecte pas : on le
+    // prévient (sinon c'est le délégué qui découvre la panne par une erreur au moment
+    // d'agir). Relancé à chaque passage quotidien tant que ça dure — fenêtre courte
+    // (5 j max) et `tag` stable : la notification se remplace au lieu de s'empiler.
+    await pushToUser(delegatorId, {
+      title: "Ta délégation ne fonctionne plus ⚠️",
+      body:
+        "Ta connexion ResaMania n'est plus valide : la personne à qui tu as délégué tes " +
+        "droits ne peut plus agir en ton nom. Reconnecte-toi à l'appli pour la réactiver.",
+      url: "/",
+      tag: `delegation-keepalive-${delegatorId}`,
+    }).catch(() => {});
   }
 
   // Fins naturelles : notifie chaque délégataire dont la délégation a expiré sans avoir
