@@ -11,10 +11,36 @@ import {
   bracketDescendants,
   proposeFormats,
   bestFormat,
+  poolTiers,
   type MatchResult,
 } from "./tournament";
 
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+
+describe("poolTiers", () => {
+  it("rassemble le rang r de chaque poule (1ers ensemble, 2es ensemble…)", () => {
+    // 2 poules de 3 : A = [a1,a2,a3] (rang 1→3), B = [b1,b2,b3].
+    const tiers = poolTiers([
+      ["a1", "a2", "a3"],
+      ["b1", "b2", "b3"],
+    ]);
+    expect(tiers).toEqual([
+      { tier: 1, playerIds: ["a1", "b1"] },
+      { tier: 2, playerIds: ["a2", "b2"] },
+      { tier: 3, playerIds: ["a3", "b3"] },
+    ]);
+  });
+
+  it("poules inégales : un tier de moins de 2 joueurs est ignoré", () => {
+    // Poule A de 4, poule B de 3 : le 4e tier n'a qu'un joueur → pas de tableau.
+    const tiers = poolTiers([
+      ["a1", "a2", "a3", "a4"],
+      ["b1", "b2", "b3"],
+    ]);
+    expect(tiers.map((t) => t.tier)).toEqual([1, 2, 3]);
+    expect(tiers[2].playerIds).toEqual(["a3", "b3"]);
+  });
+});
 
 describe("splitPools", () => {
   it("découpe proprement quand c'est divisible", () => {

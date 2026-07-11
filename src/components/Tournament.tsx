@@ -78,6 +78,22 @@ interface Detail {
       | null;
     matches: MatchView[];
   } | null;
+  // Format « poules + tableau final » : un tableau par rang de poule (1ers, 2es…), résolu
+  // en direct comme le tableau autonome. Null hors pools_bracket ou avant génération.
+  finals:
+    | {
+        tier: number;
+        title: string;
+        rounds: number;
+        byes: number;
+        ranking:
+          | { playerId: string; name: string; rank: number; played: number; wins: number; losses: number }[]
+          | null;
+        matches: MatchView[];
+      }[]
+    | null;
+  // Vrai quand les poules sont finies et la phase finale pas encore générée (bouton créateur).
+  canGenerateFinals: boolean;
   champion: PlayerRef | null;
 }
 interface ListItem {
@@ -344,6 +360,24 @@ export default function Tournament({ toast, onExpired }: Props) {
       setWizardOpen(false);
       await loadList();
       setOpenId(draftId);
+    } catch (e) {
+      toast("err", "Génération impossible : " + (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Génère la phase finale d'un pools_bracket (créateur, une fois les poules finies).
+  const generateFinals = async () => {
+    if (!openId || busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/tournaments/${openId}/finals`, { method: "POST" });
+      if (onExpired(res.status)) return;
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error ?? `Erreur ${res.status}`);
+      toast("ok", "Phase finale générée 🏆");
+      await loadDetail(openId);
     } catch (e) {
       toast("err", "Génération impossible : " + (e as Error).message);
     } finally {
@@ -683,6 +717,56 @@ export default function Tournament({ toast, onExpired }: Props) {
               <ul className="trn-matches">
                 {pool.matches.map((m, i) => renderMatch(m, `${pool.label}-${i}`))}
               </ul>
+            </section>
+          ))}
+
+          {/* Phase finale (pools_bracket) : bouton créateur puis un tableau par rang de poule. */}
+          {detail.canGenerateFinals && detail.isCreator && (
+            <section className="trn-block">
+              <button onClick={generateFinals} disabled={busy}>
+                🏆 Générer la phase finale
+              </button>
+              <p className="muted tiny">
+                Les poules sont terminées. Lance les tableaux par rang (les 1ers de chaque poule
+                ensemble, les 2es ensemble…). Les participants sont figés au moment du clic.
+              </p>
+            </section>
+          )}
+          {detail.canGenerateFinals && !detail.isCreator && (
+            <p className="muted tiny">
+              Poules terminées — le créateur doit lancer la phase finale.
+            </p>
+          )}
+          {detail.finals?.map((f) => (
+            <section key={`tier-${f.tier}`} className="trn-block">
+              <h3>{f.title}</h3>
+              {f.ranking && (
+                <table className="trn-standings">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Joueur</th>
+                      <th title="Matchs joués">MJ</th>
+                      <th title="Victoires">V</th>
+                      <th title="Défaites">D</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {f.ranking.map((r) => (
+                      <tr key={r.playerId}>
+                        <td>{r.rank}</td>
+                        <td>{r.name}</td>
+                        <td>{r.played}</td>
+                        <td>{r.wins}</td>
+                        <td>{r.losses}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {bracketGroups(f.matches).map((g) =>
+                renderBracketGroup(g.list, g.main, `${f.tier}-${g.key}`),
+              )}
             </section>
           ))}
 

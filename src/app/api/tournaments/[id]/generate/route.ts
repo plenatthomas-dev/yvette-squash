@@ -35,8 +35,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const body = await req.json().catch(() => ({}));
   const kind = (body as { kind?: unknown }).kind;
-  if (kind !== "pools" && kind !== "bracket") {
-    // pools_bracket n'est pas encore matérialisable → on refuse proprement.
+  if (kind !== "pools" && kind !== "bracket" && kind !== "pools_bracket") {
     return NextResponse.json({ error: "Formule non prise en charge" }, { status: 400 });
   }
 
@@ -45,9 +44,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .sort((a, b) => (a.seed ?? 0) - (b.seed ?? 0))
     .map((p) => ({ id: p.id, seed: p.seed ?? 0 }));
 
-  // poolSizes : fournies pour les poules, sinon on reprend la meilleure proposition.
+  // poolSizes : requis pour « poules » ET « poules + tableau final » (qui matérialise d'abord
+  // les mêmes poules). Fournies par le client, sinon reprises de la meilleure proposition.
   let poolSizes: number[] = [];
-  if (kind === "pools") {
+  if (kind === "pools" || kind === "pools_bracket") {
     const given = (body as { poolSizes?: unknown }).poolSizes;
     if (Array.isArray(given) && given.every((x) => Number.isInteger(x) && x >= 2)) {
       poolSizes = given as number[];
