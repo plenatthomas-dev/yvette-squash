@@ -66,6 +66,27 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Rien à mettre à jour" }, { status: 400 });
   }
 
+  // Unicité du pseudonyme, INSENSIBLE À LA CASSE : deux joueurs ne peuvent pas afficher le
+  // même pseudo (« Tom » vs « tom » compris), sinon on ne les distingue plus dans les
+  // créneaux et les listes. Contrôle applicatif (pas de contrainte DB : des doublons ont pu
+  // exister avant cette règle, et une course simultanée sur un même pseudo est négligeable
+  // pour l'usage d'un club). Ignoré quand on EFFACE le pseudo (retour au diminutif auto).
+  if (typeof data.nickname === "string" && data.nickname.length > 0) {
+    const taken = await prisma.user.findFirst({
+      where: {
+        id: { not: session.userId },
+        nickname: { equals: data.nickname, mode: "insensitive" },
+      },
+      select: { id: true },
+    });
+    if (taken) {
+      return NextResponse.json(
+        { error: "Ce pseudonyme est déjà pris par un autre membre." },
+        { status: 409 },
+      );
+    }
+  }
+
   const updated = await prisma.user.update({
     where: { id: session.userId },
     data,
