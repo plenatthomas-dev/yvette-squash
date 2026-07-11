@@ -68,10 +68,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Trop d'essais — redemande un code." }, { status: 429 });
   }
   if (!safeEqualHex(otp.codeHash, hashOtp(code))) {
-    await prisma.emailOtp.update({
-      where: { id: otp.id },
+    // Incrément ATOMIQUE et conditionnel : la garde `attempts < MAX` est réévaluée par la
+    // base au moment de l'écriture, donc des requêtes concurrentes ne peuvent pas toutes
+    // lire `attempts = MAX-1` puis dépasser le plafond ensemble (le compteur ne franchit
+    // jamais MAX_ATTEMPTS). `count === 0` ⇒ le plafond vient d'être atteint en parallèle.
+    const bumped = await prisma.emailOtp.updateMany({
+      where: { id: otp.id, attempts: { lt: MAX_ATTEMPTS } },
       data: { attempts: { increment: 1 } },
     });
+    if (bumped.count === 0) {
+      await prisma.emailOtp.delete({ where: { id: otp.id } }).catch(() => {});
+      return NextResponse.json({ error: "Trop d'essais — redemande un code." }, { status: 429 });
+    }
     return NextResponse.json({ error: "Code incorrect." }, { status: 400 });
   }
 
