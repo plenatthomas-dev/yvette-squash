@@ -704,7 +704,10 @@ export default function Home() {
       return;
     }
     const day = slot.startsAt.slice(0, 10);
-    const hm = slot.startsAt.slice(11, 16);
+    // Heure « murale » du club (Europe/Paris), PAS un slice UTC brut : sinon un créneau de
+    // 10 h serait stocké/affiché « 08:00 » l'été. Doit rester aligné sur PlanningGrid,
+    // WeekGrid et le cron check-alerts (même clé date|hm partout).
+    const hm = fmtTime(slot.startsAt);
     const ok = await askConfirm({
       title: "Rejoindre la liste d'attente ?",
       body: `${fmtTime(slot.startsAt)} le ${prettyDate(day)} — on te notifie dès qu'un terrain se libère à cet horaire (réservation manuelle).`,
