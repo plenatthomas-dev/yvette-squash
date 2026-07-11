@@ -57,7 +57,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       );
       poolSizes = best?.poolSizes ?? [n];
     }
-    if (poolSizes.reduce((s, x) => s + x, 0) !== n) {
+    // `materialize` répartit TOUJOURS en poules équilibrées (snakeGroups n'utilise que le
+    // NOMBRE de poules) : on rejette donc un découpage déséquilibré plutôt que de l'accepter
+    // puis de l'ignorer en silence. Valide = bon total ET tailles à ±1 les unes des autres.
+    const unbalanced = Math.max(...poolSizes) - Math.min(...poolSizes) > 1;
+    if (poolSizes.reduce((s, x) => s + x, 0) !== n || unbalanced) {
       return NextResponse.json({ error: "Répartition en poules invalide" }, { status: 400 });
     }
   }

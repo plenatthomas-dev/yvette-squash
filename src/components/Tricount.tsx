@@ -117,27 +117,33 @@ function shortName(name: string): string {
   return `${parts[0][0].toUpperCase()}. ${parts.slice(1).join(" ")}`;
 }
 
+// L'asso vit à l'heure de Paris : on fige l'affichage des horodatages sur ce fuseau plutôt
+// que sur celui de l'appareil, pour qu'un membre en déplacement (autre fuseau) voie l'heure
+// « du club » et non une heure décalée.
+const CLUB_TZ = "Europe/Paris";
+
 /** Horodatage précis d'un remboursement : "03/07/2026 à 21:15". */
 function fmtStamp(iso: string): string {
   const d = new Date(iso);
   return (
-    d.toLocaleDateString("fr-FR") +
+    d.toLocaleDateString("fr-FR", { timeZone: CLUB_TZ }) +
     " à " +
-    d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+    d.toLocaleTimeString("fr-FR", { timeZone: CLUB_TZ, hour: "2-digit", minute: "2-digit" })
   );
 }
 
 function todayISO(): string {
-  return new Date().toLocaleDateString("en-CA");
+  // Jour « du club » (Europe/Paris), indépendant du fuseau de l'appareil du membre.
+  return new Date().toLocaleDateString("en-CA", { timeZone: CLUB_TZ });
 }
 
 /** Horodatage compact d'un commentaire : "3 juil. · 21:15". */
 function fmtCommentStamp(iso: string): string {
   const d = new Date(iso);
   return (
-    d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) +
+    d.toLocaleDateString("fr-FR", { timeZone: CLUB_TZ, day: "numeric", month: "short" }) +
     " · " +
-    d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+    d.toLocaleTimeString("fr-FR", { timeZone: CLUB_TZ, hour: "2-digit", minute: "2-digit" })
   );
 }
 

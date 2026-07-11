@@ -62,6 +62,11 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     // Échec (identifiants invalides ou flux interrompu) : on incrémente le compteur.
     await prisma.loginAttempt.create({ data: { ip } }).catch(() => {});
-    return NextResponse.json({ error: (e as Error).message }, { status: 401 });
+    // Détail journalisé côté serveur ; message générique pour ne rien divulguer de l'amont.
+    console.error("[login] échec:", e);
+    return NextResponse.json(
+      { error: "Identifiants invalides ou service momentanément indisponible" },
+      { status: 401 },
+    );
   }
 }

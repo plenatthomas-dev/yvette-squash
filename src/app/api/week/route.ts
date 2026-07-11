@@ -181,6 +181,8 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(days);
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 502 });
+    // Détail amont journalisé côté serveur, message générique côté client (cf. /api/planning).
+    console.error("[week] échec amont:", e);
+    return NextResponse.json({ error: "Planning momentanément indisponible" }, { status: 502 });
   }
 }

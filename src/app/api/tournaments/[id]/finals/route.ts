@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { FEATURE_TOURNAMENT } from "@/lib/features";
@@ -39,7 +40,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const tiers = await prisma.$transaction((tx) => materializeFinals(tx, id));
     return NextResponse.json({ ok: true, tiers });
   } catch (e) {
-    // Erreurs métier de materializeFinals (poules non terminées, déjà générée…).
+    // Erreurs métier de materializeFinals (poules non terminées, déjà générée…) : messages
+    // contrôlés (littéraux français) → on peut les renvoyer. Une erreur DB inattendue, elle,
+    // reste générique côté client et n'est journalisée qu'ici.
+    if (e instanceof Prisma.PrismaClientKnownRequestError) {
+      console.error("[finals] erreur DB:", e);
+      return NextResponse.json({ error: "Génération impossible pour le moment" }, { status: 500 });
+    }
     return NextResponse.json({ error: (e as Error).message }, { status: 409 });
   }
 }
