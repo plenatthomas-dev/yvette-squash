@@ -769,6 +769,7 @@ export default function Home() {
 
   return (
     <main>
+      <a href="#main-content" className="skip-link">Aller au contenu</a>
       <header className="app">
         <div className="app-top">
           <div className="brand">
@@ -1023,6 +1024,9 @@ export default function Home() {
               } par un membre connecté à ResaMania.`}
         </p>
       )}
+
+      {/* Cible du lien d'évitement : saute l'en-tête et la barre de navigation. */}
+      <div id="main-content" tabIndex={-1} />
 
       {/* Annonce discrète pour lecteurs d'écran (chargement / erreur). */}
       <p className="sr-only" role="status" aria-live="polite">
