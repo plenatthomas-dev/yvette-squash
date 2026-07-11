@@ -153,6 +153,8 @@ export default function Tournament({ toast, onExpired }: Props) {
   const [list, setList] = useState<ListItem[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
+  // Id du match dont on RÉ-ouvre la saisie pour corriger un score (faute de frappe).
+  const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -397,6 +399,7 @@ export default function Tournament({ toast, onExpired }: Props) {
       if (onExpired(res.status)) return;
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error ?? `Erreur ${res.status}`);
+      setEditing(null); // sort du mode correction
       await loadDetail(openId);
     } catch (e) {
       toast("err", "Score refusé : " + (e as Error).message);
@@ -428,6 +431,56 @@ export default function Tournament({ toast, onExpired }: Props) {
 
   // --- Rendu d'un match (corps réutilisé en liste ET dans l'arbre) ---
   const canScore = !!detail && (detail.isParticipant || detail.isCreator);
+
+  // Contrôles de saisie d'un match, partagés liste/arbre :
+  //  - match À JOUER : boutons de score (tout participant) ;
+  //  - match DÉJÀ SAISI : bouton « ✏️ Corriger » (créateur seulement, comme le backend) qui
+  //    ré-ouvre les boutons de score → permet de rattraper une faute de frappe.
+  const scoreControls = (m: MatchView) => {
+    if (!m.p1 || !m.p2 || !detail) return null;
+    const done = m.status === "done";
+    const canEnter = done ? detail.isCreator : m.status === "pending" && canScore;
+    if (!canEnter) return null;
+    const open = m.status === "pending" || editing === m.id;
+    if (!open) {
+      return (
+        <button
+          type="button"
+          className="secondary trn-correct"
+          disabled={busy}
+          onClick={() => setEditing(m.id)}
+        >
+          ✏️ Corriger
+        </button>
+      );
+    }
+    return (
+      <div className="trn-scorepick">
+        {scorelines(detail.bestOf).map(([a, b]) => (
+          <button
+            key={`${a}-${b}`}
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={() => enterScore(m, a, b)}
+            aria-label={`${m.p1!.name} ${a} - ${b} ${m.p2!.name}`}
+          >
+            {a}–{b}
+          </button>
+        ))}
+        {done && (
+          <button
+            type="button"
+            className="secondary trn-correct"
+            disabled={busy}
+            onClick={() => setEditing(null)}
+          >
+            Annuler
+          </button>
+        )}
+      </div>
+    );
+  };
   const renderMatchBody = (m: MatchView) => {
     const done = m.status === "done";
     const bye = m.status === "bye";
@@ -454,22 +507,7 @@ export default function Tournament({ toast, onExpired }: Props) {
           )}
           <span className={done && m.winnerId === m.p2?.id ? "win" : ""}>{p2}</span>
         </div>
-        {canScore && m.status === "pending" && m.p1 && m.p2 && detail && (
-          <div className="trn-scorepick">
-            {scorelines(detail.bestOf).map(([a, b]) => (
-              <button
-                key={`${a}-${b}`}
-                type="button"
-                className="secondary"
-                disabled={busy}
-                onClick={() => enterScore(m, a, b)}
-                aria-label={`${p1} ${a} - ${b} ${p2}`}
-              >
-                {a}–{b}
-              </button>
-            ))}
-          </div>
-        )}
+        {scoreControls(m)}
       </>
     );
   };
@@ -528,22 +566,7 @@ export default function Tournament({ toast, onExpired }: Props) {
           <span className="trn-bkt-nm">{bye ? <em>passe (bye)</em> : p2}</span>
           <span className="trn-bkt-sc">{done ? m.score2 : ""}</span>
         </div>
-        {canScore && m.status === "pending" && m.p1 && m.p2 && detail && (
-          <div className="trn-scorepick">
-            {scorelines(detail.bestOf).map(([a, b]) => (
-              <button
-                key={`${a}-${b}`}
-                type="button"
-                className="secondary"
-                disabled={busy}
-                onClick={() => enterScore(m, a, b)}
-                aria-label={`${p1} ${a} - ${b} ${p2}`}
-              >
-                {a}–{b}
-              </button>
-            ))}
-          </div>
-        )}
+        {scoreControls(m)}
       </>
     );
   };
@@ -623,9 +646,11 @@ export default function Tournament({ toast, onExpired }: Props) {
   // par un toast, le refresh au focus, etc.), et n'est plus parcouru deux fois dans le JSX.
   const scheduleMatches = useMemo<MatchView[]>(() => {
     if (!detail) return [];
-    const all = detail.pools
-      ? detail.pools.flatMap((p) => p.matches)
-      : (detail.bracket?.matches ?? []);
+    const all = [
+      ...(detail.pools?.flatMap((p) => p.matches) ?? []),
+      ...(detail.bracket?.matches ?? []),
+      ...(detail.finals?.flatMap((f) => f.matches) ?? []),
+    ];
     return all
       .filter((m) => m.order !== null && m.status === "pending" && m.p1 && m.p2)
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -637,7 +662,13 @@ export default function Tournament({ toast, onExpired }: Props) {
         // --- Vue d'un tournoi ---
         <div>
           <div className="trn-detail-head">
-            <button className="secondary" onClick={() => setOpenId(null)}>
+            <button
+              className="secondary"
+              onClick={() => {
+                setOpenId(null);
+                loadList(); // rafraîchit les statuts (ex. « terminé ») dans la liste
+              }}
+            >
               ← Tournois
             </button>
             {detail.isCreator && (
