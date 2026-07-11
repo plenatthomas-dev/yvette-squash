@@ -846,7 +846,7 @@ export default function Home() {
                 },
                 {
                   key: "directory",
-                  label: "Annuaire des membres",
+                  label: "Annuaire",
                   icon: <UsersIcon />,
                   disabled: !FEATURE_DIRECTORY,
                   comingSoon: !FEATURE_DIRECTORY,
