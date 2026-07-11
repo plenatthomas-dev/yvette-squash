@@ -35,6 +35,8 @@ interface MatchView {
   branch?: string;
   phase?: string;
   placeLabel?: string | null;
+  rankLow?: number; // bande de places décidée par le sous-tableau (titre des groupes)
+  rankHigh?: number;
   stage?: string;
 }
 interface StandingView {
@@ -443,41 +445,93 @@ export default function Tournament({ toast, onExpired }: Props) {
     </li>
   );
 
-  // Arbre graphique d'un jeu de matchs (colonnes = tours). Réutilisé pour le tableau
-  // principal (vainqueurs) ET le repêchage (perdants), qui a aussi ses demi/finales.
-  const renderTree = (ms: MatchView[], titleFn: (r: number) => string) => {
-    if (!detail?.bracket || ms.length === 0) return null;
-    const rounds = detail.bracket.rounds;
-    const minRound = Math.min(...ms.map((m) => m.round ?? 0));
+  // Le tableau à repêchage est une RÉCURSION de sous-tableaux (principal + une bande de
+  // classement par « chute » de perdants : 3e place, places 5-8, 9-16…). L'ancien rendu
+  // aplatissait tous les perdants par tour → matchs de bandes différentes entremêlés.
+  // Clé de groupe = branche jusqu'au 1er « L » inclus ; « M » (sans L) = tableau principal.
+  const groupKeyOf = (branch: string): string => {
+    const i = branch.indexOf("L");
+    return i < 0 ? "M" : branch.slice(0, i + 1);
+  };
+  // Libellé de colonne par DISTANCE à la finale du (sous-)tableau (0 = finale).
+  const roundLabel = (dist: number, main: boolean): string =>
+    dist <= 0
+      ? main
+        ? "Finale"
+        : "Finales"
+      : dist === 1
+        ? "Demi-finales"
+        : dist === 2
+          ? "Quarts de finale"
+          : dist === 3
+            ? "8es de finale"
+            : dist === 4
+              ? "16es de finale"
+              : `Tour ${dist + 1} avant la fin`;
+
+  // Un sous-tableau autonome = colonnes par tour, avec traits de liaison façon bracket.
+  const renderBracketGroup = (ms: MatchView[], main: boolean, key: string) => {
+    const rounds = [...new Set(ms.map((m) => m.round ?? 0))].sort((a, b) => a - b);
+    const finalRound = rounds[rounds.length - 1];
+    const rankLow = Math.min(...ms.map((m) => m.rankLow ?? 1));
+    const rankHigh = Math.max(...ms.map((m) => m.rankHigh ?? 1));
+    const title = main
+      ? "Tableau principal"
+      : rankHigh - rankLow === 1
+        ? `Match pour la ${rankLow}ᵉ place`
+        : `Places ${rankLow} à ${rankHigh}`;
     return (
-      <div className="trn-tree">
-        {Array.from({ length: rounds }).map((_, r) => {
-          const col = ms
-            .filter((m) => m.round === r)
-            .sort((a, c) => (a.slot ?? 0) - (c.slot ?? 0));
-          if (col.length === 0) return null;
-          return (
-            <div key={r} className="trn-tree-col">
-              <div className="trn-tree-col-title">{titleFn(r)}</div>
-              <div className="trn-tree-col-body">
-                {col.map((m, i) => (
-                  <div
-                    key={i}
-                    className={
-                      "trn-tree-match" +
-                      (r > minRound ? " linked" : "") +
-                      (m.status === "done" ? " done" : "")
-                    }
-                  >
-                    {renderMatchBody(m)}
-                  </div>
-                ))}
+      <div key={key} className={"trn-bkt-group" + (main ? " main" : "")}>
+        <div className="trn-bkt-title">{title}</div>
+        <div className="trn-tree">
+          {rounds.map((r) => {
+            const col = ms
+              .filter((m) => m.round === r)
+              .sort((a, c) => (a.slot ?? 0) - (c.slot ?? 0));
+            return (
+              <div key={r} className="trn-tree-col">
+                <div className="trn-tree-col-title">{roundLabel(finalRound - r, main)}</div>
+                <div className="trn-tree-col-body">
+                  {col.map((m, i) => (
+                    <div
+                      key={i}
+                      className={
+                        "trn-tree-match" +
+                        (r > rounds[0] ? " linked" : "") +
+                        (m.status === "done" ? " done" : "") +
+                        (m.status === "bye" ? " bye" : "")
+                      }
+                    >
+                      {renderMatchBody(m)}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     );
+  };
+
+  // Découpe TOUS les matchs de tableau en groupes triés : principal d'abord, puis par
+  // meilleure place (3e place, 5-8, 9-16…).
+  const bracketGroups = (ms: MatchView[]) => {
+    const by = new Map<string, MatchView[]>();
+    for (const m of ms) {
+      const k = groupKeyOf(m.branch ?? "M");
+      const arr = by.get(k);
+      if (arr) arr.push(m);
+      else by.set(k, [m]);
+    }
+    return [...by.entries()]
+      .map(([key, list]) => ({
+        key,
+        main: key === "M",
+        rankLow: Math.min(...list.map((m) => m.rankLow ?? 1)),
+        list,
+      }))
+      .sort((a, b) => (a.main ? -1 : b.main ? 1 : a.rankLow - b.rankLow));
   };
 
   // Liste des matchs planifiés (par ordre de passage / terrain) — les prochains d'abord.
@@ -586,8 +640,6 @@ export default function Tournament({ toast, onExpired }: Props) {
           {detail.bracket &&
             (() => {
               const b = detail.bracket!;
-              const winners = b.matches.filter((m) => m.phase === "winners");
-              const classif = b.matches.filter((m) => m.phase === "classification");
               return (
                 <section className="trn-block">
                   <h3>Tableau</h3>
@@ -615,27 +667,11 @@ export default function Tournament({ toast, onExpired }: Props) {
                       </tbody>
                     </table>
                   )}
-                  {/* Arbre principal (chemin vers la 1re place) */}
-                  <h4>Tableau principal</h4>
-                  {renderTree(winners, (r) => (r === b.rounds - 1 ? "Finale" : `Tour ${r + 1}`))}
-                  {/* Repêchage : les perdants (dès le 1er tour) ont AUSSI leur arbre —
-                      leurs demi-finales puis leurs finales de classement. */}
-                  {classif.length > 0 &&
-                    (() => {
-                      const minR = Math.min(...classif.map((m) => m.round ?? 0));
-                      return (
-                        <>
-                          <h4>Tableau des perdants (repêchage)</h4>
-                          {renderTree(classif, (r) =>
-                            r === b.rounds - 1
-                              ? "Finales de classement"
-                              : r === minR
-                                ? "Demi-finales des perdants"
-                                : `Repêchage ${r - minR + 1}`,
-                          )}
-                        </>
-                      );
-                    })()}
+                  {/* Chaque bande de classement (principal, 3e place, 5-8…) = son propre
+                      arbre titré, plus jamais entremêlée. */}
+                  {bracketGroups(b.matches).map((g) =>
+                    renderBracketGroup(g.list, g.main, g.key),
+                  )}
                 </section>
               );
             })()}

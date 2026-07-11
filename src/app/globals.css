@@ -2576,20 +2576,46 @@ table.planning.week th.time.selhead {
   position: relative;
   padding: 8px 10px;
   border: 1px solid var(--pico-card-border-color);
+  /* Liseré gauche coloré : repère fort le tableau d'appartenance (principal vs classement). */
+  border-left: 4px solid var(--trn-accent, var(--pico-primary));
   border-radius: 10px;
   background: var(--pico-card-background-color);
 }
-.trn-tree-match.done { opacity: 0.92; }
-/* Trait de liaison vers la colonne précédente (esthétique « bracket »). */
+/* Match joué : fond teinté de l'accent (contraste net avec les matchs à venir). */
+.trn-tree-match.done {
+  background: color-mix(in srgb, var(--trn-accent, var(--pico-primary)) 12%, var(--pico-card-background-color));
+  border-color: color-mix(in srgb, var(--trn-accent, var(--pico-primary)) 40%, var(--pico-card-border-color));
+}
+.trn-tree-match.bye { opacity: 0.6; }
+/* Vainqueur bien plus contrasté : couleur d'accent + gras. */
+.trn-tree-match .trn-vs .win {
+  color: var(--trn-accent, var(--pico-primary));
+  font-weight: 800;
+}
+/* Traits de liaison façon bracket : trait horizontal ÉPAIS coloré vers la colonne d'avant. */
 .trn-tree-match.linked::before {
   content: "";
   position: absolute;
   left: -20px;
   top: 50%;
   width: 20px;
-  border-top: 2px solid var(--pico-muted-border-color);
+  border-top: 3px solid var(--trn-accent, var(--pico-primary));
+  opacity: 0.55;
 }
 .trn-tree-match .trn-scorepick button { padding: 3px 8px; font-size: 0.8rem; }
+
+/* --- Groupes de tableau (principal + bandes de classement, plus jamais entremêlés) --- */
+.trn-bkt-group { margin-top: 16px; }
+.trn-bkt-title {
+  font-size: 0.95rem;
+  font-weight: 800;
+  margin: 0 0 4px;
+  padding: 3px 0 3px 10px;
+  border-left: 5px solid var(--trn-accent, var(--pico-primary));
+}
+/* Principal = accent primaire ; classements = accent ambre distinct (contraste fort). */
+.trn-bkt-group.main { --trn-accent: var(--pico-primary); }
+.trn-bkt-group:not(.main) { --trn-accent: #d98a00; }
 
 /* Assistant */
 .trn-roster {
