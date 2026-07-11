@@ -351,6 +351,9 @@ model Match {
   phase        String // pool | winners | classification
   group        TournamentGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
   groupId      String?
+  // Format « poules + tableau final » : n° du tableau final (1 = 1ers de poule, 2 = 2es…).
+  // NULL pour les matchs de poule et les tableaux autonomes. Sépare les brackets par rang.
+  tier         Int?
   round        Int? // tableau : 0 = 1er tour
   slot         Int?
   branch       String? // "main" | "cons-5-8" ... (branche du tableau)

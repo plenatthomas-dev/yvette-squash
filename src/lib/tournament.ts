@@ -619,6 +619,47 @@ function bracketProposal(n: number, courts: number, matchMin: number): FormatPro
   };
 }
 
+// Poules + tableau final : mêmes poules que `poolsProposal`, PLUS une phase finale (un
+// tableau par rang de poule). On estime les matchs finaux en simulant un placementBracket
+// par tier (le tier r a un joueur par poule de taille ≥ r).
+function poolsBracketProposal(n: number, sizes: number[], courts: number, matchMin: number): FormatProposal {
+  const pools = poolsProposal(n, sizes, courts, matchMin);
+  const maxSize = Math.max(...sizes);
+  let finalMatches = 0;
+  let finalMinutes = 0;
+  let extraMin = Infinity;
+  let extraMax = 0;
+  for (let r = 1; r <= maxSize; r++) {
+    const k = sizes.filter((s) => s >= r).length; // joueurs de ce tier
+    if (k < 2) continue;
+    const b = placementBracket(k);
+    const res = resolveBracket(b, (_key, a, bb) => Math.min(a, bb));
+    finalMatches += res.realMatches;
+    finalMinutes += res.realMatchesByRound.reduce(
+      (acc, c) => acc + Math.ceil(c / Math.max(1, courts)) * matchMin,
+      0,
+    );
+    const counts = Array.from({ length: k }, (_, s) => res.playedBySeed.get(s) ?? 0);
+    extraMin = Math.min(extraMin, ...counts);
+    extraMax = Math.max(extraMax, ...counts);
+  }
+  if (!isFinite(extraMin)) extraMin = 0;
+  return {
+    kind: "pools_bracket",
+    label: `${poolsLabel(sizes)} + tableau final`,
+    matchesPerPlayer: {
+      min: pools.matchesPerPlayer.min + extraMin,
+      max: pools.matchesPerPlayer.max + extraMax,
+    },
+    avgMatchesPerPlayer: pools.avgMatchesPerPlayer + (2 * finalMatches) / n,
+    totalMatches: pools.totalMatches + finalMatches,
+    producesChampion: true,
+    fullRanking: true,
+    estimatedMinutes: pools.estimatedMinutes + finalMinutes,
+    poolSizes: sizes,
+  };
+}
+
 // Poids de l'inégalité de matchs. L'égalité est l'objectif n°1, mais PAS au point de
 // choisir « 2 matchs pour tous » quand on en veut 4 : un écart de 1 « coûte » jusqu'à
 // ~1,5 match d'éloignement à la cible. Au-delà, se rapprocher de la cible l'emporte.
@@ -669,6 +710,11 @@ export function proposeFormats(
 
   const proposals: FormatProposal[] = [bestPool];
 
+  // Poules + tableau final : seulement si au moins 2 poules (sinon pas de « tableau par rang »).
+  if ((bestPool.poolSizes?.length ?? 1) >= 2) {
+    proposals.push(poolsBracketProposal(n, bestPool.poolSizes as number[], courts, matchMin));
+  }
+
   // Tableau à repêchage : proposé si les byes restent raisonnables (≤ 25 % des places).
   const P = nextPow2(Math.max(2, n));
   if ((P - n) * 4 <= P) {
@@ -687,4 +733,27 @@ export function bestFormat(
   opts?: { courts?: number; matchMinutes?: number },
 ): FormatProposal {
   return proposeFormats(n, target, opts)[0];
+}
+
+// --- Poules + tableau final (pools_bracket) --------------------------------
+// Une fois les poules jouées, on forme un TABLEAU par rang de poule : les 1ers de chaque
+// poule s'affrontent (→ places 1..G), les 2es entre eux (→ places G+1..2G), etc. Chaque
+// tableau est un petit `placementBracket` (élimination + petite finale), matérialisé à la
+// demande. Tout le monde joue une phase finale « à son niveau ».
+
+/**
+ * Répartit les classements de poules en tiers pour la phase finale.
+ * `poolsRanked[p]` = identifiants des joueurs de la poule p, DÉJÀ triés par rang (index 0 =
+ * 1er). Le tier r rassemble le (r+1)ᵉ de chaque poule qui en a un ; l'ordre des joueurs
+ * dans un tier suit l'ordre des poules (sert de tête de série). Un tier de moins de 2
+ * joueurs est ignoré (le joueur garde sa place de poule, pas de match).
+ */
+export function poolTiers(poolsRanked: string[][]): { tier: number; playerIds: string[] }[] {
+  const maxRank = Math.max(0, ...poolsRanked.map((s) => s.length));
+  const out: { tier: number; playerIds: string[] }[] = [];
+  for (let r = 0; r < maxRank; r++) {
+    const ids = poolsRanked.map((s) => s[r]).filter((x): x is string => !!x);
+    if (ids.length >= 2) out.push({ tier: r + 1, playerIds: ids });
+  }
+  return out;
 }

@@ -5,6 +5,7 @@ import {
   validScore,
   serializeTournament,
   materialize,
+  materializeFinals,
   type FullTournament,
 } from "./tournament-db";
 
@@ -34,6 +35,7 @@ function match(over: Partial<M> & { id: string; phase: string }): M {
   return {
     tournamentId: "t1",
     groupId: null,
+    tier: null,
     round: null,
     slot: null,
     branch: null,
@@ -292,5 +294,83 @@ describe("materialize", () => {
     const byes = f.matches.filter((m) => m.status === "bye");
     expect(byes.length).toBe(2); // P=8, 2 byes
     for (const b of byes) expect(b.player1Id === null || b.player2Id === null).toBe(true);
+  });
+});
+
+// --- pools_bracket : phase finale par rang de poule -------------------------------------
+
+// Fake tx pour materializeFinals : findUnique renvoie le tournoi mocké, create capture.
+function fakeTxTournament(t: FullTournament) {
+  const created: Partial<M>[] = [];
+  const tx = {
+    tournament: { findUnique: async () => t },
+    match: {
+      create: async ({ data }: { data: Partial<M> }) => {
+        created.push(data);
+        return {};
+      },
+    },
+  } as unknown as Prisma.TransactionClient;
+  return { tx, created };
+}
+
+describe("pools_bracket", () => {
+  // 2 poules de 3, TOUTES jouées. Poule A : a0>a1>a2 ; Poule B : b0>b1>b2.
+  const mkPools = (): FullTournament => {
+    const players = [
+      ...["a0", "a1", "a2"].map((id, i) => ({ ...player({ id, seed: i }), groupId: "gA" })),
+      ...["b0", "b1", "b2"].map((id, i) => ({ ...player({ id, seed: i + 3 }), groupId: "gB" })),
+    ];
+    return tournament({
+      format: "pools_bracket",
+      players,
+      groups: [group("gA", "A"), group("gB", "B")],
+      matches: [
+        poolResult("A01", "gA", "a0", "a1", 2, 0),
+        poolResult("A02", "gA", "a0", "a2", 2, 0),
+        poolResult("A12", "gA", "a1", "a2", 2, 0),
+        poolResult("B01", "gB", "b0", "b1", 2, 0),
+        poolResult("B02", "gB", "b0", "b2", 2, 0),
+        poolResult("B12", "gB", "b1", "b2", 2, 0),
+      ],
+    });
+  };
+
+  it("poules finies → canGenerateFinals, pas encore « done »", () => {
+    const v = serializeTournament(mkPools(), "creator");
+    expect(v.canGenerateFinals).toBe(true);
+    expect(v.finals).toBeNull();
+    expect(v.status).toBe("running");
+    expect(v.champion).toBeNull();
+  });
+
+  it("materializeFinals : un tableau par rang (1ers, 2es, 3es), participants croisés", async () => {
+    const f = fakeTxTournament(mkPools());
+    const tiers = await materializeFinals(f.tx, "t1");
+    expect(tiers).toBe(3);
+    // 3 tiers de 2 joueurs → 1 finale chacun.
+    expect(f.created.length).toBe(3);
+    expect(f.created.map((m) => m.tier).sort()).toEqual([1, 2, 3]);
+    const t1 = f.created.find((m) => m.tier === 1)!;
+    expect(new Set([t1.player1Id, t1.player2Id])).toEqual(new Set(["a0", "b0"]));
+    const t2 = f.created.find((m) => m.tier === 2)!;
+    expect(new Set([t2.player1Id, t2.player2Id])).toEqual(new Set(["a1", "b1"]));
+  });
+
+  it("sérialise les tableaux finaux + champion = vainqueur du tier 1", () => {
+    const base = mkPools();
+    // Matchs de finale tels que materializeFinals les crée (tier 1-3), tier 1 & 2 joués.
+    const finals = [
+      match({ id: "F1", phase: "winners", tier: 1, round: 0, slot: 0, branch: "M", placeLabel: "Finale", player1Id: "a0", player2Id: "b0", status: "done", score1: 2, score2: 1, winnerId: "a0" }),
+      match({ id: "F2", phase: "winners", tier: 2, round: 0, slot: 0, branch: "M", placeLabel: "Finale", player1Id: "a1", player2Id: "b1", status: "done", score1: 2, score2: 0, winnerId: "a1" }),
+      match({ id: "F3", phase: "winners", tier: 3, round: 0, slot: 0, branch: "M", placeLabel: "Finale", player1Id: "a2", player2Id: "b2", status: "pending" }),
+    ];
+    const v = serializeTournament({ ...base, matches: [...base.matches, ...finals] }, "creator");
+    expect(v.finals).not.toBeNull();
+    expect(v.finals!.map((f) => f.tier)).toEqual([1, 2, 3]);
+    expect(v.finals!.every((f) => f.matches.length === 1)).toBe(true);
+    expect(v.champion).toMatchObject({ id: "a0" });
+    expect(v.canGenerateFinals).toBe(false); // finale déjà générée
+    expect(v.status).toBe("running"); // tier 3 pas joué
   });
 });

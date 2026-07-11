@@ -61,10 +61,12 @@ export async function PATCH(
           throw new HttpError(400, `Score invalide : un camp à ${w} jeux, l'autre en dessous`);
         }
 
-        // Retrouve le match dans la vue (poules ou tableau) pour ses participants actuels.
+        // Retrouve le match dans la vue (poules, tableau autonome, ou tableau FINAL d'un
+        // pools_bracket) pour ses participants actuels.
         const poolMatch = view.pools?.flatMap((p) => p.matches).find((m) => m.id === mid) ?? null;
         const bracketMatch = view.bracket?.matches.find((m) => m.id === mid) ?? null;
-        const m = poolMatch ?? bracketMatch;
+        const finalMatch = view.finals?.flatMap((f) => f.matches).find((m) => m.id === mid) ?? null;
+        const m = poolMatch ?? bracketMatch ?? finalMatch;
         if (!m || !m.p1 || !m.p2) {
           throw new HttpError(404, "Match introuvable ou pas encore jouable");
         }
@@ -94,14 +96,24 @@ export async function PATCH(
         // CASCADE : corriger un match de TABLEAU en changeant le vainqueur change les
         // participants de tous les matchs en aval → leurs scores déjà saisis sont caducs.
         // On les remet « à jouer » (participants + scores vidés ; bracketLive les re-résout).
-        if (bracketMatch && prevWinnerId && prevWinnerId !== winnerId) {
+        // Vaut pour le tableau autonome ET chaque tableau FINAL (borné à SON tier).
+        if ((bracketMatch || finalMatch) && prevWinnerId && prevWinnerId !== winnerId) {
           const dbMatch = t.matches.find((x) => x.id === mid);
           if (dbMatch) {
             const key = `${dbMatch.branch}-${dbMatch.round}-${dbMatch.slot}`;
-            const doomed = new Set(bracketDescendants(view.players.length, key));
+            // Taille du tableau + périmètre de reset : tableau autonome = tous les matchs de
+            // tableau (tier NULL) et n = tous les joueurs ; tableau final = les matchs du MÊME
+            // tier et n = les joueurs réels de ce tier (participants non nuls du 1er tour).
+            const tier = dbMatch.tier;
+            const bracketN = finalMatch
+              ? t.matches
+                  .filter((x) => x.tier === tier && (x.round ?? 0) === 0)
+                  .reduce((acc, x) => acc + (x.player1Id ? 1 : 0) + (x.player2Id ? 1 : 0), 0)
+              : view.players.length;
+            const doomed = new Set(bracketDescendants(bracketN, key));
             const toReset = t.matches.filter(
               (x) =>
-                x.phase !== "pool" &&
+                (finalMatch ? x.tier === tier : x.phase !== "pool" && x.tier == null) &&
                 x.status !== "bye" &&
                 doomed.has(`${x.branch}-${x.round}-${x.slot}`) &&
                 (x.status === "done" || x.winnerId !== null || x.score1 !== null),
