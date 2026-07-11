@@ -199,6 +199,8 @@ export function serializeTournament(t: FullTournament, userId: string) {
         branch: lm.branch,
         phase: lm.phase,
         placeLabel: lm.placeLabel ?? null,
+        rankLow: lm.rankLow,
+        rankHigh: lm.rankHigh,
         stage: stageOf(lm),
         p1: playerRef(p1Id),
         p2: playerRef(p2Id),

@@ -412,6 +412,8 @@ export interface LiveBracketMatch {
   branch: string;
   phase: "winners" | "classification";
   placeLabel?: string;
+  rankLow: number; // meilleur rang que ce sous-tableau attribue (sert à titrer les groupes)
+  rankHigh: number; // moins bon rang de ce sous-tableau
   p1: number | null; // seed, ou null si pas encore connu
   p2: number | null;
   status: "pending" | "bye" | "done";
@@ -480,6 +482,8 @@ export function bracketLive(
       branch: m.branch,
       phase: m.branch.includes("L") ? "classification" : "winners",
       placeLabel: m.placeLabel,
+      rankLow: m.rankLow,
+      rankHigh: m.rankHigh,
       p1: a !== null && a >= 0 ? a : null,
       p2: b !== null && b >= 0 ? b : null,
       status: isBye ? "bye" : bothReal && winnerSeed(m.key) !== null ? "done" : "pending",
