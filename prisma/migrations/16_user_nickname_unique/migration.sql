@@ -1,0 +1,12 @@
+-- Unicité INSENSIBLE À LA CASSE du pseudonyme : deux membres ne peuvent pas porter le même
+-- pseudo (« Tom » = « tom » = « TOM »). Doublonne le contrôle applicatif (PATCH /api/profile)
+-- comme garantie DB, source de vérité ultime en cas de course simultanée.
+--
+-- Index sur une EXPRESSION (LOWER("nickname")) : non représentable dans schema.prisma
+-- (Prisma n'exprime pas les index fonctionnels) → posé en SQL brut. `prisma migrate deploy`
+-- (lancé au build) l'applique tel quel. NB : `prisma migrate dev` en local signalera une
+-- « dérive » inoffensive (le schéma ne reflète pas cet index) — ne pas la « corriger ».
+--
+-- Les pseudos NULL (membres sans pseudo) sont EXCLUS de l'unicité (NULL ≠ NULL en SQL) :
+-- autant de comptes que voulu peuvent rester sans pseudonyme.
+CREATE UNIQUE INDEX "User_nickname_lower_key" ON "User" (LOWER("nickname"));
