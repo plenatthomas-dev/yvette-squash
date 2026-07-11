@@ -1509,6 +1509,26 @@ td.cell.past {
 }
 
 /* --- Annuaire des membres ---------------------------------------------- */
+/* Lien vers le groupe WhatsApp de l'asso (affiché seulement si configuré côté serveur). */
+.wa-group-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border-radius: var(--pico-border-radius);
+  background: #25d366; /* vert WhatsApp */
+  color: #073b26;
+  font-weight: 600;
+  text-decoration: none;
+}
+.wa-group-link:hover {
+  background: #1ebe5b;
+  color: #073b26;
+}
+
 .directory-search {
   width: 100%;
   margin: 0 0 10px;

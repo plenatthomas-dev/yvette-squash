@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Dialog } from "@/components/Dialog";
-import { fetchDirectory } from "@/lib/directoryCache";
+import { fetchDirectory, getDirectoryGroupUrl } from "@/lib/directoryCache";
 
 // Annuaire des membres (idée 6). Bouton d'en-tête → modale listant les joueurs opt-in,
 // avec une recherche par nom. Gated par FEATURE_DIRECTORY : grisé (« bientôt ») si OFF,
@@ -20,6 +20,7 @@ export function DirectoryModal({
     { id: string; name: string; clt?: string; rang?: number | null; cat?: string | null }[] | null
   >(null);
   const [q, setQ] = useState("");
+  const [groupUrl, setGroupUrl] = useState<string | null>(null);
 
   // Charge la liste à l'ouverture. Cache mémoire court (cf. fetchDirectory) : une
   // réouverture rapprochée (ou après passage par Réglages) ne refait pas d'aller-retour.
@@ -30,7 +31,10 @@ export function DirectoryModal({
     (async () => {
       try {
         const members = await fetchDirectory();
-        if (!cancelled) setMembers(members);
+        if (!cancelled) {
+          setMembers(members);
+          setGroupUrl(getDirectoryGroupUrl());
+        }
       } catch (e) {
         if (!cancelled) {
           setMembers([]);
@@ -50,6 +54,16 @@ export function DirectoryModal({
   return (
         <Dialog onClose={onClose} label="Annuaire des membres" className="directory" autoFocus={false}>
             <h3>Annuaire des membres</h3>
+            {groupUrl && (
+              <a
+                className="wa-group-link"
+                href={groupUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                💬 Groupe WhatsApp de l'asso
+              </a>
+            )}
             <input
               type="search"
               className="directory-search"

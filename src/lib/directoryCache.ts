@@ -15,7 +15,7 @@ export interface DirectoryMember {
 
 const TTL_MS = 60_000; // 1 min : suffisant pour dédupliquer, sans figer l'annuaire.
 
-let cache: { at: number; members: DirectoryMember[] } | null = null;
+let cache: { at: number; members: DirectoryMember[]; groupUrl: string | null } | null = null;
 // Requête en vol partagée : deux ouvertures quasi simultanées ne déclenchent
 // qu'un seul fetch réseau (les deux attendent la même promesse).
 let inflight: Promise<DirectoryMember[]> | null = null;
@@ -36,13 +36,22 @@ export async function fetchDirectory(opts?: { force?: boolean }): Promise<Direct
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
       const members: DirectoryMember[] = data.members ?? [];
-      cache = { at: Date.now(), members };
+      const groupUrl: string | null = typeof data.groupUrl === "string" ? data.groupUrl : null;
+      cache = { at: Date.now(), members, groupUrl };
       return members;
     } finally {
       inflight = null;
     }
   })();
   return inflight;
+}
+
+/**
+ * URL d'invitation du groupe WhatsApp de l'asso (ou null si non configurée côté serveur).
+ * Renseignée par le dernier `fetchDirectory` — appeler après avoir `await`é celui-ci.
+ */
+export function getDirectoryGroupUrl(): string | null {
+  return cache?.groupUrl ?? null;
 }
 
 /** Invalide le cache (à appeler si l'annuaire a pu changer côté serveur). */

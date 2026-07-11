@@ -84,4 +84,27 @@ describe("GET /api/directory", () => {
     const { members } = await res.json();
     expect(Object.keys(members[0]).sort()).toEqual(["id", "name"]);
   });
+
+  it("groupUrl = null quand WHATSAPP_GROUP_URL n'est pas configurée", async () => {
+    delete process.env.WHATSAPP_GROUP_URL;
+    const res = await GET(req());
+    const { groupUrl } = await res.json();
+    expect(groupUrl).toBeNull();
+  });
+
+  it("expose groupUrl quand configurée en https", async () => {
+    process.env.WHATSAPP_GROUP_URL = "https://chat.whatsapp.com/AbCdEf";
+    const res = await GET(req());
+    const { groupUrl } = await res.json();
+    expect(groupUrl).toBe("https://chat.whatsapp.com/AbCdEf");
+    delete process.env.WHATSAPP_GROUP_URL;
+  });
+
+  it("ignore une WHATSAPP_GROUP_URL non-https (anti-lien douteux)", async () => {
+    process.env.WHATSAPP_GROUP_URL = "http://chat.whatsapp.com/AbCdEf";
+    const res = await GET(req());
+    const { groupUrl } = await res.json();
+    expect(groupUrl).toBeNull();
+    delete process.env.WHATSAPP_GROUP_URL;
+  });
 });

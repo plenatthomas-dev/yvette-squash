@@ -6,6 +6,14 @@ import { FEATURE_DIRECTORY, FEATURE_RANKING } from "@/lib/features";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Lien d'invitation du groupe WhatsApp de l'asso. Volontairement en variable d'env SERVEUR
+// (pas NEXT_PUBLIC) : on ne le renvoie qu'aux membres connectés, il ne traîne pas dans le
+// bundle JS public. Absent/non-https → pas de bouton côté client (gate naturel, sans flag).
+function whatsappGroupUrl(): string | null {
+  const url = process.env.WHATSAPP_GROUP_URL;
+  return url && url.startsWith("https://") ? url : null;
+}
+
 // GET /api/directory
 // Annuaire des membres (idée 6). Renvoie UNIQUEMENT les joueurs opt-in (`listed`),
 // et pour chacun seulement { id, name } — JAMAIS l'email ni le contactId (l'email
@@ -47,5 +55,5 @@ export async function GET(req: NextRequest) {
     }))
     .sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
 
-  return NextResponse.json({ members });
+  return NextResponse.json({ members, groupUrl: whatsappGroupUrl() });
 }
