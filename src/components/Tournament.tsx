@@ -1054,13 +1054,20 @@ export default function Tournament({ toast, onExpired }: Props) {
                       disabled={busy}
                       onClick={() => generate(p)}
                     >
-                      <strong>{p.label}</strong>
+                      <strong>
+                        {p.label}
+                        {p.kind === "pools_bracket" && " 🏆"}
+                      </strong>
                       <small>
                         {p.matchesPerPlayer.min === p.matchesPerPlayer.max
                           ? `${p.matchesPerPlayer.min} matchs/joueur`
                           : `${p.matchesPerPlayer.min}–${p.matchesPerPlayer.max} matchs/joueur`}{" "}
                         · ~{p.estimatedMinutes} min
-                        {p.fullRanking ? " · classement complet" : ""}
+                        {p.kind === "pools_bracket"
+                          ? " · poules puis phase finale à élimination"
+                          : p.fullRanking
+                            ? " · classement complet"
+                            : ""}
                       </small>
                     </button>
                   </li>
