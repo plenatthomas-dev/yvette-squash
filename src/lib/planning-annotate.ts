@@ -89,4 +89,11 @@ export async function annotatePlanning(planning: PlanningDay, userId: string): P
       s.iAmAttending = list.some((a) => a.userId === userId);
     }
   }
+
+  // Ne JAMAIS renvoyer au client le contactId ResaMania brut du réservataire : c'est un
+  // identifiant interne d'un tiers (y compris des non-membres qui n'apparaissent qu'en
+  // « réservé »), qui n'a servi qu'à la résolution d'identité ci-dessus. Le snapshot STOCKÉ
+  // le conserve (le chemin « email seul » en a besoin pour ré-annoter) ; on ne le retire que
+  // de l'objet renvoyé, une fois l'annotation faite.
+  for (const s of planning.slots) delete s.bookerContactId;
 }

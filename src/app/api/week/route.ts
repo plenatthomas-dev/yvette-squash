@@ -80,6 +80,12 @@ async function annotateWeek(
       }
     }
   }
+
+  // Ne JAMAIS renvoyer au client le contactId ResaMania brut du réservataire (identifiant
+  // interne d'un tiers) : il n'a servi qu'à la résolution d'identité. Les snapshots sont
+  // écrits AVANT cet appel (ils le conservent pour le chemin « email seul ») ; ici on le
+  // retire seulement des objets renvoyés. Cf. annotatePlanning (même règle, vue Jour).
+  for (const d of days) for (const s of d.planning.slots) delete s.bookerContactId;
 }
 
 export async function GET(req: NextRequest) {
