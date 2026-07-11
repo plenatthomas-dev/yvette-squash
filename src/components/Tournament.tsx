@@ -450,7 +450,10 @@ export default function Tournament({ toast, onExpired }: Props) {
   // aplatissait tous les perdants par tour → matchs de bandes différentes entremêlés.
   // Clé de groupe = branche jusqu'au 1er « L » inclus ; « M » (sans L) = tableau principal.
   const groupKeyOf = (branch: string): string => {
-    const i = branch.indexOf("L");
+    // DERNIER « L » (et pas le 1er) : sépare CHAQUE chute de perdants en tableau distinct.
+    // Ex. n=8 → 4 groupes : principal (M), 3e place (MWL), tableau des perdants/5-6 (ML),
+    // finale 7-8 (MLL) — les deux derniers ne sont plus fondus ensemble.
+    const i = branch.lastIndexOf("L");
     return i < 0 ? "M" : branch.slice(0, i + 1);
   };
   // Libellé de colonne par DISTANCE à la finale du (sous-)tableau (0 = finale).
@@ -469,17 +472,64 @@ export default function Tournament({ toast, onExpired }: Props) {
               ? "16es de finale"
               : `Tour ${dist + 1} avant la fin`;
 
+  // Un match dans l'arbre : adversaires EMPILÉS (l'un sous l'autre) + case de score
+  // contrastée à droite (façon bracket). Le vainqueur est surligné.
+  const renderTreeMatch = (m: MatchView) => {
+    const done = m.status === "done";
+    const bye = m.status === "bye";
+    const p1 = m.p1?.name ?? "—";
+    const p2 = m.p2?.name ?? "—";
+    const w1 = done && m.winnerId != null && m.winnerId === m.p1?.id;
+    const w2 = done && m.winnerId != null && m.winnerId === m.p2?.id;
+    return (
+      <>
+        {m.terrain && m.status === "pending" && (
+          <div className="trn-bkt-terrain">{m.terrain}</div>
+        )}
+        <div className={"trn-bkt-row" + (w1 ? " win" : "")}>
+          <span className="trn-bkt-nm">{p1}</span>
+          <span className="trn-bkt-sc">{done ? m.score1 : ""}</span>
+        </div>
+        <div className={"trn-bkt-row" + (w2 ? " win" : "")}>
+          <span className="trn-bkt-nm">{bye ? <em>passe (bye)</em> : p2}</span>
+          <span className="trn-bkt-sc">{done ? m.score2 : ""}</span>
+        </div>
+        {canScore && m.status === "pending" && m.p1 && m.p2 && detail && (
+          <div className="trn-scorepick">
+            {scorelines(detail.bestOf).map(([a, b]) => (
+              <button
+                key={`${a}-${b}`}
+                type="button"
+                className="secondary"
+                disabled={busy}
+                onClick={() => enterScore(m, a, b)}
+                aria-label={`${p1} ${a} - ${b} ${p2}`}
+              >
+                {a}–{b}
+              </button>
+            ))}
+          </div>
+        )}
+      </>
+    );
+  };
+
   // Un sous-tableau autonome = colonnes par tour, avec traits de liaison façon bracket.
   const renderBracketGroup = (ms: MatchView[], main: boolean, key: string) => {
     const rounds = [...new Set(ms.map((m) => m.round ?? 0))].sort((a, b) => a - b);
     const finalRound = rounds[rounds.length - 1];
+    // Titre : le match « couronnant » du groupe porte déjà un placeLabel précis
+    // (« Finale », « Petite finale (3e-4e place) », « Places 5-6 »…) — on le réutilise.
+    const crowned = ms.find((m) => m.placeLabel);
     const rankLow = Math.min(...ms.map((m) => m.rankLow ?? 1));
     const rankHigh = Math.max(...ms.map((m) => m.rankHigh ?? 1));
     const title = main
       ? "Tableau principal"
-      : rankHigh - rankLow === 1
-        ? `Match pour la ${rankLow}ᵉ place`
-        : `Places ${rankLow} à ${rankHigh}`;
+      : crowned?.placeLabel
+        ? crowned.placeLabel
+        : rankHigh - rankLow === 1
+          ? `Match pour la ${rankLow}ᵉ place`
+          : `Places ${rankLow} à ${rankHigh}`;
     return (
       <div key={key} className={"trn-bkt-group" + (main ? " main" : "")}>
         <div className="trn-bkt-title">{title}</div>
@@ -496,13 +546,13 @@ export default function Tournament({ toast, onExpired }: Props) {
                     <div
                       key={i}
                       className={
-                        "trn-tree-match" +
+                        "trn-bkt-match" +
                         (r > rounds[0] ? " linked" : "") +
                         (m.status === "done" ? " done" : "") +
                         (m.status === "bye" ? " bye" : "")
                       }
                     >
-                      {renderMatchBody(m)}
+                      {renderTreeMatch(m)}
                     </div>
                   ))}
                 </div>

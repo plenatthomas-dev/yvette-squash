@@ -2544,78 +2544,117 @@ table.planning.week th.time.selhead {
 }
 .trn-round { margin-top: 6px; }
 
-/* Arbre graphique du tableau : colonnes = tours, chemin vers la 1re place. */
+/* Arbre graphique du tableau : colonnes = tours (gauche→droite), chemin vers la finale. */
 .trn-tree {
   display: flex;
-  gap: 20px;
+  gap: 30px; /* place pour les traits de liaison entre colonnes */
   overflow-x: auto;
-  padding: 4px 2px 12px;
+  padding: 4px 2px 14px;
   -webkit-overflow-scrolling: touch;
 }
 .trn-tree-col {
   display: flex;
   flex-direction: column;
-  min-width: 168px;
+  min-width: 196px;
   flex: 0 0 auto;
 }
 .trn-tree-col-title {
-  font-size: 0.72rem;
-  font-weight: 700;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
   text-align: center;
-  opacity: 0.7;
-  margin-bottom: 8px;
+  color: var(--trn-accent, var(--pico-primary));
+  margin-bottom: 10px;
 }
 .trn-tree-col-body {
   display: flex;
   flex-direction: column;
   justify-content: space-around;
   flex: 1;
-  gap: 10px;
+  gap: 14px;
 }
-.trn-tree-match {
+
+/* Un match : deux lignes EMPILÉES (adversaires l'un sous l'autre) + case de score
+   contrastée à droite, façon bracket classique. */
+.trn-bkt-match {
   position: relative;
-  padding: 8px 10px;
+  min-width: 196px;
   border: 1px solid var(--pico-card-border-color);
-  /* Liseré gauche coloré : repère fort le tableau d'appartenance (principal vs classement). */
   border-left: 4px solid var(--trn-accent, var(--pico-primary));
   border-radius: 10px;
+  overflow: hidden;
   background: var(--pico-card-background-color);
 }
-/* Match joué : fond teinté de l'accent (contraste net avec les matchs à venir). */
-.trn-tree-match.done {
-  background: color-mix(in srgb, var(--trn-accent, var(--pico-primary)) 12%, var(--pico-card-background-color));
-  border-color: color-mix(in srgb, var(--trn-accent, var(--pico-primary)) 40%, var(--pico-card-border-color));
+.trn-bkt-terrain {
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  color: var(--pico-primary);
+  background: color-mix(in srgb, var(--pico-primary) 10%, transparent);
 }
-.trn-tree-match.bye { opacity: 0.6; }
-/* Vainqueur bien plus contrasté : couleur d'accent + gras. */
-.trn-tree-match .trn-vs .win {
-  color: var(--trn-accent, var(--pico-primary));
+.trn-bkt-row {
+  display: flex;
+  align-items: stretch;
+  min-height: 32px;
+}
+.trn-bkt-row + .trn-bkt-row { border-top: 1px solid var(--pico-card-border-color); }
+.trn-bkt-nm {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 4px 8px 4px 10px;
+  font-size: 0.86rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Vainqueur : ligne surlignée à l'accent + nom en gras (fort contraste avec le perdant). */
+.trn-bkt-row.win {
+  background: color-mix(in srgb, var(--trn-accent, var(--pico-primary)) 18%, var(--pico-card-background-color));
+}
+.trn-bkt-row.win .trn-bkt-nm { font-weight: 800; }
+/* Case de score : couleurs INVERSÉES du thème (fond sombre en clair, clair en sombre) →
+   contraste maximal quel que soit le thème, comme les pastilles noires de la maquette. */
+.trn-bkt-sc {
+  flex: 0 0 auto;
+  min-width: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-weight: 800;
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  background: var(--pico-color);
+  color: var(--pico-background-color);
 }
-/* Traits de liaison façon bracket : trait horizontal ÉPAIS coloré vers la colonne d'avant. */
-.trn-tree-match.linked::before {
+.trn-bkt-row.win .trn-bkt-sc { background: var(--trn-accent, var(--pico-primary)); color: #fff; }
+.trn-bkt-match.bye { opacity: 0.65; }
+.trn-bkt-match .trn-scorepick { padding: 6px 8px; }
+.trn-bkt-match .trn-scorepick button { padding: 3px 8px; font-size: 0.8rem; }
+
+/* Trait de liaison façon bracket : segment horizontal ÉPAIS coloré entrant de la gauche. */
+.trn-bkt-match.linked::before {
   content: "";
   position: absolute;
-  left: -20px;
+  left: -30px;
   top: 50%;
-  width: 20px;
+  width: 30px;
   border-top: 3px solid var(--trn-accent, var(--pico-primary));
-  opacity: 0.55;
 }
-.trn-tree-match .trn-scorepick button { padding: 3px 8px; font-size: 0.8rem; }
 
-/* --- Groupes de tableau (principal + bandes de classement, plus jamais entremêlés) --- */
-.trn-bkt-group { margin-top: 16px; }
+/* --- Groupes de tableau (principal + chaque bande de classement, TOTALEMENT séparés) --- */
+.trn-bkt-group { margin-top: 18px; }
 .trn-bkt-title {
-  font-size: 0.95rem;
+  font-size: 0.98rem;
   font-weight: 800;
-  margin: 0 0 4px;
-  padding: 3px 0 3px 10px;
-  border-left: 5px solid var(--trn-accent, var(--pico-primary));
+  margin: 0 0 6px;
+  padding: 4px 0 4px 12px;
+  border-left: 6px solid var(--trn-accent, var(--pico-primary));
 }
-/* Principal = accent primaire ; classements = accent ambre distinct (contraste fort). */
+/* Principal = accent primaire vif ; classements = accent ambre distinct (fort contraste). */
 .trn-bkt-group.main { --trn-accent: var(--pico-primary); }
-.trn-bkt-group:not(.main) { --trn-accent: #d98a00; }
+.trn-bkt-group:not(.main) { --trn-accent: #e08600; }
 
 /* Assistant */
 .trn-roster {
