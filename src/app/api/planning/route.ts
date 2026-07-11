@@ -102,6 +102,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(planning);
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 502 });
+    // On journalise le détail amont côté serveur mais on ne le renvoie PAS au client
+    // (le message ResaMania brut pourrait fuiter des infos d'implémentation).
+    console.error("[planning] échec amont:", e);
+    return NextResponse.json({ error: "Planning momentanément indisponible" }, { status: 502 });
   }
 }
