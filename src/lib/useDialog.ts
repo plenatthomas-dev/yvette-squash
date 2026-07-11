@@ -9,12 +9,20 @@ const FOCUSABLE =
  * bouclent à l'intérieur), met le focus dans la modale à l'ouverture et le REND à
  * l'élément qui l'avait avant, à la fermeture. Renvoie une ref à poser sur le
  * conteneur de dialogue (qui doit avoir tabIndex={-1} pour recevoir le focus).
+ *
+ * `autoFocus` (défaut true) : place le focus sur le 1er élément focusable à l'ouverture.
+ * Le passer à FALSE quand ce 1er élément est un champ de saisie qu'on ne veut PAS activer
+ * d'emblée (ex. annuaire : sur mobile, focus l'input ⇒ le clavier surgit et masque la
+ * liste). On focus alors le conteneur : trap + Échap + annonce lecteur d'écran restent
+ * actifs, mais aucun clavier ne s'ouvre tant que l'utilisateur ne tape pas le champ.
  */
-export function useDialog<T extends HTMLElement>(onClose: () => void) {
+export function useDialog<T extends HTMLElement>(onClose: () => void, autoFocus = true) {
   const ref = useRef<T>(null);
   // onClose gardé dans une ref : l'effet ne se relance pas à chaque rendu.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // Capté à l'ouverture (valeur stable par modale) → hors deps de l'effet.
+  const autoFocusRef = useRef(autoFocus);
 
   useEffect(() => {
     const node = ref.current;
@@ -26,8 +34,9 @@ export function useDialog<T extends HTMLElement>(onClose: () => void) {
         (el) => el.offsetParent !== null,
       );
 
-    // Focus initial : premier élément focusable, sinon le conteneur lui-même.
-    (focusables()[0] ?? node).focus();
+    // Focus initial : 1er élément focusable (sauf autoFocus=false → le conteneur, pour ne
+    // pas ouvrir le clavier mobile sur un champ de saisie).
+    (autoFocusRef.current ? focusables()[0] ?? node : node).focus();
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {

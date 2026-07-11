@@ -4,6 +4,7 @@ import { encrypt, decrypt } from "@/lib/crypto";
 import { ensureFresh, getPlanning } from "@/lib/resamania/client";
 import { pushToUser, pushConfigured } from "@/lib/push";
 import { cronAuthorized } from "@/lib/cron-auth";
+import { fmtTime } from "@/lib/time";
 import type { ResaIdentity, ResaSession } from "@/lib/resamania/types";
 
 export const runtime = "nodejs";
@@ -95,7 +96,10 @@ export async function GET(req: NextRequest) {
       const planning = await getPlanning(date, token);
       freeHm = new Set<string>();
       for (const slot of planning.slots) {
-        if (slot.bookable) freeHm.add(slot.startsAt.slice(11, 16));
+        // Heure du club (Europe/Paris), comme la clé `hm` stockée à la création de l'alerte
+        // (cf. page.tsx onWatch / WeekGrid). Un slice UTC brut décalerait de +2 h l'été et
+        // ne matcherait jamais les alertes créées depuis la vue Semaine.
+        if (slot.bookable) freeHm.add(fmtTime(slot.startsAt));
       }
     } catch {
       continue;

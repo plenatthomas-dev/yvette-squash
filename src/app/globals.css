@@ -110,7 +110,10 @@
   --pico-h2-color: #a01060;
   --pico-h3-color: #a01060;
   --pico-h4-color: #a01060;
-  --pico-muted-color: #ab4a7d;
+  /* Assombri (#ab4a7d → #8f3563) pour atteindre le ratio AA 4.5:1 du texte « muted »
+     sur les fonds roses (carte #ffc6e2, fond #ffd7ec) — l'ancienne teinte tombait à
+     ~3.6:1. Reste plus clair que le texte principal (#7a0f46) → lit toujours « discret ». */
+  --pico-muted-color: #8f3563;
   --pico-muted-border-color: #ff9ecb;
 
   /* Champs de formulaire (login, pseudo) en rose clair. */
@@ -211,6 +214,29 @@ header.app h1 {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* Lien d'évitement (WCAG 2.4.1) : hors écran jusqu'au focus clavier, puis visible en haut
+   à gauche pour sauter l'en-tête + la barre de navigation et aller droit au contenu. */
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -48px;
+  z-index: 1000;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--pico-primary-background);
+  color: #fff;
+  text-decoration: none;
+  transition: top 0.15s ease;
+}
+.skip-link:focus {
+  top: 8px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skip-link {
+    transition: none;
+  }
 }
 
 /* Sous-titre pleine largeur SOUS la ligne titre : accueil + lieu réunis. Peut passer
@@ -736,11 +762,19 @@ table.planning thead th.time {
 table.planning:not(.week) tbody th.time {
   vertical-align: top;
 }
+/* Vue jour : colonne Heure un peu plus large et horaires alignés à GAUCHE, pour loger le
+   badge « 🕒 N » à DROITE sans recouvrir les chiffres (le badge, en position absolue à
+   droite, occupe la gouttière laissée libre par l'alignement à gauche). */
+table.planning:not(.week) th.time {
+  width: 84px;
+  text-align: left;
+  padding-left: 10px;
+}
 .wait-btn {
   position: absolute;
-  left: 50%;
-  bottom: 2px;
-  transform: translateX(-50%);
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
   gap: 2px;

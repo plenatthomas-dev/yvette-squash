@@ -159,7 +159,7 @@ export function PlanningGrid({
                     {end && <span className="t-end">{fmtTime(end)}</span>}
                     {!selMode && rowComplete(t) && (() => {
                       const d = t.slice(0, 10);
-                      const hm = t.slice(11, 16);
+                      const hm = fmtTime(t); // heure du club (cf. onWatch/check-alerts), pas UTC brut
                       const count = waitCountFor?.(d, hm) ?? 0;
                       const mine = myWaitFor?.(d, hm) ?? null;
                       // Déjà « +1 » sur ce créneau → on masque l'offre de REJOINDRE la liste

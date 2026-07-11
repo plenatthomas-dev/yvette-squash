@@ -48,7 +48,7 @@ export function DirectoryModal({
 
   if (!open) return null;
   return (
-        <Dialog onClose={onClose} label="Annuaire des membres" className="directory">
+        <Dialog onClose={onClose} label="Annuaire des membres" className="directory" autoFocus={false}>
             <h3>Annuaire des membres</h3>
             <input
               type="search"
