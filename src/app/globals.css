@@ -2542,6 +2542,13 @@ table.planning.week th.time.selhead {
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
 }
+/* Bouton « ✏️ Corriger » / « Annuler » d'un match déjà saisi : discret, jamais pleine largeur. */
+.trn-correct {
+  width: auto;
+  margin: 8px 0 0;
+  padding: 3px 10px;
+  font-size: 0.76rem;
+}
 .trn-round { margin-top: 6px; }
 
 /* Arbre graphique du tableau : colonnes = tours (gauche→droite), chemin vers la finale. */
