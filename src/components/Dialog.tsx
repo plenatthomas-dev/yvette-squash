@@ -10,6 +10,7 @@ export function Dialog({
   onClose,
   label,
   closeOnOverlay = true,
+  autoFocus = true,
   className,
   children,
 }: {
@@ -17,11 +18,14 @@ export function Dialog({
   label: string;
   // Certaines modales bloquent la fermeture par overlay pendant un envoi (busy).
   closeOnOverlay?: boolean;
+  // false = ne pas focus le 1er élément à l'ouverture (évite le clavier mobile sur un
+  // champ de recherche). Cf. useDialog.
+  autoFocus?: boolean;
   // Modificateur CSS optionnel ajouté à la boîte (ex. "directory").
   className?: string;
   children: ReactNode;
 }) {
-  const ref = useDialog<HTMLDivElement>(onClose);
+  const ref = useDialog<HTMLDivElement>(onClose, autoFocus);
   return (
     <div className="modal-overlay" onClick={() => closeOnOverlay && onClose()}>
       <div
