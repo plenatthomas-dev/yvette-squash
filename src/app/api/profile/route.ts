@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { invalidateAnnotationUsers } from "@/lib/planning-annotate";
@@ -87,11 +88,25 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-  const updated = await prisma.user.update({
-    where: { id: session.userId },
-    data,
-    select: { nickname: true, listed: true },
-  });
+  let updated;
+  try {
+    updated = await prisma.user.update({
+      where: { id: session.userId },
+      data,
+      select: { nickname: true, listed: true },
+    });
+  } catch (e) {
+    // Filet DB (index unique insensible à la casse sur LOWER(nickname)) : rattrape une course
+    // simultanée qui aurait passé le contrôle applicatif. Seul unique de cet UPDATE (on ne
+    // touche ni email ni contactId) → P2002 = pseudo déjà pris.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      return NextResponse.json(
+        { error: "Ce pseudonyme est déjà pris par un autre membre." },
+        { status: 409 },
+      );
+    }
+    throw e;
+  }
   // Le pseudo/la visibilité changent → le cache mémoire de la liste des membres (annotation)
   // doit refléter le nouveau nom sans attendre son TTL.
   invalidateAnnotationUsers();
