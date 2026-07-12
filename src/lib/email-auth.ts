@@ -124,38 +124,79 @@ export function nameFromEmail(email: string): string {
 
 // --- E-mails --------------------------------------------------------------------------
 
+// Échappe le strict minimum pour interpoler une URL sans risque dans le HTML. Les jetons sont
+// en base64url (pas de caractère spécial), mais on reste défensif sur l'`origin`.
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// Gabarit d'e-mail transactionnel commun (texte + HTML). Volontairement sobre — pas d'image
+// ni de couleur criarde, lien visible EN CLAIR sous le bouton (pas de lien « masqué », ce qui
+// rassure les filtres anti-phishing). Signé au nom de l'association.
+function renderEmail(opts: {
+  title: string;
+  lead: string;
+  cta?: { label: string; url: string };
+  expiry?: string;
+  footer: string;
+}): { text: string; html: string } {
+  const { title, lead, cta, expiry, footer } = opts;
+
+  const textLines = [lead];
+  if (cta) textLines.push("", `${cta.label} :`, cta.url);
+  if (expiry) textLines.push("", `Ce lien est valable ${expiry}.`);
+  textLines.push("", footer, "", "— Le Squash de l'Yvette");
+  const text = textLines.join("\n");
+
+  const button = cta
+    ? `<p style="margin:0 0 14px;"><a href="${esc(cta.url)}" style="display:inline-block;background:#1e3a8a;color:#ffffff;text-decoration:none;padding:11px 20px;border-radius:6px;font-weight:600;">${esc(cta.label)}</a></p>
+       <p style="margin:0 0 16px;font-size:13px;color:#6b7280;word-break:break-all;">Si le bouton ne marche pas, copie ce lien dans ton navigateur :<br>${esc(cta.url)}</p>`
+    : "";
+  const expiryHtml = expiry
+    ? `<p style="margin:0 0 8px;font-size:13px;color:#6b7280;">Ce lien est valable ${esc(expiry)}.</p>`
+    : "";
+  const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f2937;max-width:480px;margin:0 auto;padding:20px 16px;">
+  <h2 style="margin:0 0 12px;font-size:18px;">${esc(title)}</h2>
+  <p style="margin:0 0 16px;line-height:1.5;">${esc(lead)}</p>
+  ${button}${expiryHtml}
+  <p style="margin:0 0 16px;font-size:13px;color:#6b7280;">${esc(footer)}</p>
+  <p style="margin:20px 0 0;font-size:13px;color:#6b7280;">— Le Squash de l'Yvette</p>
+</div>`;
+  return { text, html };
+}
+
 export async function sendVerificationEmail(to: string, origin: string, token: string) {
   const link = `${origin}/api/auth/email/verify?token=${encodeURIComponent(token)}`;
-  await sendEmail({
-    to,
-    subject: "Active ton compte — Squash de l'Yvette",
-    text:
-      `Bienvenue ! Clique sur ce lien pour activer ton compte et te connecter :\n\n${link}\n\n` +
-      `Le lien est valable 24 h. Si tu n'as rien demandé, ignore ce message.`,
+  const { text, html } = renderEmail({
+    title: "Bienvenue au Squash de l'Yvette",
+    lead: "Pour activer ton compte et te connecter, confirme ton adresse en cliquant ci-dessous.",
+    cta: { label: "Activer mon compte", url: link },
+    expiry: "24 heures",
+    footer: "Tu n'as pas créé de compte ? Ignore ce message, rien ne sera activé.",
   });
+  await sendEmail({ to, subject: "Active ton compte au Squash de l'Yvette", text, html });
 }
 
 export async function sendResetEmail(to: string, origin: string, token: string) {
   const link = `${origin}/reinitialiser?token=${encodeURIComponent(token)}`;
-  await sendEmail({
-    to,
-    subject: "Réinitialise ton mot de passe — Squash de l'Yvette",
-    text:
-      `Tu as demandé à réinitialiser ton mot de passe. Clique sur ce lien pour en choisir un ` +
-      `nouveau :\n\n${link}\n\nLe lien est valable 1 h. Si tu n'as rien demandé, ignore ce message ` +
-      `(ton mot de passe reste inchangé).`,
+  const { text, html } = renderEmail({
+    title: "Nouveau mot de passe",
+    lead: "Tu as demandé à définir un nouveau mot de passe pour ton compte du Squash de l'Yvette. Clique ci-dessous pour le choisir.",
+    cta: { label: "Choisir un nouveau mot de passe", url: link },
+    expiry: "1 heure",
+    footer: "Tu n'as rien demandé ? Ignore ce message : ton mot de passe actuel reste valable.",
   });
+  await sendEmail({ to, subject: "Ton nouveau mot de passe — Squash de l'Yvette", text, html });
 }
 
 /** Envoyé quand une inscription vise un email qui a DÉJÀ un compte actif (anti-énumération). */
 export async function sendAlreadyRegisteredEmail(to: string, origin: string) {
-  await sendEmail({
-    to,
-    subject: "Tu as déjà un compte — Squash de l'Yvette",
-    text:
-      `Quelqu'un vient de tenter de créer un compte avec cette adresse, mais tu en as déjà un.\n\n` +
-      `Connecte-toi ici : ${origin}/\n` +
-      `Mot de passe oublié ? Utilise « Mot de passe oublié » sur l'écran de connexion.\n\n` +
-      `Si ce n'était pas toi, ignore ce message.`,
+  const { text, html } = renderEmail({
+    title: "Tu as déjà un compte",
+    lead: "Quelqu'un a tenté de créer un compte avec cette adresse au Squash de l'Yvette, mais tu en as déjà un. Tu peux te connecter directement.",
+    cta: { label: "Se connecter", url: `${origin}/` },
+    footer:
+      "Mot de passe oublié ? Utilise « Mot de passe oublié » sur l'écran de connexion. Si ce n'était pas toi, ignore ce message.",
   });
+  await sendEmail({ to, subject: "Tu as déjà un compte au Squash de l'Yvette", text, html });
 }
