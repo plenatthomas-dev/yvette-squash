@@ -133,6 +133,10 @@ function esc(s: string): string {
 // Gabarit d'e-mail transactionnel commun (texte + HTML). Volontairement sobre — pas d'image
 // ni de couleur criarde, lien visible EN CLAIR sous le bouton (pas de lien « masqué », ce qui
 // rassure les filtres anti-phishing). Signé au nom de l'association.
+//
+// NB : pour l'instant on n'envoie QUE la partie `text` (cf. sendVerificationEmail…) — le HTML
+// déclenchait des « Content Blocked » chez free.fr. La partie `html` reste produite ici pour
+// pouvoir la réactiver le jour où un domaine aligné (DKIM/DMARC) rend l'envoi de confiance.
 function renderEmail(opts: {
   title: string;
   lead: string;
@@ -167,36 +171,36 @@ function renderEmail(opts: {
 
 export async function sendVerificationEmail(to: string, origin: string, token: string) {
   const link = `${origin}/api/auth/email/verify?token=${encodeURIComponent(token)}`;
-  const { text, html } = renderEmail({
+  const { text } = renderEmail({
     title: "Bienvenue au Squash de l'Yvette",
     lead: "Pour activer ton compte et te connecter, confirme ton adresse en cliquant ci-dessous.",
     cta: { label: "Activer mon compte", url: link },
     expiry: "24 heures",
     footer: "Tu n'as pas créé de compte ? Ignore ce message, rien ne sera activé.",
   });
-  await sendEmail({ to, subject: "Active ton compte au Squash de l'Yvette", text, html });
+  await sendEmail({ to, subject: "Active ton compte au Squash de l'Yvette", text });
 }
 
 export async function sendResetEmail(to: string, origin: string, token: string) {
   const link = `${origin}/reinitialiser?token=${encodeURIComponent(token)}`;
-  const { text, html } = renderEmail({
+  const { text } = renderEmail({
     title: "Nouveau mot de passe",
     lead: "Tu as demandé à définir un nouveau mot de passe pour ton compte du Squash de l'Yvette. Clique ci-dessous pour le choisir.",
     cta: { label: "Choisir un nouveau mot de passe", url: link },
     expiry: "1 heure",
     footer: "Tu n'as rien demandé ? Ignore ce message : ton mot de passe actuel reste valable.",
   });
-  await sendEmail({ to, subject: "Ton nouveau mot de passe — Squash de l'Yvette", text, html });
+  await sendEmail({ to, subject: "Ton nouveau mot de passe — Squash de l'Yvette", text });
 }
 
 /** Envoyé quand une inscription vise un email qui a DÉJÀ un compte actif (anti-énumération). */
 export async function sendAlreadyRegisteredEmail(to: string, origin: string) {
-  const { text, html } = renderEmail({
+  const { text } = renderEmail({
     title: "Tu as déjà un compte",
     lead: "Quelqu'un a tenté de créer un compte avec cette adresse au Squash de l'Yvette, mais tu en as déjà un. Tu peux te connecter directement.",
     cta: { label: "Se connecter", url: `${origin}/` },
     footer:
       "Mot de passe oublié ? Utilise « Mot de passe oublié » sur l'écran de connexion. Si ce n'était pas toi, ignore ce message.",
   });
-  await sendEmail({ to, subject: "Tu as déjà un compte au Squash de l'Yvette", text, html });
+  await sendEmail({ to, subject: "Tu as déjà un compte au Squash de l'Yvette", text });
 }
