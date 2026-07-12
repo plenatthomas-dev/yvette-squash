@@ -19,6 +19,14 @@ model User {
   displayName String
   nickname    String? // pseudonyme choisi par le joueur (affiché à la place du prénom)
   email       String?      @unique // normalisé (trim+lowercase) — CLÉ D'IDENTITÉ commune ResaMania/email
+  // Connexion « email seul » par mot de passe (remplace l'OTP). Haché avec scrypt
+  // (cf. crypto.hashPassword) — JAMAIS en clair. NULL = compte sans mot de passe (un membre
+  // qui n'utilise que ResaMania, ou un compte email pas encore activé).
+  passwordHash    String?
+  // Date où la possession de l'email a été prouvée : lien d'inscription/réinitialisation
+  // cliqué, OU connexion ResaMania (qui fait autorité sur l'email). NULL = non vérifié →
+  // la connexion par mot de passe est refusée tant que c'est NULL.
+  emailVerifiedAt DateTime?
   // Annuaire (idée 6) : visibilité OPT-OUT — visible par défaut, le joueur peut se retirer
   // depuis ses paramètres. Base légale = intérêt légitime (entraide asso) + retrait facile.
   // Seuls `id` + nom/pseudo sont exposés par /api/directory (jamais email ni contactId).
@@ -108,18 +116,24 @@ model FeedbackMessage {
   @@index([userId, createdAt])
 }
 
-// Code OTP (6 chiffres) pour la connexion « email seul » — preuve de possession de l'email.
-// Le code n'est JAMAIS stocké en clair (HMAC-SHA256). Usage unique, court, rate-limité
-// à la fois PAR EMAIL (anti-spam d'une boîte) et PAR IP (anti-abus d'envoi : empêche une
+// Jeton de lien envoyé par e-mail, à usage unique, pour deux parcours « email seul » :
+//  - purpose="signup" : activation d'un nouveau compte (porte le mot de passe DÉJÀ haché
+//    et le nom choisis à l'inscription ; appliqués sur la ligne User à la vérification) ;
+//  - purpose="reset"  : réinitialisation du mot de passe oublié.
+// Le jeton n'est JAMAIS stocké en clair (HMAC-SHA256 dans tokenHash). Usage unique, expirant,
+// rate-limité PAR EMAIL (anti-spam d'une boîte) et PAR IP (anti-abus d'envoi : empêche une
 // source d'arroser des centaines d'adresses et de brûler le quota d'envoi Gmail).
-model EmailOtp {
-  id        String   @id @default(cuid())
-  email     String // normalisé (trim+lowercase)
-  codeHash  String // HMAC-SHA256 du code
-  ip        String? // IP demandeuse (rate limiting par IP ; nullable pour l'existant)
-  expiresAt DateTime
-  attempts  Int      @default(0)
-  createdAt DateTime @default(now())
+model EmailToken {
+  id           String   @id @default(cuid())
+  email        String // normalisé (trim+lowercase)
+  tokenHash    String // HMAC-SHA256 du jeton (jamais en clair)
+  purpose      String // "signup" | "reset"
+  passwordHash String? // signup : mot de passe déjà haché (scrypt), posé sur User à la vérif
+  displayName  String? // signup : nom d'affichage choisi à l'inscription
+  ip           String? // IP demandeuse (rate limiting par IP)
+  expiresAt    DateTime
+  attempts     Int      @default(0)
+  createdAt    DateTime @default(now())
 
   @@index([email, createdAt])
   @@index([ip, createdAt])

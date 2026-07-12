@@ -59,10 +59,89 @@ export function decrypt(payload: string): string {
 }
 
 /**
- * Hash HMAC-SHA256 d'un code OTP (clé = CREDENTIALS_SECRET). Le code n'est jamais
+ * Hash HMAC-SHA256 d'un secret opaque (clé = CREDENTIALS_SECRET). Le secret n'est jamais
  * stocké en clair : on ne persiste que ce hash et on le recompare à la vérification.
  * Déterministe → comparable ; à comparer en temps constant (crypto.timingSafeEqual).
+ *
+ * Utilisé pour les jetons de lien e-mail (inscription / réinitialisation) : le jeton est
+ * un secret aléatoire à haute entropie, donc un HMAC rapide suffit (contrairement à un mot
+ * de passe humain, qui exige un hash lent — cf. hashPassword).
  */
-export function hashOtp(code: string): string {
-  return crypto.createHmac("sha256", getKey()).update(code).digest("hex");
+export function hashToken(token: string): string {
+  return crypto.createHmac("sha256", getKey()).update(token).digest("hex");
+}
+
+/**
+ * Hachage d'un MOT DE PASSE humain avec scrypt (KDF lent, intégré à node:crypto — aucune
+ * dépendance). Chaque mot de passe a son propre sel aléatoire, donc deux comptes au même
+ * mot de passe ont des hachages différents. Le mot de passe n'est JAMAIS stocké en clair.
+ *
+ * Format stocké : `scrypt$N$r$p$selBase64$hashBase64` — les paramètres voyagent avec le
+ * hash, ce qui permet de les durcir plus tard sans invalider les hachages existants
+ * (verifyPassword relit les paramètres de la chaîne).
+ */
+const SCRYPT_N = 16384; // coût CPU/mémoire (2^14) — solide et rapide côté serveur
+const SCRYPT_r = 8;
+const SCRYPT_p = 1;
+const SCRYPT_KEYLEN = 32;
+// maxmem doit couvrir 128 * N * r octets (ici ~16 Mo) : on prend une marge confortable.
+const SCRYPT_MAXMEM = 64 * 1024 * 1024;
+
+export function hashPassword(password: string): Promise<string> {
+  const salt = crypto.randomBytes(16);
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(
+      password,
+      salt,
+      SCRYPT_KEYLEN,
+      { N: SCRYPT_N, r: SCRYPT_r, p: SCRYPT_p, maxmem: SCRYPT_MAXMEM },
+      (err, derived) => {
+        if (err) return reject(err);
+        resolve(
+          [
+            "scrypt",
+            SCRYPT_N,
+            SCRYPT_r,
+            SCRYPT_p,
+            salt.toString("base64"),
+            derived.toString("base64"),
+          ].join("$"),
+        );
+      },
+    );
+  });
+}
+
+/**
+ * Vérifie un mot de passe contre une chaîne produite par hashPassword(). Recalcule le
+ * hachage avec les paramètres/sel lus dans la chaîne, puis compare en TEMPS CONSTANT.
+ * Renvoie false (jamais d'exception) si la chaîne stockée est invalide/illisible.
+ */
+export function verifyPassword(password: string, stored: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const [scheme, nStr, rStr, pStr, saltB64, hashB64] = stored.split("$");
+      if (scheme !== "scrypt" || !saltB64 || !hashB64) return resolve(false);
+      const N = Number(nStr);
+      const r = Number(rStr);
+      const p = Number(pStr);
+      const salt = Buffer.from(saltB64, "base64");
+      const expected = Buffer.from(hashB64, "base64");
+      if (!N || !r || !p || salt.length === 0 || expected.length === 0) {
+        return resolve(false);
+      }
+      crypto.scrypt(
+        password,
+        salt,
+        expected.length,
+        { N, r, p, maxmem: SCRYPT_MAXMEM },
+        (err, derived) => {
+          if (err) return resolve(false);
+          resolve(derived.length === expected.length && crypto.timingSafeEqual(derived, expected));
+        },
+      );
+    } catch {
+      resolve(false);
+    }
+  });
 }

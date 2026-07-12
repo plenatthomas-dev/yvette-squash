@@ -1143,6 +1143,29 @@ td.cell.past {
   margin-top: 4px;
 }
 
+/* Bascule entre sous-modes de connexion email (se connecter / créer un compte / oublié) :
+   des boutons rendus comme des liens en ligne, centrés sous le formulaire. */
+.login-switch {
+  text-align: center;
+  margin-top: -4px;
+}
+.linklike,
+.linklike:hover,
+.linklike:focus,
+.linklike:active {
+  display: inline;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: var(--pico-primary, #0a6);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
+
 /* --- Toasts (notifications) --------------------------------------------- */
 .toasts {
   position: fixed;
