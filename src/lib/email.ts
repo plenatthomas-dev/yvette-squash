@@ -27,11 +27,16 @@ export function emailConfigured(): boolean {
   return Boolean(GMAIL_USER && GMAIL_APP_PASSWORD);
 }
 
-/** Envoie un e-mail texte. Lève si la configuration Gmail manque ou si l'envoi échoue. */
+/**
+ * Envoie un e-mail. Fournir `html` en plus de `text` produit un message multipart/alternative
+ * (mieux perçu par les filtres anti-spam qu'un texte brut seul). Lève si la configuration
+ * Gmail manque ou si l'envoi échoue.
+ */
 export async function sendEmail(opts: {
   to: string;
   subject: string;
   text: string;
+  html?: string;
   replyTo?: string;
   fromName?: string;
 }): Promise<void> {
@@ -44,6 +49,7 @@ export async function sendEmail(opts: {
     to: opts.to,
     subject: opts.subject,
     text: opts.text,
+    html: opts.html,
     replyTo: opts.replyTo,
   });
 }
