@@ -30,6 +30,11 @@ export async function resolveUser(input: {
 }): Promise<User> {
   const email = input.email ? normalizeEmail(input.email) : null;
   const contactId = input.contactId ?? null;
+  // ResaMania fait autorité sur l'email : une connexion ResaMania (contactId présent) prouve
+  // la possession de l'email → on le marque vérifié s'il ne l'était pas déjà. Les parcours
+  // « email seul » (sans contactId) ne posent PAS emailVerifiedAt ici ; c'est le clic sur le
+  // lien reçu par mail (routes auth/email) qui le fait.
+  const now = new Date();
 
   // 1) Déjà lié par contactId ? (membres ResaMania existants)
   if (contactId) {
@@ -37,7 +42,11 @@ export async function resolveUser(input: {
     if (byContact) {
       return prisma.user.update({
         where: { id: byContact.id },
-        data: { displayName: input.displayName, email: email ?? byContact.email },
+        data: {
+          displayName: input.displayName,
+          email: email ?? byContact.email,
+          ...(byContact.emailVerifiedAt ? {} : { emailVerifiedAt: now }),
+        },
       });
     }
   }
@@ -49,16 +58,23 @@ export async function resolveUser(input: {
       // Réconciliation : on n'attache le contactId que s'il manquait encore
       // (ne jamais écraser un contactId déjà présent).
       const attach = contactId && !byEmail.contactId ? { contactId } : {};
+      // Connexion ResaMania retombant sur une ligne « email seul » → email désormais prouvé.
+      const verify = contactId && !byEmail.emailVerifiedAt ? { emailVerifiedAt: now } : {};
       return prisma.user.update({
         where: { id: byEmail.id },
-        data: { displayName: input.displayName, ...attach },
+        data: { displayName: input.displayName, ...attach, ...verify },
       });
     }
   }
 
   // 3) Personne inconnue → nouvelle ligne.
   return prisma.user.create({
-    data: { displayName: input.displayName, email, contactId },
+    data: {
+      displayName: input.displayName,
+      email,
+      contactId,
+      ...(contactId ? { emailVerifiedAt: now } : {}),
+    },
   });
 }
 

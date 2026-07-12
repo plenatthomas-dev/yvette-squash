@@ -1143,6 +1143,29 @@ td.cell.past {
   margin-top: 4px;
 }
 
+/* Bascule entre sous-modes de connexion email (se connecter / créer un compte / oublié) :
+   des boutons rendus comme des liens en ligne, centrés sous le formulaire. */
+.login-switch {
+  text-align: center;
+  margin-top: -4px;
+}
+.linklike,
+.linklike:hover,
+.linklike:focus,
+.linklike:active {
+  display: inline;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: var(--pico-primary, #0a6);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
+
 /* --- Toasts (notifications) --------------------------------------------- */
 .toasts {
   position: fixed;
@@ -1509,6 +1532,26 @@ td.cell.past {
 }
 
 /* --- Annuaire des membres ---------------------------------------------- */
+/* Lien vers le groupe WhatsApp de l'asso (affiché seulement si configuré côté serveur). */
+.wa-group-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border-radius: var(--pico-border-radius);
+  background: #25d366; /* vert WhatsApp */
+  color: #073b26;
+  font-weight: 600;
+  text-decoration: none;
+}
+.wa-group-link:hover {
+  background: #1ebe5b;
+  color: #073b26;
+}
+
 .directory-search {
   width: 100%;
   margin: 0 0 10px;
