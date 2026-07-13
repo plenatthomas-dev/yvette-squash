@@ -79,7 +79,8 @@ export async function POST(req: NextRequest) {
       });
       await sendVerificationEmail(email, origin, token);
     }
-  } catch {
+  } catch (e) {
+    console.error("[email/register] envoi échoué:", e);
     return NextResponse.json({ error: "Échec de l'envoi, réessaie plus tard." }, { status: 502 });
   }
   return NextResponse.json({ ok: true });
