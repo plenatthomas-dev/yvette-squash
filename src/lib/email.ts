@@ -4,12 +4,15 @@ import nodemailer, { type Transporter } from "nodemailer";
  * Envoi d'e-mails (codes, liens d'auth, commentaires). Deux transports SMTP possibles ;
  * on n'a JAMAIS de mot de passe en clair côté appli (identifiants en variables d'env).
  *
- * 1) Mailjet (PRIORITAIRE si configuré) — meilleure délivrabilité que le relais Gmail perso
+ * 1) Brevo (PRIORITAIRE si configuré) — meilleure délivrabilité que le relais Gmail perso
  *    (IP + DKIM du fournisseur), SANS domaine à soi : il suffit de « valider un expéditeur »
- *    dans Mailjet (ton adresse Gmail). Recommandé notamment pour les FAI stricts (free.fr).
- *      MAILJET_API_KEY     = clé API publique (Account → API Key Management)
- *      MAILJET_SECRET_KEY  = clé secrète associée
- *      MAILJET_SENDER      = adresse expéditrice VALIDÉE dans Mailjet (défaut : GMAIL_USER)
+ *    dans Brevo (ton adresse Gmail). Recommandé notamment pour les FAI stricts (free.fr).
+ *    NB : avec un expéditeur @gmail.com, DMARC n'est pas aligné (DKIM signé par le domaine
+ *    Brevo, From @gmail.com) ; pour une fiabilité maximale vers free.fr, utiliser un domaine
+ *    à soi validé dans Brevo (SPF + DKIM + DMARC alignés).
+ *      BREVO_SMTP_USER  = identifiant SMTP (l'e-mail du compte Brevo)
+ *      BREVO_SMTP_KEY   = clé SMTP (Brevo → SMTP & API → SMTP → « Générer une clé SMTP »)
+ *      BREVO_SENDER     = adresse expéditrice VALIDÉE dans Brevo (défaut : GMAIL_USER)
  *
  * 2) Gmail (REPLI) — SMTP Gmail avec un « mot de passe d'application ». Gratuit, sans domaine,
  *    mais filtré par certains FAI (free.fr).
@@ -19,29 +22,29 @@ import nodemailer, { type Transporter } from "nodemailer";
 const GMAIL_USER = process.env.GMAIL_USER?.trim();
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD?.replace(/\s+/g, "");
 
-const MAILJET_API_KEY = process.env.MAILJET_API_KEY?.trim();
-const MAILJET_SECRET_KEY = process.env.MAILJET_SECRET_KEY?.trim();
-// Expéditeur : celui validé dans Mailjet ; par défaut le même que le compte Gmail.
-const MAILJET_SENDER = process.env.MAILJET_SENDER?.trim() || GMAIL_USER;
+const BREVO_SMTP_USER = process.env.BREVO_SMTP_USER?.trim();
+const BREVO_SMTP_KEY = process.env.BREVO_SMTP_KEY?.trim();
+// Expéditeur : celui validé dans Brevo ; par défaut le même que le compte Gmail.
+const BREVO_SENDER = process.env.BREVO_SENDER?.trim() || GMAIL_USER;
 
-const mailjetReady = Boolean(MAILJET_API_KEY && MAILJET_SECRET_KEY && MAILJET_SENDER);
+const brevoReady = Boolean(BREVO_SMTP_USER && BREVO_SMTP_KEY && BREVO_SENDER);
 const gmailReady = Boolean(GMAIL_USER && GMAIL_APP_PASSWORD);
 
 type MailConfig = { transporter: Transporter; from: string };
 let cached: MailConfig | null = null;
 
-/** Transport actif + adresse expéditrice (Mailjet prioritaire, repli Gmail). `null` si rien. */
+/** Transport actif + adresse expéditrice (Brevo prioritaire, repli Gmail). `null` si rien. */
 function mailer(): MailConfig | null {
   if (cached) return cached;
-  if (mailjetReady) {
+  if (brevoReady) {
     cached = {
       transporter: nodemailer.createTransport({
-        host: "in-v3.mailjet.com",
+        host: "smtp-relay.brevo.com",
         port: 587, // STARTTLS
         secure: false,
-        auth: { user: MAILJET_API_KEY!, pass: MAILJET_SECRET_KEY! },
+        auth: { user: BREVO_SMTP_USER!, pass: BREVO_SMTP_KEY! },
       }),
-      from: MAILJET_SENDER!,
+      from: BREVO_SENDER!,
     };
     return cached;
   }
@@ -58,9 +61,9 @@ function mailer(): MailConfig | null {
   return null;
 }
 
-/** L'envoi est-il configuré côté serveur ? (Mailjet OU Gmail) */
+/** L'envoi est-il configuré côté serveur ? (Brevo OU Gmail) */
 export function emailConfigured(): boolean {
-  return mailjetReady || gmailReady;
+  return brevoReady || gmailReady;
 }
 
 /**
@@ -78,7 +81,7 @@ export async function sendEmail(opts: {
 }): Promise<void> {
   const m = mailer();
   if (!m) {
-    throw new Error("Envoi d'e-mail non configuré (Mailjet ou Gmail).");
+    throw new Error("Envoi d'e-mail non configuré (Brevo ou Gmail).");
   }
   await m.transporter.sendMail({
     from: `"${opts.fromName ?? "Squash de l'Yvette"}" <${m.from}>`,
