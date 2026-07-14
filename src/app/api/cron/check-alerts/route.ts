@@ -4,7 +4,7 @@ import { encrypt, decrypt } from "@/lib/crypto";
 import { ensureFresh, getPlanning } from "@/lib/resamania/client";
 import { pushToUser, pushConfigured } from "@/lib/push";
 import { cronAuthorized } from "@/lib/cron-auth";
-import { fmtTime } from "@/lib/time";
+import { fmtTime, toInstant } from "@/lib/time";
 import type { ResaIdentity, ResaSession } from "@/lib/resamania/types";
 
 export const runtime = "nodejs";
@@ -67,9 +67,30 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Clés VAPID non configurées" }, { status: 503 });
   }
 
-  const alerts = await prisma.slotAlert.findMany({ where: { active: true } });
+  const allAlerts = await prisma.slotAlert.findMany({ where: { active: true } });
+  if (allAlerts.length === 0) {
+    return NextResponse.json({ checked: 0, notified: 0, expired: 0 });
+  }
+
+  // Un créneau déjà commencé n'a plus d'intérêt : réserver un terrain pour 18 h à 18 h 05
+  // ne sert à rien. On désactive ces alertes SANS notifier (évite la notif « 15 h trop
+  // tard » reçue quand le cron ne tournait qu'une fois par jour) et on économise l'appel
+  // planning associé. Comparaison en instant absolu via toInstant (DST-safe).
+  const now = Date.now();
+  const expired: typeof allAlerts = [];
+  const alerts: typeof allAlerts = [];
+  for (const a of allAlerts) {
+    if (new Date(toInstant(`${a.date}T${a.hm}:00`)).getTime() <= now) expired.push(a);
+    else alerts.push(a);
+  }
+  if (expired.length > 0) {
+    await prisma.slotAlert.updateMany({
+      where: { id: { in: expired.map((a) => a.id) } },
+      data: { active: false },
+    });
+  }
   if (alerts.length === 0) {
-    return NextResponse.json({ checked: 0, notified: 0 });
+    return NextResponse.json({ checked: 0, notified: 0, expired: expired.length });
   }
 
   // Regroupe par (userId, date) → un seul appel planning par joueur et par jour.
@@ -121,5 +142,5 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ checked, notified });
+  return NextResponse.json({ checked, notified, expired: expired.length });
 }
