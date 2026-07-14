@@ -140,6 +140,8 @@ export default function Home() {
   const [nickname, setNickname] = useState<string | null>(null); // pseudonyme choisi
   const [listed, setListed] = useState(true); // visibilité annuaire (idée 6, opt-out)
   const [canBook, setCanBook] = useState(true); // false = session « email seul » (lecture seule)
+  const [isAdmin, setIsAdmin] = useState(false); // admin (allowlist) → entrée « Admin » dans le menu
+  const [pendingRequests, setPendingRequests] = useState(0); // demandes d'inscription en attente (badge)
   const [date, setDate] = useState<string>(() => defaultOpenDate());
   const [planning, setPlanning] = useState<PlanningDay | null>(null);
   const [journal, setJournal] = useState<JournalEntry[]>([]);
@@ -225,6 +227,8 @@ export default function Home() {
       setNickname(data.nickname ?? null);
       setListed(data.listed ?? true);
       setCanBook(data.canBook ?? true);
+      setIsAdmin(data.isAdmin ?? false);
+      setPendingRequests(data.pendingRequests ?? 0);
     } else {
       setMe(null);
       setMyId(null);
@@ -852,6 +856,19 @@ export default function Home() {
                   comingSoon: !FEATURE_DIRECTORY,
                   onClick: () => setDirectoryOpen(true),
                 },
+                ...(isAdmin
+                  ? [
+                      {
+                        key: "admin",
+                        label: "Admin — demandes",
+                        icon: <BellIcon />,
+                        badge: pendingRequests > 0 ? pendingRequests : undefined,
+                        onClick: () => {
+                          window.location.href = "/admin";
+                        },
+                      },
+                    ]
+                  : []),
                 {
                   key: "share",
                   label: "Partager l'appli",

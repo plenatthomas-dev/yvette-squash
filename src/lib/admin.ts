@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "./db";
 import { getSession, normalizeEmail } from "./session";
+import { pushToUser, pushConfigured } from "./push";
+import type { TokenPurpose } from "./email-auth";
 
 /**
  * Droits admin par ALLOWLIST d'e-mails (variable d'env `ADMIN_EMAILS`, séparés par virgule
@@ -40,4 +42,40 @@ export async function requireAdmin(
   });
   if (!user?.email || !isAdminEmail(user.email)) return null;
   return { userId: session.userId, email: user.email };
+}
+
+/** Ids des Users admin (ceux dont l'email est dans l'allowlist), pour les notifier. */
+async function adminUserIds(): Promise<string[]> {
+  const emails = [...adminEmails()];
+  if (emails.length === 0) return [];
+  const users = await prisma.user.findMany({
+    where: { email: { in: emails } },
+    select: { id: true },
+  });
+  return users.map((u) => u.id);
+}
+
+/**
+ * Prévient les admins (push) qu'une nouvelle demande attend leur validation. Best-effort :
+ * on n'échoue JAMAIS la requête d'inscription/réinitialisation si le push tombe (l'admin
+ * verra de toute façon la demande dans /admin). Suppose que l'admin a activé les notifs.
+ */
+export async function notifyAdminsOfRequest(purpose: TokenPurpose, email: string): Promise<void> {
+  if (!pushConfigured()) return;
+  try {
+    const ids = await adminUserIds();
+    const kind = purpose === "signup" ? "création de compte" : "réinitialisation";
+    await Promise.all(
+      ids.map((id) =>
+        pushToUser(id, {
+          title: "Nouvelle demande à valider 🔑",
+          body: `Demande de ${kind} : ${email}`,
+          url: "/admin",
+          tag: "admin-requests",
+        }),
+      ),
+    );
+  } catch (e) {
+    console.warn("[admin] notif admins échouée:", (e as Error).message);
+  }
 }

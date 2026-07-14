@@ -111,6 +111,11 @@ export async function findEmailToken(token: string, purpose: TokenPurpose) {
   });
 }
 
+/** Nombre de demandes en attente (badge admin). */
+export async function countPendingRequests(): Promise<number> {
+  return prisma.emailToken.count({ where: { approvedAt: null, expiresAt: { gt: new Date() } } });
+}
+
 /** Demandes de compte/réinitialisation EN ATTENTE d'approbation admin (les plus anciennes d'abord). */
 export async function listPendingRequests() {
   return prisma.emailToken.findMany({

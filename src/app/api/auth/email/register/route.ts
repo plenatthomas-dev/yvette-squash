@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { hashPassword } from "@/lib/crypto";
 import { normalizeEmail } from "@/lib/session";
+import { notifyAdminsOfRequest } from "@/lib/admin";
 import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
 import {
   EMAIL_RE,
@@ -65,6 +66,7 @@ export async function POST(req: NextRequest) {
       displayName: name,
       approved: false,
     });
+    await notifyAdminsOfRequest("signup", email);
   }
   return NextResponse.json({ ok: true });
 }
