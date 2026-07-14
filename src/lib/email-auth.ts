@@ -29,14 +29,28 @@ const TTL_MS: Record<TokenPurpose, number> = {
   reset: 60 * 60_000, // 1 h
 };
 
-// Rate-limit d'envoi d'e-mails (motif repris de l'ancien otp/request) : fenêtre glissante.
+// Rate-limit des demandes (inscription / réinitialisation) : fenêtre glissante.
 const SEND_WINDOW_MS = 10 * 60_000;
-const MAX_PER_EMAIL = 3; // anti-spam de la boîte visée
-const MAX_PER_IP = 10; // anti-abus d'envoi (une source qui arrose des centaines d'adresses)
+const MAX_PER_EMAIL = 3; // demandes récentes pour un même email
+const MAX_PER_IP = 5; // demandes récentes depuis une même IP (anti-arrosage d'adresses)
+// Plafond GLOBAL de demandes en attente : backstop anti-noyade de la file d'attente admin,
+// au cas où le rate-limit par IP serait contourné (multi-IP). Bas car l'asso est petite et
+// l'admin traite vite ; au-delà, les nouvelles demandes sont refusées jusqu'à ce qu'il purge.
+const MAX_PENDING_TOTAL = 15;
 
-// Derrière Vercel, x-forwarded-for est posé par la plateforme (1re IP = client réel).
+// IP du client. Sur Vercel, `x-real-ip` est posé par la PLATEFORME (non falsifiable par le
+// client), contrairement à `x-forwarded-for` dont un client peut injecter la 1re valeur pour
+// tourner l'IP à chaque requête. On préfère donc x-real-ip ; repli sur la DERNIÈRE entrée de
+// x-forwarded-for (celle ajoutée par la plateforme, la moins falsifiable).
 export function clientIp(req: NextRequest): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+  const real = req.headers.get("x-real-ip")?.trim();
+  if (real) return real;
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) {
+    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
+  return "local";
 }
 
 /** Valide la robustesse minimale d'un mot de passe. `null` = OK, sinon message d'erreur. */
@@ -49,11 +63,14 @@ export function passwordProblem(pw: unknown): string | null {
 }
 
 /**
- * Un envoi d'e-mail est-il rate-limité pour cet email/IP ? Purge d'abord les jetons expirés
- * (garde la table petite), puis compte les créations récentes par IP puis par email.
+ * La demande doit-elle être refusée (rate-limit) ? Purge d'abord les jetons expirés (garde la
+ * table petite), puis vérifie, dans l'ordre : le plafond GLOBAL de demandes en attente (anti-
+ * noyade multi-IP), le nombre récent par IP, puis par email.
  */
 export async function emailSendRateLimited(email: string, ip: string): Promise<boolean> {
   await prisma.emailToken.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+  const pending = await prisma.emailToken.count({ where: { approvedAt: null } });
+  if (pending >= MAX_PENDING_TOTAL) return true;
   const since = new Date(Date.now() - SEND_WINDOW_MS);
   const fromIp = await prisma.emailToken.count({ where: { ip, createdAt: { gte: since } } });
   if (fromIp >= MAX_PER_IP) return true;
@@ -77,6 +94,14 @@ export async function createEmailToken(opts: {
   displayName?: string | null;
   approved?: boolean;
 }): Promise<string> {
+  // Dédup : une seule demande EN ATTENTE par email+usage. Sans ça, une même adresse pourrait
+  // empiler plusieurs entrées dans la file d'attente admin. On ne touche pas aux jetons déjà
+  // approuvés (liens en cours de remise).
+  if (!opts.approved) {
+    await prisma.emailToken.deleteMany({
+      where: { email: opts.email, purpose: opts.purpose, approvedAt: null },
+    });
+  }
   const token = randomBytes(32).toString("base64url");
   await prisma.emailToken.create({
     data: {
@@ -154,12 +179,23 @@ export async function rejectRequest(id: string): Promise<void> {
   await prisma.emailToken.deleteMany({ where: { id, approvedAt: null } });
 }
 
-/** Lien d'auth à transmettre selon le type de demande (activation vs réinitialisation). */
-export function authLinkFor(origin: string, purpose: TokenPurpose, token: string): string {
-  const t = encodeURIComponent(token);
-  return purpose === "signup"
-    ? `${origin}/api/auth/email/verify?token=${t}`
-    : `${origin}/reinitialiser?token=${t}`;
+/** Lien d'auth à transmettre. Activation ET réinitialisation mènent à la même page où la
+ *  personne choisit son mot de passe (le clic sur le lien prouve la possession de l'email). */
+export function authLinkFor(_origin: string, _purpose: TokenPurpose, token: string): string {
+  return `${_origin}/reinitialiser?token=${encodeURIComponent(token)}`;
+}
+
+/**
+ * Retrouve un jeton valide APPROUVÉ quel que soit son usage (signup OU reset). Utilisé par la
+ * page « définis ton mot de passe », commune aux deux parcours : le comportement (créer le
+ * compte vs juste changer le mot de passe) est décidé d'après `purpose` du jeton trouvé.
+ */
+export async function findApprovedToken(token: string) {
+  if (!token) return null;
+  return prisma.emailToken.findFirst({
+    where: { tokenHash: hashToken(token), expiresAt: { gt: new Date() }, approvedAt: { not: null } },
+    orderBy: { createdAt: "desc" },
+  });
 }
 
 /** Consomme tous les jetons d'un email pour un usage (usage unique + ménage). */
