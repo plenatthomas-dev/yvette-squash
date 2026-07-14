@@ -133,6 +133,10 @@ model EmailToken {
   ip           String? // IP demandeuse (rate limiting par IP)
   expiresAt    DateTime
   attempts     Int      @default(0)
+  // Validation par un admin (inscription sur invitation) : tant que NULL, la demande est
+  // « en attente » et le jeton NE PEUT PAS activer/réinitialiser (cf. findEmailToken). À
+  // l'approbation, un jeton frais est régénéré et ce champ est daté. Voir src/lib/admin.ts.
+  approvedAt   DateTime?
   createdAt    DateTime @default(now())
 
   @@index([email, createdAt])

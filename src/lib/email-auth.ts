@@ -62,8 +62,12 @@ export async function emailSendRateLimited(email: string, ip: string): Promise<b
 }
 
 /**
- * Crée un jeton de lien et renvoie sa valeur EN CLAIR (à mettre dans l'URL du mail ; seule
- * sa version hachée est persistée). Pour "signup", porte le mot de passe déjà haché + le nom.
+ * Crée un jeton de lien et renvoie sa valeur EN CLAIR (seule sa version hachée est persistée).
+ * Pour "signup", porte le mot de passe déjà haché + le nom.
+ *
+ * `approved` : dans le modèle « inscription sur invitation », une demande est créée NON
+ * approuvée (`false`) → elle n'est qu'une entrée dans la file d'attente admin, son jeton clair
+ * n'est révélé à personne. C'est `approveRequest` qui régénère un jeton frais et l'approuve.
  */
 export async function createEmailToken(opts: {
   email: string;
@@ -71,6 +75,7 @@ export async function createEmailToken(opts: {
   ip: string;
   passwordHash?: string | null;
   displayName?: string | null;
+  approved?: boolean;
 }): Promise<string> {
   const token = randomBytes(32).toString("base64url");
   await prisma.emailToken.create({
@@ -82,22 +87,74 @@ export async function createEmailToken(opts: {
       displayName: opts.displayName ?? null,
       ip: opts.ip,
       expiresAt: new Date(Date.now() + TTL_MS[opts.purpose]),
+      approvedAt: opts.approved ? new Date() : null,
     },
   });
   return token;
 }
 
 /**
- * Retrouve un jeton valide (non expiré) pour un usage donné, par comparaison de son hash.
- * Le jeton étant à haute entropie et à usage unique, on n'a pas besoin de compteur d'essais
- * (contrairement à un code à 6 chiffres). `null` si absent/expiré.
+ * Retrouve un jeton valide (non expiré ET APPROUVÉ par un admin) pour un usage donné, par
+ * comparaison de son hash. Le jeton étant à haute entropie et à usage unique, on n'a pas besoin
+ * de compteur d'essais (contrairement à un code à 6 chiffres). `null` si absent/expiré/en attente.
  */
 export async function findEmailToken(token: string, purpose: TokenPurpose) {
   if (!token) return null;
   return prisma.emailToken.findFirst({
-    where: { tokenHash: hashToken(token), purpose, expiresAt: { gt: new Date() } },
+    where: {
+      tokenHash: hashToken(token),
+      purpose,
+      expiresAt: { gt: new Date() },
+      approvedAt: { not: null },
+    },
     orderBy: { createdAt: "desc" },
   });
+}
+
+/** Demandes de compte/réinitialisation EN ATTENTE d'approbation admin (les plus anciennes d'abord). */
+export async function listPendingRequests() {
+  return prisma.emailToken.findMany({
+    where: { approvedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, email: true, purpose: true, displayName: true, createdAt: true },
+  });
+}
+
+/**
+ * Approuve une demande en attente : régénère un jeton frais (le jeton d'origine n'a jamais été
+ * révélé), date l'approbation et repart sur une TTL pleine depuis maintenant. Renvoie de quoi
+ * construire le lien à transmettre à la personne, ou `null` si la demande n'existe plus / déjà
+ * traitée. Le jeton clair n'est renvoyé qu'ICI, une seule fois.
+ */
+export async function approveRequest(
+  id: string,
+): Promise<{ token: string; purpose: TokenPurpose; email: string } | null> {
+  const row = await prisma.emailToken.findFirst({ where: { id, approvedAt: null } });
+  if (!row) return null;
+  const purpose = row.purpose as TokenPurpose;
+  const token = randomBytes(32).toString("base64url");
+  await prisma.emailToken.update({
+    where: { id },
+    data: {
+      tokenHash: hashToken(token),
+      approvedAt: new Date(),
+      expiresAt: new Date(Date.now() + TTL_MS[purpose]),
+    },
+  });
+  return { token, purpose, email: row.email };
+}
+
+/** Rejette (supprime) une demande en attente. */
+export async function rejectRequest(id: string): Promise<void> {
+  await prisma.emailToken.deleteMany({ where: { id, approvedAt: null } });
+}
+
+/** Lien d'auth à transmettre selon le type de demande (activation vs réinitialisation). */
+export function authLinkFor(origin: string, purpose: TokenPurpose, token: string): string {
+  const t = encodeURIComponent(token);
+  return purpose === "signup"
+    ? `${origin}/api/auth/email/verify?token=${t}`
+    : `${origin}/reinitialiser?token=${t}`;
 }
 
 /** Consomme tous les jetons d'un email pour un usage (usage unique + ménage). */

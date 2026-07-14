@@ -1,21 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/session";
-import { emailConfigured } from "@/lib/email";
 import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
 import {
   EMAIL_RE,
   clientIp,
   emailSendRateLimited,
   createEmailToken,
-  sendResetEmail,
 } from "@/lib/email-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // POST /api/auth/email/forgot  { email }
-// Envoie un lien de réinitialisation SI un compte existe. Réponse toujours générique
+// Dépose une demande de réinitialisation EN ATTENTE si un compte existe (aucun mail envoyé) :
+// un admin l'approuve depuis /admin et transmet le lien. Réponse toujours générique
 // (anti-énumération) : on ne révèle jamais si l'email correspond à un compte.
 export async function POST(req: NextRequest) {
   if (!FEATURE_EMAIL_LOGIN) {
@@ -24,12 +23,6 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as { email?: unknown };
   if (typeof body.email !== "string" || !EMAIL_RE.test(body.email.trim())) {
     return NextResponse.json({ error: "Email invalide." }, { status: 400 });
-  }
-  if (!emailConfigured()) {
-    return NextResponse.json(
-      { error: "Envoi d'e-mail non configuré côté serveur." },
-      { status: 503 },
-    );
   }
 
   const email = normalizeEmail(body.email);
@@ -43,13 +36,7 @@ export async function POST(req: NextRequest) {
 
   const user = await prisma.user.findUnique({ where: { email } });
   if (user) {
-    try {
-      const token = await createEmailToken({ email, purpose: "reset", ip });
-      await sendResetEmail(email, req.nextUrl.origin, token);
-    } catch (e) {
-      // On journalise mais on renvoie quand même une réponse générique (anti-énumération).
-      console.error("[email/forgot] envoi échoué:", e);
-    }
+    await createEmailToken({ email, purpose: "reset", ip, approved: false });
   }
   return NextResponse.json({ ok: true });
 }
