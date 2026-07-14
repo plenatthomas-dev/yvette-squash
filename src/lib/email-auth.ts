@@ -34,9 +34,9 @@ const SEND_WINDOW_MS = 10 * 60_000;
 const MAX_PER_EMAIL = 3; // demandes récentes pour un même email
 const MAX_PER_IP = 5; // demandes récentes depuis une même IP (anti-arrosage d'adresses)
 // Plafond GLOBAL de demandes en attente : backstop anti-noyade de la file d'attente admin,
-// au cas où le rate-limit par IP serait contourné (multi-IP). Généreux pour ne pas bloquer
-// des inscriptions légitimes en usage normal (petite asso).
-const MAX_PENDING_TOTAL = 200;
+// au cas où le rate-limit par IP serait contourné (multi-IP). Bas car l'asso est petite et
+// l'admin traite vite ; au-delà, les nouvelles demandes sont refusées jusqu'à ce qu'il purge.
+const MAX_PENDING_TOTAL = 15;
 
 // IP du client. Sur Vercel, `x-real-ip` est posé par la PLATEFORME (non falsifiable par le
 // client), contrairement à `x-forwarded-for` dont un client peut injecter la 1re valeur pour
