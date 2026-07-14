@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { hashPassword } from "@/lib/crypto";
 import { normalizeEmail } from "@/lib/session";
-import { emailConfigured } from "@/lib/email";
 import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
 import {
   EMAIL_RE,
@@ -10,8 +9,6 @@ import {
   passwordProblem,
   emailSendRateLimited,
   createEmailToken,
-  sendVerificationEmail,
-  sendAlreadyRegisteredEmail,
   nameFromEmail,
 } from "@/lib/email-auth";
 
@@ -19,9 +16,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // POST /api/auth/email/register  { email, password, name? }
-// Démarre une inscription « email seul » : envoie un LIEN d'activation (pas de ligne User
-// créée tant qu'il n'est pas cliqué → aucun squat d'identité possible). Réponse toujours
-// générique (anti-énumération) : on ne révèle jamais si l'email a déjà un compte.
+// Démarre une inscription « email seul » sur INVITATION : dépose une demande EN ATTENTE (pas
+// de ligne User créée, aucun mail envoyé). Un admin l'approuve depuis /admin et transmet le
+// lien d'activation à la main. Réponse toujours générique (anti-énumération) : on ne révèle
+// jamais si l'email a déjà un compte.
 export async function POST(req: NextRequest) {
   if (!FEATURE_EMAIL_LOGIN) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
@@ -37,12 +35,6 @@ export async function POST(req: NextRequest) {
   const pwProblem = passwordProblem(body.password);
   if (pwProblem) {
     return NextResponse.json({ error: pwProblem }, { status: 400 });
-  }
-  if (!emailConfigured()) {
-    return NextResponse.json(
-      { error: "Envoi d'e-mail non configuré côté serveur." },
-      { status: 503 },
-    );
   }
 
   const email = normalizeEmail(body.email);
@@ -61,27 +53,18 @@ export async function POST(req: NextRequest) {
   // On hache TOUJOURS (même coût dans les deux branches ci-dessous → pas d'oracle de timing).
   const passwordHash = await hashPassword(body.password as string);
 
-  const origin = req.nextUrl.origin;
   const existing = await prisma.user.findUnique({ where: { email } });
-  try {
-    if (existing?.passwordHash) {
-      // Compte déjà actif : pas de lien d'activation (ce serait une réinit déguisée) —
-      // on invite à se connecter / réinitialiser.
-      await sendAlreadyRegisteredEmail(email, origin);
-    } else {
-      // Email inconnu, ou compte ResaMania/sans mot de passe → lien d'activation.
-      const token = await createEmailToken({
-        email,
-        purpose: "signup",
-        ip,
-        passwordHash,
-        displayName: name,
-      });
-      await sendVerificationEmail(email, origin, token);
-    }
-  } catch (e) {
-    console.error("[email/register] envoi échoué:", e);
-    return NextResponse.json({ error: "Échec de l'envoi, réessaie plus tard." }, { status: 502 });
+  // Compte déjà actif → on n'enfile RIEN (ce serait une réinit déguisée ; la personne doit
+  // utiliser « mot de passe oublié »). Sinon on dépose une demande d'activation en attente.
+  if (!existing?.passwordHash) {
+    await createEmailToken({
+      email,
+      purpose: "signup",
+      ip,
+      passwordHash,
+      displayName: name,
+      approved: false,
+    });
   }
   return NextResponse.json({ ok: true });
 }

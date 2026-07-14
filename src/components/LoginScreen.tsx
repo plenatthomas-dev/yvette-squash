@@ -107,7 +107,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     }
   };
 
-  // Création de compte : envoie un lien d'activation par mail (aucune connexion immédiate).
+  // Création de compte : dépose une demande d'inscription (approbation admin, aucun mail).
   const submitRegister = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -122,7 +122,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Inscription impossible");
       setInfo(
-        `Presque fini ! On a envoyé un lien d'activation à ${email}. Clique dessus (pense aux spams) pour activer ton compte et te connecter.`,
+        `Demande envoyée ✅ Un administrateur va la valider et te transmettre ton lien d'activation directement (WhatsApp, SMS…). Rien à surveiller dans tes mails.`,
       );
     } catch (e) {
       setErr((e as Error).message);
@@ -131,7 +131,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     }
   };
 
-  // Mot de passe oublié : envoie un lien de réinitialisation (réponse volontairement neutre).
+  // Mot de passe oublié : dépose une demande de réinitialisation (validée par un admin).
   const submitForgot = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -146,7 +146,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Envoi impossible");
       setInfo(
-        `Si un compte existe pour ${email}, un lien de réinitialisation vient d'être envoyé (pense aux spams).`,
+        `Si un compte existe pour ${email}, un administrateur validera ta demande et te transmettra un lien de réinitialisation directement.`,
       );
     } catch (e) {
       setErr((e as Error).message);
@@ -258,7 +258,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
                 autoComplete="email"
               />
               <button type="submit" disabled={busy || !email.trim()}>
-                {busy ? "Envoi…" : "Recevoir un lien de réinitialisation"}
+                {busy ? "Envoi…" : "Demander une réinitialisation"}
               </button>
               <button
                 type="button"
