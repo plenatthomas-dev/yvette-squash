@@ -846,9 +846,22 @@ export default function Home() {
             {/* Menu ⋯ : regroupe les actions secondaires pour dégager le logo. */}
             <HeaderMenu
               items={[
+                ...(isAdmin
+                  ? [
+                      {
+                        key: "admin",
+                        label: "Admin",
+                        icon: <BellIcon />,
+                        badge: pendingRequests > 0 ? pendingRequests : undefined,
+                        onClick: () => {
+                          window.location.href = "/admin";
+                        },
+                      },
+                    ]
+                  : []),
                 {
                   key: "money",
-                  label: "Frais partagés",
+                  label: "Tricount",
                   icon: <EuroIcon />,
                   active: view === "money",
                   badge: FEATURE_TRICOUNT && triOwed > 0 ? triOwed : undefined,
@@ -873,19 +886,6 @@ export default function Home() {
                   comingSoon: !FEATURE_DIRECTORY,
                   onClick: () => setDirectoryOpen(true),
                 },
-                ...(isAdmin
-                  ? [
-                      {
-                        key: "admin",
-                        label: "Admin — demandes",
-                        icon: <BellIcon />,
-                        badge: pendingRequests > 0 ? pendingRequests : undefined,
-                        onClick: () => {
-                          window.location.href = "/admin";
-                        },
-                      },
-                    ]
-                  : []),
                 {
                   key: "share",
                   label: "Partager l'appli",
