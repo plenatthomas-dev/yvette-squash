@@ -433,6 +433,23 @@ export default function Home() {
     };
   }, [me, reload, loadTriOwed]);
 
+  // Le badge « Admin — demandes » peut changer pendant qu'on est sur /admin (approbation /
+  // rejet). /admin étant une page séparée, on rafraîchit le compteur au retour sur l'appli —
+  // SANS le throttle de 15 s ci-dessus (sinon un aller-retour rapide laisse la pastille périmée)
+  // et en écoutant `pageshow` (retour via le bouton « précédent » depuis le bfcache).
+  useEffect(() => {
+    if (!me || !isAdmin) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") checkMe();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", checkMe);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", checkMe);
+    };
+  }, [me, isAdmin, checkMe]);
+
   const pickDay = (d: string) => {
     setView("day");
     setDate(d);
