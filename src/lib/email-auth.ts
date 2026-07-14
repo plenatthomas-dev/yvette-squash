@@ -154,12 +154,23 @@ export async function rejectRequest(id: string): Promise<void> {
   await prisma.emailToken.deleteMany({ where: { id, approvedAt: null } });
 }
 
-/** Lien d'auth à transmettre selon le type de demande (activation vs réinitialisation). */
-export function authLinkFor(origin: string, purpose: TokenPurpose, token: string): string {
-  const t = encodeURIComponent(token);
-  return purpose === "signup"
-    ? `${origin}/api/auth/email/verify?token=${t}`
-    : `${origin}/reinitialiser?token=${t}`;
+/** Lien d'auth à transmettre. Activation ET réinitialisation mènent à la même page où la
+ *  personne choisit son mot de passe (le clic sur le lien prouve la possession de l'email). */
+export function authLinkFor(_origin: string, _purpose: TokenPurpose, token: string): string {
+  return `${_origin}/reinitialiser?token=${encodeURIComponent(token)}`;
+}
+
+/**
+ * Retrouve un jeton valide APPROUVÉ quel que soit son usage (signup OU reset). Utilisé par la
+ * page « définis ton mot de passe », commune aux deux parcours : le comportement (créer le
+ * compte vs juste changer le mot de passe) est décidé d'après `purpose` du jeton trouvé.
+ */
+export async function findApprovedToken(token: string) {
+  if (!token) return null;
+  return prisma.emailToken.findFirst({
+    where: { tokenHash: hashToken(token), expiresAt: { gt: new Date() }, approvedAt: { not: null } },
+    orderBy: { createdAt: "desc" },
+  });
 }
 
 /** Consomme tous les jetons d'un email pour un usage (usage unique + ménage). */

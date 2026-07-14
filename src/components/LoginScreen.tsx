@@ -117,7 +117,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
       const res = await fetch("/api/auth/email/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password: emailPassword, name: name.trim() || undefined }),
+        body: JSON.stringify({ email, name: name.trim() || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Inscription impossible");
@@ -288,33 +288,41 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
                   autoComplete="name"
                 />
               )}
-              <div className="pwd-field">
-                <input
-                  type={showEmailPwd ? "text" : "password"}
-                  placeholder={emailMode === "register" ? "Choisis un mot de passe (8 car. min)" : "Mot de passe"}
-                  value={emailPassword}
-                  onChange={(e) => setEmailPassword(e.target.value)}
-                  autoComplete={emailMode === "register" ? "new-password" : "current-password"}
-                  minLength={emailMode === "register" ? 8 : undefined}
-                />
-                <button
-                  type="button"
-                  className="pwd-toggle"
-                  onClick={() => setShowEmailPwd((v) => !v)}
-                  aria-label={showEmailPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-                  aria-pressed={showEmailPwd}
-                  title={showEmailPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-                >
-                  <EyeIcon off={showEmailPwd} />
-                </button>
-              </div>
-              <button type="submit" disabled={busy || !email.trim() || !emailPassword}>
+              {/* Le mot de passe ne se choisit PAS ici à l'inscription : c'est au moment
+                  d'activer le compte (via le lien transmis par l'admin) — cf. /reinitialiser. */}
+              {emailMode === "login" && (
+                <div className="pwd-field">
+                  <input
+                    type={showEmailPwd ? "text" : "password"}
+                    placeholder="Mot de passe"
+                    value={emailPassword}
+                    onChange={(e) => setEmailPassword(e.target.value)}
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    className="pwd-toggle"
+                    onClick={() => setShowEmailPwd((v) => !v)}
+                    aria-label={showEmailPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                    aria-pressed={showEmailPwd}
+                    title={showEmailPwd ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                  >
+                    <EyeIcon off={showEmailPwd} />
+                  </button>
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={
+                  busy || !email.trim() || (emailMode === "login" && !emailPassword)
+                }
+              >
                 {busy
                   ? emailMode === "register"
                     ? "Envoi…"
                     : "Connexion…"
                   : emailMode === "register"
-                    ? "Créer mon compte"
+                    ? "Demander un compte"
                     : "Se connecter"}
               </button>
             </form>

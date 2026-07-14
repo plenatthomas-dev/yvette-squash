@@ -9,7 +9,9 @@ import { PrivacyNotice } from "@/components/PrivacyNotice";
 import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
 
 export default function ResetPasswordPage() {
-  const [token, setToken] = useState<string | null>(null);
+  // undefined = chargement (on n'a pas encore lu l'URL) ; null/"" = pas de token → lien invalide.
+  // Sans ce distinguo, une URL sans `?token=` restait bloquée sur « Chargement… » à l'infini.
+  const [token, setToken] = useState<string | null | undefined>(undefined);
   const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -52,17 +54,17 @@ export default function ResetPasswordPage() {
 
   return (
     <main className="login">
-      <h1>Nouveau mot de passe</h1>
-      {token === null ? (
+      <h1>Définis ton mot de passe</h1>
+      {token === undefined ? (
         <p className="muted">Chargement…</p>
-      ) : token === "" ? (
+      ) : !token ? (
         <div className="notice error">
-          ⚠️ Lien invalide. Redemande un lien depuis « Mot de passe oublié » sur l'écran de
-          connexion.
+          ⚠️ Lien invalide ou incomplet. Demande un nouveau lien à un administrateur (inscription
+          ou « Mot de passe oublié » depuis l'écran de connexion).
         </div>
       ) : (
         <>
-          <p className="muted">Choisis ton nouveau mot de passe (8 caractères minimum).</p>
+          <p className="muted">Choisis ton mot de passe (8 caractères minimum).</p>
           <form onSubmit={submit}>
             <div className="pwd-field">
               <input
