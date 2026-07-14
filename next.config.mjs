@@ -1,3 +1,5 @@
+import { withBotId } from "botid/next/config";
+
 // CSP partielle SÛRE : on ne pose QUE les directives sans incidence sur le contenu inline.
 // On ne met volontairement PAS de `default-src` (il retomberait sur script-src/style-src et
 // casserait le script de thème inline, les styles Pico et le bootstrap inline de Next). Une
@@ -33,4 +35,6 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+// withBotId : pose le proxy/rewrites nécessaires à Vercel BotID (détection de bots invisible)
+// sur les endpoints protégés déclarés dans src/instrumentation-client.ts.
+export default withBotId(nextConfig);

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { checkBotId } from "botid/server";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/session";
 import { notifyAdminsOfRequest } from "@/lib/admin";
@@ -23,6 +24,11 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   if (!FEATURE_EMAIL_LOGIN) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
+  }
+  // Anti-bot invisible (Vercel BotID) : bloque le spam automatisé de la file d'attente admin
+  // avant tout travail. Sur un accès direct au endpoint (sans page instrumentée), isBot = true.
+  if ((await checkBotId()).isBot) {
+    return NextResponse.json({ error: "Requête refusée." }, { status: 403 });
   }
   const body = (await req.json().catch(() => ({}))) as {
     email?: unknown;
