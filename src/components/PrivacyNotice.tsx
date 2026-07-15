@@ -14,7 +14,7 @@ import { MODERATION_RETENTION_LABEL } from "@/lib/retention";
 // mails privés. Surchargeable par env pour changer de boîte sans redéployer le code.
 const CONTROLLER = "Thomas Plenat";
 const CONTACT_EMAIL =
-  process.env.NEXT_PUBLIC_PRIVACY_CONTACT?.trim() || "squash-yvette.app@gmail.com";
+  process.env.NEXT_PUBLIC_PRIVACY_CONTACT?.trim() || "squash.yvette.app@gmail.com";
 
 // Icône « information » (cercle + i) — ouvre la note de confidentialité.
 export function InfoIcon() {
