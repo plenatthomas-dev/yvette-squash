@@ -34,7 +34,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Titre ou message trop long." }, { status: 400 });
   }
 
+  // URL de clic : porte l'annonce en paramètres → au clic sur la notif, l'appli s'ouvre et
+  // ré-affiche le message dans une modale (cf. AnnounceModal). Stateless : rien à stocker.
+  const url = `/?${new URLSearchParams({ announce: "1", t: title, b: body }).toString()}`;
   // tag fixe : une nouvelle annonce remplace la précédente non lue plutôt que d'empiler.
-  const { recipients, sent } = await pushToAll({ title, body, url: "/", tag: "admin-announce" });
+  const { recipients, sent } = await pushToAll({ title, body, url, tag: "admin-announce" });
   return NextResponse.json({ ok: true, recipients, sent });
 }
