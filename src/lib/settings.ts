@@ -50,3 +50,41 @@ export async function setBanner(
 export async function clearBanner(): Promise<void> {
   await prisma.appSetting.deleteMany({ where: { key: BANNER_KEY } });
 }
+
+/** Ce que ce membre a déjà masqué : versions du bandeau fermé / de la modale vue. */
+export type BannerSeen = { dismissedVersion: string | null; modalSeenVersion: string | null };
+
+/** Masquages du membre. Ne jette jamais : en cas de pépin on réaffiche (plutôt que de taire). */
+export async function getBannerSeen(userId: string): Promise<BannerSeen> {
+  try {
+    const u = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { bannerDismissedVersion: true, bannerModalSeenVersion: true },
+    });
+    return {
+      dismissedVersion: u?.bannerDismissedVersion ?? null,
+      modalSeenVersion: u?.bannerModalSeenVersion ?? null,
+    };
+  } catch (e) {
+    console.error("[settings] lecture des masquages d'annonce impossible", e);
+    return { dismissedVersion: null, modalSeenVersion: null };
+  }
+}
+
+/**
+ * Enregistre que ce membre a fermé le bandeau (`what: "banner"`) ou vu la modale
+ * (`what: "modal"`) pour CETTE version de l'annonce. Les deux sont indépendants.
+ */
+export async function setBannerSeen(
+  userId: string,
+  what: "banner" | "modal",
+  version: string,
+): Promise<void> {
+  await prisma.user.update({
+    where: { id: userId },
+    data:
+      what === "banner"
+        ? { bannerDismissedVersion: version }
+        : { bannerModalSeenVersion: version },
+  });
+}

@@ -242,21 +242,21 @@ async function resolveResaToken(s: SessionTokenFields): Promise<ResaSession | nu
 }
 
 /**
- * Y a-t-il une session applicative vivante derrière ce cookie ? Vérification VOLONTAIREMENT
- * légère : une lecture par clé primaire, sans déchiffrer ni rafraîchir le jeton ResaMania
- * (contrairement à `getSession`, qui peut appeler ResaMania au passage — inacceptable sur une
- * route publique appelée à chaque chargement de page).
+ * `userId` derrière ce cookie, ou `null` si aucune session vivante. Vérification
+ * VOLONTAIREMENT légère : une lecture par clé primaire, sans déchiffrer ni rafraîchir le jeton
+ * ResaMania (contrairement à `getSession`, qui peut appeler ResaMania au passage — inacceptable
+ * sur une route publique appelée à chaque chargement de page).
  *
  * ⚠️ À réserver aux décisions d'AFFICHAGE. Ne jamais s'en servir pour autoriser une action :
  * pour ça, c'est `getSession` (qui seule garantit un jeton exploitable).
  */
-export async function hasLiveSession(sid: string | undefined): Promise<boolean> {
-  if (!sid) return false;
+export async function getLiveSessionUserId(sid: string | undefined): Promise<string | null> {
+  if (!sid) return null;
   const s = await prisma.session.findUnique({
     where: { id: sid },
-    select: { expiresAt: true },
+    select: { userId: true, expiresAt: true },
   });
-  return !!s && s.expiresAt > new Date();
+  return s && s.expiresAt > new Date() ? s.userId : null;
 }
 
 /** Récupère la session depuis l'id de cookie, en rafraîchissant le token ResaMania si besoin. */
