@@ -2822,16 +2822,35 @@ table.planning.week th.time.selhead {
 .trn-proposal strong { color: var(--pico-color); font-size: 0.95rem; }
 .trn-proposal small { color: var(--pico-color); opacity: 0.72; }
 
+/* Bannière d'annonce : texte défilant (marquee) quand le message dépasse la largeur.
+   La durée est posée en inline par le composant (proportionnelle à la longueur → vitesse
+   constante). Le transform n'affecte pas la mesure de débordement (scrollWidth). */
+.announce-marquee {
+  animation-name: announce-scroll;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+@keyframes announce-scroll {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
 /* --- Respect du réglage « réduire les animations » (a11y / WCAG 2.3.3) -----
    Pour les personnes sensibles au mouvement : on neutralise les animations
    décoratives (shimmer du skeleton en boucle, roue du rafraîchissement) et on
    réduit à un simple fondu quasi instantané les entrées de toasts/modales.
    Les transitions courtes (hover, etc.) restent, elles ne posent pas problème. */
 @media (prefers-reduced-motion: reduce) {
-  /* Coupe net les animations en boucle (skeleton, spinner de rafraîchissement). */
+  /* Coupe net les animations en boucle (skeleton, spinner de rafraîchissement, marquee). */
   .skel-cell,
-  .refresh.spin svg {
+  .refresh.spin svg,
+  .announce-marquee {
     animation: none !important;
+    transform: none !important;
   }
   /* Le skeleton garde un fond statique lisible plutôt qu'un dégradé figé à mi-course. */
   .skel-cell {
