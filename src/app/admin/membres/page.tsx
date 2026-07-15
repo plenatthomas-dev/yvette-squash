@@ -4,7 +4,8 @@
 // lien d'accès (activation / réinitialisation), désactiver / réactiver, supprimer. L'accès est
 // verrouillé CÔTÉ SERVEUR par /api/admin/members (allowlist ADMIN_EMAILS).
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
+import Link from "next/link";
 import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
 
 type Member = {
@@ -22,9 +23,31 @@ type Member = {
 
 type Action = "link" | "disable" | "enable" | "delete";
 
+// Petite pastille de statut (pas de classe .badge globale : elle n'existe qu'en scopé).
+const badge: CSSProperties = {
+  fontSize: "0.7rem",
+  padding: "1px 7px",
+  borderRadius: 999,
+  border: "1px solid currentColor",
+  whiteSpace: "nowrap",
+  lineHeight: 1.6,
+};
+
 function fmtDate(iso: string | null): string {
-  if (!iso) return "jamais";
+  if (!iso) return "—";
   return new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
+}
+
+// Dernière connexion : jour + heure (repère plus finement l'activité récente).
+function fmtDateTime(iso: string | null): string {
+  if (!iso) return "jamais";
+  return new Date(iso).toLocaleString("fr-FR", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export default function MembersPage() {
@@ -94,7 +117,7 @@ export default function MembersPage() {
     <main className="login">
       <h1>Membres</h1>
       <p className="muted tiny">
-        <a href="/admin">← Retour à l'admin</a>
+        <Link href="/admin">← Retour à l'admin</Link>
       </p>
 
       {state === "loading" && <p className="muted">Chargement…</p>}
@@ -106,91 +129,113 @@ export default function MembersPage() {
       {state === "ready" && (
         <>
           <p className="muted tiny">{members.length} compte{members.length > 1 ? "s" : ""}.</p>
-          <ul style={{ listStyle: "none", padding: 0 }}>
-            {members.map((m) => (
-              <li
-                key={m.id}
-                style={{
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 8,
-                  padding: "10px 12px",
-                  marginBottom: 10,
-                  opacity: m.disabledAt ? 0.6 : 1,
-                }}
-              >
-                <div>
-                  <strong>{m.displayName}</strong>
-                  {m.nickname ? ` (${m.nickname})` : ""}{" "}
-                  <span className="muted tiny">{m.mode === "resamania" ? "· ResaMania" : "· Email"}</span>
-                </div>
-                <div className="muted tiny">{m.email ?? "sans e-mail"}</div>
-                <div className="muted tiny">
-                  Inscrit le {fmtDate(m.createdAt)} · Dernière connexion : {fmtDate(m.lastLoginAt)}
-                </div>
-                <div className="tiny" style={{ marginTop: 2 }}>
-                  {m.disabledAt && <span style={{ color: "#b91c1c" }}>désactivé</span>}
-                  {!m.verified && (
-                    <span style={{ color: "#b45309", marginLeft: m.disabledAt ? 8 : 0 }}>
-                      non vérifié
-                    </span>
-                  )}
-                </div>
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Membre</th>
+                  <th>Dates</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {members.map((m) => (
+                  <tr key={m.id} style={{ opacity: m.disabledAt ? 0.55 : 1 }}>
+                    {/* Identité + statut */}
+                    <td>
+                      <div>
+                        <strong>{m.displayName}</strong>
+                        {m.nickname ? ` (${m.nickname})` : ""}
+                      </div>
+                      <div className="muted tiny">{m.email ?? "sans e-mail"}</div>
+                      <div className="tiny" style={{ marginTop: 2, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <span style={badge}>{m.mode === "resamania" ? "ResaMania" : "Email"}</span>
+                        {m.disabledAt && (
+                          <span style={{ ...badge, color: "#b91c1c" }}>désactivé</span>
+                        )}
+                        {!m.verified && (
+                          <span style={{ ...badge, color: "#b45309" }}>non vérifié</span>
+                        )}
+                      </div>
+                    </td>
 
-                {links[m.id] && (
-                  <div className="notice info" style={{ wordBreak: "break-all", marginTop: 8 }}>
-                    <strong>Lien à transmettre :</strong>
-                    <br />
-                    {links[m.id]}
-                    <br />
-                    <button type="button" onClick={() => copy(m.id, links[m.id])}>
-                      {copied === m.id ? "Copié ✓" : "Copier le lien"}
-                    </button>
-                  </div>
-                )}
-                {msg?.id === m.id && (
-                  <div className="notice error" style={{ marginTop: 8 }}>
-                    ⚠️ {msg.text}
-                  </div>
-                )}
+                    {/* Inscription + dernière connexion, sur deux lignes */}
+                    <td className="tiny" style={{ whiteSpace: "nowrap" }}>
+                      <div>
+                        <span className="muted">Inscrit&nbsp;:</span> {fmtDate(m.createdAt)}
+                      </div>
+                      <div>
+                        <span className="muted">Dernière connexion&nbsp;:</span>
+                        <br />
+                        {fmtDateTime(m.lastLoginAt)}
+                      </div>
+                    </td>
 
-                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {FEATURE_EMAIL_LOGIN && m.email && (
-                    <button type="button" disabled={busyId === m.id} onClick={() => act(m.id, "link")}>
-                      {m.hasPassword ? "Lien de réinitialisation" : "Lien d'activation"}
-                    </button>
-                  )}
-                  {m.disabledAt ? (
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={busyId === m.id}
-                      onClick={() => act(m.id, "enable")}
-                    >
-                      Réactiver
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={busyId === m.id}
-                      onClick={() => act(m.id, "disable")}
-                    >
-                      Désactiver
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={busyId === m.id}
-                    onClick={() => act(m.id, "delete")}
-                    style={{ color: "#b91c1c" }}
-                  >
-                    Supprimer
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
+                    {/* Actions */}
+                    <td>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {FEATURE_EMAIL_LOGIN && m.email && (
+                          <button
+                            type="button"
+                            className="tiny"
+                            disabled={busyId === m.id}
+                            onClick={() => act(m.id, "link")}
+                          >
+                            {m.hasPassword ? "Lien de réinit." : "Lien d'activation"}
+                          </button>
+                        )}
+                        {m.disabledAt ? (
+                          <button
+                            type="button"
+                            className="secondary tiny"
+                            disabled={busyId === m.id}
+                            onClick={() => act(m.id, "enable")}
+                          >
+                            Réactiver
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="secondary tiny"
+                            disabled={busyId === m.id}
+                            onClick={() => act(m.id, "disable")}
+                          >
+                            Désactiver
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="secondary tiny"
+                          disabled={busyId === m.id}
+                          onClick={() => act(m.id, "delete")}
+                          style={{ color: "#b91c1c" }}
+                        >
+                          Supprimer
+                        </button>
+                      </div>
+
+                      {links[m.id] && (
+                        <div className="notice info" style={{ wordBreak: "break-all", marginTop: 8 }}>
+                          <strong>Lien à transmettre :</strong>
+                          <br />
+                          {links[m.id]}
+                          <br />
+                          <button type="button" className="tiny" onClick={() => copy(m.id, links[m.id])}>
+                            {copied === m.id ? "Copié ✓" : "Copier le lien"}
+                          </button>
+                        </div>
+                      )}
+                      {msg?.id === m.id && (
+                        <div className="notice error" style={{ marginTop: 8 }}>
+                          ⚠️ {msg.text}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
     </main>

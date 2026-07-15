@@ -5,6 +5,7 @@
 // ADMIN_EMAILS) — cette page ne fait qu'afficher ce que l'API veut bien lui rendre.
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
 
 type PendingRequest = {
@@ -125,6 +126,9 @@ export default function AdminPage() {
   return (
     <main className="login">
       <h1>Admin</h1>
+      <p className="muted tiny">
+        <Link href="/">← Retour à mon compte</Link>
+      </p>
 
       {state === "loading" && <p className="muted">Chargement…</p>}
       {state === "error" && <div className="notice error">⚠️ Erreur de chargement.</div>}
@@ -135,7 +139,7 @@ export default function AdminPage() {
       {state === "ready" && (
         <>
           <p style={{ marginBottom: 20 }}>
-            <a href="/admin/membres">👥 Gérer les membres →</a>
+            <Link href="/admin/membres">👥 Gérer les membres →</Link>
           </p>
 
           {/* Annonce push à tous les membres abonnés (« Terrain fermé samedi »…). */}
