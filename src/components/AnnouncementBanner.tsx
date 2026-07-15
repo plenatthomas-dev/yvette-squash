@@ -7,7 +7,7 @@
 // Les deux se pilotent depuis un seul fetch et se ferment indépendamment. Une annonce MODIFIÉE
 // (nouvelle `version`) repasse devant les yeux (modale + bannière ré-affichées).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Banner = { message: string; level: "info" | "warn"; version: string };
 
@@ -24,6 +24,11 @@ export default function AnnouncementBanner() {
   const [banner, setBanner] = useState<Banner | null>(null);
   const [showBanner, setShowBanner] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  // Défilement (marquee) du message quand il dépasse la largeur du bandeau.
+  const boxRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [scroll, setScroll] = useState(false);
+  const [durationS, setDurationS] = useState(16);
 
   useEffect(() => {
     (async () => {
@@ -43,6 +48,22 @@ export default function AnnouncementBanner() {
       }
     })();
   }, []);
+
+  // Active le défilement seulement si le texte déborde ; vitesse constante (durée ∝ distance).
+  useEffect(() => {
+    if (!showBanner || !banner) return;
+    const measure = () => {
+      const box = boxRef.current;
+      const txt = textRef.current;
+      if (!box || !txt) return;
+      const overflow = txt.scrollWidth > box.clientWidth + 2;
+      setScroll(overflow);
+      if (overflow) setDurationS(Math.max(10, (2 * txt.scrollWidth) / 80)); // ~80 px/s
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [showBanner, banner]);
 
   if (!banner) return null;
   const c = palette[banner.level];
@@ -86,9 +107,22 @@ export default function AnnouncementBanner() {
           <span aria-hidden style={{ fontSize: "1.15rem" }}>
             📣
           </span>
-          <span style={{ flex: 1, textAlign: "center", whiteSpace: "pre-wrap" }}>
-            {banner.message}
-          </span>
+          <div
+            ref={boxRef}
+            style={{ flex: 1, overflow: "hidden", textAlign: scroll ? "left" : "center" }}
+          >
+            <span
+              ref={textRef}
+              className={scroll ? "announce-marquee" : undefined}
+              style={{
+                display: "inline-block",
+                whiteSpace: "nowrap",
+                ...(scroll ? { animationDuration: `${durationS}s` } : null),
+              }}
+            >
+              {banner.message}
+            </span>
+          </div>
           <button
             type="button"
             onClick={dismissBanner}
