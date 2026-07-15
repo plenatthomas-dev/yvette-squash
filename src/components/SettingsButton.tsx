@@ -6,7 +6,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Dialog } from "@/components/Dialog";
-import { FEATURE_DIRECTORY, FEATURE_DELEGATION } from "@/lib/features";
+import { useFeatures } from "@/components/FeatureProvider";
 import { DELEGATION_DURATIONS } from "@/lib/delegation-shared";
 import {
   fetchDirectory,
@@ -153,6 +153,7 @@ export function SettingsButton({
   onProfileSaved: () => void;
   toast: (type: "ok" | "err" | "info", msg: string) => void;
 }) {
+  const { directory, delegation } = useFeatures();
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>("system");
   const [nick, setNick] = useState(nickname ?? "");
@@ -187,7 +188,7 @@ export function SettingsButton({
   const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open || !FEATURE_DELEGATION) return;
+    if (!open || !delegation) return;
     let cancelled = false;
     setExtending(null); // réouverture du panneau : pas de choix de durée résiduel
     (async () => {
@@ -214,7 +215,7 @@ export function SettingsButton({
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, delegation]);
 
   // Membres à qui je ne délègue pas encore : seuls eux sont proposés dans la liste à
   // cocher (renouveler/étendre une délégation en cours = révoquer puis redonner).
@@ -477,7 +478,7 @@ export function SettingsButton({
               </div>
             </section>
 
-            {FEATURE_DIRECTORY && (
+            {directory && (
               <section className="setting">
                 <SettingInfo title="Annuaire des membres">
                   Par défaut, ton nom (ou pseudo) apparaît dans l'annuaire des membres pour
@@ -496,7 +497,7 @@ export function SettingsButton({
               </section>
             )}
 
-            {FEATURE_DELEGATION && (
+            {delegation && (
               <section className="setting">
                 <SettingInfo title="Déléguer mes droits">
                   Autorise un ou plusieurs membres à réserver/annuler en ton nom pendant une

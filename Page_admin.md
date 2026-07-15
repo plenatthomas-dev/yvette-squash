@@ -63,10 +63,12 @@ sur `User` (petite migration). À faire seulement si on veut déléguer l'admini
 ### 8. Journal d'audit
 Tracer « qui a approuvé / supprimé / annoncé quoi ». Utile surtout avec plusieurs admins.
 
-### 9. Feature flags runtime
-Activer / couper une fonction sans redéploiement. Coûteux : les flags actuels sont build-time
-(`NEXT_PUBLIC_*`) → il faudrait un mécanisme runtime (ex. Edge Config). Probablement pas
-prioritaire.
+### 9. Feature flags runtime — ✅ FAIT
+Activer / couper une fonction sans redéploiement, depuis `/admin`. Modèle **hybride** : les
+`NEXT_PUBLIC_FEATURE_*` restent le **défaut de l'environnement** (donc Recette/preview gardent
+leurs flags scopés à la branche), et un **override** en base (`AppSetting["features"]`, aucune
+migration) peut forcer ON/OFF par fonction ; « Auto » = pas d'override, on suit l'env.
+Pas d'Edge Config : la table `AppSetting` de l'étape 2 suffit.
 
 ---
 

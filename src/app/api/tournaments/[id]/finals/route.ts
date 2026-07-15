@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { FEATURE_TOURNAMENT } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 import { materializeFinals } from "@/lib/tournament-db";
 
 export const runtime = "nodejs";
@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 // par rang de poule) une fois toutes les poules terminées. Créateur seulement. Les
 // participants sont figés au clic à partir des classements de poules du moment.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  if (!FEATURE_TOURNAMENT) {
+  if (!(await getFeatures()).tournament) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);

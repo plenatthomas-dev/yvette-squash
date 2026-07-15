@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/session";
 import { notifyAdminsOfRequest } from "@/lib/admin";
 import { isEmailBlocked } from "@/lib/moderation";
-import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 import {
   EMAIL_RE,
   clientIp,
@@ -23,7 +23,7 @@ export const dynamic = "force-dynamic";
 // ici : le lien peut n'arriver que des heures plus tard). Réponse toujours générique
 // (anti-énumération) : on ne révèle jamais si l'email a déjà un compte.
 export async function POST(req: NextRequest) {
-  if (!FEATURE_EMAIL_LOGIN) {
+  if (!(await getFeatures()).emailLogin) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   // Anti-bot invisible (Vercel BotID) : bloque le spam automatisé de la file d'attente admin

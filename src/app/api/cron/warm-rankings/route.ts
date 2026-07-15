@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { cronAuthorized } from "@/lib/cron-auth";
 import { recordCronRun } from "@/lib/cron-run";
-import { FEATURE_RANKING } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 import { getLatestMonth, searchRanking } from "@/lib/squashnet/client";
 import { matchRanking } from "@/lib/squashnet/match";
 
@@ -16,7 +16,7 @@ export const maxDuration = 60;
 // upsert si trouvé, suppression du classement obsolète sinon (le membre n'apparaît plus
 // classé). Séquentiel (doux pour squashnet), idempotent. Mensuel (le classement bouge 1×/mois).
 export async function GET(req: NextRequest) {
-  if (!FEATURE_RANKING) {
+  if (!(await getFeatures()).ranking) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   if (!cronAuthorized(req)) {

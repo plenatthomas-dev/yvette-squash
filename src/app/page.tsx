@@ -39,12 +39,7 @@ import {
   pushSupported,
   pushEnabledOnServer,
 } from "@/lib/pushClient";
-import {
-  FEATURE_TRICOUNT,
-  FEATURE_DIRECTORY,
-  FEATURE_DELEGATION,
-  FEATURE_TOURNAMENT,
-} from "@/lib/features";
+import { useFeatures } from "@/components/FeatureProvider";
 
 function toISODate(d: Date): string {
   return d.toLocaleDateString("en-CA"); // YYYY-MM-DD local
@@ -134,6 +129,7 @@ interface AlertItem {
 }
 
 export default function Home() {
+  const { tricount, directory, delegation, tournament } = useFeatures();
   const [me, setMe] = useState<string | null | undefined>(undefined); // undefined = chargement
   const [myId, setMyId] = useState<string | null>(null); // id interne (se reconnaître dans l'annuaire)
   const [myHandle, setMyHandle] = useState<string>(""); // token créneau (pseudo tronqué / Tho.P)
@@ -277,8 +273,8 @@ export default function Home() {
     setTriOwed(n);
   }, []);
   useEffect(() => {
-    if (me && FEATURE_TRICOUNT) loadTriOwed();
-  }, [me, loadTriOwed]);
+    if (me && tricount) loadTriOwed();
+  }, [me, tricount, loadTriOwed]);
 
   // Délégation reçue (idée 4) : si un autre membre m'a délégué ses droits, je peux agir
   // « en son nom ». `actingAs` = pour qui j'agis actuellement (null = moi-même).
@@ -294,8 +290,8 @@ export default function Home() {
     setIncomingDelegations(d.incoming ?? []);
   }, []);
   useEffect(() => {
-    if (me && FEATURE_DELEGATION) loadIncomingDelegation();
-  }, [me, loadIncomingDelegation]);
+    if (me && delegation) loadIncomingDelegation();
+  }, [me, delegation, loadIncomingDelegation]);
   // Sécurité : si le délégant sélectionné n'est plus dans les délégations entrantes actives
   // (révoquée, expirée), on retombe sur « moi-même ».
   useEffect(() => {
@@ -366,8 +362,8 @@ export default function Home() {
     const vParam = p.get("view");
     const vLS = localStorage.getItem("view");
     let v = isView(vParam) ? vParam : isView(vLS) ? vLS : null;
-    if (v === "money" && !FEATURE_TRICOUNT) v = "day"; // Frais désactivé : jamais cette vue
-    if (v === "tourney" && !FEATURE_TOURNAMENT) v = "day"; // Tournoi désactivé
+    // Les vues gated (Frais/Tournoi) sont ramenées à « day » par l'effet correctif plus bas :
+    // il couvre aussi la coupure d'un flag EN COURS de session, pas seulement le démarrage.
     // Au LANCEMENT, on n'ouvre jamais directement la vue Semaine : /api/week (7 fetches
     // ResaMania) est lourd sur le chemin critique du démarrage. La Semaine reste à un clic
     // une fois l'appli chargée. (Comme la DATE, ce n'est volontairement pas restauré.)
@@ -381,6 +377,13 @@ export default function Home() {
 
     setHydrated(true);
   }, []);
+
+  // Une vue dont la fonction est coupée ne doit jamais rester à l'écran : au démarrage
+  // (vue restaurée depuis l'URL/localStorage) comme après une coupure à chaud par un admin.
+  useEffect(() => {
+    if (view === "money" && !tricount) setView("day");
+    if (view === "tourney" && !tournament) setView("day");
+  }, [view, tricount, tournament]);
 
   // Reflète l'état dans l'URL (partageable, survit au refresh) et le persiste.
   useEffect(() => {
@@ -423,7 +426,7 @@ export default function Home() {
       if (now - lastFocusRef.current < 15000) return;
       lastFocusRef.current = now;
       reload();
-      if (FEATURE_TRICOUNT) loadTriOwed(); // le badge € peut avoir changé (validation ailleurs)
+      if (tricount) loadTriOwed(); // le badge € peut avoir changé (validation ailleurs)
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
@@ -431,7 +434,7 @@ export default function Home() {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, [me, reload, loadTriOwed]);
+  }, [me, tricount, reload, loadTriOwed]);
 
   // Le badge « Admin — demandes » peut changer pendant qu'on est sur /admin (approbation /
   // rejet). /admin étant une page séparée, on rafraîchit le compteur au retour sur l'appli —
@@ -808,7 +811,7 @@ export default function Home() {
             </h1>
           </div>
           <div className="actions">
-            {FEATURE_DELEGATION && incomingDelegations.length > 0 && (
+            {delegation && incomingDelegations.length > 0 && (
               <select
                 className="acting-as-select"
                 value={actingAsId ?? ""}
@@ -864,9 +867,9 @@ export default function Home() {
                   label: "Tricount",
                   icon: <EuroIcon />,
                   active: view === "money",
-                  badge: FEATURE_TRICOUNT && triOwed > 0 ? triOwed : undefined,
-                  disabled: !FEATURE_TRICOUNT,
-                  comingSoon: !FEATURE_TRICOUNT,
+                  badge: tricount && triOwed > 0 ? triOwed : undefined,
+                  disabled: !tricount,
+                  comingSoon: !tricount,
                   onClick: () => setView(view === "money" ? "day" : "money"),
                 },
                 {
@@ -874,16 +877,16 @@ export default function Home() {
                   label: "Tournois",
                   icon: <TrophyIcon />,
                   active: view === "tourney",
-                  disabled: !FEATURE_TOURNAMENT,
-                  comingSoon: !FEATURE_TOURNAMENT,
+                  disabled: !tournament,
+                  comingSoon: !tournament,
                   onClick: () => setView(view === "tourney" ? "day" : "tourney"),
                 },
                 {
                   key: "directory",
                   label: "Annuaire",
                   icon: <UsersIcon />,
-                  disabled: !FEATURE_DIRECTORY,
-                  comingSoon: !FEATURE_DIRECTORY,
+                  disabled: !directory,
+                  comingSoon: !directory,
                   onClick: () => setDirectoryOpen(true),
                 },
                 {
@@ -915,7 +918,7 @@ export default function Home() {
         toast={toast}
       />
 
-      {FEATURE_DELEGATION &&
+      {delegation &&
         incomingDelegations.map((deleg) => {
           const key = `${deleg.delegatorId}|${deleg.expiresAt}`;
           if (delegBannerDismissed.includes(key)) return null;
@@ -1069,11 +1072,11 @@ export default function Home() {
 
       {error && !isSpecial && <div className="notice error" role="alert">⚠️ {error}</div>}
 
-      {FEATURE_TRICOUNT && view === "money" && (
+      {tricount && view === "money" && (
         <Tricount toast={toast} onExpired={handleExpired} onOwedChange={setTriOwed} />
       )}
 
-      {FEATURE_TOURNAMENT && view === "tourney" && (
+      {tournament && view === "tourney" && (
         <Tournament toast={toast} onExpired={handleExpired} />
       )}
 

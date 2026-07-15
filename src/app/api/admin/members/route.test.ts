@@ -24,10 +24,16 @@ vi.mock("@/lib/admin", () => ({
   requireAdmin: vi.fn(async () => h.admin),
   isAdminEmail: (e: string | null | undefined) => (e ? h.adminEmails.has(e) : false),
 }));
-vi.mock("@/lib/features", () => ({
-  get FEATURE_EMAIL_LOGIN() {
-    return h.featureEmailLogin;
-  },
+// Le flag est résolu à chaud côté serveur (env + override en base) : on mocke l'état effectif.
+vi.mock("@/lib/features-server", () => ({
+  getFeatures: async () => ({
+    tricount: false,
+    emailLogin: h.featureEmailLogin,
+    directory: false,
+    delegation: false,
+    tournament: false,
+    ranking: false,
+  }),
 }));
 vi.mock("@/lib/members", () => ({
   listMembers: vi.fn(async () => h.members),

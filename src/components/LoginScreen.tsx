@@ -1,11 +1,11 @@
 "use client";
 
 // Écran de connexion (extrait de page.tsx) : onglet ResaMania + onglet « Par email »
-// (OTP, gated par FEATURE_EMAIL_LOGIN). L'icône œil ci-dessous ne sert qu'ici.
+// (OTP, gated par le flag `emailLogin`). L'icône œil ci-dessous ne sert qu'ici.
 
 import { useEffect, useState, type FormEvent } from "react";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
-import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
+import { useFeatures } from "@/components/FeatureProvider";
 
 // Icône « œil » (afficher/masquer le mot de passe). `off` = œil barré (masqué).
 function EyeIcon({ off }: { off: boolean }) {
@@ -37,6 +37,7 @@ function EyeIcon({ off }: { off: boolean }) {
 }
 
 export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
+  const { emailLogin } = useFeatures();
   const [tab, setTab] = useState<"resa" | "email">("resa");
   // ResaMania
   const [username, setUsername] = useState("");
@@ -58,13 +59,15 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    if (params.get("erreur") === "lien_invalide" && FEATURE_EMAIL_LOGIN) {
+    if (params.get("erreur") === "lien_invalide" && emailLogin) {
       setTab("email");
       setErr("Ce lien d'activation est invalide ou expiré. Recrée un compte pour en recevoir un nouveau.");
       // Nettoie l'URL pour ne pas ré-afficher le message au rechargement.
       window.history.replaceState(null, "", window.location.pathname);
     }
-  }, []);
+    // Rejoué si le flag arrive après coup (override runtime) : sans effet, `replaceState`
+    // a déjà retiré le paramètre d'URL.
+  }, [emailLogin]);
 
   const submitResa = async (e: FormEvent) => {
     e.preventDefault();
@@ -188,18 +191,18 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
           type="button"
           className={
             (tab === "email" ? "active" : "secondary") +
-            (FEATURE_EMAIL_LOGIN ? "" : " coming-soon")
+            (emailLogin ? "" : " coming-soon")
           }
           aria-pressed={tab === "email"}
-          onClick={() => FEATURE_EMAIL_LOGIN && switchTab("email")}
-          disabled={!FEATURE_EMAIL_LOGIN}
-          title={FEATURE_EMAIL_LOGIN ? undefined : "🚧 En cours de développement"}
+          onClick={() => emailLogin && switchTab("email")}
+          disabled={!emailLogin}
+          title={emailLogin ? undefined : "🚧 En cours de développement"}
         >
           Par email
         </button>
       </div>
 
-      {tab === "resa" || !FEATURE_EMAIL_LOGIN ? (
+      {tab === "resa" || !emailLogin ? (
         <>
           <p className="muted">
             Connecte-toi avec ton compte ResaMania (Le Complexe Bures).

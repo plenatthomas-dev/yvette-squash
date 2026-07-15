@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { FEATURE_TOURNAMENT } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 import { proposeFormats } from "@/lib/tournament";
 import { materialize } from "@/lib/tournament-db";
 
@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 // POST /api/tournaments/{id}/generate : fige la formule choisie et crée poules + matchs.
 // { kind: "pools" | "bracket" | "pools_bracket", poolSizes?: number[] }. Créateur seulement.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  if (!FEATURE_TOURNAMENT) {
+  if (!(await getFeatures()).tournament) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);

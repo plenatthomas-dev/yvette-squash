@@ -6,9 +6,10 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
-import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
+import { useFeatures } from "@/components/FeatureProvider";
 
 export default function ResetPasswordPage() {
+  const { emailLogin } = useFeatures();
   // undefined = chargement (on n'a pas encore lu l'URL) ; null/"" = pas de token → lien invalide.
   // Sans ce distinguo, une URL sans `?token=` restait bloquée sur « Chargement… » à l'infini.
   const [token, setToken] = useState<string | null | undefined>(undefined);
@@ -43,7 +44,7 @@ export default function ResetPasswordPage() {
     }
   };
 
-  if (!FEATURE_EMAIL_LOGIN) {
+  if (!emailLogin) {
     return (
       <main className="login">
         <h1>Réinitialisation</h1>

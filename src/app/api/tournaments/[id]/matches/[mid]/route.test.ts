@@ -20,10 +20,16 @@ const h = vi.hoisted(() => ({
   tournamentUpdate: vi.fn(async (_args: unknown) => ({})),
 }));
 
-vi.mock("@/lib/features", () => ({
-  get FEATURE_TOURNAMENT() {
-    return h.featureOn;
-  },
+// Le flag est résolu à chaud côté serveur (env + override en base) : on mocke l'état effectif.
+vi.mock("@/lib/features-server", () => ({
+  getFeatures: async () => ({
+    tricount: false,
+    emailLogin: false,
+    directory: false,
+    delegation: false,
+    tournament: h.featureOn,
+    ranking: false,
+  }),
 }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
 vi.mock("@/lib/db", () => ({

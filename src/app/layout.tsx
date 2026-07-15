@@ -3,6 +3,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import AnnouncementBanner from "@/components/AnnouncementBanner";
 import AnnounceModal from "@/components/AnnounceModal";
+import FeatureProvider from "@/components/FeatureProvider";
 import "@picocss/pico/css/pico.min.css";
 import "./globals.css";
 
@@ -44,7 +45,7 @@ export default function RootLayout({
       <body>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <AnnouncementBanner />
-        {children}
+        <FeatureProvider>{children}</FeatureProvider>
         <AnnounceModal />
         <Analytics />
         <SpeedInsights />

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { FEATURE_TOURNAMENT } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 import { serializeTournament, tournamentInclude, validScore } from "@/lib/tournament-db";
 import { bracketDescendants } from "@/lib/tournament";
 
@@ -31,7 +31,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; mid: string }> },
 ) {
-  if (!FEATURE_TOURNAMENT) {
+  if (!(await getFeatures()).tournament) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);

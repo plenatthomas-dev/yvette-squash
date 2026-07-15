@@ -6,7 +6,7 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 import Link from "next/link";
-import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
+import { useFeatures } from "@/components/FeatureProvider";
 
 type Member = {
   id: string;
@@ -51,6 +51,7 @@ function fmtDateTime(iso: string | null): string {
 }
 
 export default function MembersPage() {
+  const { emailLogin } = useFeatures();
   const [state, setState] = useState<"loading" | "forbidden" | "ready" | "error">("loading");
   const [members, setMembers] = useState<Member[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -174,7 +175,7 @@ export default function MembersPage() {
                     {/* Actions */}
                     <td>
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {FEATURE_EMAIL_LOGIN && m.email && (
+                        {emailLogin && m.email && (
                           <button
                             type="button"
                             className="tiny"

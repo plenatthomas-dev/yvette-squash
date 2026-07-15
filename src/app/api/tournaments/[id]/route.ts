@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { FEATURE_TOURNAMENT } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 import { serializeTournament, tournamentInclude } from "@/lib/tournament-db";
 
 export const runtime = "nodejs";
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 // GET /api/tournaments/{id} : état complet (poules + classements, ou tableau en direct).
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  if (!FEATURE_TOURNAMENT) {
+  if (!(await getFeatures()).tournament) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 // DELETE /api/tournaments/{id} : créateur seulement (supprime tout en cascade).
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  if (!FEATURE_TOURNAMENT) {
+  if (!(await getFeatures()).tournament) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);

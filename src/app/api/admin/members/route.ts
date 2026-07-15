@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAdmin, isAdminEmail } from "@/lib/admin";
 import { listMembers, deleteBlockersFor } from "@/lib/members";
-import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 import { createEmailToken, authLinkFor, clientIp } from "@/lib/email-auth";
 
 export const runtime = "nodejs";
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
 
   if (action === "link") {
     // Le lien mène à /reinitialiser, servi par le parcours « email seul » (désactivé → 404).
-    if (!FEATURE_EMAIL_LOGIN) {
+    if (!(await getFeatures()).emailLogin) {
       return NextResponse.json({ error: "Connexion par e-mail désactivée." }, { status: 400 });
     }
     if (!target.email) {

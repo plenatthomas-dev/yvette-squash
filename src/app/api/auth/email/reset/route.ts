@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { hashPassword } from "@/lib/crypto";
 import { createEmailSession } from "@/lib/session";
-import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 import {
   passwordProblem,
   findApprovedToken,
@@ -23,7 +23,7 @@ const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 jours
 //  - signup : crée le compte (ou active un compte ResaMania sans mot de passe) ;
 //  - reset  : change le mot de passe d'un compte existant.
 export async function POST(req: NextRequest) {
-  if (!FEATURE_EMAIL_LOGIN) {
+  if (!(await getFeatures()).emailLogin) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const body = (await req.json().catch(() => ({}))) as { token?: unknown; password?: unknown };

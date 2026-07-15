@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { FEATURE_DELEGATION } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 import { pushToUser } from "@/lib/push";
 
 export const runtime = "nodejs";
@@ -11,7 +11,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  if (!FEATURE_DELEGATION) {
+  if (!(await getFeatures()).delegation) {
     return NextResponse.json({ error: "Délégation désactivée" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);

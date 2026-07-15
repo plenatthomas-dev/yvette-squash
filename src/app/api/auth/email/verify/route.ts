@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 // d'activer (et non à l'inscription), l'activation et la réinitialisation partagent la même
 // page /reinitialiser. On y redirige donc — en conservant les liens d'activation déjà émis.
 export async function GET(req: NextRequest) {
-  if (!FEATURE_EMAIL_LOGIN) {
+  if (!(await getFeatures()).emailLogin) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const token = req.nextUrl.searchParams.get("token") ?? "";

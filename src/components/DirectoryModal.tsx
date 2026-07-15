@@ -5,7 +5,7 @@ import { Dialog } from "@/components/Dialog";
 import { fetchDirectory, getDirectoryGroupUrl } from "@/lib/directoryCache";
 
 // Annuaire des membres (idée 6). Bouton d'en-tête → modale listant les joueurs opt-in,
-// avec une recherche par nom. Gated par FEATURE_DIRECTORY : grisé (« bientôt ») si OFF,
+// avec une recherche par nom. Gated par le flag `directory` : grisé (« bientôt ») si OFF,
 // à l'image du bouton Frais. Lecture seule ici (les usages — message, etc. — viendront).
 export function DirectoryModal({
   open,

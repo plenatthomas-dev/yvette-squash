@@ -3,18 +3,21 @@ import type { NextRequest } from "next/server";
 
 // État mutable partagé, hoisté pour être visible des factories vi.mock (hoistées en tête).
 const h = vi.hoisted(() => ({
-  flags: { FEATURE_DIRECTORY: true, FEATURE_RANKING: true },
+  flags: { directory: true, ranking: true },
   session: null as null | { userId: string },
   users: [] as Array<Record<string, unknown>>,
 }));
 
-vi.mock("@/lib/features", () => ({
-  get FEATURE_DIRECTORY() {
-    return h.flags.FEATURE_DIRECTORY;
-  },
-  get FEATURE_RANKING() {
-    return h.flags.FEATURE_RANKING;
-  },
+// Les flags sont résolus à chaud côté serveur (env + override en base) : on mocke l'état effectif.
+vi.mock("@/lib/features-server", () => ({
+  getFeatures: async () => ({
+    tricount: false,
+    emailLogin: false,
+    directory: h.flags.directory,
+    delegation: false,
+    tournament: false,
+    ranking: h.flags.ranking,
+  }),
 }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
 vi.mock("@/lib/db", () => ({
@@ -27,14 +30,14 @@ import { GET } from "./route";
 const req = () => ({ cookies: { get: () => undefined } }) as unknown as NextRequest;
 
 beforeEach(() => {
-  h.flags = { FEATURE_DIRECTORY: true, FEATURE_RANKING: true };
+  h.flags = { directory: true, ranking: true };
   h.session = { userId: "u1" };
   h.users = [];
 });
 
 describe("GET /api/directory", () => {
   it("404 si l'annuaire est désactivé", async () => {
-    h.flags.FEATURE_DIRECTORY = false;
+    h.flags.directory = false;
     const res = await GET(req());
     expect(res.status).toBe(404);
   });
@@ -56,7 +59,7 @@ describe("GET /api/directory", () => {
     expect(members.map((m: { name: string }) => m.name)).toEqual(["Alice Martin", "Bubu", "Zoé Zola"]);
   });
 
-  it("expose clt/rang/cat quand FEATURE_RANKING est actif et le rapprochement existe", async () => {
+  it("expose clt/rang/cat quand le classement est actif et le rapprochement existe", async () => {
     h.users = [
       { id: "a", displayName: "Alice Martin", nickname: null, squashnetRanking: { clt: "5A", rang: 3184, cat: "+55" } },
       { id: "b", displayName: "Bob Sans", nickname: null, squashnetRanking: null },
@@ -67,8 +70,8 @@ describe("GET /api/directory", () => {
     expect(members[1].clt).toBeUndefined(); // pas de rapprochement → aucun champ classement
   });
 
-  it("n'expose jamais le classement quand FEATURE_RANKING est désactivé", async () => {
-    h.flags.FEATURE_RANKING = false;
+  it("n'expose jamais le classement quand le classement est désactivé", async () => {
+    h.flags.ranking = false;
     h.users = [
       { id: "a", displayName: "Alice Martin", nickname: null, squashnetRanking: { clt: "5A", rang: 3184, cat: "+55" } },
     ];

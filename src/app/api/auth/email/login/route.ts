@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { hashPassword, verifyPassword } from "@/lib/crypto";
 import { normalizeEmail, createEmailSession } from "@/lib/session";
-import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 import { EMAIL_RE, clientIp } from "@/lib/email-auth";
 
 export const runtime = "nodejs";
@@ -22,7 +22,7 @@ const dummyHash = hashPassword("timing-equalizer-not-a-real-password");
 
 // POST /api/auth/email/login  { email, password }
 export async function POST(req: NextRequest) {
-  if (!FEATURE_EMAIL_LOGIN) {
+  if (!(await getFeatures()).emailLogin) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const body = (await req.json().catch(() => ({}))) as { email?: unknown; password?: unknown };

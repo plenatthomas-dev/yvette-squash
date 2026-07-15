@@ -6,7 +6,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
+import { useFeatures } from "@/components/FeatureProvider";
+import FeatureFlagsPanel from "@/components/FeatureFlagsPanel";
 
 type PendingRequest = {
   id: string;
@@ -34,6 +35,7 @@ function purposeLabel(p: PendingRequest["purpose"]): string {
 }
 
 export default function AdminPage() {
+  const { emailLogin } = useFeatures();
   const [state, setState] = useState<"loading" | "forbidden" | "ready" | "error">("loading");
   const [requests, setRequests] = useState<PendingRequest[]>([]);
   // Lien généré à l'approbation, à transmettre à la personne (par id de demande).
@@ -57,7 +59,7 @@ export default function AdminPage() {
   const [dash, setDash] = useState<Dashboard | null>(null);
 
   useEffect(() => {
-    if (!FEATURE_EMAIL_LOGIN) return;
+    if (!emailLogin) return;
     (async () => {
       try {
         const res = await fetch("/api/admin/requests");
@@ -70,7 +72,7 @@ export default function AdminPage() {
         setState("error");
       }
     })();
-  }, []);
+  }, [emailLogin]);
 
   // Pré-remplit le formulaire avec la bannière courante (pour l'éditer / l'effacer).
   useEffect(() => {
@@ -191,11 +193,20 @@ export default function AdminPage() {
     }
   };
 
-  if (!FEATURE_EMAIL_LOGIN) {
+  // La file d'attente dépend de la connexion « email seul » (inscription sur invitation).
+  // Le panneau des fonctions reste affiché : sans lui, couper `emailLogin` verrouillerait
+  // l'admin hors du seul écran permettant de le rallumer.
+  if (!emailLogin) {
     return (
       <main className="login">
         <h1>Admin</h1>
-        <div className="notice error">⚠️ Fonction indisponible.</div>
+        <p className="muted tiny">
+          <Link href="/">← Retour à mon compte</Link>
+        </p>
+        <div className="notice error">
+          ⚠️ La connexion « email seul » est coupée : la file des demandes est indisponible.
+        </div>
+        <FeatureFlagsPanel />
       </main>
     );
   }
@@ -265,6 +276,9 @@ export default function AdminPage() {
             <Link href="/admin/demandes">📜 Historique &amp; blocklist →</Link>
             <Link href="/admin/tricounts">💶 Tricounts →</Link>
           </p>
+
+          {/* Pilotage à chaud des fonctions (étape #9). */}
+          <FeatureFlagsPanel />
 
           {/* Annonce push à tous les membres abonnés (« Terrain fermé samedi »…). */}
           <section style={{ marginBottom: 24 }}>

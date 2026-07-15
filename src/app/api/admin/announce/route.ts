@@ -12,7 +12,7 @@ const MAX_BODY = 300;
 
 // POST /api/admin/announce  { title, body }
 // Diffuse une notification push à tous les membres abonnés (annonce club). Accès réservé aux
-// admins (allowlist ADMIN_EMAILS) — indépendant de FEATURE_EMAIL_LOGIN : le push est une
+// admins (allowlist ADMIN_EMAILS) — indépendant du flag `emailLogin` : le push est une
 // capacité de base, pas liée à la connexion par e-mail.
 export async function POST(req: NextRequest) {
   if (!(await requireAdmin(req))) {

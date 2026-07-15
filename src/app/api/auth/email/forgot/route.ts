@@ -3,7 +3,7 @@ import { checkBotId } from "botid/server";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/session";
 import { notifyAdminsOfRequest } from "@/lib/admin";
-import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 import {
   EMAIL_RE,
   clientIp,
@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 // un admin l'approuve depuis /admin et transmet le lien. Réponse toujours générique
 // (anti-énumération) : on ne révèle jamais si l'email correspond à un compte.
 export async function POST(req: NextRequest) {
-  if (!FEATURE_EMAIL_LOGIN) {
+  if (!(await getFeatures()).emailLogin) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   // Anti-bot invisible (Vercel BotID), avant tout travail. cf. auth/email/register.
