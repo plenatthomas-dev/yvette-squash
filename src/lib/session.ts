@@ -78,6 +78,18 @@ export async function resolveUser(input: {
   });
 }
 
+/**
+ * Levée par `createSession` quand la personne s'authentifie correctement (ResaMania) mais que
+ * son compte a été DÉSACTIVÉ par un admin : la route de login la traduit en 403 (compte
+ * désactivé), à distinguer d'un échec d'identifiants (401 + compteur anti-brute-force).
+ */
+export class AccountDisabledError extends Error {
+  constructor() {
+    super("ACCOUNT_DISABLED");
+    this.name = "AccountDisabledError";
+  }
+}
+
 /** Crée un User (via réconciliation email) + une session ResaMania. Renvoie l'id de cookie. */
 export async function createSession(resa: ResaSession): Promise<string> {
   // Purge opportuniste : les sessions expirées ne sont sinon supprimées que si leur
@@ -89,6 +101,11 @@ export async function createSession(resa: ResaSession): Promise<string> {
     email: resa.identity.email || null,
     contactId: resa.identity.contactId,
   });
+  // Compte désactivé par un admin : on refuse AVANT d'ouvrir la session (le membre existe et
+  // s'authentifie bien côté ResaMania, mais il est bloqué localement).
+  if (user.disabledAt) throw new AccountDisabledError();
+  // Trace la dernière connexion (repère les comptes inactifs côté admin).
+  await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
   const id = randomBytes(24).toString("base64url");
   await prisma.session.create({
@@ -108,6 +125,9 @@ export async function createSession(resa: ResaSession): Promise<string> {
 /** Crée une session « email seul » (aucun jeton ResaMania). Renvoie l'id de cookie. */
 export async function createEmailSession(userId: string): Promise<string> {
   await prisma.session.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+  // Trace la dernière connexion (le refus des comptes désactivés est fait en amont, dans la
+  // route de login email qui a déjà chargé le User).
+  await prisma.user.update({ where: { id: userId }, data: { lastLoginAt: new Date() } });
   const id = randomBytes(24).toString("base64url");
   await prisma.session.create({
     data: {

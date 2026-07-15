@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getResaTokenForUser } from "@/lib/session";
 import { cronAuthorized } from "@/lib/cron-auth";
+import { recordCronRun } from "@/lib/cron-run";
 import { pushToUser } from "@/lib/push";
 
 export const runtime = "nodejs";
@@ -78,5 +79,10 @@ export async function GET(req: NextRequest) {
     ended++;
   }
 
+  await recordCronRun(
+    "keep-alive-delegations",
+    true,
+    `${refreshed} ok, ${failed} KO, ${ended} finie(s)`,
+  );
   return NextResponse.json({ delegators: delegations.length, refreshed, failed, ended });
 }

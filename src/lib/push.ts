@@ -24,6 +24,30 @@ export function pushConfigured(): boolean {
 
 export type PushPayload = { title: string; body: string; url?: string; tag?: string };
 
+// Envoie une notif à TOUS les membres abonnés (annonce club, cf. espace admin). Un envoi par
+// joueur ayant au moins un abonnement (pushToUser dédoublonne les appareils et purge les
+// abonnements morts). Renvoie { recipients: joueurs effectivement notifiés, sent: total
+// d'appareils touchés }. Best-effort : un abonnement en échec n'interrompt pas les autres.
+export async function pushToAll(payload: PushPayload): Promise<{ recipients: number; sent: number }> {
+  if (!ensureConfigured()) return { recipients: 0, sent: 0 };
+  const subs = await prisma.pushSubscription.findMany({
+    distinct: ["userId"],
+    select: { userId: true },
+  });
+  let recipients = 0;
+  let sent = 0;
+  await Promise.all(
+    subs.map(async ({ userId }) => {
+      const n = await pushToUser(userId, payload);
+      if (n > 0) {
+        recipients++;
+        sent += n;
+      }
+    }),
+  );
+  return { recipients, sent };
+}
+
 // Envoie une notif à tous les abonnements d'un joueur.
 // Supprime au passage les abonnements devenus invalides (404/410). Renvoie le nb d'envois OK.
 export async function pushToUser(userId: string, payload: PushPayload): Promise<number> {

@@ -73,3 +73,57 @@ prioritaire.
 ## Recommandation
 Commencer par **#1 (gestion des membres)** et **#2 (annonce push)** : meilleur rapport
 valeur/effort, et suppriment les manipulations manuelles en base de données.
+
+---
+
+## Ordre d'implémentation
+
+Ordre issu du croisement priorité × dépendances techniques réelles. Rappel des contraintes
+côté code : `pushToUser` existe mais pas `pushToAll` (trivial à ajouter, 0 migration) ;
+`User` n'a **ni `lastLoginAt`, ni `role`, ni champ de désactivation** (chacun = migration +
+câblage dans l'auth) ; la suppression d'un membre est bloquée par des relations `Restrict`
+(Tricount) → logique transactionnelle, **réutilisée** pour #6 ; bannière et flags runtime
+n'ont pas de store → #3 introduit une table `AppSetting` que #9 réutilisera.
+
+**Étape 0 — #2 Annonce push à tous** (0 migration, gain immédiat) — ✅ FAIT
+Ajouter `pushToAll` + route `/api/admin/announce` + formulaire titre/message. Réutilise 100 %
+l'infra push. À livrer en premier : aucun risque schéma.
+
+**Étape 1 — #1 Gestion des membres**, en 3 sous-phases — ✅ FAIT
+(migration `20_user_admin_mgmt` : `lastLoginAt` + `disabledAt` ; `src/lib/members.ts` ;
+`/api/admin/members` ; page `/admin/membres`. Suppression refusée si dépendances `Restrict`
+→ désactivation à la place. Désactivation révoque les sessions + refus aux deux logins.)
+1. **Liste lecture seule** — migration `lastLoginAt` (+ remplissage au login), puis affichage
+   (nom, email, mode, date d'inscription, dernière connexion). Sans la migration, la colonne
+   « dernière connexion » reste vide.
+2. **Actions non destructives** — « renvoyer un lien d'activation » / « forcer une
+   réinitialisation » : réutilise directement `email-auth`, aucune migration.
+3. **Destructif** — désactiver (migration `disabledAt` + refus au login), puis
+   supprimer-avec-dépendances (logique transactionnelle `Restrict`). Vrai gros morceau.
+
+**Étape 2 — #3 Bannière d'annonce** — ✅ FAIT
+Introduit la table `AppSetting` (KV générique, migration `21_app_setting`). `src/lib/settings.ts`
+(getBanner/setBanner/clearBanner) ; `GET /api/banner` (public) + `POST /api/admin/banner` (admin) ;
+composant `AnnouncementBanner` dans le layout (masquable, réapparaît si modifiée via `version`) ;
+éditeur dans la section « broadcast » de `/admin`.
+
+**Étape 3 — #5 Historique demandes + blocklist** — ✅ FAIT
+Migration `22_request_log_blocklist` : `RequestLog` (historique append-only des décisions,
+découplé des jetons `EmailToken`) + `EmailBlock` (blocklist). `src/lib/moderation.ts`.
+Décisions approve/reject journalisées ; `reject-block` (rejette + bloque) dans la file ;
+inscription d'une adresse bloquée ignorée silencieusement (anti-énumération). Routes
+`/api/admin/history` + `/api/admin/blocklist` ; page `/admin/demandes`.
+
+**Étape 4 — #4 Mini-tableau de bord** — ✅ FAIT
+Migration `23_cron_run` (heartbeat des crons). `src/lib/cron-run.ts` (`recordCronRun` appelé par
+les 4 crons) + `src/lib/dashboard.ts` (`getDashboard`). Route `/api/admin/dashboard` ; grille
+d'indicateurs en tête de `/admin` (membres, actifs 30 j, sessions dont ResaMania, alertes, file,
+bloqués) + santé des crons (dernier passage, ok/KO, résumé). État ResaMania = échec du compte de
+service dans `warm-planning`.
+
+**Étape 5 — #6 Modération Tricount** — ✅ FAIT
+`src/lib/tricount-admin.ts` (liste avec total/participants + suppression, cascade propre — pas de
+`Restrict` sur la suppression d'un Tricount). Route `/api/admin/tricounts` ; page `/admin/tricounts`.
+
+**Étape 6 — le lourd/optionnel** : #7 (colonne `role` en base) → #8 (journal d'audit) →
+#9 (flags runtime).

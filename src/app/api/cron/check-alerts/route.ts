@@ -4,6 +4,7 @@ import { encrypt, decrypt } from "@/lib/crypto";
 import { ensureFresh, getPlanning } from "@/lib/resamania/client";
 import { pushToUser, pushConfigured } from "@/lib/push";
 import { cronAuthorized } from "@/lib/cron-auth";
+import { recordCronRun } from "@/lib/cron-run";
 import { fmtTime, toInstant } from "@/lib/time";
 import type { ResaIdentity, ResaSession } from "@/lib/resamania/types";
 
@@ -64,11 +65,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Interdit" }, { status: 401 });
   }
   if (!pushConfigured()) {
+    await recordCronRun("check-alerts", false, "VAPID non configuré");
     return NextResponse.json({ error: "Clés VAPID non configurées" }, { status: 503 });
   }
 
   const allAlerts = await prisma.slotAlert.findMany({ where: { active: true } });
   if (allAlerts.length === 0) {
+    await recordCronRun("check-alerts", true, "0 alerte active");
     return NextResponse.json({ checked: 0, notified: 0, expired: 0 });
   }
 
@@ -90,6 +93,7 @@ export async function GET(req: NextRequest) {
     });
   }
   if (alerts.length === 0) {
+    await recordCronRun("check-alerts", true, `${expired.length} expirée(s)`);
     return NextResponse.json({ checked: 0, notified: 0, expired: expired.length });
   }
 
@@ -142,5 +146,6 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  await recordCronRun("check-alerts", true, `${notified} notif(s), ${checked} vérifiée(s)`);
   return NextResponse.json({ checked, notified, expired: expired.length });
 }

@@ -3,6 +3,7 @@ import { checkBotId } from "botid/server";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/session";
 import { notifyAdminsOfRequest } from "@/lib/admin";
+import { isEmailBlocked } from "@/lib/moderation";
 import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
 import {
   EMAIL_RE,
@@ -40,6 +41,11 @@ export async function POST(req: NextRequest) {
 
   const email = normalizeEmail(body.email);
   const ip = clientIp(req);
+  // Blocklist (étape 3) : on ignore SILENCIEUSEMENT une adresse bloquée (réponse générique,
+  // comme pour un compte déjà actif) → ni demande enfilée, ni indice donné au demandeur.
+  if (await isEmailBlocked(email)) {
+    return NextResponse.json({ ok: true });
+  }
   if (await emailSendRateLimited(email, ip)) {
     return NextResponse.json(
       { error: "Trop de demandes — réessaie dans quelques minutes." },
