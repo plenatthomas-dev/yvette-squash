@@ -2,8 +2,9 @@
 
 // Bannière d'annonce (étape 2 de l'admin) : message éditable par un admin, affiché à TOUS.
 // Rendu « bien visible » (choix UX « les deux ») :
-//  1) une MODALE la première fois qu'on voit une annonce donnée (impossible à rater) ;
-//  2) puis une BANNIÈRE pleine couleur en haut, tant que l'annonce est active.
+//  1) une MODALE la première fois qu'un MEMBRE CONNECTÉ voit une annonce donnée (impossible
+//     à rater). Jamais hors connexion : elle recouvrirait l'écran de login ;
+//  2) une BANNIÈRE pleine couleur en haut, tant que l'annonce est active — elle, publique.
 // Les deux se pilotent depuis un seul fetch et se ferment indépendamment. Une annonce MODIFIÉE
 // (nouvelle `version`) repasse devant les yeux (modale + bannière ré-affichées).
 
@@ -66,14 +67,16 @@ export default function AnnouncementBanner() {
       // navigateur resserve une annonce périmée (ou son absence) depuis sa copie.
       const res = await fetch("/api/banner", { cache: "no-store" });
       if (!res.ok) return;
-      const data = (await res.json()) as { banner: Banner | null };
+      const data = (await res.json()) as { banner: Banner | null; authenticated?: boolean };
       const b = data.banner;
       setBanner(b); // `null` = annonce retirée par l'admin → on cesse de l'afficher
       if (!b) return;
       // Bannière : visible sauf si masquée dans cette version.
       setShowBanner(localStorage.getItem(DISMISS_KEY) !== b.version);
-      // Modale : une seule fois par version.
-      setShowModal(localStorage.getItem(MODAL_SEEN_KEY) !== b.version);
+      // Modale : une seule fois par version, et JAMAIS hors connexion — elle recouvrirait
+      // l'écran de login (il faut la fermer avant de pouvoir saisir ses identifiants). Le
+      // membre la verra juste après s'être connecté, ce qui est le bon moment.
+      setShowModal(data.authenticated === true && localStorage.getItem(MODAL_SEEN_KEY) !== b.version);
     } catch {
       /* réseau indisponible : pas d'annonce, sans bruit */
     }
