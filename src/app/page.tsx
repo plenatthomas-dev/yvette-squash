@@ -40,6 +40,7 @@ import {
   pushEnabledOnServer,
 } from "@/lib/pushClient";
 import { useFeatures } from "@/components/FeatureProvider";
+import { clearBannerDismissal } from "@/components/AnnouncementBanner";
 
 function toISODate(d: Date): string {
   return d.toLocaleDateString("en-CA"); // YYYY-MM-DD local
@@ -779,6 +780,9 @@ export default function Home() {
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
+    // Le masquage de l'annonce vit dans localStorage (navigateur, pas compte) : on l'oublie,
+    // sinon le membre suivant sur cet appareil ne verrait jamais l'annonce en cours.
+    clearBannerDismissal();
     setMe(null);
     setPlanning(null);
   };

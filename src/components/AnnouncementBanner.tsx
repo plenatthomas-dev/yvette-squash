@@ -7,12 +7,31 @@
 // Les deux se pilotent depuis un seul fetch et se ferment indépendamment. Une annonce MODIFIÉE
 // (nouvelle `version`) repasse devant les yeux (modale + bannière ré-affichées).
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Banner = { message: string; level: "info" | "warn"; version: string };
 
 const DISMISS_KEY = "bannerDismissed"; // version de la bannière masquée (croix)
 const MODAL_SEEN_KEY = "bannerModalSeen"; // version dont la modale a déjà été vue
+// Demande de réévaluation immédiate (la bannière vit dans le layout, hors de l'arbre de la
+// page : un événement est le moyen le plus simple de la réveiller depuis la déconnexion).
+const RECHECK_EVENT = "banner-recheck";
+
+/**
+ * Oublie le masquage local de l'annonce (croix + modale) et redemande son affichage.
+ * Appelé à la DÉCONNEXION : `localStorage` est lié au navigateur, pas au compte — sans ça,
+ * le membre suivant à se connecter sur le même appareil hériterait du « déjà vu » du
+ * précédent et ne verrait jamais l'annonce.
+ */
+export function clearBannerDismissal(): void {
+  try {
+    localStorage.removeItem(DISMISS_KEY);
+    localStorage.removeItem(MODAL_SEEN_KEY);
+  } catch {
+    /* localStorage indisponible : il n'y avait rien à oublier */
+  }
+  window.dispatchEvent(new Event(RECHECK_EVENT));
+}
 
 // Couleurs pleines et saturées (texte blanc) pour bien trancher avec l'appli.
 const palette = {
@@ -29,25 +48,50 @@ export default function AnnouncementBanner() {
   const textRef = useRef<HTMLSpanElement>(null);
   const [scroll, setScroll] = useState(false);
   const [durationS, setDurationS] = useState(16);
+  const lastFetchRef = useRef(0);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/banner");
-        if (!res.ok) return;
-        const data = (await res.json()) as { banner: Banner | null };
-        const b = data.banner;
-        if (!b) return;
-        setBanner(b);
-        // Bannière : visible sauf si masquée dans cette version.
-        setShowBanner(localStorage.getItem(DISMISS_KEY) !== b.version);
-        // Modale : une seule fois par version.
-        setShowModal(localStorage.getItem(MODAL_SEEN_KEY) !== b.version);
-      } catch {
-        /* réseau indisponible : pas d'annonce, sans bruit */
-      }
-    })();
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/banner");
+      if (!res.ok) return;
+      const data = (await res.json()) as { banner: Banner | null };
+      const b = data.banner;
+      setBanner(b); // `null` = annonce retirée par l'admin → on cesse de l'afficher
+      if (!b) return;
+      // Bannière : visible sauf si masquée dans cette version.
+      setShowBanner(localStorage.getItem(DISMISS_KEY) !== b.version);
+      // Modale : une seule fois par version.
+      setShowModal(localStorage.getItem(MODAL_SEEN_KEY) !== b.version);
+    } catch {
+      /* réseau indisponible : pas d'annonce, sans bruit */
+    }
   }, []);
+
+  // Au montage, puis au RETOUR sur l'appli : sans ça, une annonce publiée pendant qu'un membre
+  // a l'appli ouverte n'apparaît qu'au rechargement de la page. Throttle 15 s comme le planning
+  // (le focus se déclenche souvent). La déconnexion force une réévaluation immédiate.
+  useEffect(() => {
+    load();
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastFetchRef.current < 15000) return;
+      lastFetchRef.current = now;
+      load();
+    };
+    const onRecheck = () => {
+      lastFetchRef.current = Date.now();
+      load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    window.addEventListener(RECHECK_EVENT, onRecheck);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+      window.removeEventListener(RECHECK_EVENT, onRecheck);
+    };
+  }, [load]);
 
   // Active le défilement seulement si le texte déborde ; vitesse constante (durée ∝ distance).
   useEffect(() => {
