@@ -64,10 +64,12 @@ describe("POST /api/admin/announce", () => {
     const body = await res.json();
     expect(body).toMatchObject({ ok: true, recipients: 3, sent: 5 });
     expect(h.pushToAll).toHaveBeenCalledTimes(1);
+    // L'URL de clic porte l'annonce (titre + message) pour la ré-afficher en modale.
+    const expectedUrl = `/?${new URLSearchParams({ announce: "1", t: "Terrain fermé", b: "samedi" }).toString()}`;
     expect(h.pushToAll).toHaveBeenCalledWith({
       title: "Terrain fermé",
       body: "samedi",
-      url: "/",
+      url: expectedUrl,
       tag: "admin-announce",
     });
   });
