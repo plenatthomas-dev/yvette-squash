@@ -101,8 +101,11 @@ l'infra push. À livrer en premier : aucun risque schéma.
 3. **Destructif** — désactiver (migration `disabledAt` + refus au login), puis
    supprimer-avec-dépendances (logique transactionnelle `Restrict`). Vrai gros morceau.
 
-**Étape 2 — #3 Bannière d'annonce**
-Introduit la table `AppSetting` (singleton). Complète #2 dans la même section « broadcast ».
+**Étape 2 — #3 Bannière d'annonce** — ✅ FAIT
+Introduit la table `AppSetting` (KV générique, migration `21_app_setting`). `src/lib/settings.ts`
+(getBanner/setBanner/clearBanner) ; `GET /api/banner` (public) + `POST /api/admin/banner` (admin) ;
+composant `AnnouncementBanner` dans le layout (masquable, réapparaît si modifiée via `version`) ;
+éditeur dans la section « broadcast » de `/admin`.
 
 **Étape 3 — #5 Historique demandes + blocklist**
 Prolonge la gestion `EmailToken` (garder les demandes traitées au lieu de les supprimer) +

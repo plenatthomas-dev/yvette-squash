@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import AnnouncementBanner from "@/components/AnnouncementBanner";
 import "@picocss/pico/css/pico.min.css";
 import "./globals.css";
 
@@ -41,6 +42,7 @@ export default function RootLayout({
     <html lang="fr" suppressHydrationWarning>
       <body>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <AnnouncementBanner />
         {children}
         <Analytics />
         <SpeedInsights />

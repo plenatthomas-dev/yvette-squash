@@ -34,6 +34,12 @@ export default function AdminPage() {
   const [annBusy, setAnnBusy] = useState(false);
   const [annResult, setAnnResult] = useState<{ ok: boolean; text: string } | null>(null);
 
+  // Bannière d'annonce (étape 2) : message affiché en haut de l'appli pour tous.
+  const [bnMessage, setBnMessage] = useState("");
+  const [bnLevel, setBnLevel] = useState<"info" | "warn">("info");
+  const [bnBusy, setBnBusy] = useState(false);
+  const [bnResult, setBnResult] = useState<{ ok: boolean; text: string } | null>(null);
+
   useEffect(() => {
     if (!FEATURE_EMAIL_LOGIN) return;
     (async () => {
@@ -46,6 +52,25 @@ export default function AdminPage() {
         setState("ready");
       } catch {
         setState("error");
+      }
+    })();
+  }, []);
+
+  // Pré-remplit le formulaire avec la bannière courante (pour l'éditer / l'effacer).
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/banner");
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          banner: { message: string; level: "info" | "warn" } | null;
+        };
+        if (data.banner) {
+          setBnMessage(data.banner.message);
+          setBnLevel(data.banner.level);
+        }
+      } catch {
+        /* pas de bannière à pré-remplir */
       }
     })();
   }, []);
@@ -101,6 +126,30 @@ export default function AdminPage() {
       setAnnResult({ ok: false, text: "Envoi impossible." });
     } finally {
       setAnnBusy(false);
+    }
+  };
+
+  // Pose ou retire la bannière. Un message vide efface la bannière côté serveur.
+  const saveBanner = async (clear: boolean) => {
+    setBnBusy(true);
+    setBnResult(null);
+    try {
+      const res = await fetch("/api/admin/banner", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: clear ? "" : bnMessage.trim(), level: bnLevel }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setBnResult({ ok: false, text: data.error ?? "Enregistrement impossible." });
+        return;
+      }
+      if (clear) setBnMessage("");
+      setBnResult({ ok: true, text: clear ? "Bannière retirée." : "Bannière enregistrée." });
+    } catch {
+      setBnResult({ ok: false, text: "Enregistrement impossible." });
+    } finally {
+      setBnBusy(false);
     }
   };
 
@@ -177,6 +226,51 @@ export default function AdminPage() {
               <div className={`notice ${annResult.ok ? "info" : "error"}`} style={{ marginTop: 8 }}>
                 {annResult.ok ? "✓ " : "⚠️ "}
                 {annResult.text}
+              </div>
+            )}
+          </section>
+
+          {/* Bannière affichée en haut de l'appli pour tous (même sans notifications). */}
+          <section style={{ marginBottom: 24 }}>
+            <h2 style={{ fontSize: "1.1rem" }}>Bannière d'annonce</h2>
+            <p className="muted tiny">
+              Affichée en haut de l'appli pour tous. Laisse vide et « Retirer » pour l'enlever.
+            </p>
+            <textarea
+              placeholder="Message de la bannière (ex. Assemblée générale vendredi 20 h)"
+              value={bnMessage}
+              maxLength={280}
+              rows={2}
+              disabled={bnBusy}
+              onChange={(e) => setBnMessage(e.target.value)}
+              style={{ width: "100%", marginBottom: 8 }}
+            />
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <select
+                value={bnLevel}
+                disabled={bnBusy}
+                onChange={(e) => setBnLevel(e.target.value as "info" | "warn")}
+                style={{ width: "auto", marginBottom: 0 }}
+              >
+                <option value="info">Info (bleu)</option>
+                <option value="warn">Alerte (orange)</option>
+              </select>
+              <button type="button" disabled={bnBusy || !bnMessage.trim()} onClick={() => saveBanner(false)}>
+                {bnBusy ? "…" : "Enregistrer"}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                disabled={bnBusy}
+                onClick={() => saveBanner(true)}
+              >
+                Retirer
+              </button>
+            </div>
+            {bnResult && (
+              <div className={`notice ${bnResult.ok ? "info" : "error"}`} style={{ marginTop: 8 }}>
+                {bnResult.ok ? "✓ " : "⚠️ "}
+                {bnResult.text}
               </div>
             )}
           </section>
