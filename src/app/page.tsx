@@ -40,7 +40,7 @@ import {
   pushEnabledOnServer,
 } from "@/lib/pushClient";
 import { useFeatures } from "@/components/FeatureProvider";
-import { clearBannerDismissal } from "@/components/AnnouncementBanner";
+import { clearBannerDismissal, recheckBanner } from "@/components/AnnouncementBanner";
 
 function toISODate(d: Date): string {
   return d.toLocaleDateString("en-CA"); // YYYY-MM-DD local
@@ -778,6 +778,14 @@ export default function Home() {
   const myWaitFor = (date: string, hm: string) =>
     alerts.find((a) => a.date === date && a.hm === hm) ?? null;
 
+  // Se connecter ne remonte pas la bannière (elle vit dans le layout) et ne déclenche aucun
+  // focus : sans ce signal, une annonce publiée pendant que l'écran de connexion était ouvert
+  // n'apparaîtrait qu'au rechargement.
+  const onLoggedIn = () => {
+    checkMe();
+    recheckBanner();
+  };
+
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     // Le masquage de l'annonce vit dans localStorage (navigateur, pas compte) : on l'oublie,
@@ -792,7 +800,7 @@ export default function Home() {
   }
 
   if (me === null) {
-    return <LoginScreen onLoggedIn={checkMe} />;
+    return <LoginScreen onLoggedIn={onLoggedIn} />;
   }
 
   return (
