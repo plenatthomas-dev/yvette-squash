@@ -32,13 +32,25 @@ export async function getBanner(): Promise<Banner | null> {
   }
 }
 
-/** Pose (ou remplace) la bannière. `updatedById` = admin qui l'a éditée (trace, pas de FK). */
+/**
+ * Pose (ou remplace) la bannière. `updatedById` = admin qui l'a éditée (trace, pas de FK).
+ *
+ * IDEMPOTENT : réenregistrer un message identique ne touche à RIEN. La `version` d'une annonce
+ * est son `updatedAt` ; la bouger invalide les masquages de TOUS les membres et leur remet la
+ * modale devant les yeux. Un double-clic sur « Enregistrer », ou une correction annulée, ne doit
+ * pas déranger le club entier. Un vrai changement (texte OU couleur) repasse bien devant tous.
+ */
 export async function setBanner(
   message: string,
   level: BannerLevel,
   updatedById: string,
 ): Promise<void> {
   const value = JSON.stringify({ message: message.trim().slice(0, BANNER_MAX), level });
+  const current = await prisma.appSetting.findUnique({
+    where: { key: BANNER_KEY },
+    select: { value: true },
+  });
+  if (current?.value === value) return; // rien de neuf : on ne rejoue pas l'annonce
   await prisma.appSetting.upsert({
     where: { key: BANNER_KEY },
     create: { key: BANNER_KEY, value, updatedById },
