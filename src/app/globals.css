@@ -1239,6 +1239,14 @@ td.cell.past {
   max-width: 380px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
   animation: modal-in 0.18s ease-out;
+  /* Bornée à l'écran. Sans ça, un panneau riche (Paramètres, avec délégation) dépasse le
+     viewport d'un téléphone : l'overlay étant centré (align-items:center), le débordement
+     part À LA FOIS en haut et en bas, et le haut devient INATTEIGNABLE (on ne peut pas
+     scroller vers du contenu hors flux au-dessus). La modale défile donc elle-même.
+     `dvh` et non `vh` : sur mobile, vh ignore la barre d'URL et surestime la hauteur.
+     Le 40px correspond au padding vertical de .modal-overlay (20px en haut + 20px en bas). */
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
 }
 
 .modal h3 {
@@ -1444,6 +1452,17 @@ td.cell.past {
 .check-row input {
   margin: 0;
   width: auto;
+}
+
+/* Après un clic/tap, Pico laisse sa bordure + son halo bleus de :focus sur la case. Une case
+   DÉCOCHÉE gardait donc l'air sélectionnée (signalé sur la liste des délégués : on désélectionne,
+   le bouton « Déléguer » se grise mais la case reste bleue). On ne montre le focus qu'au CLAVIER
+   (:focus-visible) : le pointeur n'en a pas besoin, la navigation clavier le garde — a11y intacte. */
+.check-row input:focus:not(:focus-visible) {
+  box-shadow: none;
+}
+.check-row input:not(:checked):focus:not(:focus-visible) {
+  border-color: var(--pico-form-element-border-color);
 }
 
 /* Interrupteur « annuaire » : la case Pico par défaut (fine barre bleue) était

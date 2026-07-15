@@ -75,7 +75,11 @@ export async function POST(req: NextRequest) {
       subject: "APPLI SQUASH YVETTE",
       text: `Commentaire de ${who}${userEmail ? ` (${userEmail})` : ""} :\n\n${text}`,
     });
-  } catch {
+  } catch (e) {
+    // La cause DOIT être tracée : sans ça, un refus SMTP (clé révoquée, quota…) ne laisse
+    // qu'un 502 muet dans les logs, impossible à diagnostiquer. Le client, lui, ne reçoit
+    // toujours qu'un message générique (même politique que planning/week/login).
+    console.error("[feedback] envoi échoué:", e);
     return NextResponse.json({ error: "Échec de l'envoi, réessaie plus tard." }, { status: 502 });
   }
 
