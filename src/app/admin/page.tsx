@@ -16,6 +16,19 @@ type PendingRequest = {
   createdAt: string;
 };
 
+type CronRun = { name: string; lastRunAt: string; ok: boolean; info: string | null };
+type Dashboard = {
+  members: number;
+  disabledMembers: number;
+  activeSessions: number;
+  resaSessions: number;
+  recentLogins: number;
+  activeAlerts: number;
+  pendingRequests: number;
+  blockedEmails: number;
+  crons: CronRun[];
+};
+
 function purposeLabel(p: PendingRequest["purpose"]): string {
   return p === "signup" ? "Nouveau compte" : "Mot de passe oublié";
 }
@@ -39,6 +52,9 @@ export default function AdminPage() {
   const [bnLevel, setBnLevel] = useState<"info" | "warn">("info");
   const [bnBusy, setBnBusy] = useState(false);
   const [bnResult, setBnResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Mini-tableau de bord (étape 4).
+  const [dash, setDash] = useState<Dashboard | null>(null);
 
   useEffect(() => {
     if (!FEATURE_EMAIL_LOGIN) return;
@@ -71,6 +87,18 @@ export default function AdminPage() {
         }
       } catch {
         /* pas de bannière à pré-remplir */
+      }
+    })();
+  }, []);
+
+  // Indicateurs du tableau de bord.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/dashboard");
+        if (res.ok) setDash((await res.json()) as Dashboard);
+      } catch {
+        /* dashboard indisponible : on n'affiche simplement rien */
       }
     })();
   }, []);
@@ -187,9 +215,55 @@ export default function AdminPage() {
 
       {state === "ready" && (
         <>
+          {/* Mini-tableau de bord (étape 4) : indicateurs d'un coup d'œil. */}
+          {dash && (
+            <section style={{ marginBottom: 20 }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
+                  gap: 8,
+                }}
+              >
+                <Stat label="Membres" value={dash.members} hint={dash.disabledMembers ? `${dash.disabledMembers} désactivé(s)` : undefined} />
+                <Stat label="Actifs (30 j)" value={dash.recentLogins} />
+                <Stat label="Sessions" value={dash.activeSessions} hint={`${dash.resaSessions} ResaMania`} />
+                <Stat label="Alertes terrain" value={dash.activeAlerts} />
+                <Stat label="En attente" value={dash.pendingRequests} />
+                <Stat label="Bloqués" value={dash.blockedEmails} />
+              </div>
+
+              {/* Santé des crons */}
+              <div style={{ marginTop: 10 }}>
+                {dash.crons.length === 0 ? (
+                  <p className="muted tiny">Aucun passage de cron enregistré pour l'instant.</p>
+                ) : (
+                  <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                    {dash.crons.map((c) => (
+                      <li key={c.name} className="tiny" style={{ display: "flex", gap: 6 }}>
+                        <span title={c.ok ? "OK" : "problème"}>{c.ok ? "🟢" : "🔴"}</span>
+                        <strong>{c.name}</strong>
+                        <span className="muted">
+                          {new Date(c.lastRunAt).toLocaleString("fr-FR", {
+                            day: "numeric",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                          {c.info ? ` · ${c.info}` : ""}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </section>
+          )}
+
           <p style={{ marginBottom: 20, display: "flex", gap: 16, flexWrap: "wrap" }}>
             <Link href="/admin/membres">👥 Gérer les membres →</Link>
             <Link href="/admin/demandes">📜 Historique &amp; blocklist →</Link>
+            <Link href="/admin/tricounts">💶 Tricounts →</Link>
           </p>
 
           {/* Annonce push à tous les membres abonnés (« Terrain fermé samedi »…). */}
@@ -349,5 +423,23 @@ export default function AdminPage() {
         </>
       )}
     </main>
+  );
+}
+
+// Vignette d'indicateur du tableau de bord.
+function Stat({ label, value, hint }: { label: string; value: number; hint?: string }) {
+  return (
+    <div
+      style={{
+        border: "1px solid #e5e7eb",
+        borderRadius: 8,
+        padding: "8px 10px",
+        textAlign: "center",
+      }}
+    >
+      <div style={{ fontSize: "1.4rem", fontWeight: 700, lineHeight: 1.1 }}>{value}</div>
+      <div className="tiny">{label}</div>
+      {hint && <div className="muted tiny">{hint}</div>}
+    </div>
   );
 }

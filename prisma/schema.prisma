@@ -162,6 +162,16 @@ model PlanningSnapshot {
   updatedAt   DateTime @updatedAt
 }
 
+// Dernier passage de chaque cron (mini-tableau de bord admin, étape 4). Une ligne par cron,
+// écrasée à chaque exécution (heartbeat). `info` = court résumé lisible (compteurs). Sert à
+// repérer un cron muet et, via warm-planning, l'état du compte de service ResaMania.
+model CronRun {
+  name      String   @id // "warm-planning", "check-alerts", ...
+  lastRunAt DateTime
+  ok        Boolean // false = le cron n'a pas pu faire son travail (compte de service KO, VAPID absent…)
+  info      String? // résumé court, ex. "14/16 jours", "2 notif(s)"
+}
+
 // Historique des demandes de compte/réinitialisation TRAITÉES (étape 3 de l'admin) : trace
 // append-only, découplée du cycle de vie des jetons `EmailToken` (qui sont purgés à
 // expiration/consommation). Une ligne par décision, pour la traçabilité côté admin.

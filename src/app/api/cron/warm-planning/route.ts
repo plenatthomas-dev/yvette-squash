@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { login, getPlanning } from "@/lib/resamania/client";
 import { cronAuthorized } from "@/lib/cron-auth";
+import { recordCronRun } from "@/lib/cron-run";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,6 +41,8 @@ export async function GET(req: NextRequest) {
   }
   const token = await serviceToken();
   if (!token) {
+    // Signal de santé ResaMania pour le tableau de bord : le compte de service ne se connecte pas.
+    await recordCronRun("warm-planning", false, "compte de service ResaMania KO");
     return NextResponse.json({
       warmed: 0,
       reason: "Compte de service ResaMania non configuré ou connexion échouée.",
@@ -64,5 +67,6 @@ export async function GET(req: NextRequest) {
       // Jour indisponible / erreur ponctuelle ResaMania → on continue.
     }
   }
+  await recordCronRun("warm-planning", true, `${warmed}/${dates.length} jours`);
   return NextResponse.json({ warmed, total: dates.length });
 }

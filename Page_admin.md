@@ -114,12 +114,16 @@ Décisions approve/reject journalisées ; `reject-block` (rejette + bloque) dans
 inscription d'une adresse bloquée ignorée silencieusement (anti-énumération). Routes
 `/api/admin/history` + `/api/admin/blocklist` ; page `/admin/demandes`.
 
-**Étape 4 — #4 Mini-tableau de bord**
-Agrège les compteurs (sessions actives ← dépend du `lastLoginAt` de l'étape 1), état ResaMania,
-dernier passage des crons + nb de notifs envoyées.
+**Étape 4 — #4 Mini-tableau de bord** — ✅ FAIT
+Migration `23_cron_run` (heartbeat des crons). `src/lib/cron-run.ts` (`recordCronRun` appelé par
+les 4 crons) + `src/lib/dashboard.ts` (`getDashboard`). Route `/api/admin/dashboard` ; grille
+d'indicateurs en tête de `/admin` (membres, actifs 30 j, sessions dont ResaMania, alertes, file,
+bloqués) + santé des crons (dernier passage, ok/KO, résumé). État ResaMania = échec du compte de
+service dans `warm-planning`.
 
-**Étape 5 — #6 Modération Tricount**
-Réutilise la logique « suppression avec dépendances » écrite à l'étape 1.3 → quasi gratuit.
+**Étape 5 — #6 Modération Tricount** — ✅ FAIT
+`src/lib/tricount-admin.ts` (liste avec total/participants + suppression, cascade propre — pas de
+`Restrict` sur la suppression d'un Tricount). Route `/api/admin/tricounts` ; page `/admin/tricounts`.
 
 **Étape 6 — le lourd/optionnel** : #7 (colonne `role` en base) → #8 (journal d'audit) →
 #9 (flags runtime).

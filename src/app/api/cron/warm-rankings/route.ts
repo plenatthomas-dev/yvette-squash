@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { cronAuthorized } from "@/lib/cron-auth";
+import { recordCronRun } from "@/lib/cron-run";
 import { FEATURE_RANKING } from "@/lib/features";
 import { getLatestMonth, searchRanking } from "@/lib/squashnet/client";
 import { matchRanking } from "@/lib/squashnet/match";
@@ -70,5 +71,6 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  await recordCronRun("warm-rankings", true, `${matched} rapproché(s), ${cleared} retiré(s)`);
   return NextResponse.json({ month, members: members.length, matched, cleared });
 }
