@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { encrypt, decrypt } from "@/lib/crypto";
-import { ensureFresh, getPlanning } from "@/lib/resamania/client";
+import { getResaTokenForUser } from "@/lib/session";
+import { getPlanning } from "@/lib/resamania/client";
 import { pushToUser, pushConfigured } from "@/lib/push";
 import { cronAuthorized } from "@/lib/cron-auth";
 import { recordCronRun } from "@/lib/cron-run";
 import { fmtTime, toInstant } from "@/lib/time";
-import type { ResaIdentity, ResaSession } from "@/lib/resamania/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,42 +19,11 @@ function prettyDate(date: string): string {
   });
 }
 
-// Régénère un access token ResaMania valide à partir de la dernière session du joueur.
-async function accessTokenForUser(userId: string): Promise<string | null> {
-  // Uniquement les sessions ResaMania (avec jeton) : les sessions « email seul » n'en ont pas.
-  const s = await prisma.session.findFirst({
-    where: { userId, expiresAt: { gt: new Date() }, refreshTokenEnc: { not: null } },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!s || !s.accessToken || !s.refreshTokenEnc || !s.tokenExpiresAt || !s.identityJson) {
-    return null;
-  }
-  try {
-    const resa: ResaSession = {
-      accessToken: s.accessToken,
-      refreshToken: decrypt(s.refreshTokenEnc),
-      expiresAt: s.tokenExpiresAt.getTime(),
-      identity: JSON.parse(s.identityJson) as ResaIdentity,
-    };
-    const fresh = await ensureFresh(resa);
-    if (fresh.accessToken !== s.accessToken) {
-      // Persiste le token rafraîchi pour ne pas le refabriquer à chaque passage.
-      await prisma.session
-        .update({
-          where: { id: s.id },
-          data: {
-            accessToken: fresh.accessToken,
-            refreshTokenEnc: encrypt(fresh.refreshToken),
-            tokenExpiresAt: new Date(fresh.expiresAt),
-          },
-        })
-        .catch(() => {});
-    }
-    return fresh.accessToken;
-  } catch {
-    return null;
-  }
-}
+// NB : la récupération du jeton ResaMania d'un joueur passe par `getResaTokenForUser`
+// (session.ts), comme le cron keep-alive-delegations. Ce fichier en avait sa PROPRE copie,
+// qui oubliait de déchiffrer le jeton lu et de rechiffrer le jeton rafraîchi — voir l'historique.
+// Ne pas la refaire : le déchiffrement, le rechiffrement et la sérialisation des refresh
+// concurrents vivent à UN seul endroit.
 
 // GET /api/cron/check-alerts
 // Pour chaque alerte active : interroge le planning du jour visé et, si un terrain est
@@ -113,12 +81,13 @@ export async function GET(req: NextRequest) {
     const [userId, date] = key.split("|");
     checked += group.length;
 
-    const token = await accessTokenForUser(userId);
-    if (!token) continue;
+    // Jeton déchiffré et rafraîchi si besoin (et rechiffré en base) par session.ts.
+    const resa = await getResaTokenForUser(userId);
+    if (!resa) continue;
 
     let freeHm: Set<string>;
     try {
-      const planning = await getPlanning(date, token);
+      const planning = await getPlanning(date, resa.accessToken);
       freeHm = new Set<string>();
       for (const slot of planning.slots) {
         // Heure du club (Europe/Paris), comme la clé `hm` stockée à la création de l'alerte
