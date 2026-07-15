@@ -3,8 +3,25 @@
 
 import { prisma } from "./db";
 import { normalizeEmail } from "./session";
+import { MODERATION_RETENTION_MS } from "./retention";
 
 export type Outcome = "approved" | "rejected";
+
+/**
+ * Purge des traces sorties de la fenêtre de rétention. Opportuniste (au fil des accès) plutôt
+ * que par un cron dédié : même approche que `LoginAttempt` et `FeedbackMessage`, et le plan
+ * Vercel plafonne le nombre de crons. Best-effort — ne doit JAMAIS faire échouer l'action qui
+ * l'a déclenchée (journaliser une décision reste plus important que nettoyer).
+ */
+export async function purgeExpiredModeration(): Promise<void> {
+  const cutoff = new Date(Date.now() - MODERATION_RETENTION_MS);
+  try {
+    await prisma.requestLog.deleteMany({ where: { createdAt: { lt: cutoff } } });
+    await prisma.emailBlock.deleteMany({ where: { createdAt: { lt: cutoff } } });
+  } catch (e) {
+    console.error("[moderation] purge de rétention impossible", e);
+  }
+}
 
 /** Journalise une décision admin (approbation / rejet) pour la traçabilité. Best-effort. */
 export async function logRequestDecision(entry: {
@@ -14,6 +31,9 @@ export async function logRequestDecision(entry: {
   outcome: Outcome;
   decidedById?: string | null;
 }): Promise<void> {
+  // Deuxième point de purge (avec la lecture de l'historique) : garantit que la rétention
+  // s'applique même si personne n'ouvre jamais /admin/demandes.
+  await purgeExpiredModeration();
   await prisma.requestLog.create({
     data: {
       email: entry.email,
@@ -27,6 +47,8 @@ export async function logRequestDecision(entry: {
 
 /** Historique des demandes traitées, les plus récentes d'abord. */
 export async function listRequestHistory(limit = 50) {
+  // Purge avant lecture : l'admin ne doit jamais voir une trace qu'on annonce comme supprimée.
+  await purgeExpiredModeration();
   return prisma.requestLog.findMany({
     orderBy: { createdAt: "desc" },
     take: limit,

@@ -3,6 +3,18 @@
 import { useState } from "react";
 import { Dialog } from "@/components/Dialog";
 import { useFeatures } from "@/components/FeatureProvider";
+import { MODERATION_RETENTION_LABEL } from "@/lib/retention";
+
+// Responsable du traitement (art. 13 RGPD) : son identité ET ses coordonnées doivent figurer
+// dans la note — le but est qu'on sache à qui l'on confie ses données, et à qui s'adresser.
+// L'adresse doit rester joignable par quelqu'un qui n'a PAS de compte : une demande
+// d'inscription rejetée laisse un e-mail en base, et son auteur ne peut pas se connecter pour
+// utiliser « Un commentaire ? ». Le canal in-app ne suffit donc pas à lui seul.
+// Boîte DÉDIÉE (pas l'adresse perso) : transmissible à un successeur sans donner accès à des
+// mails privés. Surchargeable par env pour changer de boîte sans redéployer le code.
+const CONTROLLER = "Thomas Plenat";
+const CONTACT_EMAIL =
+  process.env.NEXT_PUBLIC_PRIVACY_CONTACT?.trim() || "squash-yvette.app@gmail.com";
 
 // Icône « information » (cercle + i) — ouvre la note de confidentialité.
 export function InfoIcon() {
@@ -43,16 +55,56 @@ export function PrivacyNotice() {
                 Complexe de Bures via ton compte ResaMania.
               </p>
               <p>
-                <strong>Ce qu'on garde.</strong> Ton nom (fourni par ResaMania), ton e-mail,
-                ton éventuel pseudonyme, les réservations faites ici et ton IP de connexion
-                (anti-abus). Ton mot de passe ResaMania n'est <strong>jamais conservé</strong> —
-                seulement un jeton de session <strong>chiffré</strong> (AES-256-GCM).
+                <strong>Qui est responsable.</strong> {CONTROLLER}, qui développe et exploite
+                l'appli. Pour toute question ou demande sur tes données :{" "}
+                <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.
               </p>
               <p>
-                <strong>Ce qu'on en fait.</strong> Te connecter, gérer les réservations,
-                protéger le service. Rien n'est revendu ni transmis à des tiers (hormis
-                ResaMania, que tu utilises déjà). Hébergement en <strong>Union
-                européenne</strong> (Vercel, base Neon).
+                <strong>Ce qu'on garde.</strong> Ton nom (fourni par ResaMania), ton e-mail,
+                ton éventuel pseudonyme, les réservations faites ici, ta date de dernière
+                connexion et ton IP de connexion (anti-abus). Ton mot de passe ResaMania n'est
+                <strong> jamais conservé</strong> — seulement un jeton de session
+                <strong> chiffré</strong> (AES-256-GCM). Si tu utilises la connexion par e-mail,
+                ton mot de passe est conservé <strong>haché</strong> (scrypt), jamais en clair.
+              </p>
+              <p>
+                <strong>Ce qu'on en fait, et à quel titre.</strong> Te connecter et gérer les
+                réservations (<em>exécution du service que tu demandes</em>) ; protéger l'appli
+                du spam et des abus, et faire vivre l'entraide entre membres
+                (<em>intérêt légitime</em>) ; les notifications reposent sur
+                <em> ton consentement</em>, retirable à tout moment depuis ton navigateur.
+              </p>
+              <p>
+                <strong>Qui d'autre voit passer tes données.</strong> Hébergement en
+                <strong> Union européenne</strong> (Vercel, base Neon). L'appli s'appuie aussi
+                sur <strong>ResaMania</strong> (que tu utilises déjà), <strong>Brevo</strong>
+                {" "}(envoi des e-mails — il reçoit ton nom et ton adresse quand tu nous écris),
+                et sur les outils de Vercel : mesure d'audience
+                (<strong>Analytics</strong>, sans cookie ni profilage) et détection de robots
+                (<strong>BotID</strong>, à l'inscription). Rien n'est vendu, ni transmis à des
+                tiers en dehors de ça.
+              </p>
+              <p>
+                <strong>Administrateurs.</strong> Un ou deux membres ont un accès
+                d'administration : ils voient la liste des comptes (nom, e-mail, dates de
+                création et de dernière connexion), valident les demandes d'inscription et
+                peuvent désactiver ou supprimer un compte. Ils peuvent aussi publier une
+                annonce à tous.
+              </p>
+              <p>
+                <strong>Demandes d'inscription.</strong> L'accès se fait sur validation : ta
+                demande enregistre ton e-mail et le nom que tu choisis. La décision (acceptée
+                ou refusée) est <strong>journalisée {MODERATION_RETENTION_LABEL}</strong>, y
+                compris en cas de refus, ainsi que les adresses bloquées pour empêcher une
+                réinscription abusive. C'est le seul endroit où l'appli garde une donnée sur
+                quelqu'un qui n'est pas membre.
+              </p>
+              <p>
+                <strong>Combien de temps.</strong> Tes données de membre vivent
+                <strong> aussi longtemps que ton compte</strong> et disparaissent avec lui.
+                Les traces de modération ci-dessus : <strong>{MODERATION_RETENTION_LABEL}</strong>.
+                Les données anti-abus sont éphémères (quelques minutes à 24 h), et une session
+                expire d'elle-même.
               </p>
               {directory && (
                 <p>
@@ -67,13 +119,16 @@ export function PrivacyNotice() {
                   <strong>Classement fédéral.</strong> Ton classement FFSquash
                   (<strong>squashnet.fr</strong>, source publique) peut s'afficher à côté de
                   ton nom si tu es dans l'annuaire, et pré-remplir les têtes de série d'un
-                  tournoi. Retire-toi de l'annuaire pour le masquer.
+                  tournoi. On conserve aussi ton numéro de licence et ton club (vérification
+                  du rapprochement) — <strong>jamais affichés</strong>. Retire-toi de
+                  l'annuaire pour le masquer.
                 </p>
               )}
               <p>
                 <strong>Liste d'attente &amp; notifications.</strong> Sur un créneau complet,
                 on enregistre le créneau visé et, si tu l'autorises, un abonnement aux
-                notifications de ton navigateur. Les membres voient le
+                notifications de ton navigateur — il sert aux alertes « terrain libéré » et aux
+                annonces de l'asso. Les membres voient le
                 <strong> nombre d'inscrits</strong> et <strong>ta position</strong> —
                 <strong> jamais les noms</strong>.
               </p>
@@ -103,9 +158,12 @@ export function PrivacyNotice() {
                 </p>
               )}
               <p>
-                <strong>Tes droits.</strong> Consultation ou suppression de tes données à
-                tout moment : une fois connecté, écris-nous via ⚙️ Paramètres › « Un
-                commentaire&nbsp;? ». La déconnexion efface déjà ta session.
+                <strong>Tes droits.</strong> Tu peux demander à consulter, corriger, récupérer
+                ou supprimer tes données, et t'opposer à un traitement. Écris à{" "}
+                <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>, ou passe par
+                ⚙️ Paramètres › « Un commentaire&nbsp;? » si tu es connecté.
+                La déconnexion efface déjà ta session. Si une réponse ne te convient pas, tu
+                peux saisir la <strong>CNIL</strong> (<a href="https://www.cnil.fr" target="_blank" rel="noopener noreferrer">cnil.fr</a>).
               </p>
             </div>
             <div className="modal-actions">
