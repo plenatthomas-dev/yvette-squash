@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { login } from "@/lib/resamania/client";
-import { createSession } from "@/lib/session";
+import { createSession, AccountDisabledError } from "@/lib/session";
 import { prisma } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -60,6 +60,14 @@ export async function POST(req: NextRequest) {
     });
     return res;
   } catch (e) {
+    // Compte désactivé par un admin : l'authentification ResaMania a réussi, ce n'est PAS un
+    // échec d'identifiants → 403 explicite, sans incrémenter le compteur anti-brute-force.
+    if (e instanceof AccountDisabledError) {
+      return NextResponse.json(
+        { error: "Ce compte a été désactivé. Contacte un responsable du club." },
+        { status: 403 },
+      );
+    }
     // Échec (identifiants invalides ou flux interrompu) : on incrémente le compteur.
     await prisma.loginAttempt.create({ data: { ip } }).catch(() => {});
     // Détail journalisé côté serveur ; message générique pour ne rien divulguer de l'amont.

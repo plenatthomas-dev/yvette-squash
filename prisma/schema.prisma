@@ -31,6 +31,15 @@ model User {
   // depuis ses paramètres. Base légale = intérêt légitime (entraide asso) + retrait facile.
   // Seuls `id` + nom/pseudo sont exposés par /api/directory (jamais email ni contactId).
   listed      Boolean      @default(true)
+  // Gestion des membres (espace admin, étape 1) :
+  //  - lastLoginAt : horodaté à CHAQUE connexion réussie (ResaMania ou email) — repère les
+  //    comptes inactifs. NULL = jamais connecté depuis l'ajout de la colonne.
+  //  - disabledAt  : compte désactivé par un admin → connexion refusée (ResaMania ET email) et
+  //    sessions en cours révoquées. Alternative NON destructive à la suppression, seule option
+  //    pour un membre ResaMania (qui se recréerait à la prochaine connexion) ou porteur d'un
+  //    historique financier (dépenses Tricount `Restrict`).
+  lastLoginAt DateTime?
+  disabledAt  DateTime?
   createdAt   DateTime     @default(now())
   sessions    Session[]
   bookings    Booking[]

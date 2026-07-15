@@ -134,6 +134,10 @@ export default function AdminPage() {
 
       {state === "ready" && (
         <>
+          <p style={{ marginBottom: 20 }}>
+            <a href="/admin/membres">👥 Gérer les membres →</a>
+          </p>
+
           {/* Annonce push à tous les membres abonnés (« Terrain fermé samedi »…). */}
           <section style={{ marginBottom: 24 }}>
             <h2 style={{ fontSize: "1.1rem" }}>Annonce à tous les membres</h2>

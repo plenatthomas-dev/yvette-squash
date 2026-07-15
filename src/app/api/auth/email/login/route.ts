@@ -59,6 +59,13 @@ export async function POST(req: NextRequest) {
     await prisma.loginAttempt.create({ data: { ip } }).catch(() => {});
     return NextResponse.json({ error: "Email ou mot de passe incorrect." }, { status: 401 });
   }
+  // Compte désactivé par un admin : identifiants corrects, mais accès bloqué localement.
+  if (user.disabledAt) {
+    return NextResponse.json(
+      { error: "Ce compte a été désactivé. Contacte un responsable du club." },
+      { status: 403 },
+    );
+  }
 
   // Succès : on efface l'ardoise de cette IP puis on ouvre une session « email seul ».
   await prisma.loginAttempt.deleteMany({ where: { ip } });

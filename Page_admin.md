@@ -85,11 +85,14 @@ câblage dans l'auth) ; la suppression d'un membre est bloquée par des relation
 (Tricount) → logique transactionnelle, **réutilisée** pour #6 ; bannière et flags runtime
 n'ont pas de store → #3 introduit une table `AppSetting` que #9 réutilisera.
 
-**Étape 0 — #2 Annonce push à tous** (0 migration, gain immédiat)
+**Étape 0 — #2 Annonce push à tous** (0 migration, gain immédiat) — ✅ FAIT
 Ajouter `pushToAll` + route `/api/admin/announce` + formulaire titre/message. Réutilise 100 %
 l'infra push. À livrer en premier : aucun risque schéma.
 
-**Étape 1 — #1 Gestion des membres**, en 3 sous-phases :
+**Étape 1 — #1 Gestion des membres**, en 3 sous-phases — ✅ FAIT
+(migration `20_user_admin_mgmt` : `lastLoginAt` + `disabledAt` ; `src/lib/members.ts` ;
+`/api/admin/members` ; page `/admin/membres`. Suppression refusée si dépendances `Restrict`
+→ désactivation à la place. Désactivation révoque les sessions + refus aux deux logins.)
 1. **Liste lecture seule** — migration `lastLoginAt` (+ remplissage au login), puis affichage
    (nom, email, mode, date d'inscription, dernière connexion). Sans la migration, la colonne
    « dernière connexion » reste vide.
