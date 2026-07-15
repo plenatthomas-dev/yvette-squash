@@ -145,12 +145,15 @@ export function SettingsButton({
   nickname,
   listed,
   onProfileSaved,
+  onDelegationsChanged,
   toast,
 }: {
   myId: string | null;
   nickname: string | null;
   listed: boolean;
   onProfileSaved: () => void;
+  /** Une délégation REÇUE a changé : l'appelant doit relire les siennes (sélecteur « Pour X »). */
+  onDelegationsChanged: () => void;
   toast: (type: "ok" | "err" | "info", msg: string) => void;
 }) {
   const { directory, delegation } = useFeatures();
@@ -173,6 +176,11 @@ export function SettingsButton({
   >(null);
   const [outgoingDelegations, setOutgoingDelegations] = useState<
     { id: string; delegateId: string; delegateName: string; expiresAt: string }[]
+  >([]);
+  // Délégations REÇUES : celles qu'on m'a accordées. Listées pour pouvoir les rendre — on ne
+  // les demande pas, on ne devrait pas être obligé de les garder.
+  const [incomingDelegations, setIncomingDelegations] = useState<
+    { id: string; delegatorId: string; delegatorName: string; expiresAt: string }[]
   >([]);
   const [pickedDelegates, setPickedDelegates] = useState<string[]>([]);
   const [pickedHours, setPickedHours] = useState<number>(DELEGATION_DURATIONS[0].hours);
@@ -203,11 +211,13 @@ export function SettingsButton({
         if (cancelled) return;
         setDelegateMembers(members);
         setOutgoingDelegations(delRes.ok ? (del.outgoing ?? []) : []);
+        setIncomingDelegations(delRes.ok ? (del.incoming ?? []) : []);
         setSessionExpiresAt(delRes.ok ? (del.sessionExpiresAt ?? null) : null);
       } catch {
         if (!cancelled) {
           setDelegateMembers([]);
           setOutgoingDelegations([]);
+          setIncomingDelegations([]);
           setSessionExpiresAt(null);
         }
       }
@@ -305,6 +315,28 @@ export function SettingsButton({
       if (!res.ok) throw new Error(`Erreur ${res.status}`);
       setOutgoingDelegations((prev) => prev.filter((d) => d.id !== id));
       toast("ok", "Délégation révoquée");
+    } catch (e) {
+      toast("err", (e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /**
+   * Rendre une délégation REÇUE. Même route que la révocation (les deux parties peuvent mettre
+   * fin à une délégation) : personne ne devrait subir le pouvoir d'agir au nom d'un autre sans
+   * l'avoir demandé. On prévient l'appelant : le sélecteur « Pour X » de l'en-tête doit
+   * disparaître aussitôt, sinon on garderait un choix qui n'a plus de droits derrière — et
+   * s'en servir renverrait une erreur.
+   */
+  const releaseDelegation = async (id: string) => {
+    setBusy(id);
+    try {
+      const res = await fetch(`/api/delegations/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Erreur ${res.status}`);
+      setIncomingDelegations((prev) => prev.filter((d) => d.id !== id));
+      toast("ok", "Délégation rendue");
+      onDelegationsChanged();
     } catch (e) {
       toast("err", (e as Error).message);
     } finally {
@@ -519,6 +551,35 @@ export function SettingsButton({
                     </>
                   )}
                 </SettingInfo>
+                {/* Délégations REÇUES : on peut les rendre (on ne les a pas demandées). */}
+                {incomingDelegations.length > 0 && (
+                  <ul className="delegation-active-list">
+                    {incomingDelegations.map((d) => (
+                      <li key={d.id} className="delegation-active">
+                        <p className="tiny">
+                          <strong>{d.delegatorName}</strong> t'a délégué ses droits jusqu'au{" "}
+                          {new Date(d.expiresAt).toLocaleString("fr-FR", {
+                            day: "numeric",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                          .
+                        </p>
+                        <div className="delegation-row-actions">
+                          <button
+                            className="secondary"
+                            onClick={() => releaseDelegation(d.id)}
+                            disabled={busy !== null}
+                            title={`Tu ne pourras plus réserver au nom de ${d.delegatorName}`}
+                          >
+                            {busy === d.id ? "…" : "Rendre"}
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 {outgoingDelegations.length > 0 && (
                   <ul className="delegation-active-list">
                     {outgoingDelegations.map((d) => (

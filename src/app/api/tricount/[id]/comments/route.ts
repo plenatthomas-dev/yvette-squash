@@ -7,6 +7,17 @@ import { getFeatures } from "@/lib/features-server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Garde-fou anti-emballement : au-delà de MAX_PER_WINDOW messages en WINDOW_MS pour un même
+// membre, on refuse. Volontairement LARGE — une vraie conversation n'en approche jamais. Ce
+// n'est pas une limite d'usage mais un filet : le club est sur invitation, donc le risque n'est
+// pas l'inconnu malveillant mais le client qui boucle ou le compte compromis, qui rempliraient
+// la base (Neon Hobby) de messages. Le compteur vit en base (pas de mémoire partagée entre
+// fonctions serverless), comme pour le login et le feedback.
+// ⚠️ Contrairement à LoginAttempt/FeedbackMessage, on ne PURGE rien ici : ces lignes sont le
+// contenu lui-même, on se contente de les compter.
+const WINDOW_MS = 10 * 60_000; // 10 min glissantes
+const MAX_PER_WINDOW = 30;
+
 // POST /api/tricount/{id}/comments { body } -> ajoute un commentaire au fil du tricount
 // (idée 5a). Tout membre connecté peut commenter un tricount existant.
 export async function POST(
@@ -34,6 +45,18 @@ export async function POST(
   const tricount = await prisma.tricount.findUnique({ where: { id }, select: { id: true } });
   if (!tricount) {
     return NextResponse.json({ error: "Tricount introuvable" }, { status: 404 });
+  }
+
+  // Tous fils confondus : la limite vise le membre, pas le tricount (sinon il suffirait de
+  // changer de fil pour la contourner).
+  const recent = await prisma.tricountComment.count({
+    where: { userId: session.userId, createdAt: { gte: new Date(Date.now() - WINDOW_MS) } },
+  });
+  if (recent >= MAX_PER_WINDOW) {
+    return NextResponse.json(
+      { error: "Trop de messages d'un coup. Reprends dans quelques minutes." },
+      { status: 429 },
+    );
   }
 
   const comment = await prisma.tricountComment.create({

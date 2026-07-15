@@ -856,6 +856,7 @@ export default function Home() {
               nickname={nickname}
               listed={listed}
               onProfileSaved={checkMe}
+              onDelegationsChanged={loadIncomingDelegation}
               toast={toast}
             />
             {/* Menu ⋯ : regroupe les actions secondaires pour dégager le logo. */}

@@ -28,8 +28,6 @@ export async function DELETE(
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
-  const blocked = blockEmailOnlyExpenseWrite(session);
-  if (blocked) return blocked;
   const { id } = await params;
   const expense = await prisma.expense.findUnique({
     where: { id },
@@ -37,6 +35,15 @@ export async function DELETE(
   });
   if (!expense || (expense.creatorId !== session.userId && expense.payerId !== session.userId)) {
     return NextResponse.json({ error: "Dépense introuvable ou non autorisée" }, { status: 404 });
+  }
+  // Le garde « email seul » ne vaut que pour les vraies DÉPENSES. Un remboursement, ces comptes
+  // ont le droit de le déclarer (cf. tricount-guard + route refunds) : leur interdire de le
+  // supprimer les enfermait dans leur erreur, d'autant que PATCH renvoie « un remboursement ne se
+  // modifie pas, supprime-le et refais-le » — une consigne qu'ils ne pouvaient pas suivre.
+  // L'ownership est déjà vérifié ci-dessus : on ne peut défaire que SON propre remboursement.
+  if (!expense.isRefund) {
+    const blocked = blockEmailOnlyExpenseWrite(session);
+    if (blocked) return blocked;
   }
 
   await prisma.$transaction(async (tx) => {
