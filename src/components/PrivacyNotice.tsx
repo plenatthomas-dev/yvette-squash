@@ -10,9 +10,11 @@ import { MODERATION_RETENTION_LABEL } from "@/lib/retention";
 // L'adresse doit rester joignable par quelqu'un qui n'a PAS de compte : une demande
 // d'inscription rejetée laisse un e-mail en base, et son auteur ne peut pas se connecter pour
 // utiliser « Un commentaire ? ». Le canal in-app ne suffit donc pas à lui seul.
-// Pilotée par variable d'env pour pouvoir changer de boîte sans toucher au code.
+// Boîte DÉDIÉE (pas l'adresse perso) : transmissible à un successeur sans donner accès à des
+// mails privés. Surchargeable par env pour changer de boîte sans redéployer le code.
 const CONTROLLER = "Thomas Plenat";
-const CONTACT_EMAIL = process.env.NEXT_PUBLIC_PRIVACY_CONTACT?.trim() || "";
+const CONTACT_EMAIL =
+  process.env.NEXT_PUBLIC_PRIVACY_CONTACT?.trim() || "squash-yvette.app@gmail.com";
 
 // Icône « information » (cercle + i) — ouvre la note de confidentialité.
 export function InfoIcon() {
@@ -54,15 +56,8 @@ export function PrivacyNotice() {
               </p>
               <p>
                 <strong>Qui est responsable.</strong> {CONTROLLER}, qui développe et exploite
-                l'appli.{" "}
-                {CONTACT_EMAIL ? (
-                  <>
-                    Pour toute question ou demande sur tes données :{" "}
-                    <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.
-                  </>
-                ) : (
-                  <>Contact : voir ⚙️ Paramètres › « Un commentaire&nbsp;? » une fois connecté.</>
-                )}
+                l'appli. Pour toute question ou demande sur tes données :{" "}
+                <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.
               </p>
               <p>
                 <strong>Ce qu'on garde.</strong> Ton nom (fourni par ResaMania), ton e-mail,
@@ -164,15 +159,9 @@ export function PrivacyNotice() {
               )}
               <p>
                 <strong>Tes droits.</strong> Tu peux demander à consulter, corriger, récupérer
-                ou supprimer tes données, et t'opposer à un traitement.{" "}
-                {CONTACT_EMAIL ? (
-                  <>
-                    Écris à <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>, ou passe
-                    par ⚙️ Paramètres › « Un commentaire&nbsp;? » si tu es connecté.
-                  </>
-                ) : (
-                  <>Une fois connecté, écris-nous via ⚙️ Paramètres › « Un commentaire&nbsp;? ».</>
-                )}{" "}
+                ou supprimer tes données, et t'opposer à un traitement. Écris à{" "}
+                <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>, ou passe par
+                ⚙️ Paramètres › « Un commentaire&nbsp;? » si tu es connecté.
                 La déconnexion efface déjà ta session. Si une réponse ne te convient pas, tu
                 peux saisir la <strong>CNIL</strong> (<a href="https://www.cnil.fr" target="_blank" rel="noopener noreferrer">cnil.fr</a>).
               </p>
