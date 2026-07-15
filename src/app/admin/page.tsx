@@ -27,6 +27,12 @@ export default function AdminPage() {
   const [copied, setCopied] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // Annonce push à tous les membres (étape 0 de l'espace admin).
+  const [annTitle, setAnnTitle] = useState("");
+  const [annBody, setAnnBody] = useState("");
+  const [annBusy, setAnnBusy] = useState(false);
+  const [annResult, setAnnResult] = useState<{ ok: boolean; text: string } | null>(null);
+
   useEffect(() => {
     if (!FEATURE_EMAIL_LOGIN) return;
     (async () => {
@@ -63,6 +69,40 @@ export default function AdminPage() {
     }
   };
 
+  const sendAnnounce = async () => {
+    const title = annTitle.trim();
+    const body = annBody.trim();
+    if (!title || !body) return;
+    setAnnBusy(true);
+    setAnnResult(null);
+    try {
+      const res = await fetch("/api/admin/announce", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, body }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        recipients?: number;
+        error?: string;
+      };
+      if (!res.ok) {
+        setAnnResult({ ok: false, text: data.error ?? "Envoi impossible." });
+        return;
+      }
+      const n = data.recipients ?? 0;
+      setAnnResult({
+        ok: true,
+        text: n === 0 ? "Aucun membre abonné aux notifications." : `Envoyée à ${n} membre${n > 1 ? "s" : ""}.`,
+      });
+      setAnnTitle("");
+      setAnnBody("");
+    } catch {
+      setAnnResult({ ok: false, text: "Envoi impossible." });
+    } finally {
+      setAnnBusy(false);
+    }
+  };
+
   const copy = async (id: string, link: string) => {
     try {
       await navigator.clipboard.writeText(link);
@@ -84,7 +124,7 @@ export default function AdminPage() {
 
   return (
     <main className="login">
-      <h1>Demandes en attente</h1>
+      <h1>Admin</h1>
 
       {state === "loading" && <p className="muted">Chargement…</p>}
       {state === "error" && <div className="notice error">⚠️ Erreur de chargement.</div>}
@@ -94,6 +134,46 @@ export default function AdminPage() {
 
       {state === "ready" && (
         <>
+          {/* Annonce push à tous les membres abonnés (« Terrain fermé samedi »…). */}
+          <section style={{ marginBottom: 24 }}>
+            <h2 style={{ fontSize: "1.1rem" }}>Annonce à tous les membres</h2>
+            <p className="muted tiny">
+              Envoie une notification push aux membres qui ont activé les notifications.
+            </p>
+            <input
+              type="text"
+              placeholder="Titre (ex. Terrain fermé samedi)"
+              value={annTitle}
+              maxLength={80}
+              disabled={annBusy}
+              onChange={(e) => setAnnTitle(e.target.value)}
+              style={{ width: "100%", marginBottom: 8 }}
+            />
+            <textarea
+              placeholder="Message"
+              value={annBody}
+              maxLength={300}
+              rows={3}
+              disabled={annBusy}
+              onChange={(e) => setAnnBody(e.target.value)}
+              style={{ width: "100%", marginBottom: 8 }}
+            />
+            <button
+              type="button"
+              disabled={annBusy || !annTitle.trim() || !annBody.trim()}
+              onClick={sendAnnounce}
+            >
+              {annBusy ? "Envoi…" : "Envoyer l'annonce"}
+            </button>
+            {annResult && (
+              <div className={`notice ${annResult.ok ? "info" : "error"}`} style={{ marginTop: 8 }}>
+                {annResult.ok ? "✓ " : "⚠️ "}
+                {annResult.text}
+              </div>
+            )}
+          </section>
+
+          <h2 style={{ fontSize: "1.1rem" }}>Demandes en attente</h2>
           <p className="muted tiny">
             Approuve une demande pour générer son lien, puis transmets-le à la personne
             (WhatsApp, SMS…). Le lien ne s'affiche qu'une seule fois.

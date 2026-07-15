@@ -73,3 +73,44 @@ prioritaire.
 ## Recommandation
 Commencer par **#1 (gestion des membres)** et **#2 (annonce push)** : meilleur rapport
 valeur/effort, et suppriment les manipulations manuelles en base de données.
+
+---
+
+## Ordre d'implémentation
+
+Ordre issu du croisement priorité × dépendances techniques réelles. Rappel des contraintes
+côté code : `pushToUser` existe mais pas `pushToAll` (trivial à ajouter, 0 migration) ;
+`User` n'a **ni `lastLoginAt`, ni `role`, ni champ de désactivation** (chacun = migration +
+câblage dans l'auth) ; la suppression d'un membre est bloquée par des relations `Restrict`
+(Tricount) → logique transactionnelle, **réutilisée** pour #6 ; bannière et flags runtime
+n'ont pas de store → #3 introduit une table `AppSetting` que #9 réutilisera.
+
+**Étape 0 — #2 Annonce push à tous** (0 migration, gain immédiat)
+Ajouter `pushToAll` + route `/api/admin/announce` + formulaire titre/message. Réutilise 100 %
+l'infra push. À livrer en premier : aucun risque schéma.
+
+**Étape 1 — #1 Gestion des membres**, en 3 sous-phases :
+1. **Liste lecture seule** — migration `lastLoginAt` (+ remplissage au login), puis affichage
+   (nom, email, mode, date d'inscription, dernière connexion). Sans la migration, la colonne
+   « dernière connexion » reste vide.
+2. **Actions non destructives** — « renvoyer un lien d'activation » / « forcer une
+   réinitialisation » : réutilise directement `email-auth`, aucune migration.
+3. **Destructif** — désactiver (migration `disabledAt` + refus au login), puis
+   supprimer-avec-dépendances (logique transactionnelle `Restrict`). Vrai gros morceau.
+
+**Étape 2 — #3 Bannière d'annonce**
+Introduit la table `AppSetting` (singleton). Complète #2 dans la même section « broadcast ».
+
+**Étape 3 — #5 Historique demandes + blocklist**
+Prolonge la gestion `EmailToken` (garder les demandes traitées au lieu de les supprimer) +
+petite table blocklist. Naturel juste après avoir touché les demandes.
+
+**Étape 4 — #4 Mini-tableau de bord**
+Agrège les compteurs (sessions actives ← dépend du `lastLoginAt` de l'étape 1), état ResaMania,
+dernier passage des crons + nb de notifs envoyées.
+
+**Étape 5 — #6 Modération Tricount**
+Réutilise la logique « suppression avec dépendances » écrite à l'étape 1.3 → quasi gratuit.
+
+**Étape 6 — le lourd/optionnel** : #7 (colonne `role` en base) → #8 (journal d'audit) →
+#9 (flags runtime).
