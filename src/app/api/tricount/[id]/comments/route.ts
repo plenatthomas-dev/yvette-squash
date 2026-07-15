@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { MAX_COMMENT_LEN } from "@/lib/tricount";
-import { FEATURE_TRICOUNT } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  if (!FEATURE_TRICOUNT) {
+  if (!(await getFeatures()).tricount) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);

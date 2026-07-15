@@ -2,13 +2,7 @@
 
 import { useState } from "react";
 import { Dialog } from "@/components/Dialog";
-import {
-  FEATURE_DIRECTORY,
-  FEATURE_RANKING,
-  FEATURE_TRICOUNT,
-  FEATURE_TOURNAMENT,
-  FEATURE_DELEGATION,
-} from "@/lib/features";
+import { useFeatures } from "@/components/FeatureProvider";
 
 // Icône « information » (cercle + i) — ouvre la note de confidentialité.
 export function InfoIcon() {
@@ -26,6 +20,7 @@ export function InfoIcon() {
 // comme sur l'appli. La modale réutilise le style .modal existant.
 export function PrivacyNotice() {
   const [open, setOpen] = useState(false);
+  const { directory, ranking, tricount, tournament, delegation } = useFeatures();
   return (
     <footer className="app-footer">
       <button
@@ -59,7 +54,7 @@ export function PrivacyNotice() {
                 ResaMania, que tu utilises déjà). Hébergement en <strong>Union
                 européenne</strong> (Vercel, base Neon).
               </p>
-              {FEATURE_DIRECTORY && (
+              {directory && (
                 <p>
                   <strong>Annuaire des membres.</strong> Ton nom (ou pseudonyme) est visible
                   des membres connectés — <strong>rien d'autre</strong> (ni e-mail, ni
@@ -67,7 +62,7 @@ export function PrivacyNotice() {
                   membres ».
                 </p>
               )}
-              {FEATURE_RANKING && (
+              {ranking && (
                 <p>
                   <strong>Classement fédéral.</strong> Ton classement FFSquash
                   (<strong>squashnet.fr</strong>, source publique) peut s'afficher à côté de
@@ -82,7 +77,7 @@ export function PrivacyNotice() {
                 <strong> nombre d'inscrits</strong> et <strong>ta position</strong> —
                 <strong> jamais les noms</strong>.
               </p>
-              {FEATURE_TRICOUNT && (
+              {tricount && (
                 <p>
                   <strong>Partage de frais (« Frais »).</strong> Dépenses, remboursements et
                   messages y sont visibles de <strong>tous les membres connectés</strong>,
@@ -90,14 +85,14 @@ export function PrivacyNotice() {
                   combien à qui. N'y saisis que ce que tu acceptes de partager.
                 </p>
               )}
-              {FEATURE_TOURNAMENT && (
+              {tournament && (
                 <p>
                   <strong>Tournois.</strong> Participants (dont <strong>prénoms d'invités hors
                   asso</strong>), matchs et scores sont visibles de <strong>tous les membres
                   connectés</strong>. N'ajoute un invité qu'avec son accord.
                 </p>
               )}
-              {FEATURE_DELEGATION && (
+              {delegation && (
                 <p>
                   <strong>Délégation de droits.</strong> Si tu délègues tes droits
                   (⚙️ Paramètres), les membres choisis peuvent réserver/annuler

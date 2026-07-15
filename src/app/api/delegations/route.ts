@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, getResaSessionExpiry } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { FEATURE_DELEGATION } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 import { pushToUser } from "@/lib/push";
 import {
   DELEGATION_DURATIONS_H,
@@ -26,7 +26,7 @@ const fmtParis = (d: Date) =>
 // GET /api/delegations -> mes délégations actives : celles que je donne (outgoing, une par
 // délégué, plusieurs simultanées) et celles que je reçois (incoming, plusieurs délégants).
 export async function GET(req: NextRequest) {
-  if (!FEATURE_DELEGATION) {
+  if (!(await getFeatures()).delegation) {
     return NextResponse.json({ error: "Délégation désactivée" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);
@@ -71,7 +71,7 @@ const MAX_DELEGATES = 20;
 // Chaque prolongation reste bornée par les préréglages et exige une action du délégant.
 // Rétro-compat : accepte aussi { delegateId } (ancien client mono).
 export async function POST(req: NextRequest) {
-  if (!FEATURE_DELEGATION) {
+  if (!(await getFeatures()).delegation) {
     return NextResponse.json({ error: "Délégation désactivée" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);

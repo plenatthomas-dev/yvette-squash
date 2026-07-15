@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 import { requireAdmin } from "@/lib/admin";
 import { addBlock } from "@/lib/moderation";
 import {
@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 // GET /api/admin/requests
 // File d'attente des demandes de compte / réinitialisation (inscription sur invitation).
 export async function GET(req: NextRequest) {
-  if (!FEATURE_EMAIL_LOGIN) {
+  if (!(await getFeatures()).emailLogin) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   if (!(await requireAdmin(req))) {
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
 // reject       → supprime la demande (journalisée dans l'historique) ;
 // reject-block → rejette ET bloque l'e-mail (réinscription abusive).
 export async function POST(req: NextRequest) {
-  if (!FEATURE_EMAIL_LOGIN) {
+  if (!(await getFeatures()).emailLogin) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const admin = await requireAdmin(req);

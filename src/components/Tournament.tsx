@@ -12,7 +12,7 @@ import { fetchDirectory } from "@/lib/directoryCache";
 interface Member {
   id: string;
   name: string;
-  clt?: string; // classement fédéral (si FEATURE_RANKING + rapprochement sûr)
+  clt?: string; // classement fédéral (si le flag `ranking` est actif + rapprochement sûr)
   rang?: number | null; // rang national (tri des têtes de série)
   cat?: string | null; // catégorie d'âge (info-bulle)
 }

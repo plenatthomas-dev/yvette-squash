@@ -1,6 +1,6 @@
 import { prisma } from "./db";
 import { getResaTokenForUser } from "./session";
-import { FEATURE_DELEGATION } from "./features";
+import { getFeatures } from "./features-server";
 import { DELEGATION_SCOPE, DELEGATION_DURATIONS_H } from "./delegation-shared";
 import type { AppSession } from "./session";
 import type { ResaSession } from "./resamania/types";
@@ -72,7 +72,7 @@ export async function resolveActingContext(
   selfRequiredMessage: string,
 ): Promise<ActingResult> {
   if (typeof onBehalfOf === "string" && onBehalfOf) {
-    if (!FEATURE_DELEGATION) {
+    if (!(await getFeatures()).delegation) {
       return { ok: false, status: 404, error: "Délégation désactivée" };
     }
     if (onBehalfOf === session.userId) {

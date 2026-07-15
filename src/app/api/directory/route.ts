@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { FEATURE_DIRECTORY, FEATURE_RANKING } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +19,9 @@ function whatsappGroupUrl(): string | null {
 // et pour chacun seulement { id, name } — JAMAIS l'email ni le contactId (l'email
 // reste une clé d'identité interne). Réservé aux membres connectés + gated par flag.
 export async function GET(req: NextRequest) {
-  if (!FEATURE_DIRECTORY) {
+  // Un seul appel : `ranking` sert plus bas à décider de la jointure classement.
+  const { directory, ranking } = await getFeatures();
+  if (!directory) {
     return NextResponse.json({ error: "Annuaire désactivé" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);
@@ -34,7 +36,7 @@ export async function GET(req: NextRequest) {
       displayName: true,
       nickname: true,
       // Classement fédéral (idée squashnet) : joint seulement si la fonction est active.
-      squashnetRanking: FEATURE_RANKING ? { select: { clt: true, rang: true, cat: true } } : false,
+      squashnetRanking: ranking ? { select: { clt: true, rang: true, cat: true } } : false,
     },
   });
 
@@ -45,7 +47,7 @@ export async function GET(req: NextRequest) {
     .map((u) => ({
       id: u.id,
       name: u.nickname ?? u.displayName,
-      ...(FEATURE_RANKING && u.squashnetRanking
+      ...(ranking && u.squashnetRanking
         ? {
             clt: u.squashnetRanking.clt,
             rang: u.squashnetRanking.rang,

@@ -14,10 +14,16 @@ const h = vi.hoisted(() => ({
   delegatorResa: null as null | Record<string, unknown>,
 }));
 
-vi.mock("./features", () => ({
-  get FEATURE_DELEGATION() {
-    return h.featureOn;
-  },
+// Le flag est résolu à chaud côté serveur (env + override en base) : on mocke l'état effectif.
+vi.mock("./features-server", () => ({
+  getFeatures: async () => ({
+    tricount: false,
+    emailLogin: false,
+    directory: false,
+    delegation: h.featureOn,
+    tournament: false,
+    ranking: false,
+  }),
 }));
 vi.mock("./db", () => ({ prisma: { delegation: { findFirst: h.findFirst } } }));
 vi.mock("./session", () => ({ getResaTokenForUser: vi.fn(async () => h.delegatorResa) }));

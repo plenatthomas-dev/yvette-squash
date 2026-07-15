@@ -8,7 +8,7 @@ import {
   MAX_LABEL_LEN,
   MAX_PARTS,
 } from "@/lib/tricount";
-import { FEATURE_TRICOUNT } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 import { blockEmailOnlyExpenseWrite } from "@/lib/tricount-guard";
 
 export const runtime = "nodejs";
@@ -21,7 +21,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  if (!FEATURE_TRICOUNT) {
+  if (!(await getFeatures()).tricount) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);
@@ -61,7 +61,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  if (!FEATURE_TRICOUNT) {
+  if (!(await getFeatures()).tricount) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);

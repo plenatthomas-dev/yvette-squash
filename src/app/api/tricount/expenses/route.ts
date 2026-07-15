@@ -9,7 +9,7 @@ import {
   MAX_TITLE_LEN,
   MAX_PARTS,
 } from "@/lib/tricount";
-import { FEATURE_TRICOUNT } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 import { blockEmailOnlyExpenseWrite } from "@/lib/tricount-guard";
 
 export const runtime = "nodejs";
@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 // compte uniquement à la création). Toute modification des dépenses remet à zéro
 // les validations « OK pour rembourser » du tricount.
 export async function POST(req: NextRequest) {
-  if (!FEATURE_TRICOUNT) {
+  if (!(await getFeatures()).tricount) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);

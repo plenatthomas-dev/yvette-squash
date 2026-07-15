@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { FEATURE_TOURNAMENT } from "@/lib/features";
+import { getFeatures } from "@/lib/features-server";
 import { proposeFormats, MIN_PLAYERS, MAX_PLAYERS } from "@/lib/tournament";
 
 export const runtime = "nodejs";
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 // GET /api/tournaments -> liste paginée (plus récents d'abord). ?limit (défaut 20, max 100).
 export async function GET(req: NextRequest) {
-  if (!FEATURE_TOURNAMENT) {
+  if (!(await getFeatures()).tournament) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
 // POST /api/tournaments : crée un tournoi en "draft" avec son roster et renvoie les
 // FORMULES proposées. { name?, date, targetMatches, bestOf?, courts?, players:[{userId}|{guestName}] }
 export async function POST(req: NextRequest) {
-  if (!FEATURE_TOURNAMENT) {
+  if (!(await getFeatures()).tournament) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);
