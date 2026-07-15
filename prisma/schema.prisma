@@ -111,15 +111,21 @@ model Booking {
   @@index([userId])
 }
 
-// Tentative de connexion ÉCHOUÉE (rate limiting du login : 5 max / 15 min par IP).
-// Une ligne par échec ; les lignes sont purgées dès qu'elles sortent de la fenêtre,
-// et toutes celles d'une IP sont effacées quand elle réussit à se connecter.
+// Tentative de connexion ÉCHOUÉE (rate limiting du login, cf. api/auth/login).
+// Une ligne par échec ; purgées dès qu'elles sortent de la fenêtre de 15 min, et effacées
+// pour l'IP + l'identifiant concernés dès qu'une connexion réussit.
 model LoginAttempt {
-  id        String   @id @default(cuid())
-  ip        String
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  ip         String
+  // Identifiant VISÉ par la tentative (normalisé : trim + minuscules). Permet de plafonner
+  // les échecs sur UN compte indépendamment de l'IP : une limite par IP seule ne protège pas
+  // un membre précis d'un botnet (ou d'une simple rotation d'IP mobile). NULL = ligne écrite
+  // avant l'ajout de la colonne. Durée de vie : 15 min (purge), comme le reste de la table.
+  identifier String?
+  createdAt  DateTime @default(now())
 
   @@index([ip, createdAt])
+  @@index([identifier, createdAt])
 }
 
 // Commentaire envoyé par e-mail (rate limiting : 10 max / 24 h par membre).

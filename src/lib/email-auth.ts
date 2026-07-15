@@ -10,7 +10,6 @@
 //    existe ou non ;
 //  - rate-limiting des envois (par IP et par email) pour protéger le quota Gmail.
 
-import type { NextRequest } from "next/server";
 import { randomBytes } from "node:crypto";
 import { prisma } from "./db";
 import { hashToken } from "./crypto";
@@ -39,20 +38,9 @@ const MAX_PER_IP = 5; // demandes récentes depuis une même IP (anti-arrosage d
 // l'admin traite vite ; au-delà, les nouvelles demandes sont refusées jusqu'à ce qu'il purge.
 const MAX_PENDING_TOTAL = 15;
 
-// IP du client. Sur Vercel, `x-real-ip` est posé par la PLATEFORME (non falsifiable par le
-// client), contrairement à `x-forwarded-for` dont un client peut injecter la 1re valeur pour
-// tourner l'IP à chaque requête. On préfère donc x-real-ip ; repli sur la DERNIÈRE entrée de
-// x-forwarded-for (celle ajoutée par la plateforme, la moins falsifiable).
-export function clientIp(req: NextRequest): string {
-  const real = req.headers.get("x-real-ip")?.trim();
-  if (real) return real;
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) {
-    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
-    if (parts.length) return parts[parts.length - 1];
-  }
-  return "local";
-}
+// L'IP du client vit désormais dans son propre module (source unique) : cf. lib/client-ip.
+// Ré-exportée ici pour les appelants historiques.
+export { clientIp } from "./client-ip";
 
 /** Valide la robustesse minimale d'un mot de passe. `null` = OK, sinon message d'erreur. */
 export function passwordProblem(pw: unknown): string | null {

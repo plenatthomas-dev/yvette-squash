@@ -12,3 +12,16 @@ export const MODERATION_RETENTION_DAYS = 365;
 export const MODERATION_RETENTION_MS = MODERATION_RETENTION_DAYS * 24 * 60 * 60_000;
 /** Formulation affichée aux membres. Doit décrire la constante ci-dessus. */
 export const MODERATION_RETENTION_LABEL = "12 mois";
+
+/**
+ * Cache du planning (`PlanningSnapshot`) : 7 jours après la date du créneau.
+ *
+ * Ce n'est pas qu'une question de place. Le snapshot est le planning BRUT de ResaMania : il
+ * contient le `contactId` du réservataire de chaque créneau — donc de personnes qui ne sont PAS
+ * membres de l'appli et n'ont rien accepté. On le garde parce que les comptes « email seul »
+ * (sans jeton ResaMania) n'ont que lui pour voir le planning ; mais le planning d'un jour PASSÉ
+ * ne sert plus à personne, alors que la donnée, elle, resterait.
+ */
+export const SNAPSHOT_RETENTION_DAYS = 7;
+/** Formulation affichée aux membres. Doit décrire la constante ci-dessus. */
+export const SNAPSHOT_RETENTION_LABEL = "7 jours";

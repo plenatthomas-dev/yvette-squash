@@ -72,6 +72,22 @@ export function hashToken(token: string): string {
 }
 
 /**
+ * Compare deux chaînes en TEMPS CONSTANT. À utiliser dès qu'on compare un secret reçu à un
+ * secret attendu : `===` s'arrête au premier octet différent, ce qui laisse fuiter, par la
+ * durée, le nombre d'octets corrects — de quoi reconstruire un secret octet par octet.
+ *
+ * Des longueurs différentes renvoient `false` tout de suite : `timingSafeEqual` exige des
+ * buffers de même taille, et la LONGUEUR d'un secret n'est pas ce qu'on protège.
+ *
+ * N'exige aucune clé (contrairement au reste du module) : utilisable sans CREDENTIALS_SECRET.
+ */
+export function safeEqual(a: string, b: string): boolean {
+  const ba = Buffer.from(a, "utf8");
+  const bb = Buffer.from(b, "utf8");
+  return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
+}
+
+/**
  * Hachage d'un MOT DE PASSE humain avec scrypt (KDF lent, intégré à node:crypto — aucune
  * dépendance). Chaque mot de passe a son propre sel aléatoire, donc deux comptes au même
  * mot de passe ont des hachages différents. Le mot de passe n'est JAMAIS stocké en clair.

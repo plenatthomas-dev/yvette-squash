@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { login, getPlanning } from "@/lib/resamania/client";
 import { cronAuthorized } from "@/lib/cron-auth";
 import { recordCronRun } from "@/lib/cron-run";
+import { SNAPSHOT_RETENTION_DAYS } from "@/lib/retention";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,16 +36,44 @@ function dayISO(offset: number): string {
 // Préchauffe le cache du planning (PlanningSnapshot) pour hier → +14 jours avec le compte
 // de service, pour qu'un compte « email seul » voie toujours le planning à venir, sans
 // dépendre de qui a navigué. Idempotent (upsert). Séquentiel (doux pour ResaMania).
+
+/**
+ * Efface les snapshots des jours révolus depuis plus de SNAPSHOT_RETENTION_DAYS. Le planning
+ * d'un jour passé ne sert plus à personne, mais il contient le contactId ResaMania du
+ * réservataire de chaque créneau — y compris de gens qui ne sont PAS membres de l'appli.
+ * Comparaison de chaînes : les dates sont en "YYYY-MM-DD", dont l'ordre lexicographique EST
+ * l'ordre chronologique. Best-effort : ne doit jamais faire échouer le préchauffage.
+ */
+async function purgeOldSnapshots(): Promise<number> {
+  try {
+    const { count } = await prisma.planningSnapshot.deleteMany({
+      where: { date: { lt: dayISO(-SNAPSHOT_RETENTION_DAYS) } },
+    });
+    return count;
+  } catch (e) {
+    console.error("[warm-planning] purge des snapshots impossible", e);
+    return 0;
+  }
+}
+
 export async function GET(req: NextRequest) {
   if (!cronAuthorized(req)) {
     return NextResponse.json({ error: "Interdit" }, { status: 401 });
   }
+
+  // Purge AVANT tout le reste, et surtout avant le garde « compte de service » : la rétention
+  // est une promesse faite aux gens, elle ne doit pas dépendre de la santé de ResaMania. Si on
+  // la mettait en fin de fonction, une panne du compte de service ferait sortir le cron en
+  // amont et les snapshots — qui portent le contactId de tiers — s'accumuleraient sans fin.
+  const purged = await purgeOldSnapshots();
+
   const token = await serviceToken();
   if (!token) {
     // Signal de santé ResaMania pour le tableau de bord : le compte de service ne se connecte pas.
     await recordCronRun("warm-planning", false, "compte de service ResaMania KO");
     return NextResponse.json({
       warmed: 0,
+      purged,
       reason: "Compte de service ResaMania non configuré ou connexion échouée.",
     });
   }
@@ -67,6 +96,10 @@ export async function GET(req: NextRequest) {
       // Jour indisponible / erreur ponctuelle ResaMania → on continue.
     }
   }
-  await recordCronRun("warm-planning", true, `${warmed}/${dates.length} jours`);
-  return NextResponse.json({ warmed, total: dates.length });
+  await recordCronRun(
+    "warm-planning",
+    true,
+    `${warmed}/${dates.length} jours${purged ? `, ${purged} purgé(s)` : ""}`,
+  );
+  return NextResponse.json({ warmed, total: dates.length, purged });
 }

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Dialog } from "@/components/Dialog";
 import { useFeatures } from "@/components/FeatureProvider";
-import { MODERATION_RETENTION_LABEL } from "@/lib/retention";
+import { MODERATION_RETENTION_LABEL, SNAPSHOT_RETENTION_LABEL } from "@/lib/retention";
 
 // Responsable du traitement (art. 13 RGPD) : son identité ET ses coordonnées doivent figurer
 // dans la note — le but est qu'on sache à qui l'on confie ses données, et à qui s'adresser.
@@ -116,8 +116,10 @@ export function PrivacyNotice() {
                 <strong>Combien de temps.</strong> Tes données de membre vivent
                 <strong> aussi longtemps que ton compte</strong> et disparaissent avec lui.
                 Les traces de modération ci-dessus : <strong>{MODERATION_RETENTION_LABEL}</strong>.
-                Les données anti-abus sont éphémères (quelques minutes à 24 h), et une session
-                expire d'elle-même.
+                Le planning du club est mis en cache (pour l'afficher aux comptes sans accès
+                ResaMania) et effacé <strong>{SNAPSHOT_RETENTION_LABEL}</strong> après le jour
+                concerné. Les données anti-abus sont éphémères (quelques minutes à 24 h), et une
+                session expire d'elle-même.
               </p>
               {directory && (
                 <p>
