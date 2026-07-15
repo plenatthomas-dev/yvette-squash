@@ -15,6 +15,7 @@ import { randomBytes } from "node:crypto";
 import { prisma } from "./db";
 import { hashToken } from "./crypto";
 import { sendEmail } from "./email";
+import { logRequestDecision } from "./moderation";
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const MIN_PASSWORD_LEN = 8;
@@ -158,6 +159,7 @@ export async function listPendingRequests() {
  */
 export async function approveRequest(
   id: string,
+  decidedById?: string | null,
 ): Promise<{ token: string; purpose: TokenPurpose; email: string } | null> {
   const row = await prisma.emailToken.findFirst({ where: { id, approvedAt: null } });
   if (!row) return null;
@@ -171,12 +173,33 @@ export async function approveRequest(
       expiresAt: new Date(Date.now() + TTL_MS[purpose]),
     },
   });
+  // Trace la décision dans l'historique (survivra à la consommation/purge du jeton).
+  await logRequestDecision({
+    email: row.email,
+    purpose,
+    displayName: row.displayName,
+    outcome: "approved",
+    decidedById,
+  });
   return { token, purpose, email: row.email };
 }
 
-/** Rejette (supprime) une demande en attente. */
-export async function rejectRequest(id: string): Promise<void> {
+/**
+ * Rejette (supprime) une demande en attente. Journalise d'abord la décision. Renvoie l'e-mail
+ * de la demande (utile pour un « rejeter et bloquer »), ou `null` si elle n'existait plus.
+ */
+export async function rejectRequest(id: string, decidedById?: string | null): Promise<string | null> {
+  const row = await prisma.emailToken.findFirst({ where: { id, approvedAt: null } });
+  if (!row) return null;
+  await logRequestDecision({
+    email: row.email,
+    purpose: row.purpose,
+    displayName: row.displayName,
+    outcome: "rejected",
+    decidedById,
+  });
   await prisma.emailToken.deleteMany({ where: { id, approvedAt: null } });
+  return row.email;
 }
 
 /** Lien d'auth à transmettre. Activation ET réinitialisation mènent à la même page où la

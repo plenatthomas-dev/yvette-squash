@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FEATURE_EMAIL_LOGIN } from "@/lib/features";
 import { requireAdmin } from "@/lib/admin";
+import { addBlock } from "@/lib/moderation";
 import {
   listPendingRequests,
   approveRequest,
@@ -24,14 +25,16 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ requests });
 }
 
-// POST /api/admin/requests  { id, action: "approve" | "reject" }
-// approve → régénère un lien à transmettre à la personne (renvoyé une seule fois) ;
-// reject  → supprime la demande.
+// POST /api/admin/requests  { id, action: "approve" | "reject" | "reject-block" }
+// approve      → régénère un lien à transmettre à la personne (renvoyé une seule fois) ;
+// reject       → supprime la demande (journalisée dans l'historique) ;
+// reject-block → rejette ET bloque l'e-mail (réinscription abusive).
 export async function POST(req: NextRequest) {
   if (!FEATURE_EMAIL_LOGIN) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
-  if (!(await requireAdmin(req))) {
+  const admin = await requireAdmin(req);
+  if (!admin) {
     return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
   }
   const body = (await req.json().catch(() => ({}))) as { id?: unknown; action?: unknown };
@@ -39,12 +42,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Demande invalide." }, { status: 400 });
   }
 
-  if (body.action === "reject") {
-    await rejectRequest(body.id);
+  if (body.action === "reject" || body.action === "reject-block") {
+    const email = await rejectRequest(body.id, admin.userId);
+    if (body.action === "reject-block" && email) {
+      await addBlock(email, "Demande rejetée depuis la file d'attente", admin.userId);
+    }
     return NextResponse.json({ ok: true });
   }
   if (body.action === "approve") {
-    const approved = await approveRequest(body.id);
+    const approved = await approveRequest(body.id, admin.userId);
     if (!approved) {
       return NextResponse.json({ error: "Demande introuvable ou déjà traitée." }, { status: 404 });
     }

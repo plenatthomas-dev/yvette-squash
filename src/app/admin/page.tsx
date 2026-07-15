@@ -75,7 +75,7 @@ export default function AdminPage() {
     })();
   }, []);
 
-  const act = async (id: string, action: "approve" | "reject") => {
+  const act = async (id: string, action: "approve" | "reject" | "reject-block") => {
     setBusyId(id);
     try {
       const res = await fetch("/api/admin/requests", {
@@ -88,7 +88,7 @@ export default function AdminPage() {
       if (action === "approve" && data.link) {
         setLinks((m) => ({ ...m, [id]: data.link! }));
       }
-      // Dans les deux cas la demande quitte la file (approuvée → lien affiché ; rejetée → retirée).
+      // Dans tous les cas la demande quitte la file (approuvée → lien affiché ; rejetée → retirée).
       setRequests((rs) => rs.filter((r) => r.id !== id));
     } finally {
       setBusyId(null);
@@ -187,8 +187,9 @@ export default function AdminPage() {
 
       {state === "ready" && (
         <>
-          <p style={{ marginBottom: 20 }}>
+          <p style={{ marginBottom: 20, display: "flex", gap: 16, flexWrap: "wrap" }}>
             <Link href="/admin/membres">👥 Gérer les membres →</Link>
+            <Link href="/admin/demandes">📜 Historique &amp; blocklist →</Link>
           </p>
 
           {/* Annonce push à tous les membres abonnés (« Terrain fermé samedi »…). */}
@@ -316,7 +317,7 @@ export default function AdminPage() {
                 <div className="muted tiny">
                   {purposeLabel(r.purpose)} · {new Date(r.createdAt).toLocaleString("fr-FR")}
                 </div>
-                <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button
                     type="button"
                     disabled={busyId === r.id}
@@ -331,6 +332,15 @@ export default function AdminPage() {
                     onClick={() => act(r.id, "reject")}
                   >
                     Rejeter
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={busyId === r.id}
+                    onClick={() => act(r.id, "reject-block")}
+                    style={{ color: "#b91c1c" }}
+                  >
+                    Rejeter et bloquer
                   </button>
                 </div>
               </li>

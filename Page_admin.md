@@ -107,9 +107,12 @@ Introduit la table `AppSetting` (KV générique, migration `21_app_setting`). `s
 composant `AnnouncementBanner` dans le layout (masquable, réapparaît si modifiée via `version`) ;
 éditeur dans la section « broadcast » de `/admin`.
 
-**Étape 3 — #5 Historique demandes + blocklist**
-Prolonge la gestion `EmailToken` (garder les demandes traitées au lieu de les supprimer) +
-petite table blocklist. Naturel juste après avoir touché les demandes.
+**Étape 3 — #5 Historique demandes + blocklist** — ✅ FAIT
+Migration `22_request_log_blocklist` : `RequestLog` (historique append-only des décisions,
+découplé des jetons `EmailToken`) + `EmailBlock` (blocklist). `src/lib/moderation.ts`.
+Décisions approve/reject journalisées ; `reject-block` (rejette + bloque) dans la file ;
+inscription d'une adresse bloquée ignorée silencieusement (anti-énumération). Routes
+`/api/admin/history` + `/api/admin/blocklist` ; page `/admin/demandes`.
 
 **Étape 4 — #4 Mini-tableau de bord**
 Agrège les compteurs (sessions actives ← dépend du `lastLoginAt` de l'étape 1), état ResaMania,
