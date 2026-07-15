@@ -6,7 +6,11 @@ import { pushToUser } from "@/lib/push";
 
 export const runtime = "nodejs";
 
-// DELETE /api/delegations/{id} -> révoque MA délégation sortante (délégant uniquement).
+// DELETE /api/delegations/{id} -> met fin à une délégation qui me concerne.
+// Les DEUX camps peuvent y mettre fin : le délégant retire les droits qu'il a donnés ; le
+// délégataire rend ceux qu'il a reçus (une délégation non sollicitée ne doit pas être subie —
+// il n'a rien demandé, et personne ne devrait garder de force le pouvoir d'agir au nom d'un
+// autre). Dans les deux cas c'est une RESTRICTION de droits : aucun risque à l'ouvrir.
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -19,27 +23,35 @@ export async function DELETE(
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
   const { id } = await params;
-  // Borné à MON userId de délégant : pas moyen de révoquer la délégation d'un autre. On lit
-  // d'abord la délégation (pour connaître le délégataire à prévenir), puis on révoque en
-  // marquant endNotifiedAt → le cron d'expiration ne la re-notifiera pas.
+  // Borné aux délégations où JE suis l'une des deux parties : pas moyen de toucher à celle de
+  // deux autres membres. On lit d'abord (pour savoir qui prévenir), puis on révoque en marquant
+  // endNotifiedAt → le cron d'expiration ne la re-notifiera pas.
   const deleg = await prisma.delegation.findFirst({
-    where: { id, delegatorId: session.userId, revokedAt: null },
-    select: { id: true, delegateId: true },
+    where: {
+      id,
+      revokedAt: null,
+      OR: [{ delegatorId: session.userId }, { delegateId: session.userId }],
+    },
+    select: { id: true, delegatorId: true, delegateId: true },
   });
   if (deleg) {
     await prisma.delegation.update({
       where: { id: deleg.id },
       data: { revokedAt: new Date(), endNotifiedAt: new Date() },
     });
-    // Prévient le délégataire que ses droits sont retirés (best-effort).
-    const delegator = await prisma.user.findUnique({
+    // On prévient l'AUTRE partie (best-effort) : celui qui agit sait déjà ce qu'il a fait.
+    const iAmDelegator = deleg.delegatorId === session.userId;
+    const otherId = iAmDelegator ? deleg.delegateId : deleg.delegatorId;
+    const me = await prisma.user.findUnique({
       where: { id: session.userId },
       select: { displayName: true, nickname: true },
     });
-    const name = delegator?.nickname ?? delegator?.displayName ?? "Un membre";
-    await pushToUser(deleg.delegateId, {
+    const name = me?.nickname ?? me?.displayName ?? "Un membre";
+    await pushToUser(otherId, {
       title: "Délégation terminée",
-      body: `${name} a mis fin à la délégation — tu ne peux plus agir en son nom.`,
+      body: iAmDelegator
+        ? `${name} a mis fin à la délégation — tu ne peux plus agir en son nom.`
+        : `${name} a rendu la délégation que tu lui avais accordée.`,
       url: "/",
       tag: `delegation-end-${deleg.id}`,
     }).catch(() => {});

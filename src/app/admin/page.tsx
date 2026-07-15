@@ -55,6 +55,10 @@ export default function AdminPage() {
   const [bnLevel, setBnLevel] = useState<"info" | "warn">("info");
   const [bnBusy, setBnBusy] = useState(false);
   const [bnResult, setBnResult] = useState<{ ok: boolean; text: string } | null>(null);
+  // Y a-t-il une annonce PUBLIÉE ? À distinguer du champ de saisie : on peut y taper un texte
+  // sans l'avoir enregistré. Sans ça, « Retirer » était toujours actif et répondait
+  // « Bannière retirée » alors qu'il n'avait rien retiré.
+  const [bnPublished, setBnPublished] = useState(false);
 
   // Mini-tableau de bord (étape 4).
   const [dash, setDash] = useState<Dashboard | null>(null);
@@ -84,6 +88,7 @@ export default function AdminPage() {
         const data = (await res.json()) as {
           banner: { message: string; level: "info" | "warn" } | null;
         };
+        setBnPublished(data.banner !== null);
         if (data.banner) {
           setBnMessage(data.banner.message);
           setBnLevel(data.banner.level);
@@ -176,6 +181,7 @@ export default function AdminPage() {
         return;
       }
       if (clear) setBnMessage("");
+      setBnPublished(!clear);
       setBnResult({ ok: true, text: clear ? "Bannière retirée." : "Bannière enregistrée." });
       // La bannière vit dans le layout : sans ce signal, l'admin ne verrait son annonce
       // qu'en rechargeant la page (publier ne provoque ni remontage ni focus).
@@ -354,8 +360,9 @@ export default function AdminPage() {
               <button
                 type="button"
                 className="secondary"
-                disabled={bnBusy}
+                disabled={bnBusy || !bnPublished}
                 onClick={() => saveBanner(true)}
+                title={bnPublished ? "Enlève l'annonce affichée" : "Aucune annonce publiée"}
               >
                 Retirer
               </button>
