@@ -7,13 +7,21 @@
 //  2) une BANNIÈRE pleine couleur en haut, tant que l'annonce est active — elle, publique.
 // Les deux se pilotent depuis un seul fetch et se ferment indépendamment. Une annonce MODIFIÉE
 // (nouvelle `version`) repasse devant les yeux (modale + bannière ré-affichées).
+//
+// Où vit le « déjà vu » ? Pour un membre CONNECTÉ : sur son COMPTE (en base). `localStorage`
+// est lié à l'appareil — il fuitait donc d'un membre à l'autre sur un téléphone partagé, et
+// devait être oublié à la déconnexion, ce qui remontrait l'annonce à chaque reconnexion. Le
+// masquage suit maintenant le membre, y compris d'un appareil à l'autre.
+// Pour un visiteur NON connecté (écran de login) : `localStorage`, faute de compte où le poser.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Banner = { message: string; level: "info" | "warn"; version: string };
+type Seen = { dismissedVersion: string | null; modalSeenVersion: string | null };
 
-const DISMISS_KEY = "bannerDismissed"; // version de la bannière masquée (croix)
-const MODAL_SEEN_KEY = "bannerModalSeen"; // version dont la modale a déjà été vue
+// Masquage du bandeau pour un visiteur NON connecté uniquement (un membre connecté, lui, est
+// suivi en base). La modale ne s'affichant jamais hors connexion, elle n'a pas d'équivalent ici.
+const ANON_DISMISS_KEY = "bannerDismissed";
 // Demande de réévaluation immédiate. La bannière vit dans le LAYOUT : elle ne se remonte
 // jamais, et une navigation interne ou une connexion ne déclenchent ni `focus` ni
 // `visibilitychange`. Sans ce signal explicite, une annonce n'apparaît qu'au rechargement.
@@ -28,22 +36,6 @@ export function recheckBanner(): void {
   window.dispatchEvent(new Event(RECHECK_EVENT));
 }
 
-/**
- * Oublie le masquage local de l'annonce (croix + modale) puis la redemande.
- * Appelé à la DÉCONNEXION : `localStorage` est lié au navigateur, pas au compte — sans ça,
- * le membre suivant à se connecter sur le même appareil hériterait du « déjà vu » du
- * précédent et ne verrait jamais l'annonce.
- */
-export function clearBannerDismissal(): void {
-  try {
-    localStorage.removeItem(DISMISS_KEY);
-    localStorage.removeItem(MODAL_SEEN_KEY);
-  } catch {
-    /* localStorage indisponible : il n'y avait rien à oublier */
-  }
-  recheckBanner();
-}
-
 // Couleurs pleines et saturées (texte blanc) pour bien trancher avec l'appli.
 const palette = {
   info: { bg: "#2563eb", fg: "#ffffff" },
@@ -54,6 +46,8 @@ export default function AnnouncementBanner() {
   const [banner, setBanner] = useState<Banner | null>(null);
   const [showBanner, setShowBanner] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  // Connecté ⇒ le masquage se mémorise en base, pas dans ce navigateur.
+  const [authenticated, setAuthenticated] = useState(false);
   // Défilement (marquee) du message quand il dépasse la largeur du bandeau.
   const boxRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
@@ -67,16 +61,27 @@ export default function AnnouncementBanner() {
       // navigateur resserve une annonce périmée (ou son absence) depuis sa copie.
       const res = await fetch("/api/banner", { cache: "no-store" });
       if (!res.ok) return;
-      const data = (await res.json()) as { banner: Banner | null; authenticated?: boolean };
+      const data = (await res.json()) as {
+        banner: Banner | null;
+        authenticated?: boolean;
+        seen?: Seen | null;
+      };
       const b = data.banner;
+      const authed = data.authenticated === true;
+      setAuthenticated(authed);
       setBanner(b); // `null` = annonce retirée par l'admin → on cesse de l'afficher
       if (!b) return;
-      // Bannière : visible sauf si masquée dans cette version.
-      setShowBanner(localStorage.getItem(DISMISS_KEY) !== b.version);
-      // Modale : une seule fois par version, et JAMAIS hors connexion — elle recouvrirait
-      // l'écran de login (il faut la fermer avant de pouvoir saisir ses identifiants). Le
-      // membre la verra juste après s'être connecté, ce qui est le bon moment.
-      setShowModal(data.authenticated === true && localStorage.getItem(MODAL_SEEN_KEY) !== b.version);
+
+      if (authed) {
+        // Membre connecté : c'est son COMPTE qui fait foi (le suit d'un appareil à l'autre).
+        setShowBanner(data.seen?.dismissedVersion !== b.version);
+        setShowModal(data.seen?.modalSeenVersion !== b.version);
+      } else {
+        // Visiteur : pas de compte où mémoriser → le navigateur. Et JAMAIS de modale, elle
+        // recouvrirait l'écran de login (il faudrait la fermer avant de pouvoir s'y connecter).
+        setShowBanner(localStorage.getItem(ANON_DISMISS_KEY) !== b.version);
+        setShowModal(false);
+      }
     } catch {
       /* réseau indisponible : pas d'annonce, sans bruit */
     }
@@ -130,21 +135,38 @@ export default function AnnouncementBanner() {
   if (!banner) return null;
   const c = palette[banner.level];
 
-  const closeModal = () => {
+  /**
+   * Mémorise le masquage : sur le COMPTE si le membre est connecté (il ne reverra plus
+   * l'annonce, même après déconnexion ou depuis un autre appareil), sinon dans ce navigateur.
+   * Best-effort : on masque tout de suite à l'écran quoi qu'il arrive — au pire l'annonce
+   * réapparaîtra au prochain chargement, ce qui vaut mieux qu'un clic sans effet visible.
+   */
+  const remember = (what: "banner" | "modal") => {
+    if (authenticated) {
+      fetch("/api/banner/dismiss", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ what, version: banner.version }),
+      }).catch(() => {
+        /* réseau KO : masqué pour cette session, réapparaîtra plus tard */
+      });
+      return;
+    }
+    // Visiteur non connecté : seul le bandeau est concerné (pas de modale hors connexion).
     try {
-      localStorage.setItem(MODAL_SEEN_KEY, banner.version);
+      localStorage.setItem(ANON_DISMISS_KEY, banner.version);
     } catch {
       /* localStorage indisponible : on masque au moins pour la session */
     }
+  };
+
+  const closeModal = () => {
+    remember("modal");
     setShowModal(false);
   };
 
   const dismissBanner = () => {
-    try {
-      localStorage.setItem(DISMISS_KEY, banner.version);
-    } catch {
-      /* idem */
-    }
+    remember("banner");
     setShowBanner(false);
   };
 

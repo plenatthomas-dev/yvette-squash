@@ -40,6 +40,14 @@ model User {
   //    historique financier (dépenses Tricount `Restrict`).
   lastLoginAt DateTime?
   disabledAt  DateTime?
+  // Annonce (bannière + modale, étape 2) : la `version` de l'annonce que ce membre a masquée /
+  // dont il a déjà vu la modale. Rattaché au COMPTE et non au navigateur : `localStorage` est
+  // lié à l'appareil, donc il fuitait d'un membre à l'autre sur un téléphone partagé, et
+  // s'oubliait à chaque reconnexion. Stocker la VERSION (= AppSetting.updatedAt ISO) et non un
+  // booléen : une NOUVELLE annonce (version différente) repasse naturellement devant les yeux.
+  // Les deux sont indépendants : on peut fermer la modale et garder le bandeau.
+  bannerDismissedVersion String?
+  bannerModalSeenVersion String?
   createdAt   DateTime     @default(now())
   sessions    Session[]
   bookings    Booking[]
