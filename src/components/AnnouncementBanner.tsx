@@ -2,8 +2,9 @@
 
 // Bannière d'annonce (étape 2 de l'admin) : message éditable par un admin, affiché à TOUS.
 // Rendu « bien visible » (choix UX « les deux ») :
-//  1) une MODALE la première fois qu'on voit une annonce donnée (impossible à rater) ;
-//  2) puis une BANNIÈRE pleine couleur en haut, tant que l'annonce est active.
+//  1) une MODALE la première fois qu'un MEMBRE CONNECTÉ voit une annonce donnée (impossible
+//     à rater). Jamais hors connexion : elle recouvrirait l'écran de login ;
+//  2) une BANNIÈRE pleine couleur en haut, tant que l'annonce est active — elle, publique.
 // Les deux se pilotent depuis un seul fetch et se ferment indépendamment. Une annonce MODIFIÉE
 // (nouvelle `version`) repasse devant les yeux (modale + bannière ré-affichées).
 
@@ -13,12 +14,22 @@ type Banner = { message: string; level: "info" | "warn"; version: string };
 
 const DISMISS_KEY = "bannerDismissed"; // version de la bannière masquée (croix)
 const MODAL_SEEN_KEY = "bannerModalSeen"; // version dont la modale a déjà été vue
-// Demande de réévaluation immédiate (la bannière vit dans le layout, hors de l'arbre de la
-// page : un événement est le moyen le plus simple de la réveiller depuis la déconnexion).
+// Demande de réévaluation immédiate. La bannière vit dans le LAYOUT : elle ne se remonte
+// jamais, et une navigation interne ou une connexion ne déclenchent ni `focus` ni
+// `visibilitychange`. Sans ce signal explicite, une annonce n'apparaît qu'au rechargement.
 const RECHECK_EVENT = "banner-recheck";
 
 /**
- * Oublie le masquage local de l'annonce (croix + modale) et redemande son affichage.
+ * Relit l'annonce côté serveur et réévalue son affichage, tout de suite.
+ * À appeler dès qu'elle a pu changer sans que la page bouge : publication depuis /admin,
+ * connexion, déconnexion.
+ */
+export function recheckBanner(): void {
+  window.dispatchEvent(new Event(RECHECK_EVENT));
+}
+
+/**
+ * Oublie le masquage local de l'annonce (croix + modale) puis la redemande.
  * Appelé à la DÉCONNEXION : `localStorage` est lié au navigateur, pas au compte — sans ça,
  * le membre suivant à se connecter sur le même appareil hériterait du « déjà vu » du
  * précédent et ne verrait jamais l'annonce.
@@ -30,7 +41,7 @@ export function clearBannerDismissal(): void {
   } catch {
     /* localStorage indisponible : il n'y avait rien à oublier */
   }
-  window.dispatchEvent(new Event(RECHECK_EVENT));
+  recheckBanner();
 }
 
 // Couleurs pleines et saturées (texte blanc) pour bien trancher avec l'appli.
@@ -52,24 +63,31 @@ export default function AnnouncementBanner() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/banner");
+      // no-store : la réponse ne porte aucun en-tête de cache, on ne veut pas que le
+      // navigateur resserve une annonce périmée (ou son absence) depuis sa copie.
+      const res = await fetch("/api/banner", { cache: "no-store" });
       if (!res.ok) return;
-      const data = (await res.json()) as { banner: Banner | null };
+      const data = (await res.json()) as { banner: Banner | null; authenticated?: boolean };
       const b = data.banner;
       setBanner(b); // `null` = annonce retirée par l'admin → on cesse de l'afficher
       if (!b) return;
       // Bannière : visible sauf si masquée dans cette version.
       setShowBanner(localStorage.getItem(DISMISS_KEY) !== b.version);
-      // Modale : une seule fois par version.
-      setShowModal(localStorage.getItem(MODAL_SEEN_KEY) !== b.version);
+      // Modale : une seule fois par version, et JAMAIS hors connexion — elle recouvrirait
+      // l'écran de login (il faut la fermer avant de pouvoir saisir ses identifiants). Le
+      // membre la verra juste après s'être connecté, ce qui est le bon moment.
+      setShowModal(data.authenticated === true && localStorage.getItem(MODAL_SEEN_KEY) !== b.version);
     } catch {
       /* réseau indisponible : pas d'annonce, sans bruit */
     }
   }, []);
 
-  // Au montage, puis au RETOUR sur l'appli : sans ça, une annonce publiée pendant qu'un membre
-  // a l'appli ouverte n'apparaît qu'au rechargement de la page. Throttle 15 s comme le planning
-  // (le focus se déclenche souvent). La déconnexion force une réévaluation immédiate.
+  // Trois déclencheurs, car ce composant ne se remonte jamais (il vit dans le layout) :
+  //  - le montage (premier chargement de l'appli) ;
+  //  - le RETOUR sur l'appli (focus/visibilitychange), throttlé 15 s comme le planning, pour
+  //    l'annonce publiée pendant qu'un membre avait l'appli ouverte en arrière-plan ;
+  //  - RECHECK_EVENT, pour les changements que ces deux-là ne voient PAS : publication depuis
+  //    /admin, connexion, déconnexion — aucun ne provoque de remontage ni de focus.
   useEffect(() => {
     load();
     const onVisible = () => {

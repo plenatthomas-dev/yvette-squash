@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useFeatures } from "@/components/FeatureProvider";
 import FeatureFlagsPanel from "@/components/FeatureFlagsPanel";
+import { recheckBanner } from "@/components/AnnouncementBanner";
 
 type PendingRequest = {
   id: string;
@@ -176,6 +177,9 @@ export default function AdminPage() {
       }
       if (clear) setBnMessage("");
       setBnResult({ ok: true, text: clear ? "Bannière retirée." : "Bannière enregistrée." });
+      // La bannière vit dans le layout : sans ce signal, l'admin ne verrait son annonce
+      // qu'en rechargeant la page (publier ne provoque ni remontage ni focus).
+      recheckBanner();
     } catch {
       setBnResult({ ok: false, text: "Enregistrement impossible." });
     } finally {
