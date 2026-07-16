@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import AnnouncementBanner from "@/components/AnnouncementBanner";
@@ -35,15 +36,18 @@ export const viewport: Viewport = {
 // explicites (light/dark/rose) sont posés en data-theme dès le paint initial.
 const themeScript = `(function(){try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark'||t==='rose'){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();`;
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // Nonce posé par src/middleware.ts (CSP stricte). On le passe au script de thème inline
+  // pour qu'il reste autorisé. Next propage ce même nonce à ses propres scripts tout seul.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html lang="fr" suppressHydrationWarning>
       <body>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeScript }} />
         <AnnouncementBanner />
         <FeatureProvider>{children}</FeatureProvider>
         <AnnounceModal />
