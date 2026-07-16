@@ -24,12 +24,6 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
-  if (session.resa) {
-    return NextResponse.json(
-      { error: "La connexion biométrique est réservée aux comptes par email." },
-      { status: 403 },
-    );
-  }
 
   const body = (await req.json().catch(() => ({}))) as {
     response?: RegistrationResponseJSON;

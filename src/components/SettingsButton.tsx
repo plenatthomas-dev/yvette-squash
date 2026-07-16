@@ -147,7 +147,6 @@ export function SettingsButton({
   myId,
   nickname,
   listed,
-  emailOnly,
   onProfileSaved,
   onDelegationsChanged,
   toast,
@@ -155,8 +154,6 @@ export function SettingsButton({
   myId: string | null;
   nickname: string | null;
   listed: boolean;
-  /** Compte « email seul » (sans ResaMania) : seul cas où la connexion biométrique est proposée. */
-  emailOnly: boolean;
   onProfileSaved: () => void;
   /** Une délégation REÇUE a changé : l'appelant doit relire les siennes (sélecteur « Pour X »). */
   onDelegationsChanged: () => void;
@@ -201,8 +198,9 @@ export function SettingsButton({
   // bulle « i » du titre de section (toujours accessible, même sans formulaire).
   const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null);
 
-  // Connexion biométrique (passkeys) — comptes « email seul » uniquement.
-  const showPasskeys = emailOnly && emailLogin;
+  // Connexion biométrique (passkeys) — tout compte connecté. Pour un compte ResaMania, la
+  // connexion par passkey restaure sa session ResaMania via le refresh token (option A).
+  const showPasskeys = emailLogin;
   const [pkSupported, setPkSupported] = useState(false);
   const [passkeys, setPasskeys] = useState<PasskeyInfo[] | null>(null);
   const [pkBusy, setPkBusy] = useState(false);

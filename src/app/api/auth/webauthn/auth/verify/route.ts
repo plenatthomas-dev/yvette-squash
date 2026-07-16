@@ -5,7 +5,7 @@ import type {
   AuthenticatorTransportFuture,
 } from "@simplewebauthn/server";
 import { prisma } from "@/lib/db";
-import { createEmailSession } from "@/lib/session";
+import { createEmailSession, createResaSessionFromUser } from "@/lib/session";
 import { getFeatures } from "@/lib/features-server";
 import {
   rpParams,
@@ -83,7 +83,24 @@ export async function POST(req: NextRequest) {
     data: { counter: verification.authenticationInfo.newCounter, lastUsedAt: new Date() },
   });
 
-  const sid = await createEmailSession(passkey.userId);
+  // Ouvre la MEILLEURE session possible pour ce compte :
+  //  1) ResaMania restaurée (option A : refresh token réutilisé) → accès complet ;
+  //  2) sinon, compte avec connexion email vérifiée → session email-seule (lecture seule) ;
+  //  3) sinon → refresh ResaMania mort et pas d'email : reconnexion par mot de passe requise.
+  let sid = await createResaSessionFromUser(passkey.userId);
+  if (!sid && passkey.user.passwordHash && passkey.user.emailVerifiedAt) {
+    sid = await createEmailSession(passkey.userId);
+  }
+  if (!sid) {
+    return NextResponse.json(
+      {
+        error:
+          "Session ResaMania expirée — reconnecte-toi une fois avec ton mot de passe ResaMania, puis la biométrie reprendra.",
+      },
+      { status: 409 },
+    );
+  }
+
   const res = NextResponse.json({ displayName: passkey.user.displayName });
   res.cookies.set("sid", sid, {
     httpOnly: true,

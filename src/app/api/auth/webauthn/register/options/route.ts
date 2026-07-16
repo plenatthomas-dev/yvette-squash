@@ -26,14 +26,8 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
-  // Réservé aux comptes « email seul » : un passkey ouvre une session SANS jeton ResaMania,
-  // donc l'associer à un compte ResaMania le rétrograderait en lecture seule.
-  if (session.resa) {
-    return NextResponse.json(
-      { error: "La connexion biométrique est réservée aux comptes par email." },
-      { status: 403 },
-    );
-  }
+  // Comptes email-seul ET ResaMania : pour un compte ResaMania, la connexion par passkey
+  // restaurera sa session ResaMania en réutilisant le refresh token (cf. createResaSessionFromUser).
 
   const user = await prisma.user.findUnique({
     where: { id: session.userId },

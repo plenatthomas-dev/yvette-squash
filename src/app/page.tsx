@@ -880,7 +880,6 @@ export default function Home() {
               myId={myId}
               nickname={nickname}
               listed={listed}
-              emailOnly={!canBook}
               onProfileSaved={checkMe}
               onDelegationsChanged={loadIncomingDelegation}
               toast={toast}
