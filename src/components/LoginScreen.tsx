@@ -8,16 +8,20 @@ import { PrivacyNotice } from "@/components/PrivacyNotice";
 import { useFeatures } from "@/components/FeatureProvider";
 import { loginWithPasskey, passkeySupported, hasPasskeyOnDevice } from "@/lib/webauthnClient";
 
-// Icône empreinte (connexion biométrique).
+// Icône empreinte (connexion biométrique). Tracé « fingerprint » de Lucide (ISC) : des
+// crêtes concentriques nettes, tout de suite reconnaissables comme une empreinte.
 function FingerprintIcon({ size = 18 }: { size?: number }) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 10a2 2 0 0 0-2 2c0 1.5.5 3.5-1 5" />
-      <path d="M12 6a6 6 0 0 0-6 6c0 2-.5 3.5-1 4.5" />
-      <path d="M12 14c0 3-1 5-2 6.5" />
-      <path d="M16 12a4 4 0 0 0-4-4" />
-      <path d="M18.5 17c.5-1.5.5-3.5.5-5a7 7 0 0 0-11-5.7" />
-      <path d="M14.5 20c.7-1.5 1.2-3 1.4-4.5" />
+      <path d="M2 12C2 6.5 6.5 2 12 2a10 10 0 0 1 8 4" />
+      <path d="M5 19.5C5.5 18 6 15 6 12c0-.7.12-1.37.34-2" />
+      <path d="M17.29 21.02c.12-.6.43-2.3.5-3.02" />
+      <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4" />
+      <path d="M8.65 22c.21-.66.45-1.32.57-2" />
+      <path d="M14 13.12c0 2.38 0 6.38-1 8.88" />
+      <path d="M2 16h.01" />
+      <path d="M21.8 16c.2-2 .131-5.354 0-6" />
+      <path d="M9 6.8a6 6 0 0 1 9 5.2c0 .47 0 1.17-.02 2" />
     </svg>
   );
 }
