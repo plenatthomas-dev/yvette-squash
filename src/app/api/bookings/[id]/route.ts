@@ -3,6 +3,7 @@ import { cancel, findAttendeeId, invalidatePlanningCache } from "@/lib/resamania
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { resolveActingContext } from "@/lib/delegation";
+import { refreshSnapshotFromResa } from "@/lib/planning-snapshot";
 
 export const runtime = "nodejs";
 
@@ -56,5 +57,11 @@ export async function DELETE(
   await prisma.booking.update({ where: { id }, data: { status: "cancelled", actingUserId } });
   // Le créneau se libère : purge le cache planning.
   invalidatePlanningCache();
+
+  // Annulation AU NOM d'un délégant : rafraîchit le snapshot pour que le délégataire « email
+  // seul » voie le créneau redevenir libre tout de suite (cf. /api/book pour le détail).
+  if (actingUserId) {
+    await refreshSnapshotFromResa(booking.startsAt.toISOString().slice(0, 10), resa, bookingOwnerId);
+  }
   return NextResponse.json({ ok: true });
 }

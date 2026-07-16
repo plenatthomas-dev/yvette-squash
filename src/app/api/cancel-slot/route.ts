@@ -4,6 +4,7 @@ import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { isClassEventId } from "@/lib/validation";
 import { resolveActingContext } from "@/lib/delegation";
+import { refreshSnapshotFromResa } from "@/lib/planning-snapshot";
 
 export const runtime = "nodejs";
 
@@ -48,7 +49,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: r.error }, { status: 409 });
   }
 
-  // Aligne le journal local si une résa correspond.
+  // Aligne le journal local si une résa correspond. On lit d'abord son startsAt : utile
+  // pour rafraîchir le bon snapshot en cas d'annulation par délégation (la date n'est pas
+  // dans la requête, juste le classEventId).
+  const local = await prisma.booking.findFirst({
+    where: { userId: bookingOwnerId, classEventId, status: "booked" },
+    select: { startsAt: true },
+  });
   await prisma.booking.updateMany({
     where: { userId: bookingOwnerId, classEventId, status: "booked" },
     data: { status: "cancelled", actingUserId },
@@ -57,5 +64,12 @@ export async function POST(req: NextRequest) {
   // Un terrain vient de se libérer. On ne connaît pas la date ici (juste le classEventId)
   // → on vide tout le cache planning (annulations rares, recharge en une requête).
   invalidatePlanningCache();
+
+  // Annulation AU NOM d'un délégant : rafraîchit le snapshot pour que le délégataire « email
+  // seul » voie le créneau redevenir libre tout de suite (cf. /api/book). Sans résa locale
+  // connue, on ne sait pas quel jour rafraîchir → on laisse le cycle normal s'en charger.
+  if (actingUserId && local) {
+    await refreshSnapshotFromResa(local.startsAt.toISOString().slice(0, 10), resa, bookingOwnerId);
+  }
   return NextResponse.json({ ok: true });
 }
