@@ -475,6 +475,12 @@ export default function Home() {
   // sans ce OU, le garde de lecture seule le bloquait alors que l'API l'autorise.
   const canBookNow = canBook || actingAsId !== null;
 
+  // Nom du délégant pour qui on agit (si « Pour <délégant> » est sélectionné), rappelé dans
+  // les confirmations pour lever toute ambiguïté sur le compte réellement engagé.
+  const actingForName = actingAsId
+    ? incomingDelegations.find((d) => d.delegatorId === actingAsId)?.delegatorName ?? null
+    : null;
+
   const onBook = async (slot: Slot) => {
     if (busy || confirmState) return; // anti double-clic / double-modale
     if (!canBookNow) {
@@ -492,7 +498,7 @@ export default function Home() {
       return;
     }
     const ok = await askConfirm({
-      title: "Réserver ce créneau ?",
+      title: actingForName ? `Réserver au nom de ${actingForName} ?` : "Réserver ce créneau ?",
       body: `${slot.courtName} — ${fmtTime(slot.startsAt)} le ${prettyDate(slot.startsAt.slice(0, 10))}`,
       confirmLabel: "Réserver",
     });
@@ -532,7 +538,7 @@ export default function Home() {
   const onCancel = async (b: JournalEntry) => {
     if (busy || confirmState) return;
     const ok = await askConfirm({
-      title: "Annuler la réservation ?",
+      title: actingForName ? `Annuler la réservation de ${actingForName} ?` : "Annuler la réservation ?",
       body: `${b.courtName} — ${fmtTime(b.startsAt)} le ${prettyDate(date)}`,
       confirmLabel: "Annuler la résa",
       danger: true,
@@ -561,7 +567,7 @@ export default function Home() {
   const onCancelMine = async (slot: Slot) => {
     if (busy || confirmState) return;
     const ok = await askConfirm({
-      title: "Annuler ta réservation ?",
+      title: actingForName ? `Annuler la réservation de ${actingForName} ?` : "Annuler ta réservation ?",
       body: `${slot.courtName} — ${fmtTime(slot.startsAt)} le ${prettyDate(slot.startsAt.slice(0, 10))}`,
       confirmLabel: "Annuler la résa",
       danger: true,
@@ -672,7 +678,7 @@ export default function Home() {
       );
     if (slots.length > MAX_LINES) lines.push(`… et ${slots.length - MAX_LINES} autre${slots.length - MAX_LINES > 1 ? "s" : ""}`);
     const ok = await askConfirm({
-      title: `Réserver ${slots.length} créneau${slots.length > 1 ? "x" : ""} ?`,
+      title: `Réserver ${slots.length} créneau${slots.length > 1 ? "x" : ""}${actingForName ? ` au nom de ${actingForName}` : ""} ?`,
       body: "Ces terrains seront réservés :",
       lines,
       confirmLabel: "Réserver",
