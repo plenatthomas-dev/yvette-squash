@@ -9,9 +9,9 @@ import { useFeatures } from "@/components/FeatureProvider";
 import { loginWithPasskey, passkeySupported } from "@/lib/webauthnClient";
 
 // Icône empreinte (connexion biométrique).
-function FingerprintIcon() {
+function FingerprintIcon({ size = 18 }: { size?: number }) {
   return (
-    <svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M12 10a2 2 0 0 0-2 2c0 1.5.5 3.5-1 5" />
       <path d="M12 6a6 6 0 0 0-6 6c0 2-.5 3.5-1 4.5" />
       <path d="M12 14c0 3-1 5-2 6.5" />
@@ -209,20 +209,6 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
       <h1 className="sr-only">Squash de l'Yvette</h1>
       <img src="/logo_squash.jpeg" alt="Squash de l'Yvette" className="logo-hero" />
 
-      {/* Connexion biométrique en un geste (passkey). Découvrable → pas d'email à saisir.
-          N'apparaît que si l'appareil la supporte et que la connexion email est active. */}
-      {emailLogin && pkSupported && (
-        <div className="passkey-login">
-          <button type="button" className="passkey-btn" onClick={doPasskeyLogin} disabled={busy}>
-            <FingerprintIcon />
-            {busy ? "Connexion…" : "Se connecter avec Face ID / empreinte"}
-          </button>
-          <p className="muted tiny" style={{ textAlign: "center" }}>
-            Après l'avoir activée une fois dans les Réglages.
-          </p>
-        </div>
-      )}
-
       {/* Onglet « Par email » : actif si le flag est ON ; sinon affiché grisé (désactivé)
           avec un tooltip « en cours de développement ». Seule ResaMania reste utilisable. */}
       <div className="login-tabs" role="group" aria-label="Méthode de connexion">
@@ -404,6 +390,24 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
             de terrain (ça reste sur ResaMania).
           </p>
         </>
+      )}
+
+      {/* Connexion biométrique en un geste (passkey), sous les formulaires. Juste l'empreinte,
+          tappable comme un lecteur. Découvrable → pas d'email à saisir. N'apparaît que si
+          l'appareil la supporte et que la connexion email est active. */}
+      {emailLogin && pkSupported && (
+        <div className="passkey-login">
+          <button
+            type="button"
+            className="passkey-fab"
+            onClick={doPasskeyLogin}
+            disabled={busy}
+            aria-label="Se connecter avec Face ID / empreinte"
+            title="Se connecter avec Face ID / empreinte"
+          >
+            <FingerprintIcon size={40} />
+          </button>
+        </div>
       )}
 
       {info && <div className="notice info">{info}</div>}

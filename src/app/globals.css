@@ -2886,16 +2886,37 @@ table.planning.week th.time.selhead {
 }
 
 /* --- Connexion biométrique (passkeys) --- */
-/* Bloc de connexion biométrique sur l'écran de login : mis en avant sous le logo. */
+/* Connexion biométrique sur l'écran de login : sous les formulaires, centré. */
 .passkey-login {
-  margin: 0 0 14px;
+  display: flex;
+  justify-content: center;
+  margin: 16px 0 4px;
 }
-.passkey-btn {
+/* Juste l'empreinte, façon « lecteur » tappable : cercle discret, sans libellé. */
+.passkey-fab {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  width: 100%;
+  background: transparent;
+  color: var(--pico-primary, currentColor);
+  border: 2px solid color-mix(in srgb, currentColor 35%, transparent);
+  cursor: pointer;
+  transition: transform 0.06s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+.passkey-fab:hover:not(:disabled) {
+  border-color: color-mix(in srgb, currentColor 60%, transparent);
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+.passkey-fab:active:not(:disabled) {
+  transform: scale(0.94);
+}
+.passkey-fab:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 /* Liste des passkeys enregistrés (Réglages) : une ligne par appareil, action à droite. */
 .passkey-list {
