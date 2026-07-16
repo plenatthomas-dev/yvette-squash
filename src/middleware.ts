@@ -32,19 +32,34 @@ import { NextRequest, NextResponse } from "next/server";
 
 const REPORT_ONLY = false;
 
+// En PREVIEW Vercel uniquement : autorise la barre d'outils « Vercel Live » (feedback.js
+// chargé depuis vercel.live + son temps réel via Pusher). Elle n'existe PAS en prod, donc on
+// n'élargit jamais la CSP de production. ⚠️ Comme `strict-dynamic` fait ignorer aux navigateurs
+// toute liste d'hôtes dans script-src, on ne peut pas « juste ajouter vercel.live » : en preview
+// on retombe donc sur un script-src par hôte ('self' + nonce + vercel.live), SANS strict-dynamic.
+// C'est acceptable : la preview n'est pas une frontière de sécurité, tout le reste est same-origin.
+const IS_PREVIEW = process.env.VERCEL_ENV === "preview";
+
 function buildCsp(nonce: string): string {
+  const live = IS_PREVIEW ? " https://vercel.live" : "";
   return [
     "default-src 'self'",
-    // Scripts : nonce + strict-dynamic. 'self' sert de repli aux navigateurs sans strict-dynamic.
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    // Prod : nonce + strict-dynamic (le plus strict). Preview : par hôte pour laisser passer
+    // le script vercel.live, qui n'est pas noncé par Vercel donc bloqué par strict-dynamic.
+    IS_PREVIEW
+      ? `script-src 'self' 'nonce-${nonce}'${live}`
+      : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     // Styles inline (React/Next/Pico) non contenables par nonce, non exécutables.
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
-    "font-src 'self'",
+    `style-src 'self' 'unsafe-inline'${live}`,
+    `img-src 'self' data: blob:${IS_PREVIEW ? " https://vercel.live https://vercel.com" : ""}`,
+    `font-src 'self'${IS_PREVIEW ? " https://vercel.live https://assets.vercel.com" : ""}`,
     // API interne + beacons Vercel (insights/vitals) + BotID : tous en same-origin.
-    "connect-src 'self'",
+    // Preview : + vercel.live et son websocket Pusher (temps réel de la barre d'outils).
+    `connect-src 'self'${IS_PREVIEW ? " https://vercel.live https://*.pusher.com wss://*.pusher.com" : ""}`,
     "worker-src 'self'", // service worker /sw.js (web push)
     "manifest-src 'self'", // /manifest.webmanifest (PWA)
+    // Preview : la barre d'outils s'affiche dans une iframe vercel.live. Prod : retombe sur default-src 'self'.
+    ...(IS_PREVIEW ? ["frame-src 'self' https://vercel.live"] : []),
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
