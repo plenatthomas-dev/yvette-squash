@@ -13,6 +13,32 @@ import {
 
 export type PasskeyResult = { ok: boolean; error?: string };
 
+// Indicateur LOCAL (par appareil) « un passkey a déjà été utilisé ici ». Sert à ne proposer
+// l'auto-connexion biométrique au lancement QUE sur les appareils déjà configurés — jamais de
+// modale surprise sur un appareil vierge. Posé après un enrôlement ou une connexion réussis.
+const PK_HINT = "pk_on_device";
+export function hasPasskeyOnDevice(): boolean {
+  try {
+    return localStorage.getItem(PK_HINT) === "1";
+  } catch {
+    return false;
+  }
+}
+function markPasskeyOnDevice(): void {
+  try {
+    localStorage.setItem(PK_HINT, "1");
+  } catch {
+    /* localStorage indisponible : tant pis, pas d'auto-connexion */
+  }
+}
+export function forgetPasskeyOnDevice(): void {
+  try {
+    localStorage.removeItem(PK_HINT);
+  } catch {
+    /* ignore */
+  }
+}
+
 // Vrai si l'appareil a un authenticator « plateforme » (biométrie intégrée). Sert à n'afficher
 // les boutons biométrie que là où ça peut marcher (téléphone surtout).
 export async function passkeySupported(): Promise<boolean> {
@@ -49,6 +75,7 @@ export async function enrollPasskey(deviceLabel?: string): Promise<PasskeyResult
       body: JSON.stringify({ response, deviceLabel }),
     });
     if (!verifyRes.ok) return { ok: false, error: await readError(verifyRes, "Enrôlement refusé.") };
+    markPasskeyOnDevice();
     return { ok: true };
   } catch (e) {
     return { ok: false, error: humanizeError(e) };
@@ -68,6 +95,7 @@ export async function loginWithPasskey(): Promise<PasskeyResult> {
       body: JSON.stringify({ response }),
     });
     if (!verifyRes.ok) return { ok: false, error: await readError(verifyRes, "Connexion refusée.") };
+    markPasskeyOnDevice();
     return { ok: true };
   } catch (e) {
     return { ok: false, error: humanizeError(e) };

@@ -3,10 +3,10 @@
 // Écran de connexion (extrait de page.tsx) : onglet ResaMania + onglet « Par email »
 // (OTP, gated par le flag `emailLogin`). L'icône œil ci-dessous ne sert qu'ici.
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
 import { useFeatures } from "@/components/FeatureProvider";
-import { loginWithPasskey, passkeySupported } from "@/lib/webauthnClient";
+import { loginWithPasskey, passkeySupported, hasPasskeyOnDevice } from "@/lib/webauthnClient";
 
 // Icône empreinte (connexion biométrique).
 function FingerprintIcon({ size = 18 }: { size?: number }) {
@@ -75,17 +75,33 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     passkeySupported().then(setPkSupported);
   }, []);
 
-  const doPasskeyLogin = async () => {
+  // `silent` (auto-connexion au lancement) : on N'affiche PAS d'erreur si l'utilisateur annule
+  // la modale — on le laisse simplement sur les formulaires (le bouton empreinte reste le plan B).
+  const doPasskeyLogin = async (silent = false) => {
     setBusy(true);
     setErr(null);
     const r = await loginWithPasskey();
     if (r.ok) {
       onLoggedIn();
     } else {
-      setErr(r.error ?? "Connexion biométrique impossible.");
+      if (!silent) setErr(r.error ?? "Connexion biométrique impossible.");
       setBusy(false);
     }
   };
+
+  // Auto-connexion : si CET appareil a déjà servi de passkey, on ouvre la modale biométrique
+  // automatiquement au lancement de l'écran de connexion — une seule fois, sans surgir sur un
+  // appareil vierge. Sur iOS Safari, `get()` sans geste peut être bloqué → échec silencieux,
+  // l'empreinte tappable prend le relais. (Android Chrome : la modale s'ouvre bien toute seule.)
+  const autoTried = useRef(false);
+  useEffect(() => {
+    if (autoTried.current) return;
+    if (!emailLogin || !pkSupported) return;
+    if (!hasPasskeyOnDevice()) return;
+    autoTried.current = true;
+    doPasskeyLogin(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emailLogin, pkSupported]);
 
   // Un lien d'activation invalide/expiré renvoie vers /?erreur=lien_invalide (cf. la route
   // auth/email/verify). On bascule alors sur l'onglet email et on explique quoi faire.
@@ -400,7 +416,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
           <button
             type="button"
             className="passkey-fab"
-            onClick={doPasskeyLogin}
+            onClick={() => doPasskeyLogin()}
             disabled={busy}
             aria-label="Se connecter avec Face ID / empreinte"
             title="Se connecter avec Face ID / empreinte"

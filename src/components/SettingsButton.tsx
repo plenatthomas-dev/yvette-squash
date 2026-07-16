@@ -13,7 +13,7 @@ import {
   invalidateDirectory,
   type DirectoryMember,
 } from "@/lib/directoryCache";
-import { enrollPasskey, passkeySupported } from "@/lib/webauthnClient";
+import { enrollPasskey, passkeySupported, forgetPasskeyOnDevice } from "@/lib/webauthnClient";
 
 type PasskeyInfo = { id: string; deviceLabel: string | null; createdAt: string; lastUsedAt: string | null };
 
@@ -245,7 +245,13 @@ export function SettingsButton({
     try {
       const res = await fetch(`/api/auth/webauthn/passkeys/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`Erreur ${res.status}`);
-      setPasskeys((prev) => (prev ?? []).filter((p) => p.id !== id));
+      setPasskeys((prev) => {
+        const next = (prev ?? []).filter((p) => p.id !== id);
+        // Plus aucun passkey côté serveur : oublie l'indicateur local pour ne pas tenter une
+        // auto-connexion biométrique vouée à l'échec au prochain lancement.
+        if (next.length === 0) forgetPasskeyOnDevice();
+        return next;
+      });
       toast("ok", "Passkey supprimé.");
     } catch (e) {
       toast("err", (e as Error).message);
