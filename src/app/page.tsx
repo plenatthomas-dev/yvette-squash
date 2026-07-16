@@ -469,9 +469,15 @@ export default function Home() {
     return false;
   };
 
+  // On peut réserver soit avec son propre compte ResaMania, soit en agissant pour un
+  // délégant (on emprunte SON jeton, cf. resolveActingContext côté serveur). Donc un compte
+  // « email seul » (canBook=false) PEUT réserver dès qu'il a sélectionné « Pour <délégant> » :
+  // sans ce OU, le garde de lecture seule le bloquait alors que l'API l'autorise.
+  const canBookNow = canBook || actingAsId !== null;
+
   const onBook = async (slot: Slot) => {
     if (busy || confirmState) return; // anti double-clic / double-modale
-    if (!canBook) {
+    if (!canBookNow) {
       toast(
         "info",
         "Réservation possible seulement via ResaMania. Ici tu peux te mettre « +1 » sur un créneau déjà réservé.",
@@ -650,6 +656,13 @@ export default function Home() {
   // Réservation groupée (vues jour et semaine) : un /api/book par créneau, en séquence, avec bilan.
   const onBookMany = async (slots: Slot[]) => {
     if (busy || confirmState || slots.length === 0) return;
+    if (!canBookNow) {
+      toast(
+        "info",
+        "Réservation possible seulement via ResaMania. Ici tu peux te mettre « +1 » sur un créneau déjà réservé.",
+      );
+      return;
+    }
     const MAX_LINES = 10;
     const lines = slots
       .slice(0, MAX_LINES)
@@ -961,7 +974,7 @@ export default function Home() {
           );
         })}
 
-      {!canBook && (
+      {!canBookNow && (
         <div className="notice info readonly-note">
           🔒 <strong>Lecture seule</strong> (connexion par email) : réserver un terrain passe par
           ResaMania. Tu peux consulter le planning et te mettre « +1 » sur un créneau déjà réservé
