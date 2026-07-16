@@ -119,6 +119,9 @@ interface JournalEntry {
   startsAt: string;
   endsAt: string;
   mine: boolean;
+  // Non null si je peux annuler cette résa au nom d'un délégant (= son userId à passer en
+  // onBehalfOf). Permet à un délégataire — dont un compte « email seul » — de gérer la résa.
+  manageableOnBehalfOf?: string | null;
 }
 
 interface AlertItem {
@@ -537,8 +540,11 @@ export default function Home() {
 
   const onCancel = async (b: JournalEntry) => {
     if (busy || confirmState) return;
+    // onBehalfOf dérivé de la résa elle-même : sa propre résa → aucun (jeton propre) ; résa d'un
+    // délégant → son id (le serveur revérifie la délégation). Indépendant du sélecteur global.
+    const onBehalf = b.mine ? undefined : b.manageableOnBehalfOf ?? undefined;
     const ok = await askConfirm({
-      title: actingForName ? `Annuler la réservation de ${actingForName} ?` : "Annuler la réservation ?",
+      title: onBehalf ? `Annuler la réservation de ${b.displayName} ?` : "Annuler la réservation ?",
       body: `${b.courtName} — ${fmtTime(b.startsAt)} le ${prettyDate(date)}`,
       confirmLabel: "Annuler la résa",
       danger: true,
@@ -549,7 +555,7 @@ export default function Home() {
       const res = await fetch(`/api/bookings/${b.id}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ onBehalfOf: actingAsId ?? undefined }),
+        body: JSON.stringify({ onBehalfOf: onBehalf }),
       });
       if (handleExpired(res.status)) return;
       const data = await res.json();
@@ -1154,13 +1160,19 @@ export default function Home() {
             <EmptyState icon="👥" text="Aucun membre de l'asso n'a (encore) réservé ce jour-là." />
           ) : (
             <ul>
-              {journal.map((b) => (
+              {journal.map((b) => {
+                // Actions visibles sur MA résa, ou sur celle d'un délégant que je peux gérer.
+                const canManage = b.mine || !!b.manageableOnBehalfOf;
+                return (
                 <li key={b.id} className={b.mine ? "mine" : ""}>
                   <span>
                     <strong>{fmtTime(b.startsAt)}</strong> · {b.courtName} ·{" "}
                     {b.displayName} {b.mine && "(toi)"}
+                    {!b.mine && b.manageableOnBehalfOf && (
+                      <span className="muted tiny"> · via délégation</span>
+                    )}
                   </span>
-                  {b.mine && (
+                  {canManage && (
                     <span className="jrow-actions">
                       <button
                         type="button"
@@ -1177,7 +1189,8 @@ export default function Home() {
                     </span>
                   )}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </section>

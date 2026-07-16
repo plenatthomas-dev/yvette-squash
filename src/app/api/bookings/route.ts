@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import { getActiveIncomingDelegations } from "@/lib/delegation";
+import { getFeatures } from "@/lib/features-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,14 +30,29 @@ export async function GET(req: NextRequest) {
     take: 100,
   });
 
+  // Résas d'un délégant que JE peux gérer (annuler) via une délégation active : sans ça, un
+  // délégataire — notamment un compte « email seul » — voyait la résa qu'il a faite au nom du
+  // délégant mais sans pouvoir l'annuler (le journal ne montre les boutons que sur `mine`).
+  // On renvoie l'id du délégant à passer en `onBehalfOf`. L'API d'annulation revérifie la
+  // délégation → l'exposition ici ne fait que RÉVÉLER un droit que le délégataire détient déjà.
+  const delegationOn = (await getFeatures()).delegation;
+  const delegatorIds = delegationOn
+    ? new Set((await getActiveIncomingDelegations(session.userId)).map((d) => d.delegatorId))
+    : new Set<string>();
+
   return NextResponse.json(
-    bookings.map((b) => ({
-      id: b.id,
-      displayName: b.user.displayName,
-      courtName: b.courtName,
-      startsAt: b.startsAt,
-      endsAt: b.endsAt,
-      mine: b.userId === session.userId,
-    })),
+    bookings.map((b) => {
+      const mine = b.userId === session.userId;
+      return {
+        id: b.id,
+        displayName: b.user.displayName,
+        courtName: b.courtName,
+        startsAt: b.startsAt,
+        endsAt: b.endsAt,
+        mine,
+        // id du délégant à passer en onBehalfOf pour annuler, ou null si non gérable via délégation.
+        manageableOnBehalfOf: !mine && delegatorIds.has(b.userId) ? b.userId : null,
+      };
+    }),
   );
 }
