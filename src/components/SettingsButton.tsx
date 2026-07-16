@@ -13,6 +13,9 @@ import {
   invalidateDirectory,
   type DirectoryMember,
 } from "@/lib/directoryCache";
+import { enrollPasskey, passkeySupported } from "@/lib/webauthnClient";
+
+type PasskeyInfo = { id: string; deviceLabel: string | null; createdAt: string; lastUsedAt: string | null };
 
 // Thèmes disponibles. "rose" = variante « pinky » (voir globals.css). Persisté en localStorage.
 type Theme = "system" | "light" | "dark" | "rose";
@@ -144,6 +147,7 @@ export function SettingsButton({
   myId,
   nickname,
   listed,
+  emailOnly,
   onProfileSaved,
   onDelegationsChanged,
   toast,
@@ -151,12 +155,14 @@ export function SettingsButton({
   myId: string | null;
   nickname: string | null;
   listed: boolean;
+  /** Compte « email seul » (sans ResaMania) : seul cas où la connexion biométrique est proposée. */
+  emailOnly: boolean;
   onProfileSaved: () => void;
   /** Une délégation REÇUE a changé : l'appelant doit relire les siennes (sélecteur « Pour X »). */
   onDelegationsChanged: () => void;
   toast: (type: "ok" | "err" | "info", msg: string) => void;
 }) {
-  const { directory, delegation } = useFeatures();
+  const { directory, delegation, emailLogin } = useFeatures();
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>("system");
   const [nick, setNick] = useState(nickname ?? "");
@@ -194,6 +200,59 @@ export function SettingsButton({
   // (30 j non glissants après connexion — cf. docs/delegation-droits.md). Intégrée à la
   // bulle « i » du titre de section (toujours accessible, même sans formulaire).
   const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null);
+
+  // Connexion biométrique (passkeys) — comptes « email seul » uniquement.
+  const showPasskeys = emailOnly && emailLogin;
+  const [pkSupported, setPkSupported] = useState(false);
+  const [passkeys, setPasskeys] = useState<PasskeyInfo[] | null>(null);
+  const [pkBusy, setPkBusy] = useState(false);
+
+  const loadPasskeys = async () => {
+    try {
+      const res = await fetch("/api/auth/webauthn/passkeys");
+      const data = await res.json().catch(() => ({}));
+      setPasskeys(res.ok ? (data.passkeys ?? []) : []);
+    } catch {
+      setPasskeys([]);
+    }
+  };
+
+  useEffect(() => {
+    if (!open || !showPasskeys) return;
+    passkeySupported().then(setPkSupported);
+    loadPasskeys();
+  }, [open, showPasskeys]);
+
+  const addPasskey = async () => {
+    setPkBusy(true);
+    // Libellé pour reconnaître l'appareil dans la liste (ex. « iPhone de Tom »).
+    const label =
+      typeof window !== "undefined"
+        ? window.prompt("Nom de cet appareil (facultatif) :", "")?.trim() || undefined
+        : undefined;
+    const r = await enrollPasskey(label);
+    setPkBusy(false);
+    if (r.ok) {
+      toast("ok", "Connexion biométrique activée sur cet appareil.");
+      loadPasskeys();
+    } else {
+      toast("err", r.error ?? "Activation impossible.");
+    }
+  };
+
+  const removePasskey = async (id: string) => {
+    setPkBusy(true);
+    try {
+      const res = await fetch(`/api/auth/webauthn/passkeys/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Erreur ${res.status}`);
+      setPasskeys((prev) => (prev ?? []).filter((p) => p.id !== id));
+      toast("ok", "Passkey supprimé.");
+    } catch (e) {
+      toast("err", (e as Error).message);
+    } finally {
+      setPkBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!open || !delegation) return;
@@ -687,6 +746,56 @@ export function SettingsButton({
                           : "Déléguer"}
                     </button>
                   </div>
+                )}
+              </section>
+            )}
+
+            {showPasskeys && (
+              <section className="setting">
+                <SettingInfo title="Connexion biométrique">
+                  Active Face ID / Touch ID / empreinte pour te reconnecter sans mot de passe
+                  sur cet appareil. Ta biométrie ne quitte jamais ton téléphone : l'appli ne
+                  reçoit qu'une clé de sécurité, pas ton empreinte.
+                </SettingInfo>
+                {passkeys === null ? (
+                  <p className="muted tiny">Chargement…</p>
+                ) : (
+                  passkeys.length > 0 && (
+                    <ul className="passkey-list">
+                      {passkeys.map((p) => (
+                        <li key={p.id} className="passkey-item">
+                          <span className="tiny">
+                            🔐 {p.deviceLabel || "Cet appareil"}
+                            <span className="muted">
+                              {" · ajouté le "}
+                              {new Date(p.createdAt).toLocaleDateString("fr-FR", {
+                                day: "numeric",
+                                month: "short",
+                              })}
+                            </span>
+                          </span>
+                          <button
+                            className="secondary"
+                            onClick={() => removePasskey(p.id)}
+                            disabled={pkBusy}
+                            title="Retirer ce passkey"
+                          >
+                            Retirer
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )
+                )}
+                {pkSupported ? (
+                  <button onClick={addPasskey} disabled={pkBusy}>
+                    {pkBusy ? "…" : "Activer sur cet appareil"}
+                  </button>
+                ) : (
+                  <p className="muted tiny">
+                    Cet appareil ne propose pas de connexion biométrique (essaie depuis ton
+                    téléphone).
+                  </p>
                 )}
               </section>
             )}

@@ -6,6 +6,21 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
 import { useFeatures } from "@/components/FeatureProvider";
+import { loginWithPasskey, passkeySupported } from "@/lib/webauthnClient";
+
+// Icône empreinte (connexion biométrique).
+function FingerprintIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 10a2 2 0 0 0-2 2c0 1.5.5 3.5-1 5" />
+      <path d="M12 6a6 6 0 0 0-6 6c0 2-.5 3.5-1 4.5" />
+      <path d="M12 14c0 3-1 5-2 6.5" />
+      <path d="M16 12a4 4 0 0 0-4-4" />
+      <path d="M18.5 17c.5-1.5.5-3.5.5-5a7 7 0 0 0-11-5.7" />
+      <path d="M14.5 20c.7-1.5 1.2-3 1.4-4.5" />
+    </svg>
+  );
+}
 
 // Icône « œil » (afficher/masquer le mot de passe). `off` = œil barré (masqué).
 function EyeIcon({ off }: { off: boolean }) {
@@ -53,6 +68,24 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Connexion biométrique (passkey) : proposée seulement si l'appareil a un authenticator
+  // plateforme (biométrie intégrée) ET que la connexion par email est activée.
+  const [pkSupported, setPkSupported] = useState(false);
+  useEffect(() => {
+    passkeySupported().then(setPkSupported);
+  }, []);
+
+  const doPasskeyLogin = async () => {
+    setBusy(true);
+    setErr(null);
+    const r = await loginWithPasskey();
+    if (r.ok) {
+      onLoggedIn();
+    } else {
+      setErr(r.error ?? "Connexion biométrique impossible.");
+      setBusy(false);
+    }
+  };
 
   // Un lien d'activation invalide/expiré renvoie vers /?erreur=lien_invalide (cf. la route
   // auth/email/verify). On bascule alors sur l'onglet email et on explique quoi faire.
@@ -175,6 +208,20 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     <main className="login">
       <h1 className="sr-only">Squash de l'Yvette</h1>
       <img src="/logo_squash.jpeg" alt="Squash de l'Yvette" className="logo-hero" />
+
+      {/* Connexion biométrique en un geste (passkey). Découvrable → pas d'email à saisir.
+          N'apparaît que si l'appareil la supporte et que la connexion email est active. */}
+      {emailLogin && pkSupported && (
+        <div className="passkey-login">
+          <button type="button" className="passkey-btn" onClick={doPasskeyLogin} disabled={busy}>
+            <FingerprintIcon />
+            {busy ? "Connexion…" : "Se connecter avec Face ID / empreinte"}
+          </button>
+          <p className="muted tiny" style={{ textAlign: "center" }}>
+            Après l'avoir activée une fois dans les Réglages.
+          </p>
+        </div>
+      )}
 
       {/* Onglet « Par email » : actif si le flag est ON ; sinon affiché grisé (désactivé)
           avec un tooltip « en cours de développement ». Seule ResaMania reste utilisable. */}

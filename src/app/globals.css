@@ -2884,3 +2884,32 @@ table.planning.week th.time.selhead {
     animation-duration: 0.01ms !important;
   }
 }
+
+/* --- Connexion biométrique (passkeys) --- */
+/* Bloc de connexion biométrique sur l'écran de login : mis en avant sous le logo. */
+.passkey-login {
+  margin: 0 0 14px;
+}
+.passkey-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+}
+/* Liste des passkeys enregistrés (Réglages) : une ligne par appareil, action à droite. */
+.passkey-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 10px;
+}
+.passkey-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+}
+.passkey-item + .passkey-item {
+  border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
