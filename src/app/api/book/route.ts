@@ -4,6 +4,7 @@ import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { isClassEventId } from "@/lib/validation";
 import { resolveActingContext } from "@/lib/delegation";
+import { refreshSnapshotFromResa } from "@/lib/planning-snapshot";
 
 export const runtime = "nodejs";
 
@@ -102,5 +103,13 @@ export async function POST(req: NextRequest) {
   // Le créneau vient de passer « réservé » : purge le cache planning pour que la prochaine
   // lecture reflète tout de suite l'état réel (sinon jusqu'à 20 s à le voir encore libre).
   invalidatePlanningCache();
+
+  // Réservation AU NOM d'un délégant : le délégataire peut être un compte « email seul » qui
+  // ne lit que le snapshot. On le rafraîchit avec le jeton du délégant (déjà en main) pour que
+  // le créneau apparaisse réservé immédiatement de son côté. (Une auto-réservation d'un compte
+  // ResaMania rafraîchit déjà le snapshot via sa propre lecture live du planning.)
+  if (actingUserId && startsAt) {
+    await refreshSnapshotFromResa(String(startsAt).slice(0, 10), resa, bookingOwnerId);
+  }
   return NextResponse.json({ ok: true, state: r.state });
 }
