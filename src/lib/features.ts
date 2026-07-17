@@ -20,6 +20,7 @@
 export const FEATURE_KEYS = [
   "tricount",
   "emailLogin",
+  "biometry",
   "directory",
   "delegation",
   "tournament",
@@ -38,6 +39,7 @@ export type FeatureOverrides = Partial<Record<FeatureKey, boolean>>;
 export const FEATURE_LABELS: Record<FeatureKey, string> = {
   tricount: "Frais partagés (Tricount)",
   emailLogin: "Connexion « email seul »",
+  biometry: "Connexion biométrique (Face ID / empreinte)",
   directory: "Annuaire des membres",
   delegation: "Délégation de droits",
   tournament: "Tournois internes",
@@ -57,6 +59,11 @@ export const ENV_FEATURES: Features = {
   tricount: isOn(process.env.NEXT_PUBLIC_FEATURE_TRICOUNT),
   // Connexion « email seul » (OTP) : onglet de login + routes /api/auth/email/**.
   emailLogin: isOn(process.env.NEXT_PUBLIC_FEATURE_EMAIL_LOGIN),
+  // Connexion biométrique (passkeys : Face ID / Touch ID / empreinte) : bouton d'empreinte au
+  // login, relance d'enrôlement, section « Réglages » et routes /api/auth/webauthn/**.
+  // INDÉPENDANT de `emailLogin` — marche aussi pour les comptes ResaMania (la connexion par
+  // passkey restaure leur session ResaMania via le refresh token).
+  biometry: isOn(process.env.NEXT_PUBLIC_FEATURE_BIOMETRY),
   // Annuaire des membres (idée 6) : bouton « Membres » + route /api/directory.
   directory: isOn(process.env.NEXT_PUBLIC_FEATURE_DIRECTORY),
   // Délégation temporaire de droits (idée 4) : UI Réglages + routes /api/delegations/**

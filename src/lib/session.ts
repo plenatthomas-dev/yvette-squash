@@ -140,6 +140,44 @@ export async function createEmailSession(userId: string): Promise<string> {
   return id;
 }
 
+/**
+ * Connexion biométrique d'un compte ResaMania (« option A ») : plutôt que de redemander le
+ * mot de passe ResaMania, on RÉUTILISE la session ResaMania valide la plus récente du user —
+ * sa dernière connexion « vraie » — en rafraîchissant son jeton, puis on TRANSFÈRE ces jetons
+ * frais dans une nouvelle session (fenêtre 30 j remise à neuf) et on supprime l'ancienne ligne
+ * pour qu'une SEULE détienne le refresh token (ResaMania le fait tourner → éviter tout conflit).
+ *
+ * Renvoie l'id de cookie de la nouvelle session, ou `null` si aucune session ResaMania n'est
+ * exploitable (jamais connecté à ResaMania, session > 30 j, ou refresh token révoqué/expiré) —
+ * l'appelant doit alors retomber sur un autre mode (session email, ou mot de passe ResaMania).
+ */
+export async function createResaSessionFromUser(userId: string): Promise<string | null> {
+  const src = await prisma.session.findFirst({
+    where: { userId, refreshTokenEnc: { not: null }, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!src) return null;
+  const resa = await resolveResaToken(src); // rafraîchit + persiste sur src si besoin
+  if (!resa) return null; // jeton irrécupérable → repli à l'appelant
+
+  const id = randomBytes(24).toString("base64url");
+  // Crée D'ABORD la nouvelle ligne (on ne perd jamais les jetons), puis retire la source.
+  await prisma.session.create({
+    data: {
+      id,
+      userId,
+      accessToken: encrypt(resa.accessToken),
+      refreshTokenEnc: encrypt(resa.refreshToken),
+      tokenExpiresAt: new Date(resa.expiresAt),
+      identityJson: JSON.stringify(resa.identity),
+      expiresAt: new Date(Date.now() + SESSION_DAYS * 864e5),
+    },
+  });
+  await prisma.session.deleteMany({ where: { id: src.id } });
+  await prisma.user.update({ where: { id: userId }, data: { lastLoginAt: new Date() } });
+  return id;
+}
+
 export interface AppSession {
   userId: string;
   displayName: string;

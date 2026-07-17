@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   userUpdate: vi.fn(),
   userDelete: vi.fn(),
   sessionDeleteMany: vi.fn(),
+  passkeyDeleteMany: vi.fn(),
   createEmailToken: vi.fn(),
 }));
 
@@ -52,6 +53,7 @@ vi.mock("@/lib/db", () => ({
       delete: h.userDelete,
     },
     session: { deleteMany: h.sessionDeleteMany },
+    passkey: { deleteMany: h.passkeyDeleteMany },
   },
 }));
 
@@ -81,6 +83,7 @@ beforeEach(() => {
   h.userUpdate.mockReset().mockResolvedValue({});
   h.userDelete.mockReset().mockResolvedValue({});
   h.sessionDeleteMany.mockReset().mockResolvedValue({ count: 0 });
+  h.passkeyDeleteMany.mockReset().mockResolvedValue({ count: 2 });
   h.createEmailToken.mockReset().mockResolvedValue("tok123");
 });
 
@@ -171,6 +174,33 @@ describe("POST /api/admin/members", () => {
     const res = await POST(postReq({ id: "u1", action: "enable" }));
     expect(res.status).toBe(200);
     expect(h.userUpdate).toHaveBeenCalledWith({ where: { id: "u1" }, data: { disabledAt: null } });
+  });
+
+  it("revoke_passkeys : supprime tous les passkeys du membre", async () => {
+    const res = await POST(postReq({ id: "u1", action: "revoke_passkeys" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, removed: 2 });
+    expect(h.passkeyDeleteMany).toHaveBeenCalledWith({ where: { userId: "u1" } });
+  });
+
+  it("revoke_passkey : supprime un passkey précis, borné au membre", async () => {
+    h.passkeyDeleteMany.mockResolvedValueOnce({ count: 1 });
+    const res = await POST(postReq({ id: "u1", action: "revoke_passkey", passkeyId: "pk1" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(h.passkeyDeleteMany).toHaveBeenCalledWith({ where: { id: "pk1", userId: "u1" } });
+  });
+
+  it("revoke_passkey : 400 si passkeyId manquant", async () => {
+    const res = await POST(postReq({ id: "u1", action: "revoke_passkey" }));
+    expect(res.status).toBe(400);
+    expect(h.passkeyDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("revoke_passkey : 404 si le passkey n'appartient pas au membre", async () => {
+    h.passkeyDeleteMany.mockResolvedValueOnce({ count: 0 });
+    const res = await POST(postReq({ id: "u1", action: "revoke_passkey", passkeyId: "zz" }));
+    expect(res.status).toBe(404);
   });
 
   it("delete : 409 si dépendances bloquantes (ne supprime pas)", async () => {

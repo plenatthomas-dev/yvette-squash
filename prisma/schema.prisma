@@ -50,6 +50,7 @@ model User {
   bannerModalSeenVersion String?
   createdAt   DateTime     @default(now())
   sessions    Session[]
+  passkeys    Passkey[] // connexion biométrique (WebAuthn / passkeys) — comptes « email seul »
   bookings    Booking[]
   attendances Attendance[]
   pushSubs    PushSubscription[]
@@ -82,6 +83,29 @@ model Session {
   identityJson    String? // ResaIdentity sérialisée (contactId, clubId, nom…)
   expiresAt       DateTime // expiration de la session applicative
   createdAt       DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Passkey WebAuthn (connexion biométrique : Face ID / Touch ID / empreinte). Réservé aux
+// comptes « email seul » : un passkey ouvre une session applicative (aucun jeton ResaMania),
+// donc l'attacher à un compte ResaMania le rétrograderait en lecture seule. La biométrie ne
+// quitte jamais l'appareil ; on ne stocke qu'une clé PUBLIQUE et un compteur anti-rejeu.
+model Passkey {
+  id           String   @id @default(cuid())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       String
+  credentialId String   @unique // identifiant du credential (base64url), renvoyé à l'auth
+  publicKey    Bytes // clé publique COSE (jamais de secret : la clé privée reste dans l'enclave)
+  counter      Int      @default(0) // compteur d'usage de l'authenticator (détection de rejeu/clonage)
+  transports   String? // CSV des transports (ex. "internal,hybrid"), pour un meilleur prompt
+  deviceLabel  String? // libellé lisible saisi à l'enrôlement (ex. « iPhone de Tom »)
+  // État de sauvegarde du passkey, renvoyé par WebAuthn à l'enrôlement (null pour les passkeys
+  // créés avant l'ajout de ces colonnes) :
+  backedUp     Boolean? // true = synchronisé (iCloud/Google) → survit à la perte de l'appareil
+  deviceType   String? // "singleDevice" (lié à l'appareil) | "multiDevice" (synchronisable)
+  createdAt    DateTime @default(now())
+  lastUsedAt   DateTime?
 
   @@index([userId])
 }

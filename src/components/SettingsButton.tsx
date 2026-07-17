@@ -13,6 +13,21 @@ import {
   invalidateDirectory,
   type DirectoryMember,
 } from "@/lib/directoryCache";
+import {
+  enrollPasskey,
+  passkeySupported,
+  forgetPasskeyOnDevice,
+  hasPasskeyOnDevice,
+} from "@/lib/webauthnClient";
+
+type PasskeyInfo = {
+  id: string;
+  deviceLabel: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  backedUp: boolean | null; // true = synchronisé (iCloud/Google) ; false = lié à l'appareil ; null = inconnu
+  deviceType: string | null; // "singleDevice" | "multiDevice"
+};
 
 // Thèmes disponibles. "rose" = variante « pinky » (voir globals.css). Persisté en localStorage.
 type Theme = "system" | "light" | "dark" | "rose";
@@ -156,7 +171,7 @@ export function SettingsButton({
   onDelegationsChanged: () => void;
   toast: (type: "ok" | "err" | "info", msg: string) => void;
 }) {
-  const { directory, delegation } = useFeatures();
+  const { directory, delegation, biometry } = useFeatures();
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>("system");
   const [nick, setNick] = useState(nickname ?? "");
@@ -194,6 +209,110 @@ export function SettingsButton({
   // (30 j non glissants après connexion — cf. docs/delegation-droits.md). Intégrée à la
   // bulle « i » du titre de section (toujours accessible, même sans formulaire).
   const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null);
+
+  // Connexion biométrique (passkeys) — tout compte connecté. Pour un compte ResaMania, la
+  // connexion par passkey restaure sa session ResaMania via le refresh token (option A).
+  const showPasskeys = biometry;
+  const [pkSupported, setPkSupported] = useState(false);
+  const [passkeys, setPasskeys] = useState<PasskeyInfo[] | null>(null);
+  const [pkBusy, setPkBusy] = useState(false);
+  // « Cet appareil a-t-il déjà un passkey ? » (marqueur local par appareil). Sert à n'afficher
+  // « Activer sur cet appareil » QUE là où ça a du sens : sur un appareil déjà enrôlé, le seul
+  // bouton pertinent est le « Retirer » de sa ligne (un seul bouton activer/retirer, selon le
+  // contexte). On exige aussi un passkey côté serveur, au cas où le marqueur local serait resté
+  // alors que le passkey a été supprimé depuis un autre appareil.
+  const [pkOnDevice, setPkOnDevice] = useState(false);
+  const enabledOnThisDevice = pkOnDevice && (passkeys?.length ?? 0) > 0;
+  // Avertissement « risque de blocage » : le membre a au moins un passkey LIÉ à l'appareil
+  // (backedUp=false) et AUCUN synchronisé (backedUp=true) → perdre l'appareil = perdre l'accès
+  // biométrique. Les passkeys d'avant la migration (backedUp=null) sont ignorés (état inconnu).
+  const anyBackedUp = (passkeys ?? []).some((p) => p.backedUp === true);
+  const anyDeviceBound = (passkeys ?? []).some((p) => p.backedUp === false);
+  const showLockoutWarning = anyDeviceBound && !anyBackedUp;
+
+  const loadPasskeys = async () => {
+    try {
+      const res = await fetch("/api/auth/webauthn/passkeys");
+      const data = await res.json().catch(() => ({}));
+      setPasskeys(res.ok ? (data.passkeys ?? []) : []);
+    } catch {
+      setPasskeys([]);
+    }
+  };
+
+  useEffect(() => {
+    if (!open || !showPasskeys) return;
+    passkeySupported().then(setPkSupported);
+    setPkOnDevice(hasPasskeyOnDevice());
+    loadPasskeys();
+  }, [open, showPasskeys]);
+
+  const addPasskey = async () => {
+    setPkBusy(true);
+    // Libellé pour reconnaître l'appareil dans la liste (ex. « iPhone de Tom »).
+    const label =
+      typeof window !== "undefined"
+        ? window.prompt("Nom de cet appareil (facultatif) :", "")?.trim() || undefined
+        : undefined;
+    const r = await enrollPasskey(label);
+    setPkBusy(false);
+    if (r.ok) {
+      setPkOnDevice(true); // cet appareil est désormais enrôlé (enrollPasskey a posé le marqueur)
+      toast("ok", "Connexion biométrique activée sur cet appareil.");
+      loadPasskeys();
+    } else {
+      toast("err", r.error ?? "Activation impossible.");
+    }
+  };
+
+  // Renomme un appareil (ex. « iPhone de Tom ») : prompt simple → PATCH borné à mes passkeys.
+  const renamePasskey = async (id: string, current: string | null) => {
+    if (typeof window === "undefined") return;
+    const input = window.prompt("Nom de cet appareil :", current ?? "");
+    if (input === null) return; // annulé
+    setPkBusy(true);
+    try {
+      const res = await fetch(`/api/auth/webauthn/passkeys/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceLabel: input.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      setPasskeys((prev) =>
+        (prev ?? []).map((p) => (p.id === id ? { ...p, deviceLabel: data.deviceLabel ?? null } : p)),
+      );
+      toast("ok", "Appareil renommé.");
+    } catch (e) {
+      toast("err", (e as Error).message);
+    } finally {
+      setPkBusy(false);
+    }
+  };
+
+  const removePasskey = async (id: string) => {
+    setPkBusy(true);
+    try {
+      const res = await fetch(`/api/auth/webauthn/passkeys/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Erreur ${res.status}`);
+      setPasskeys((prev) => {
+        const next = (prev ?? []).filter((p) => p.id !== id);
+        // Plus aucun passkey côté serveur : oublie l'indicateur local pour ne pas tenter une
+        // auto-connexion biométrique vouée à l'échec au prochain lancement (et re-proposer
+        // « Activer sur cet appareil »).
+        if (next.length === 0) {
+          forgetPasskeyOnDevice();
+          setPkOnDevice(false);
+        }
+        return next;
+      });
+      toast("ok", "Passkey supprimé.");
+    } catch (e) {
+      toast("err", (e as Error).message);
+    } finally {
+      setPkBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!open || !delegation) return;
@@ -687,6 +806,93 @@ export function SettingsButton({
                           : "Déléguer"}
                     </button>
                   </div>
+                )}
+              </section>
+            )}
+
+            {showPasskeys && (
+              <section className="setting">
+                <SettingInfo title="Connexion biométrique">
+                  Active Face ID / Touch ID / empreinte pour te reconnecter sans mot de passe
+                  sur cet appareil. Ta biométrie ne quitte jamais ton téléphone : l'appli ne
+                  reçoit qu'une clé de sécurité, pas ton empreinte.
+                </SettingInfo>
+                {passkeys === null ? (
+                  <p className="muted tiny">Chargement…</p>
+                ) : (
+                  passkeys.length > 0 && (
+                    <>
+                      {showLockoutWarning && (
+                        <p className="tiny" style={{ color: "var(--danger-fg)", margin: "0 0 8px" }}>
+                          ⚠️ Tes passkeys sont liés à cet appareil : si tu le perds, tu devras te
+                          reconnecter par mot de passe puis les réactiver. Astuce : ajoutes-en un
+                          sur un appareil qui synchronise tes passkeys (iCloud / Google).
+                        </p>
+                      )}
+                      <ul className="passkey-list">
+                        {passkeys.map((p) => (
+                          <li key={p.id} className="passkey-item">
+                            <span className="tiny" style={{ minWidth: 0 }}>
+                              🔐 {p.deviceLabel || "Cet appareil"}
+                              {p.backedUp === true && (
+                                <span className="muted" title="Passkey synchronisé (iCloud / Google)">
+                                  {" · 🔁 synchronisé"}
+                                </span>
+                              )}
+                              {p.backedUp === false && (
+                                <span className="muted" title="Passkey lié à cet appareil uniquement">
+                                  {" · 📱 cet appareil"}
+                                </span>
+                              )}
+                              <span className="muted">
+                                {" · ajouté le "}
+                                {new Date(p.createdAt).toLocaleDateString("fr-FR", {
+                                  day: "numeric",
+                                  month: "short",
+                                })}
+                                {p.lastUsedAt
+                                  ? ` · vu le ${new Date(p.lastUsedAt).toLocaleDateString("fr-FR", {
+                                      day: "numeric",
+                                      month: "short",
+                                    })}`
+                                  : " · jamais utilisé"}
+                              </span>
+                            </span>
+                            <span style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                              <button
+                                className="secondary"
+                                onClick={() => renamePasskey(p.id, p.deviceLabel)}
+                                disabled={pkBusy}
+                                title="Renommer cet appareil"
+                              >
+                                Renommer
+                              </button>
+                              <button
+                                className="secondary"
+                                onClick={() => removePasskey(p.id)}
+                                disabled={pkBusy}
+                                title="Retirer ce passkey"
+                              >
+                                Retirer
+                              </button>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )
+                )}
+                {/* Cet appareil déjà enrôlé : le seul bouton pertinent est le « Retirer » de sa
+                    ligne ci-dessus — on n'affiche pas « Activer sur cet appareil » en double. */}
+                {enabledOnThisDevice ? null : pkSupported ? (
+                  <button onClick={addPasskey} disabled={pkBusy}>
+                    {pkBusy ? "…" : "Activer sur cet appareil"}
+                  </button>
+                ) : (
+                  <p className="muted tiny">
+                    Cet appareil ne propose pas de connexion biométrique (essaie depuis ton
+                    téléphone).
+                  </p>
                 )}
               </section>
             )}

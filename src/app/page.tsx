@@ -7,6 +7,7 @@ import { PlanningGrid } from "@/components/PlanningGrid";
 import { WeekGrid } from "@/components/WeekGrid";
 import { Dialog } from "@/components/Dialog";
 import { SettingsButton } from "@/components/SettingsButton";
+import { PasskeyEnrollPrompt } from "@/components/PasskeyEnrollPrompt";
 import { DirectoryModal } from "@/components/DirectoryModal";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
 import { ShareModal } from "@/components/ShareModal";
@@ -947,6 +948,10 @@ export default function Home() {
             (l'ancienne ligne « Bonjour » séparée est supprimée pour gagner de la place). */}
         <div className="sub">Bonjour {nickname || me.split(" ")[0]} 👋 · Le Complexe, Bures</div>
       </header>
+
+      {/* Relance d'enrôlement biométrique (une seule fois, masquable) : gated en interne sur le
+          flag `biometry` + le support de l'appareil + l'absence de passkey déjà enrôlé. */}
+      <PasskeyEnrollPrompt toast={toast} />
 
       {/* Modales du menu ⋯ (rendues hors du menu pour survivre à sa fermeture). */}
       <ShareModal open={shareOpen} onClose={() => setShareOpen(false)} toast={toast} />

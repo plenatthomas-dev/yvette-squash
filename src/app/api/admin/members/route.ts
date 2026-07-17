@@ -17,17 +17,25 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/admin/members  { id, action }
-//   link    → régénère un lien d'accès à transmettre (activation si sans mot de passe, sinon
-//             réinitialisation) ; le lien mène à /reinitialiser où la personne choisit son mdp ;
-//   disable → désactive le compte (connexion refusée) + révoque ses sessions ;
-//   enable  → réactive le compte ;
-//   delete  → suppression définitive, refusée si le membre porte un historique bloquant.
+//   link            → régénère un lien d'accès à transmettre (activation si sans mot de passe,
+//                     sinon réinitialisation) ; mène à /reinitialiser où la personne choisit son mdp ;
+//   disable         → désactive le compte (connexion refusée) + révoque ses sessions ;
+//   enable          → réactive le compte ;
+//   revoke_passkey  → retire UN passkey précis du membre (body.passkeyId ; ex. un appareil perdu
+//                     parmi plusieurs). Recouvrable → non « sensible ».
+//   revoke_passkeys → retire TOUS les passkeys du membre d'un coup ; il pourra en ré-enrôler
+//                     depuis ses Réglages. Recouvrable → non « sensible ».
+//   delete          → suppression définitive, refusée si le membre porte un historique bloquant.
 export async function POST(req: NextRequest) {
   const admin = await requireAdmin(req);
   if (!admin) {
     return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
   }
-  const body = (await req.json().catch(() => ({}))) as { id?: unknown; action?: unknown };
+  const body = (await req.json().catch(() => ({}))) as {
+    id?: unknown;
+    action?: unknown;
+    passkeyId?: unknown;
+  };
   if (typeof body.id !== "string" || !body.id) {
     return NextResponse.json({ error: "Membre invalide." }, { status: 400 });
   }
@@ -81,6 +89,26 @@ export async function POST(req: NextRequest) {
   if (action === "enable") {
     await prisma.user.update({ where: { id: target.id }, data: { disabledAt: null } });
     return NextResponse.json({ ok: true });
+  }
+
+  if (action === "revoke_passkey") {
+    // Retire UN passkey précis (un appareil). Borné à target.id : impossible de viser le passkey
+    // d'un autre membre via un id forgé. 404 si l'id ne correspond à aucun passkey de ce membre.
+    if (typeof body.passkeyId !== "string" || !body.passkeyId) {
+      return NextResponse.json({ error: "Passkey invalide." }, { status: 400 });
+    }
+    const r = await prisma.passkey.deleteMany({ where: { id: body.passkeyId, userId: target.id } });
+    if (r.count === 0) {
+      return NextResponse.json({ error: "Passkey introuvable." }, { status: 404 });
+    }
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "revoke_passkeys") {
+    // Retire TOUS les passkeys du membre (ex. téléphone perdu). Aucune session ni donnée touchée :
+    // le membre pourra en réactiver un depuis ses Réglages. `removed` alimente le retour UI.
+    const r = await prisma.passkey.deleteMany({ where: { userId: target.id } });
+    return NextResponse.json({ ok: true, removed: r.count });
   }
 
   if (action === "delete") {
