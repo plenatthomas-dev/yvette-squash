@@ -7,6 +7,7 @@ import { getFeatures } from "@/lib/features-server";
 import {
   rpParams,
   openChallenge,
+  deviceLabelFromUA,
   CHALLENGE_COOKIE,
   challengeCookieOptions,
 } from "@/lib/webauthn";
@@ -17,12 +18,19 @@ export const dynamic = "force-dynamic";
 // POST /api/auth/webauthn/register/verify — vérifie l'attestation et enregistre le passkey
 // (clé publique + compteur) pour le compte « email seul » connecté.
 export async function POST(req: NextRequest) {
+  // Réponse d'échec : efface TOUJOURS le défi d'enrôlement (usage unique — cf. auth/verify).
+  const fail = (status: number, error: string) => {
+    const res = NextResponse.json({ error }, { status });
+    res.cookies.set(CHALLENGE_COOKIE, "", challengeCookieOptions(0));
+    return res;
+  };
+
   if (!(await getFeatures()).emailLogin) {
-    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
+    return fail(404, "Fonction indisponible");
   }
   const session = await getSession(req.cookies.get("sid")?.value);
   if (!session) {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+    return fail(401, "Non authentifié");
   }
 
   const body = (await req.json().catch(() => ({}))) as {
@@ -30,20 +38,19 @@ export async function POST(req: NextRequest) {
     deviceLabel?: unknown;
   };
   if (!body.response) {
-    return NextResponse.json({ error: "Réponse d'attestation manquante." }, { status: 400 });
+    return fail(400, "Réponse d'attestation manquante.");
   }
+  // Libellé saisi par l'utilisateur, sinon déduit du User-Agent (« iPhone · Safari »), sinon
+  // null (la liste affichera « Cet appareil »).
   const deviceLabel =
     typeof body.deviceLabel === "string" && body.deviceLabel.trim()
       ? body.deviceLabel.trim().slice(0, 40)
-      : null;
+      : deviceLabelFromUA(req.headers.get("user-agent"));
 
   // Le défi DOIT correspondre à une cérémonie d'enrôlement lancée par CE compte.
   const chal = openChallenge(req.cookies.get(CHALLENGE_COOKIE)?.value, "reg");
   if (!chal || chal.userId !== session.userId) {
-    return NextResponse.json(
-      { error: "Session d'enrôlement expirée — réessaie." },
-      { status: 400 },
-    );
+    return fail(400, "Session d'enrôlement expirée — réessaie.");
   }
 
   const { rpID, origin } = rpParams(req);
@@ -57,10 +64,10 @@ export async function POST(req: NextRequest) {
       requireUserVerification: true,
     });
   } catch {
-    return NextResponse.json({ error: "Enrôlement invalide." }, { status: 400 });
+    return fail(400, "Enrôlement invalide.");
   }
   if (!verification.verified || !verification.registrationInfo) {
-    return NextResponse.json({ error: "Enrôlement non vérifié." }, { status: 400 });
+    return fail(400, "Enrôlement non vérifié.");
   }
 
   const { credential } = verification.registrationInfo;

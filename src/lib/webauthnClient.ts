@@ -8,6 +8,7 @@ import {
   startRegistration,
   startAuthentication,
   browserSupportsWebAuthn,
+  browserSupportsWebAuthnAutofill,
   platformAuthenticatorIsAvailable,
 } from "@simplewebauthn/browser";
 
@@ -44,6 +45,16 @@ export function forgetPasskeyOnDevice(): void {
 export async function passkeySupported(): Promise<boolean> {
   if (!browserSupportsWebAuthn()) return false;
   return platformAuthenticatorIsAvailable().catch(() => false);
+}
+
+// Vrai si le navigateur gère l'« autofill conditionnel » (Conditional UI) : le passkey apparaît
+// dans la liste d'autocomplétion d'un champ (au lieu d'une modale imposée). C'est le mécanisme
+// recommandé — non intrusif, et il marche là où l'auto-ouverture de modale est bloquée (iOS
+// Safari sans geste utilisateur). Support distinct de `passkeySupported` (peut être vrai même
+// sans biométrie plateforme, ex. gestionnaire de mots de passe sur desktop).
+export async function passkeyAutofillSupported(): Promise<boolean> {
+  if (!browserSupportsWebAuthn()) return false;
+  return browserSupportsWebAuthnAutofill().catch(() => false);
 }
 
 // L'utilisateur a annulé le prompt biométrique (ou l'a laissé expirer) → message doux.
@@ -83,12 +94,23 @@ export async function enrollPasskey(deviceLabel?: string): Promise<PasskeyResult
 }
 
 // Connexion par passkey (usernameless) : ouvre une session « email seul ».
-export async function loginWithPasskey(): Promise<PasskeyResult> {
+//
+// `useAutofill` : démarre en mode Conditional UI. L'appel `startAuthentication` reste alors en
+// attente en arrière-plan et ne se résout QUE lorsque l'utilisateur choisit un passkey dans
+// l'autocomplétion du champ (il faut un <input autocomplete="… webauthn"> à l'écran). Sur un
+// clic explicite (bouton empreinte), on rappelle sans autofill : simplewebauthn annule alors
+// proprement la cérémonie autofill en cours (WebAuthnAbortService) au profit de la modale.
+export async function loginWithPasskey(
+  opts: { useAutofill?: boolean } = {},
+): Promise<PasskeyResult> {
   try {
     const optRes = await fetch("/api/auth/webauthn/auth/options", { method: "POST" });
     if (!optRes.ok) return { ok: false, error: await readError(optRes, "Connexion impossible.") };
     const optionsJSON = await optRes.json();
-    const response = await startAuthentication({ optionsJSON });
+    const response = await startAuthentication({
+      optionsJSON,
+      useBrowserAutofill: opts.useAutofill === true,
+    });
     const verifyRes = await fetch("/api/auth/webauthn/auth/verify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

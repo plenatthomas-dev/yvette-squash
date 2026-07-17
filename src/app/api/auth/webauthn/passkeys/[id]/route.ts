@@ -6,6 +6,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // DELETE /api/auth/webauthn/passkeys/{id} — retire un de MES passkeys (appareil perdu, etc.).
+// VOLONTAIREMENT non gated par le flag emailLogin (contrairement au GET et aux cérémonies) :
+// si l'admin coupe la connexion par e-mail, un membre doit tout de même pouvoir supprimer un
+// passkey déjà enrôlé (retrait d'un appareil perdu) — jamais le piéger dans son compte.
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },

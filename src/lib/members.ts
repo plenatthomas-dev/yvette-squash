@@ -11,6 +11,7 @@ export type MemberRow = {
   mode: "resamania" | "email"; // ResaMania si un contactId est attaché, sinon « email seul »
   hasPassword: boolean; // pilote « lien d'activation » (non) vs « lien de réinitialisation » (oui)
   verified: boolean; // email prouvé (lien cliqué ou connexion ResaMania)
+  passkeyCount: number; // nb de passkeys enrôlés → pilote le bouton « Révoquer biométrie »
   lastLoginAt: string | null;
   disabledAt: string | null;
   createdAt: string;
@@ -31,6 +32,7 @@ export async function listMembers(): Promise<MemberRow[]> {
       lastLoginAt: true,
       disabledAt: true,
       createdAt: true,
+      _count: { select: { passkeys: true } },
     },
   });
   return users.map((u) => ({
@@ -41,6 +43,7 @@ export async function listMembers(): Promise<MemberRow[]> {
     mode: u.contactId ? "resamania" : "email",
     hasPassword: !!u.passwordHash,
     verified: !!u.emailVerifiedAt,
+    passkeyCount: u._count.passkeys,
     lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
     disabledAt: u.disabledAt?.toISOString() ?? null,
     createdAt: u.createdAt.toISOString(),

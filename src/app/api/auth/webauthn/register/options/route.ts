@@ -59,7 +59,12 @@ export async function POST(req: NextRequest) {
     })),
     authenticatorSelection: {
       authenticatorAttachment: "platform", // biométrie intégrée (Face ID / Touch ID / empreinte)
-      residentKey: "preferred", // passkey découvrable → connexion sans saisir l'email
+      // « required » et non « preferred » : tout le flux de connexion est usernameless
+      // (auth/options ne passe AUCUN allowCredentials), donc seuls les passkeys DÉCOUVRABLES
+      // (resident keys) sont proposables au login. Avec « preferred », un authenticator aurait
+      // le droit de créer une clé non-découvrable : l'enrôlement réussirait, mais le bouton
+      // empreinte ne la retrouverait jamais → connexion impossible et bug muet à diagnostiquer.
+      residentKey: "required",
       userVerification: "required", // exige la vérification utilisateur (biométrie / PIN)
     },
   });

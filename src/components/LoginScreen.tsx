@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
 import { useFeatures } from "@/components/FeatureProvider";
-import { loginWithPasskey, passkeySupported, hasPasskeyOnDevice } from "@/lib/webauthnClient";
+import { loginWithPasskey, passkeySupported, passkeyAutofillSupported } from "@/lib/webauthnClient";
 
 // Icône empreinte (connexion biométrique). Tracé « fingerprint » de Lucide (ISC) : des
 // crêtes concentriques nettes, tout de suite reconnaissables comme une empreinte.
@@ -79,33 +79,38 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     passkeySupported().then(setPkSupported);
   }, []);
 
-  // `silent` (auto-connexion au lancement) : on N'affiche PAS d'erreur si l'utilisateur annule
-  // la modale — on le laisse simplement sur les formulaires (le bouton empreinte reste le plan B).
-  const doPasskeyLogin = async (silent = false) => {
-    setBusy(true);
+  // `silent` (autofill au lancement) : on N'affiche PAS d'erreur si l'utilisateur annule ou
+  // ignore la suggestion — on le laisse simplement sur les formulaires (le bouton empreinte
+  // reste le plan B). `useAutofill` branche le passkey sur l'autocomplétion des champs.
+  const doPasskeyLogin = async (opts: { silent?: boolean; useAutofill?: boolean } = {}) => {
+    const { silent = false, useAutofill = false } = opts;
+    if (!silent) setBusy(true);
     setErr(null);
-    const r = await loginWithPasskey();
+    const r = await loginWithPasskey({ useAutofill });
     if (r.ok) {
       onLoggedIn();
     } else {
       if (!silent) setErr(r.error ?? "Connexion biométrique impossible.");
-      setBusy(false);
+      if (!silent) setBusy(false);
     }
   };
 
-  // Auto-connexion : si CET appareil a déjà servi de passkey, on ouvre la modale biométrique
-  // automatiquement au lancement de l'écran de connexion — une seule fois, sans surgir sur un
-  // appareil vierge. Sur iOS Safari, `get()` sans geste peut être bloqué → échec silencieux,
-  // l'empreinte tappable prend le relais. (Android Chrome : la modale s'ouvre bien toute seule.)
+  // Auto-connexion via « autofill conditionnel » (Conditional UI) : plutôt qu'ouvrir une modale
+  // d'office (bloquée sur iOS Safari sans geste), on décore l'autocomplétion des champs — le
+  // passkey y apparaît, et la connexion se déclenche quand l'utilisateur le choisit. Non
+  // intrusif : rien ne surgit sur un appareil sans passkey. La cérémonie reste en attente en
+  // arrière-plan ; un clic sur l'empreinte l'annule proprement au profit de la modale.
   const autoTried = useRef(false);
   useEffect(() => {
     if (autoTried.current) return;
-    if (!emailLogin || !pkSupported) return;
-    if (!hasPasskeyOnDevice()) return;
+    if (!emailLogin) return; // les routes passkey sont gated sur ce flag
     autoTried.current = true;
-    doPasskeyLogin(true);
+    (async () => {
+      if (!(await passkeyAutofillSupported())) return;
+      await doPasskeyLogin({ silent: true, useAutofill: true });
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [emailLogin, pkSupported]);
+  }, [emailLogin]);
 
   // Un lien d'activation invalide/expiré renvoie vers /?erreur=lien_invalide (cf. la route
   // auth/email/verify). On bascule alors sur l'onglet email et on explique quoi faire.
@@ -266,7 +271,9 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
               placeholder="Identifiant (email)"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              autoComplete="username"
+              // « webauthn » (quand la connexion e-mail est active) branche l'autofill
+              // conditionnel : le passkey apparaît dans la liste d'autocomplétion de ce champ.
+              autoComplete={emailLogin ? "username webauthn" : "username"}
             />
             <div className="pwd-field">
               <input
@@ -328,7 +335,8 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
                 placeholder="Ton email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
+                // « webauthn » : autofill conditionnel du passkey sur ce champ (cf. onglet ResaMania).
+                autoComplete="email webauthn"
               />
               {emailMode === "register" && (
                 <input

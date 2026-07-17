@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateAuthenticationOptions } from "@simplewebauthn/server";
 import { getFeatures } from "@/lib/features-server";
+import { clientIp } from "@/lib/client-ip";
 import {
   rpParams,
   sealChallenge,
+  passkeyRateLimited,
   CHALLENGE_COOKIE,
   CHALLENGE_TTL_S,
   challengeCookieOptions,
@@ -18,6 +20,14 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   if (!(await getFeatures()).emailLogin) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
+  }
+  // Anti-abus par IP (aligné sur /auth/verify) : coupe court avant de générer un défi si l'IP
+  // martèle les cérémonies passkey.
+  if (await passkeyRateLimited(clientIp(req))) {
+    return NextResponse.json(
+      { error: "Trop de tentatives — réessaie dans quelques minutes." },
+      { status: 429 },
+    );
   }
   const { rpID } = rpParams(req);
   const options = await generateAuthenticationOptions({

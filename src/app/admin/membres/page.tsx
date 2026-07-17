@@ -16,12 +16,13 @@ type Member = {
   mode: "resamania" | "email";
   hasPassword: boolean;
   verified: boolean;
+  passkeyCount: number;
   lastLoginAt: string | null;
   disabledAt: string | null;
   createdAt: string;
 };
 
-type Action = "link" | "disable" | "enable" | "delete";
+type Action = "link" | "disable" | "enable" | "revoke_passkeys" | "delete";
 
 // Petite pastille de statut (pas de classe .badge globale : elle n'existe qu'en scopé).
 const badge: CSSProperties = {
@@ -78,6 +79,11 @@ export default function MembersPage() {
 
   const act = async (id: string, action: Action) => {
     if (action === "delete" && !confirm("Supprimer définitivement ce compte ?")) return;
+    if (
+      action === "revoke_passkeys" &&
+      !confirm("Retirer tous les passkeys (connexion biométrique) de ce membre ?")
+    )
+      return;
     setBusyId(id);
     setMsg(null);
     try {
@@ -157,6 +163,11 @@ export default function MembersPage() {
                         {!m.verified && (
                           <span style={{ ...badge, color: "#b45309" }}>non vérifié</span>
                         )}
+                        {m.passkeyCount > 0 && (
+                          <span style={badge} title="Passkeys enrôlés (connexion biométrique)">
+                            🔐 {m.passkeyCount}
+                          </span>
+                        )}
                       </div>
                     </td>
 
@@ -202,6 +213,17 @@ export default function MembersPage() {
                             onClick={() => act(m.id, "disable")}
                           >
                             Désactiver
+                          </button>
+                        )}
+                        {m.passkeyCount > 0 && (
+                          <button
+                            type="button"
+                            className="secondary tiny"
+                            disabled={busyId === m.id}
+                            onClick={() => act(m.id, "revoke_passkeys")}
+                            title="Retire tous les passkeys du membre (appareil perdu)"
+                          >
+                            Révoquer biométrie
                           </button>
                         )}
                         <button

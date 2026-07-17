@@ -7,9 +7,12 @@ import type {
 import { prisma } from "@/lib/db";
 import { createEmailSession, createResaSessionFromUser } from "@/lib/session";
 import { getFeatures } from "@/lib/features-server";
+import { clientIp } from "@/lib/client-ip";
 import {
   rpParams,
   openChallenge,
+  passkeyRateLimited,
+  recordPasskeyAttempt,
   CHALLENGE_COOKIE,
   challengeCookieOptions,
 } from "@/lib/webauthn";
@@ -22,19 +25,36 @@ const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 jours (aligné sur la connexion
 // POST /api/auth/webauthn/auth/verify — vérifie l'assertion du passkey et ouvre une session
 // « email seul ». Le passkey découvrable identifie le compte (via son credentialId).
 export async function POST(req: NextRequest) {
+  // Réponse d'échec : efface TOUJOURS le défi. Un défi est à USAGE UNIQUE — le laisser vivre
+  // jusqu'à son TTL après une cérémonie ratée permettrait de le rejouer. (Sur les tout premiers
+  // échecs, il n'y a pas encore de cookie de défi : l'effacer est alors sans effet, donc sûr.)
+  const fail = (status: number, error: string) => {
+    const res = NextResponse.json({ error }, { status });
+    res.cookies.set(CHALLENGE_COOKIE, "", challengeCookieOptions(0));
+    return res;
+  };
+
   if (!(await getFeatures()).emailLogin) {
-    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
+    return fail(404, "Fonction indisponible");
   }
+
+  const ip = clientIp(req);
+  // Anti-abus par IP (flux usernameless → pas d'identifiant à viser). Aligne la posture sur
+  // la connexion par mot de passe (cf. api/auth/login).
+  if (await passkeyRateLimited(ip)) {
+    return fail(429, "Trop de tentatives — réessaie dans quelques minutes.");
+  }
+
   const body = (await req.json().catch(() => ({}))) as {
     response?: AuthenticationResponseJSON;
   };
   if (!body.response?.id) {
-    return NextResponse.json({ error: "Réponse d'authentification manquante." }, { status: 400 });
+    return fail(400, "Réponse d'authentification manquante.");
   }
 
   const chal = openChallenge(req.cookies.get(CHALLENGE_COOKIE)?.value, "auth");
   if (!chal) {
-    return NextResponse.json({ error: "Session de connexion expirée — réessaie." }, { status: 400 });
+    return fail(400, "Session de connexion expirée — réessaie.");
   }
 
   // Le credentialId renvoyé par l'appareil identifie le compte.
@@ -43,13 +63,12 @@ export async function POST(req: NextRequest) {
     include: { user: true },
   });
   if (!passkey) {
-    return NextResponse.json({ error: "Passkey inconnu — reconnecte-toi par mot de passe." }, { status: 401 });
+    // credentialId inconnu = quelqu'un présente un identifiant au hasard → compte comme échec.
+    await recordPasskeyAttempt(ip);
+    return fail(401, "Passkey inconnu — reconnecte-toi par mot de passe.");
   }
   if (passkey.user.disabledAt) {
-    return NextResponse.json(
-      { error: "Ce compte a été désactivé. Contacte un responsable du club." },
-      { status: 403 },
-    );
+    return fail(403, "Ce compte a été désactivé. Contacte un responsable du club.");
   }
 
   const { rpID, origin } = rpParams(req);
@@ -70,11 +89,18 @@ export async function POST(req: NextRequest) {
           : undefined,
       },
     });
-  } catch {
-    return NextResponse.json({ error: "Connexion biométrique invalide." }, { status: 401 });
+  } catch (e) {
+    // La lib lève aussi sur une RÉGRESSION de compteur (signal de clonage possible) : on log
+    // côté serveur pour l'observabilité sécurité, sinon l'échec serait indistinguable d'un
+    // simple aléa réseau. Le message client reste volontairement générique.
+    await recordPasskeyAttempt(ip);
+    console.error(`[webauthn] échec de vérification (passkey ${passkey.id}, user ${passkey.userId}):`, e);
+    return fail(401, "Connexion biométrique invalide.");
   }
   if (!verification.verified) {
-    return NextResponse.json({ error: "Connexion biométrique non vérifiée." }, { status: 401 });
+    await recordPasskeyAttempt(ip);
+    console.warn(`[webauthn] assertion non vérifiée (passkey ${passkey.id}, user ${passkey.userId})`);
+    return fail(401, "Connexion biométrique non vérifiée.");
   }
 
   // Compteur anti-rejeu : on mémorise la nouvelle valeur (0 pour beaucoup de passkeys, c'est ok).
@@ -92,12 +118,14 @@ export async function POST(req: NextRequest) {
     sid = await createEmailSession(passkey.userId);
   }
   if (!sid) {
-    return NextResponse.json(
-      {
-        error:
-          "Session ResaMania expirée — reconnecte-toi une fois avec ton mot de passe ResaMania, puis la biométrie reprendra.",
-      },
-      { status: 409 },
+    // Le passkey ÉTAIT valide (la biométrie a réussi) : ce n'est pas un échec biométrique, mais
+    // le lien vers ResaMania a expiré et aucun repli email n'existe. Message rassurant + qui
+    // dit précisément quoi faire, pour ne pas laisser croire que la biométrie est cassée.
+    return fail(
+      409,
+      "Biométrie reconnue ✅ mais ta connexion ResaMania a expiré. Reconnecte-toi une seule " +
+        "fois via l'onglet « ResaMania » (identifiant + mot de passe) : ta biométrie se " +
+        "réactivera ensuite toute seule, sans rien à reconfigurer.",
     );
   }
 
