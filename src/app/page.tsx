@@ -133,9 +133,16 @@ interface AlertItem {
   position?: number; // mon rang (1 = 1ᵉʳ inscrit)
 }
 
+// Plancher d'affichage de l'écran de chargement initial (ms). La durée RÉELLE de cet écran =
+// le plus LONG entre ce plancher et le temps de réponse de /api/auth/me : on ne peut pas
+// descendre sous le temps du fetch (c'est le vrai travail), ce plancher ne fait que lisser le
+// cas « session déjà en cache » où la réponse arrive en quelques ms (sinon le logo clignote).
+const SPLASH_MIN_MS = 1000;
+
 export default function Home() {
   const { tricount, directory, delegation, tournament } = useFeatures();
   const [me, setMe] = useState<string | null | undefined>(undefined); // undefined = chargement
+  const [splashDone, setSplashDone] = useState(false); // plancher anti-flash de l'écran de chargement écoulé
   const [myId, setMyId] = useState<string | null>(null); // id interne (se reconnaître dans l'annuaire)
   const [myHandle, setMyHandle] = useState<string>(""); // token créneau (pseudo tronqué / Tho.P)
   const [nickname, setNickname] = useState<string | null>(null); // pseudonyme choisi
@@ -241,6 +248,13 @@ export default function Home() {
   useEffect(() => {
     checkMe();
   }, [checkMe]);
+
+  // Plancher anti-flash de l'écran de chargement : au bout de SPLASH_MIN_MS, on autorise le
+  // passage à l'appli (le rendu attend AUSSI que /api/auth/me ait répondu — cf. `me`).
+  useEffect(() => {
+    const t = setTimeout(() => setSplashDone(true), SPLASH_MIN_MS);
+    return () => clearTimeout(t);
+  }, []);
 
   const loadAlerts = useCallback(async () => {
     const r = await fetch("/api/alerts");
@@ -821,8 +835,18 @@ export default function Home() {
     setPlanning(null);
   };
 
-  if (me === undefined) {
-    return <main><p>Chargement…</p></main>;
+  // Écran de chargement initial : affiché tant que la session n'est pas connue (me === undefined)
+  // ET au moins SPLASH_MIN_MS (plancher anti-flash). Logo + roue dans la continuité du splash PWA.
+  if (me === undefined || !splashDone) {
+    return (
+      <main className="app-splash">
+        <img className="app-splash__logo" src="/logo_squash.jpeg" alt="Squash de l'Yvette" />
+        <div className="app-splash__spinner" aria-hidden="true" />
+        <p className="muted tiny" role="status" aria-live="polite">
+          Chargement…
+        </p>
+      </main>
+    );
   }
 
   if (me === null) {
