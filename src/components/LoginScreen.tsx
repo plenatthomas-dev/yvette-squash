@@ -6,7 +6,12 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
 import { useFeatures } from "@/components/FeatureProvider";
-import { loginWithPasskey, passkeySupported, passkeyAutofillSupported } from "@/lib/webauthnClient";
+import {
+  loginWithPasskey,
+  passkeySupported,
+  passkeyAutofillSupported,
+  hasPasskeyOnDevice,
+} from "@/lib/webauthnClient";
 
 // Icône empreinte (connexion biométrique). Tracé « fingerprint » de Lucide (ISC) : des
 // crêtes concentriques nettes, tout de suite reconnaissables comme une empreinte.
@@ -95,19 +100,27 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     }
   };
 
-  // Auto-connexion via « autofill conditionnel » (Conditional UI) : plutôt qu'ouvrir une modale
-  // d'office (bloquée sur iOS Safari sans geste), on décore l'autocomplétion des champs — le
-  // passkey y apparaît, et la connexion se déclenche quand l'utilisateur le choisit. Non
-  // intrusif : rien ne surgit sur un appareil sans passkey. La cérémonie reste en attente en
-  // arrière-plan ; un clic sur l'empreinte l'annule proprement au profit de la modale.
+  // Auto-connexion biométrique au lancement, adaptée à l'appareil :
+  //  • appareil DÉJÀ configuré (un passkey y a servi → repère local `pk_on_device`) : on ouvre
+  //    directement la modale Face ID / empreinte, comme un lecteur qui s'arme tout seul. C'est
+  //    le comportement attendu des habitués (un geste et on est connecté) ; il marche là où
+  //    l'auto-ouverture est permise (Android/Chrome notamment).
+  //  • appareil vierge : jamais de modale surprise. On tente l'« autofill conditionnel »
+  //    (Conditional UI) là où c'est supporté — le passkey apparaît alors dans l'autocomplétion
+  //    des champs, sans rien imposer. Sinon rien : le bouton empreinte reste le plan B.
   const autoTried = useRef(false);
   useEffect(() => {
     if (autoTried.current) return;
     if (!emailLogin) return; // les routes passkey sont gated sur ce flag
     autoTried.current = true;
     (async () => {
-      if (!(await passkeyAutofillSupported())) return;
-      await doPasskeyLogin({ silent: true, useAutofill: true });
+      if (hasPasskeyOnDevice()) {
+        await doPasskeyLogin({ silent: true });
+        return;
+      }
+      if (await passkeyAutofillSupported()) {
+        await doPasskeyLogin({ silent: true, useAutofill: true });
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [emailLogin]);

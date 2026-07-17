@@ -183,6 +183,26 @@ describe("POST /api/admin/members", () => {
     expect(h.passkeyDeleteMany).toHaveBeenCalledWith({ where: { userId: "u1" } });
   });
 
+  it("revoke_passkey : supprime un passkey précis, borné au membre", async () => {
+    h.passkeyDeleteMany.mockResolvedValueOnce({ count: 1 });
+    const res = await POST(postReq({ id: "u1", action: "revoke_passkey", passkeyId: "pk1" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(h.passkeyDeleteMany).toHaveBeenCalledWith({ where: { id: "pk1", userId: "u1" } });
+  });
+
+  it("revoke_passkey : 400 si passkeyId manquant", async () => {
+    const res = await POST(postReq({ id: "u1", action: "revoke_passkey" }));
+    expect(res.status).toBe(400);
+    expect(h.passkeyDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("revoke_passkey : 404 si le passkey n'appartient pas au membre", async () => {
+    h.passkeyDeleteMany.mockResolvedValueOnce({ count: 0 });
+    const res = await POST(postReq({ id: "u1", action: "revoke_passkey", passkeyId: "zz" }));
+    expect(res.status).toBe(404);
+  });
+
   it("delete : 409 si dépendances bloquantes (ne supprime pas)", async () => {
     h.blockers = { expenses: 2, shares: 5, tournaments: 0, total: 7 };
     const res = await POST(postReq({ id: "u1", action: "delete" }));
