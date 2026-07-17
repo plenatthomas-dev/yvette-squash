@@ -37,6 +37,21 @@
   --danger-fg: #b3261e;
   --danger-border: #e2b8b8;
   --danger-hover: #e5484d;
+
+  /* --- Relief / élévation (embellissement « pretty ») ----------------------
+     Ombres douces MULTI-COUCHES (le look moderne à la Linear/Vercel, pas le « 3D »
+     dur d'antan) + un léger dégradé de surface sur les cartes. Coût runtime nul
+     (100 % CSS, aucune dépendance). Les valeurs d'ombre/dégradé sont retéclées par
+     thème plus bas ; rayons et « lift » sont communs (définis ici seulement). */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --lift: -2px; /* soulèvement au survol (transform → composé par le GPU) */
+  --elev-1: 0 1px 2px rgba(16, 24, 40, 0.06), 0 3px 8px rgba(16, 24, 40, 0.09);
+  --elev-2: 0 2px 6px rgba(16, 24, 40, 0.08), 0 12px 28px rgba(16, 24, 40, 0.15);
+  --elev-3: 0 8px 16px rgba(16, 24, 40, 0.12), 0 24px 56px rgba(16, 24, 40, 0.22);
+  /* Reflet discret en haut des cartes (effet « verre »). */
+  --card-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0) 55%);
 }
 
 /* THÈME SOMBRE — appliqué si data-theme="dark" OU si l'OS est sombre en mode « système »
@@ -58,6 +73,11 @@
     --danger-fg: #ff9a9a;
     --danger-border: #5a2a2a;
     --danger-hover: #ff6b6b;
+    /* Ombres plus profondes en sombre (sinon elles disparaissent sur fond noir). */
+    --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 3px 10px rgba(0, 0, 0, 0.5);
+    --elev-2: 0 3px 10px rgba(0, 0, 0, 0.5), 0 14px 34px rgba(0, 0, 0, 0.6);
+    --elev-3: 0 10px 24px rgba(0, 0, 0, 0.55), 0 28px 64px rgba(0, 0, 0, 0.7);
+    --card-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 55%);
   }
 }
 [data-theme="dark"] {
@@ -76,6 +96,10 @@
   --danger-fg: #ff9a9a;
   --danger-border: #5a2a2a;
   --danger-hover: #ff6b6b;
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 3px 10px rgba(0, 0, 0, 0.5);
+  --elev-2: 0 3px 10px rgba(0, 0, 0, 0.5), 0 14px 34px rgba(0, 0, 0, 0.6);
+  --elev-3: 0 10px 24px rgba(0, 0, 0, 0.55), 0 28px 64px rgba(0, 0, 0, 0.7);
+  --card-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 55%);
 }
 
 /* THÈME « SHORT ROSE » — vraie ambiance pinky : fond, cartes, texte, boutons, tout est rose.
@@ -139,6 +163,11 @@
   --danger-fg: #9b1b1b;
   --danger-border: #e2a8b8;
   --danger-hover: #e5484d;
+  /* Ombres teintées rose (cohérentes avec l'ambiance pinky). */
+  --elev-1: 0 1px 2px rgba(160, 16, 96, 0.1), 0 3px 8px rgba(160, 16, 96, 0.14);
+  --elev-2: 0 2px 6px rgba(160, 16, 96, 0.14), 0 12px 28px rgba(160, 16, 96, 0.2);
+  --elev-3: 0 8px 16px rgba(160, 16, 96, 0.18), 0 24px 56px rgba(160, 16, 96, 0.28);
+  --card-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 55%);
 }
 
 /* --- Enveloppe : conteneur centré, marges maîtrisées sur mobile --------- */
@@ -188,6 +217,7 @@ header.app h1 {
   border-radius: 11px;
   object-fit: contain;
   background: #fff;
+  box-shadow: var(--elev-1);
 }
 
 /* Grand logo sur l'écran de connexion */
@@ -200,7 +230,7 @@ header.app h1 {
   border-radius: 24px;
   object-fit: contain;
   background: #fff;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--elev-3);
 }
 
 /* Contenu réservé aux lecteurs d'écran (titre pour la structure/accessibilité) */
@@ -416,10 +446,12 @@ header.app .sub {
   gap: 10px;
   padding: 10px 12px;
   border: 1px solid var(--pico-card-border-color);
-  border-radius: 10px;
+  border-radius: var(--radius);
   margin-bottom: 8px;
   font-size: 0.88rem;
   text-transform: capitalize;
+  background: var(--card-grad), var(--pico-card-background-color);
+  box-shadow: var(--elev-1);
 }
 
 .alerts-list li button.cancel {
@@ -552,6 +584,9 @@ header.app .sub {
   background: var(--pico-card-background-color);
   color: var(--pico-muted-color);
   border: 1px solid var(--pico-card-border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--elev-1);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
 .filters button.active {
@@ -559,6 +594,7 @@ header.app .sub {
   color: #fff;
   border-color: var(--pico-primary);
   font-weight: 600;
+  box-shadow: var(--elev-2);
 }
 
 /* --- Barre vue (Jour/Semaine) + rafraîchir ------------------------------ */
@@ -714,7 +750,8 @@ header.app .sub {
 .grid-wrap {
   overflow-x: auto;
   border: 1px solid var(--pico-card-border-color);
-  border-radius: 12px;
+  border-radius: var(--radius);
+  box-shadow: var(--elev-2);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -927,7 +964,8 @@ td.cell.past {
   border: 1px solid var(--pico-card-border-color);
   border-left: 3px solid var(--accent);
   padding: 10px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--elev-1);
   font-size: 0.85rem;
   color: var(--pico-muted-color);
   margin-bottom: 16px;
@@ -953,8 +991,9 @@ td.cell.past {
   padding: 30px 18px;
   color: var(--pico-muted-color);
   border: 1px dashed var(--pico-card-border-color);
-  border-radius: 12px;
-  background: var(--pico-card-background-color);
+  border-radius: var(--radius-lg);
+  background: var(--card-grad), var(--pico-card-background-color);
+  box-shadow: var(--elev-1);
 }
 
 .empty-icon {
@@ -992,10 +1031,18 @@ td.cell.past {
   gap: 10px;
   padding: 10px 12px;
   border: 1px solid var(--pico-card-border-color);
-  border-radius: 10px;
+  border-radius: var(--radius);
   margin-bottom: 8px;
   font-size: 0.88rem;
-  background: var(--pico-card-background-color);
+  background: var(--card-grad), var(--pico-card-background-color);
+  box-shadow: var(--elev-1);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Léger « soulèvement » au survol (transform → composé GPU, aucune perte de fluidité). */
+.journal li:hover {
+  transform: translateY(var(--lift));
+  box-shadow: var(--elev-2);
 }
 
 .journal li.mine {
@@ -1202,13 +1249,13 @@ td.cell.past {
 
 .toast {
   padding: 11px 16px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   font-size: 0.9rem;
   font-weight: 500;
-  background: var(--pico-card-background-color);
+  background: var(--card-grad), var(--pico-card-background-color);
   color: var(--pico-color);
   border: 1px solid var(--pico-card-border-color);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--elev-2);
   animation: toast-in 0.18s ease-out;
 }
 
@@ -1250,13 +1297,13 @@ td.cell.past {
 }
 
 .modal {
-  background: var(--pico-card-background-color);
+  background: var(--card-grad), var(--pico-card-background-color);
   border: 1px solid var(--pico-card-border-color);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   padding: 20px 20px 18px;
   width: 100%;
   max-width: 380px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--elev-3);
   animation: modal-in 0.18s ease-out;
   /* Bornée à l'écran. Sans ça, un panneau riche (Paramètres, avec délégation) dépasse le
      viewport d'un téléphone : l'overlay étant centré (align-items:center), le débordement
