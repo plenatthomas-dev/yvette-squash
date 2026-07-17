@@ -637,27 +637,18 @@ header.app .sub {
 }
 
 /* --- Écran de chargement initial (vérification de session au lancement) -----
-   Logo + roue, centrés sur le même fond que le splash PWA (manifest.background_color)
-   pour prolonger l'écran de démarrage sans « flash blanc ». Piloté par page.tsx
-   (state `me === undefined`) avec un plancher anti-flash (SPLASH_MIN_MS). */
-.app-splash {
+   On réutilise le MÊME conteneur (.login) et le MÊME logo (.logo-hero) que l'écran de
+   connexion : au lancement, seul le spinner s'ajoute sous le logo — qui ne bouge donc pas
+   au passage sur le login. Piloté par page.tsx (me === undefined + plancher SPLASH_MIN_MS). */
+.app-loading {
   display: flex;
-  flex-direction: column;
-  align-items: center;
   justify-content: center;
-  gap: 20px;
-  min-height: 100dvh;
+  margin-top: 24px;
 }
-
-.app-splash__logo {
-  width: 96px;
-  height: 96px;
-  border-radius: 20px;
-}
-
-.app-splash__spinner {
-  width: 28px;
-  height: 28px;
+.app-spinner {
+  display: block;
+  width: 34px;
+  height: 34px;
   border: 3px solid var(--pico-muted-border-color, rgba(128, 128, 128, 0.25));
   border-top-color: var(--pico-primary);
   border-radius: 50%;
@@ -1456,9 +1447,15 @@ td.cell.past {
   white-space: nowrap;
 }
 
+/* Compteur de caractères placé AU-DESSUS de la zone de saisie (juste collé à elle). */
+.comment-count {
+  margin: 0 0 2px;
+}
+
 .comment-field {
   width: 100%;
-  margin: 0 0 10px;
+  /* Marge basse réduite : le bouton « Envoyer » reste au plus près de la zone de saisie. */
+  margin: 0 0 6px;
   resize: vertical;
 }
 
@@ -1466,6 +1463,46 @@ td.cell.past {
 .setting > button {
   margin: 0;
   width: auto;
+}
+
+/* Switch 3 positions (Coupée · Auto · Active) pour piloter une fonction dans /admin,
+   en remplacement du menu déroulant. Segment unique : la position choisie se colore. */
+.tri-switch {
+  display: inline-flex;
+  border: 1px solid var(--pico-muted-border-color, rgba(128, 128, 128, 0.35));
+  border-radius: 999px;
+  overflow: hidden;
+}
+.tri-switch button {
+  margin: 0;
+  width: auto;
+  border: 0;
+  border-radius: 0;
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  background: transparent;
+  color: var(--pico-muted-color, #8a8a8a);
+  cursor: pointer;
+}
+.tri-switch button + button {
+  border-left: 1px solid var(--pico-muted-border-color, rgba(128, 128, 128, 0.35));
+}
+.tri-switch button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.tri-switch button.tri-off.active {
+  background: var(--danger-hover);
+  color: #fff;
+}
+.tri-switch button.tri-auto.active {
+  background: var(--accent);
+  color: #fff;
+}
+.tri-switch button.tri-on.active {
+  background: var(--free);
+  color: var(--free-fg);
 }
 
 /* Case à cocher alignée avec son libellé (opt-out annuaire). */
@@ -2895,7 +2932,7 @@ table.planning.week th.time.selhead {
   /* Coupe net les animations en boucle (skeleton, spinner de rafraîchissement, marquee). */
   .skel-cell,
   .refresh.spin svg,
-  .app-splash__spinner,
+  .app-spinner,
   .announce-marquee {
     animation: none !important;
     transform: none !important;

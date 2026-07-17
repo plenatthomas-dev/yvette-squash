@@ -836,15 +836,18 @@ export default function Home() {
   };
 
   // Écran de chargement initial : affiché tant que la session n'est pas connue (me === undefined)
-  // ET au moins SPLASH_MIN_MS (plancher anti-flash). Logo + roue dans la continuité du splash PWA.
+  // ET au moins SPLASH_MIN_MS (plancher anti-flash). On rend le MÊME conteneur et le MÊME logo
+  // (place + taille) que l'écran de connexion — cf. LoginScreen / .logo-hero : en enchaînant sur
+  // le login, seul le spinner disparaît, le logo ne bouge pas. Le spinner respecte reduced-motion.
   if (me === undefined || !splashDone) {
     return (
-      <main className="app-splash">
-        <img className="app-splash__logo" src="/logo_squash.jpeg" alt="Squash de l'Yvette" />
-        <div className="app-splash__spinner" aria-hidden="true" />
-        <p className="muted tiny" role="status" aria-live="polite">
-          Chargement…
-        </p>
+      <main className="login">
+        <h1 className="sr-only">Squash de l'Yvette</h1>
+        <img src="/logo_squash.jpeg" alt="Squash de l'Yvette" className="logo-hero" />
+        <div className="app-loading" role="status" aria-live="polite">
+          <span className="app-spinner" aria-hidden="true" />
+          <span className="sr-only">Chargement…</span>
+        </div>
       </main>
     );
   }

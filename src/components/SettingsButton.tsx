@@ -652,9 +652,7 @@ export function SettingsButton({
               <section className="setting">
                 <SettingInfo title="Déléguer mes droits">
                   Autorise un ou plusieurs membres à réserver/annuler en ton nom pendant une
-                  durée limitée (ex. ils gèrent les résas d'une soirée à ta place pendant que
-                  tu es indisponible). La réservation reste sous ton compte ResaMania ; on
-                  trace qui a agi.
+                  durée limitée. La réservation reste sous ton compte ResaMania.
                   {sessionExpiresAt && (
                     <>
                       {" "}
@@ -813,9 +811,8 @@ export function SettingsButton({
             {showPasskeys && (
               <section className="setting">
                 <SettingInfo title="Connexion biométrique">
-                  Active Face ID / Touch ID / empreinte pour te reconnecter sans mot de passe
-                  sur cet appareil. Ta biométrie ne quitte jamais ton téléphone : l'appli ne
-                  reçoit qu'une clé de sécurité, pas ton empreinte.
+                  Active Face ID/empreinte pour te reconnecter sans mot de passe sur cet
+                  appareil. L'appli ne reçoit qu'une clé de sécurité, pas ton empreinte.
                 </SettingInfo>
                 {passkeys === null ? (
                   <p className="muted tiny">Chargement…</p>
@@ -897,27 +894,28 @@ export function SettingsButton({
               </section>
             )}
 
-            <section className="setting">
+            <section className="setting comment-section">
               <h4>Un commentaire ?</h4>
-              <p className="muted tiny">
-                Une question, une idée, un bug ? Écris-le ici, ça m'est envoyé par e-mail.
-              </p>
-              <textarea
-                className="comment-field"
-                value={comment}
-                maxLength={COMMENT_MAX}
-                rows={3}
-                placeholder="Ton message…"
-                onChange={(e) => setComment(e.target.value)}
-              />
               <div
-                className="muted tiny"
+                className="muted tiny comment-count"
                 style={{ textAlign: "right" }}
                 aria-live="polite"
               >
                 {comment.length} / {COMMENT_MAX}
               </div>
-              <button onClick={sendComment} disabled={sending || !comment.trim()}>
+              <textarea
+                className="comment-field"
+                value={comment}
+                maxLength={COMMENT_MAX}
+                rows={3}
+                placeholder="Une question, une idée, un bug ? Écris-le ici"
+                onChange={(e) => setComment(e.target.value)}
+              />
+              <button
+                className="comment-send"
+                onClick={sendComment}
+                disabled={sending || !comment.trim()}
+              >
                 {sending ? "Envoi…" : "Envoyer"}
               </button>
             </section>
