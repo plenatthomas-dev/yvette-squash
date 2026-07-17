@@ -137,7 +137,7 @@ interface AlertItem {
 // le plus LONG entre ce plancher et le temps de réponse de /api/auth/me : on ne peut pas
 // descendre sous le temps du fetch (c'est le vrai travail), ce plancher ne fait que lisser le
 // cas « session déjà en cache » où la réponse arrive en quelques ms (sinon le logo clignote).
-const SPLASH_MIN_MS = 1000;
+const SPLASH_MIN_MS = 250;
 
 export default function Home() {
   const { tricount, directory, delegation, tournament } = useFeatures();
