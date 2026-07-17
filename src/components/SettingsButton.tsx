@@ -13,7 +13,12 @@ import {
   invalidateDirectory,
   type DirectoryMember,
 } from "@/lib/directoryCache";
-import { enrollPasskey, passkeySupported, forgetPasskeyOnDevice } from "@/lib/webauthnClient";
+import {
+  enrollPasskey,
+  passkeySupported,
+  forgetPasskeyOnDevice,
+  hasPasskeyOnDevice,
+} from "@/lib/webauthnClient";
 
 type PasskeyInfo = { id: string; deviceLabel: string | null; createdAt: string; lastUsedAt: string | null };
 
@@ -204,6 +209,13 @@ export function SettingsButton({
   const [pkSupported, setPkSupported] = useState(false);
   const [passkeys, setPasskeys] = useState<PasskeyInfo[] | null>(null);
   const [pkBusy, setPkBusy] = useState(false);
+  // « Cet appareil a-t-il déjà un passkey ? » (marqueur local par appareil). Sert à n'afficher
+  // « Activer sur cet appareil » QUE là où ça a du sens : sur un appareil déjà enrôlé, le seul
+  // bouton pertinent est le « Retirer » de sa ligne (un seul bouton activer/retirer, selon le
+  // contexte). On exige aussi un passkey côté serveur, au cas où le marqueur local serait resté
+  // alors que le passkey a été supprimé depuis un autre appareil.
+  const [pkOnDevice, setPkOnDevice] = useState(false);
+  const enabledOnThisDevice = pkOnDevice && (passkeys?.length ?? 0) > 0;
 
   const loadPasskeys = async () => {
     try {
@@ -218,6 +230,7 @@ export function SettingsButton({
   useEffect(() => {
     if (!open || !showPasskeys) return;
     passkeySupported().then(setPkSupported);
+    setPkOnDevice(hasPasskeyOnDevice());
     loadPasskeys();
   }, [open, showPasskeys]);
 
@@ -231,6 +244,7 @@ export function SettingsButton({
     const r = await enrollPasskey(label);
     setPkBusy(false);
     if (r.ok) {
+      setPkOnDevice(true); // cet appareil est désormais enrôlé (enrollPasskey a posé le marqueur)
       toast("ok", "Connexion biométrique activée sur cet appareil.");
       loadPasskeys();
     } else {
@@ -246,8 +260,12 @@ export function SettingsButton({
       setPasskeys((prev) => {
         const next = (prev ?? []).filter((p) => p.id !== id);
         // Plus aucun passkey côté serveur : oublie l'indicateur local pour ne pas tenter une
-        // auto-connexion biométrique vouée à l'échec au prochain lancement.
-        if (next.length === 0) forgetPasskeyOnDevice();
+        // auto-connexion biométrique vouée à l'échec au prochain lancement (et re-proposer
+        // « Activer sur cet appareil »).
+        if (next.length === 0) {
+          forgetPasskeyOnDevice();
+          setPkOnDevice(false);
+        }
         return next;
       });
       toast("ok", "Passkey supprimé.");
@@ -791,7 +809,9 @@ export function SettingsButton({
                     </ul>
                   )
                 )}
-                {pkSupported ? (
+                {/* Cet appareil déjà enrôlé : le seul bouton pertinent est le « Retirer » de sa
+                    ligne ci-dessus — on n'affiche pas « Activer sur cet appareil » en double. */}
+                {enabledOnThisDevice ? null : pkSupported ? (
                   <button onClick={addPasskey} disabled={pkBusy}>
                     {pkBusy ? "…" : "Activer sur cet appareil"}
                   </button>

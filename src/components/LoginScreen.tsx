@@ -291,10 +291,6 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
               {busy ? "Connexion…" : "Se connecter"}
             </button>
           </form>
-          <p className="muted tiny">
-            Ton mot de passe sert seulement à te connecter à ResaMania ; il n'est jamais
-            conservé. L'appli mémorise uniquement que tu es connecté, de façon sécurisée.
-          </p>
         </>
       ) : (
         <>

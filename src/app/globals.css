@@ -2924,12 +2924,19 @@ table.planning.week th.time.selhead {
   padding: 0;
   margin: 0 0 10px;
 }
+/* Colle l'info « Cet appareil · ajouté le… » au titre de la section (moins d'air perdu). */
+.setting-head + .passkey-list {
+  margin-top: -4px;
+}
 .passkey-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding: 6px 0;
+}
+.passkey-item:first-child {
+  padding-top: 2px;
 }
 .passkey-item + .passkey-item {
   border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent);
