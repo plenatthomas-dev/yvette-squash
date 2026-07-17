@@ -5,7 +5,7 @@ import type { NextRequest } from "next/server";
 // USAGE UNIQUE (cookie toujours effacé), credential inconnu/désactivé, échec de vérification, et
 // l'échelle de session (ResaMania → email → mur 409). Toutes les frontières sont mockées.
 const h = vi.hoisted(() => ({
-  emailLogin: true,
+  biometry: true,
   rateLimited: false,
   challenge: { challenge: "chal", type: "auth" } as null | { challenge: string; type: string },
   passkey: null as null | Record<string, unknown>,
@@ -24,7 +24,7 @@ vi.mock("@simplewebauthn/server", () => ({
   }),
 }));
 vi.mock("@/lib/features-server", () => ({
-  getFeatures: async () => ({ emailLogin: h.emailLogin }),
+  getFeatures: async () => ({ biometry: h.biometry }),
 }));
 vi.mock("@/lib/client-ip", () => ({ clientIp: () => "1.2.3.4" }));
 vi.mock("@/lib/session", () => ({
@@ -62,7 +62,7 @@ const clears = (res: { cookies: { get: (n: string) => { value: string } | undefi
   res.cookies.get("wa_chal")?.value === "";
 
 beforeEach(() => {
-  h.emailLogin = true;
+  h.biometry = true;
   h.rateLimited = false;
   h.challenge = { challenge: "chal", type: "auth" };
   h.passkey = {
@@ -75,6 +75,7 @@ beforeEach(() => {
     user: {
       id: "u1",
       displayName: "Jean",
+      email: "jean@club.fr",
       disabledAt: null,
       passwordHash: "hash",
       emailVerifiedAt: new Date(),
@@ -89,8 +90,8 @@ beforeEach(() => {
 });
 
 describe("POST /api/auth/webauthn/auth/verify", () => {
-  it("404 si la connexion e-mail est désactivée", async () => {
-    h.emailLogin = false;
+  it("404 si la biométrie est désactivée", async () => {
+    h.biometry = false;
     const res = await POST(postReq(goodBody));
     expect(res.status).toBe(404);
   });
@@ -163,5 +164,9 @@ describe("POST /api/auth/webauthn/auth/verify", () => {
     const res = await POST(postReq(goodBody));
     expect(res.status).toBe(409);
     expect(clears(res)).toBe(true);
+    // Le 409 joint de quoi pré-remplir la reconnexion ResaMania (identifiant + code).
+    const body = (await res.json()) as { code?: string; username?: string };
+    expect(body.code).toBe("resa_expired");
+    expect(body.username).toBe("jean@club.fr");
   });
 });

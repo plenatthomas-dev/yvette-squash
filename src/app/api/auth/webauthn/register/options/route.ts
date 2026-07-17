@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 // POST /api/auth/webauthn/register/options — prépare l'enrôlement d'un passkey pour le compte
 // « email seul » connecté. Renvoie les options WebAuthn et pose le défi (cookie chiffré).
 export async function POST(req: NextRequest) {
-  if (!(await getFeatures()).emailLogin) {
+  if (!(await getFeatures()).biometry) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);

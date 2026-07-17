@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
     return res;
   };
 
-  if (!(await getFeatures()).emailLogin) {
+  if (!(await getFeatures()).biometry) {
     return fail(404, "Fonction indisponible");
   }
 
@@ -119,14 +119,23 @@ export async function POST(req: NextRequest) {
   }
   if (!sid) {
     // Le passkey ÉTAIT valide (la biométrie a réussi) : ce n'est pas un échec biométrique, mais
-    // le lien vers ResaMania a expiré et aucun repli email n'existe. Message rassurant + qui
-    // dit précisément quoi faire, pour ne pas laisser croire que la biométrie est cassée.
-    return fail(
-      409,
-      "Biométrie reconnue ✅ mais ta connexion ResaMania a expiré. Reconnecte-toi une seule " +
-        "fois via l'onglet « ResaMania » (identifiant + mot de passe) : ta biométrie se " +
-        "réactivera ensuite toute seule, sans rien à reconfigurer.",
+    // le lien vers ResaMania a expiré et aucun repli email n'existe. On renvoie l'identifiant
+    // (email) du compte : la biométrie ayant prouvé la possession de l'appareil, révéler à
+    // l'utilisateur SON PROPRE email est sûr — et ça permet au client de pré-remplir le
+    // formulaire ResaMania et de mettre le focus sur le mot de passe (« reconnexion en un geste »).
+    const res = NextResponse.json(
+      {
+        error:
+          "Biométrie reconnue ✅ mais ta connexion ResaMania a expiré. Reconnecte-toi via " +
+          "l'onglet « ResaMania » (identifiant + mot de passe) : ta biométrie se réactivera " +
+          "ensuite toute seule.",
+        code: "resa_expired",
+        username: passkey.user.email ?? undefined,
+      },
+      { status: 409 },
     );
+    res.cookies.set(CHALLENGE_COOKIE, "", challengeCookieOptions(0)); // défi à usage unique
+    return res;
   }
 
   const res = NextResponse.json({ displayName: passkey.user.displayName });

@@ -171,7 +171,7 @@ export function SettingsButton({
   onDelegationsChanged: () => void;
   toast: (type: "ok" | "err" | "info", msg: string) => void;
 }) {
-  const { directory, delegation, emailLogin } = useFeatures();
+  const { directory, delegation, biometry } = useFeatures();
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>("system");
   const [nick, setNick] = useState(nickname ?? "");
@@ -212,7 +212,7 @@ export function SettingsButton({
 
   // Connexion biométrique (passkeys) — tout compte connecté. Pour un compte ResaMania, la
   // connexion par passkey restaure sa session ResaMania via le refresh token (option A).
-  const showPasskeys = emailLogin;
+  const showPasskeys = biometry;
   const [pkSupported, setPkSupported] = useState(false);
   const [passkeys, setPasskeys] = useState<PasskeyInfo[] | null>(null);
   const [pkBusy, setPkBusy] = useState(false);

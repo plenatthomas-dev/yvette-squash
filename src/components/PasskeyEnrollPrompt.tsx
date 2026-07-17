@@ -4,7 +4,7 @@
 // supporte Face ID / Touch ID / empreinte et qu'AUCUN passkey n'y est encore enrôlé, on propose
 // UNE FOIS de l'activer. C'est le plus gros levier d'adoption : sinon la biométrie reste enterrée
 // dans les Réglages et personne ne l'active. Non intrusif : masquable, et « Plus tard » met la
-// relance en veille 7 jours. Gated en interne (flag emailLogin + support), donc l'appelant se
+// relance en veille 7 jours. Gated en interne (flag `biometry` + support), donc l'appelant se
 // contente de le monter dans la vue connectée.
 
 import { useEffect, useState } from "react";
@@ -28,12 +28,12 @@ export function PasskeyEnrollPrompt({
 }: {
   toast: (type: "ok" | "err" | "info", msg: string) => void;
 }) {
-  const { emailLogin } = useFeatures();
+  const { biometry } = useFeatures();
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!emailLogin) return; // les routes passkey sont gated sur ce flag
+    if (!biometry) return; // les routes passkey sont gated sur ce flag
     if (hasPasskeyOnDevice()) return; // déjà activé sur cet appareil → rien à proposer
     if (snoozed()) return; // « Plus tard » récent : on ne relance pas
     let cancelled = false;
@@ -43,7 +43,7 @@ export function PasskeyEnrollPrompt({
     return () => {
       cancelled = true;
     };
-  }, [emailLogin]);
+  }, [biometry]);
 
   if (!show) return null;
 

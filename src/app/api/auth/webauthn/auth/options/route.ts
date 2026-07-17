@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 // d'allowCredentials : le passkey est découvrable, l'utilisateur n'a donc pas à saisir son
 // email — l'appareil propose directement le bon compte.
 export async function POST(req: NextRequest) {
-  if (!(await getFeatures()).emailLogin) {
+  if (!(await getFeatures()).biometry) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   // Anti-abus par IP (aligné sur /auth/verify) : coupe court avant de générer un défi si l'IP

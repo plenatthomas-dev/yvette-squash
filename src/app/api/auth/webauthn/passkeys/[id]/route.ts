@@ -7,9 +7,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // DELETE /api/auth/webauthn/passkeys/{id} — retire un de MES passkeys (appareil perdu, etc.).
-// VOLONTAIREMENT non gated par le flag emailLogin (contrairement au GET et aux cérémonies) :
-// si l'admin coupe la connexion par e-mail, un membre doit tout de même pouvoir supprimer un
-// passkey déjà enrôlé (retrait d'un appareil perdu) — jamais le piéger dans son compte.
+// VOLONTAIREMENT non gated par le flag `biometry` (contrairement au GET et aux cérémonies) :
+// si l'admin coupe la biométrie, un membre doit tout de même pouvoir supprimer un passkey déjà
+// enrôlé (retrait d'un appareil perdu) — jamais le piéger dans son compte.
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -28,13 +28,13 @@ export async function DELETE(
 }
 
 // PATCH /api/auth/webauthn/passkeys/{id}  { deviceLabel } — renomme UN de MES passkeys (donner un
-// nom lisible à un appareil : « iPhone de Tom »). Gated comme le GET : la section Réglages qui
-// l'appelle n'est montrée que quand la connexion par e-mail est active.
+// nom lisible à un appareil : « iPhone de Tom »). Gated comme le GET (flag `biometry`) : la
+// section Réglages qui l'appelle n'est montrée que quand la biométrie est active.
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  if (!(await getFeatures()).emailLogin) {
+  if (!(await getFeatures()).biometry) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);

@@ -12,7 +12,15 @@ import {
   platformAuthenticatorIsAvailable,
 } from "@simplewebauthn/browser";
 
-export type PasskeyResult = { ok: boolean; error?: string };
+export type PasskeyResult = {
+  ok: boolean;
+  error?: string;
+  // Renseignés quand la biométrie a RÉUSSI mais qu'aucune session n'a pu s'ouvrir (lien ResaMania
+  // expiré, pas de repli e-mail) : `code === "resa_expired"` + `username` (l'identifiant à
+  // pré-remplir). Le client bascule alors sur le formulaire ResaMania au lieu d'afficher une erreur.
+  code?: string;
+  username?: string;
+};
 
 // Indicateur LOCAL (par appareil) « un passkey a déjà été utilisé ici ». Sert à ne proposer
 // l'auto-connexion biométrique au lancement QUE sur les appareils déjà configurés — jamais de
@@ -116,7 +124,21 @@ export async function loginWithPasskey(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ response }),
     });
-    if (!verifyRes.ok) return { ok: false, error: await readError(verifyRes, "Connexion refusée.") };
+    if (!verifyRes.ok) {
+      // On lit le corps en entier (pas juste `error`) : le 409 « ResaMania expirée » y joint
+      // `code` + `username` pour permettre au client de pré-remplir la reconnexion.
+      const data = (await verifyRes.json().catch(() => ({}))) as {
+        error?: string;
+        code?: string;
+        username?: string;
+      };
+      return {
+        ok: false,
+        error: data.error ?? "Connexion refusée.",
+        code: data.code,
+        username: data.username,
+      };
+    }
     markPasskeyOnDevice();
     return { ok: true };
   } catch (e) {

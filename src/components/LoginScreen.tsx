@@ -1,7 +1,8 @@
 "use client";
 
-// Écran de connexion (extrait de page.tsx) : onglet ResaMania + onglet « Par email »
-// (OTP, gated par le flag `emailLogin`). L'icône œil ci-dessous ne sert qu'ici.
+// Écran de connexion (extrait de page.tsx) : onglet ResaMania + onglet « Par email » (gated par
+// le flag `emailLogin`). La connexion biométrique (bouton empreinte + auto-connexion) est, elle,
+// gatée par le flag `biometry`, indépendant. L'icône œil ci-dessous ne sert qu'ici.
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
@@ -61,12 +62,16 @@ function EyeIcon({ off }: { off: boolean }) {
 }
 
 export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
-  const { emailLogin } = useFeatures();
+  const { emailLogin, biometry } = useFeatures();
   const [tab, setTab] = useState<"resa" | "email">("resa");
   // ResaMania
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  // Mode « reconnexion ResaMania guidée » : activé après une biométrie réussie dont la session
+  // ResaMania a expiré (409). On garde l'identifiant pré-rempli et on invite juste à taper le mdp.
+  const [resaReconnect, setResaReconnect] = useState(false);
   // Connexion par email (mot de passe) : 3 sous-modes.
   const [emailMode, setEmailMode] = useState<"login" | "register" | "forgot">("login");
   const [email, setEmail] = useState("");
@@ -94,10 +99,25 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     const r = await loginWithPasskey({ useAutofill });
     if (r.ok) {
       onLoggedIn();
-    } else {
-      if (!silent) setErr(r.error ?? "Connexion biométrique impossible.");
-      if (!silent) setBusy(false);
+      return;
     }
+    // Biométrie reconnue MAIS session ResaMania expirée (pas de repli e-mail) : on ne bloque pas.
+    // On bascule sur l'onglet ResaMania avec l'identifiant déjà rempli et le focus sur le mot de
+    // passe — il ne reste qu'à le taper pour pouvoir réserver. On le fait MÊME en mode silencieux
+    // (auto-connexion au lancement) : ici la biométrie A réussi, ce n'est pas une annulation à
+    // taire — et c'est justement le scénario le plus courant du token ResaMania expiré.
+    if (r.code === "resa_expired") {
+      setTab("resa");
+      if (r.username) setUsername(r.username);
+      setResaReconnect(true);
+      setInfo(null);
+      setErr(null);
+      setBusy(false);
+      requestAnimationFrame(() => passwordRef.current?.focus());
+      return;
+    }
+    if (!silent) setErr(r.error ?? "Connexion biométrique impossible.");
+    if (!silent) setBusy(false);
   };
 
   // Auto-connexion biométrique au lancement, adaptée à l'appareil :
@@ -111,7 +131,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   const autoTried = useRef(false);
   useEffect(() => {
     if (autoTried.current) return;
-    if (!emailLogin) return; // les routes passkey sont gated sur ce flag
+    if (!biometry) return; // gate biométrie (routes passkey + auto-connexion empreinte)
     autoTried.current = true;
     (async () => {
       if (hasPasskeyOnDevice()) {
@@ -123,7 +143,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [emailLogin]);
+  }, [biometry]);
 
   // Un lien d'activation invalide/expiré renvoie vers /?erreur=lien_invalide (cf. la route
   // auth/email/verify). On bascule alors sur l'onglet email et on explique quoi faire.
@@ -233,6 +253,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     setTab(t);
     setErr(null);
     setInfo(null);
+    setResaReconnect(false);
   };
 
   // Change de sous-mode email en nettoyant les messages (mais garde l'email déjà saisi).
@@ -278,18 +299,27 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
           <p className="muted">
             Connecte-toi avec ton compte ResaMania (Le Complexe Bures).
           </p>
+          {/* Reconnexion guidée après une biométrie réussie mais un lien ResaMania expiré :
+              identifiant déjà rempli + focus sur le mot de passe → un seul geste pour réserver. */}
+          {resaReconnect && (
+            <div className="notice info">
+              🔓 Biométrie reconnue ✅ — entre juste ton <strong>mot de passe ResaMania</strong>{" "}
+              pour réserver ton terrain. Ta biométrie restera active ensuite.
+            </div>
+          )}
           <form onSubmit={submitResa}>
             <input
               type="text"
               placeholder="Identifiant (email)"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              // « webauthn » (quand la connexion e-mail est active) branche l'autofill
-              // conditionnel : le passkey apparaît dans la liste d'autocomplétion de ce champ.
-              autoComplete={emailLogin ? "username webauthn" : "username"}
+              // « webauthn » (quand la biométrie est active) branche l'autofill conditionnel :
+              // le passkey apparaît dans la liste d'autocomplétion de ce champ.
+              autoComplete={biometry ? "username webauthn" : "username"}
             />
             <div className="pwd-field">
               <input
+                ref={passwordRef}
                 type={showPwd ? "text" : "password"}
                 placeholder="Mot de passe"
                 value={password}
@@ -348,8 +378,9 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
                 placeholder="Ton email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                // « webauthn » : autofill conditionnel du passkey sur ce champ (cf. onglet ResaMania).
-                autoComplete="email webauthn"
+                // « webauthn » : autofill conditionnel du passkey sur ce champ (cf. onglet ResaMania),
+                // seulement si la biométrie est active.
+                autoComplete={biometry ? "email webauthn" : "email"}
               />
               {emailMode === "register" && (
                 <input
@@ -431,8 +462,8 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
 
       {/* Connexion biométrique en un geste (passkey), sous les formulaires. Juste l'empreinte,
           tappable comme un lecteur. Découvrable → pas d'email à saisir. N'apparaît que si
-          l'appareil la supporte et que la connexion email est active. */}
-      {emailLogin && pkSupported && (
+          l'appareil la supporte et que la biométrie est active (flag `biometry`). */}
+      {biometry && pkSupported && (
         <div className="passkey-login">
           <button
             type="button"

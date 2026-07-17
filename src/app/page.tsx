@@ -950,7 +950,7 @@ export default function Home() {
       </header>
 
       {/* Relance d'enrôlement biométrique (une seule fois, masquable) : gated en interne sur le
-          flag emailLogin + le support de l'appareil + l'absence de passkey déjà enrôlé. */}
+          flag `biometry` + le support de l'appareil + l'absence de passkey déjà enrôlé. */}
       <PasskeyEnrollPrompt toast={toast} />
 
       {/* Modales du menu ⋯ (rendues hors du menu pour survivre à sa fermeture). */}

@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     return res;
   };
 
-  if (!(await getFeatures()).emailLogin) {
+  if (!(await getFeatures()).biometry) {
     return fail(404, "Fonction indisponible");
   }
   const session = await getSession(req.cookies.get("sid")?.value);

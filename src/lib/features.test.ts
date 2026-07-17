@@ -11,6 +11,7 @@ import {
 const env: Features = {
   tricount: false,
   emailLogin: true,
+  biometry: false,
   directory: false,
   delegation: false,
   tournament: false,

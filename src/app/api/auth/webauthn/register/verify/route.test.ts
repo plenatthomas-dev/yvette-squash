@@ -5,7 +5,7 @@ import type { NextRequest } from "next/server";
 // compte, stockage de l'état de sauvegarde (backedUp / deviceType), effacement du défi à usage
 // unique et idempotence sur credential déjà enrôlé. Frontières mockées.
 const h = vi.hoisted(() => ({
-  emailLogin: true,
+  biometry: true,
   session: { userId: "u1" } as null | { userId: string },
   challenge: { challenge: "chal", type: "reg", userId: "u1" } as
     | null
@@ -30,7 +30,7 @@ vi.mock("@simplewebauthn/server", () => ({
   }),
 }));
 vi.mock("@/lib/features-server", () => ({
-  getFeatures: async () => ({ emailLogin: h.emailLogin }),
+  getFeatures: async () => ({ biometry: h.biometry }),
 }));
 vi.mock("@/lib/session", () => ({ getSession: async () => h.session }));
 vi.mock("@/lib/webauthn", () => ({
@@ -65,7 +65,7 @@ const clears = (res: { cookies: { get: (n: string) => { value: string } | undefi
   res.cookies.get("wa_chal")?.value === "";
 
 beforeEach(() => {
-  h.emailLogin = true;
+  h.biometry = true;
   h.session = { userId: "u1" };
   h.challenge = { challenge: "chal", type: "reg", userId: "u1" };
   h.verifyResult = {
@@ -82,8 +82,8 @@ beforeEach(() => {
 });
 
 describe("POST /api/auth/webauthn/register/verify", () => {
-  it("404 si la connexion e-mail est désactivée", async () => {
-    h.emailLogin = false;
+  it("404 si la biométrie est désactivée", async () => {
+    h.biometry = false;
     expect((await POST(postReq(goodBody))).status).toBe(404);
   });
 
