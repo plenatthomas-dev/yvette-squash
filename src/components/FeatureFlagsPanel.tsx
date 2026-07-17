@@ -100,17 +100,43 @@ export default function FeatureFlagsPanel() {
                   {FEATURE_LABELS[k]}
                   <span className="sr-only"> : {on ? "active" : "coupée"}</span>
                 </span>
-                <select
+                {/* Switch 3 positions : Coupée · Auto · Active (au lieu d'un menu déroulant). */}
+                <div
+                  className="tri-switch"
+                  role="group"
                   aria-label={`État de « ${FEATURE_LABELS[k]} »`}
-                  value={choice}
-                  disabled={busy === k}
-                  onChange={(e) => change(k, e.target.value as Choice)}
-                  style={{ width: "auto", marginBottom: 0 }}
                 >
-                  <option value="auto">Auto ({data.env[k] ? "active" : "coupée"})</option>
-                  <option value="on">Forcée active</option>
-                  <option value="off">Forcée coupée</option>
-                </select>
+                  <button
+                    type="button"
+                    className={"tri-off" + (choice === "off" ? " active" : "")}
+                    aria-pressed={choice === "off"}
+                    disabled={busy === k}
+                    onClick={() => change(k, "off")}
+                    title="Forcer la fonction coupée"
+                  >
+                    Coupée
+                  </button>
+                  <button
+                    type="button"
+                    className={"tri-auto" + (choice === "auto" ? " active" : "")}
+                    aria-pressed={choice === "auto"}
+                    disabled={busy === k}
+                    onClick={() => change(k, "auto")}
+                    title={`Suit l'environnement (actuellement ${data.env[k] ? "active" : "coupée"})`}
+                  >
+                    Auto
+                  </button>
+                  <button
+                    type="button"
+                    className={"tri-on" + (choice === "on" ? " active" : "")}
+                    aria-pressed={choice === "on"}
+                    disabled={busy === k}
+                    onClick={() => change(k, "on")}
+                    title="Forcer la fonction active"
+                  >
+                    Active
+                  </button>
+                </div>
               </li>
             );
           })}

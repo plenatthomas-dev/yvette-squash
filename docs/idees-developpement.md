@@ -145,6 +145,30 @@ d'une soirée à sa place).
   Paramètres, paragraphe RGPD ajouté à la note de confidentialité (gated par le flag).
   **Déviation assumée** vs le design : livré en **opt-out** (`listed` vrai par défaut, chacun
   décoche pour se retirer) plutôt qu'en opt-in — à garder en tête côté RGPD.
+- **Extensions envisagées — exploiter l'annuaire (2026-07-17)** : l'annuaire est aujourd'hui
+  en **lecture seule** (le code le dit lui-même : « les usages — message, etc. — viendront »).
+  Pistes **branchables sur la donnée DÉJÀ en base** (`Booking`, `Attendance`, `lastLoginAt`,
+  `SquashnetRanking`, `PushSubscription`) — **aucune n'exige de numéro de téléphone** (non
+  stocké), l'email restant masqué par conception :
+  - **6a · « Je cherche à jouer »** · 💡 à étudier · ⭐⭐⭐ · **M** — statut de disponibilité
+    (+ plages Matin/Après-midi/Soir) affiché dans l'annuaire, **push optionnel** quand un
+    membre se déclare dispo sur une plage voulue. Réutilise `PushSubscription`. C'est le vrai
+    cœur d'un annuaire de club (trouver un partenaire).
+  - **6b · Fiche membre = hub d'actions** · 💡 à étudier · ⭐⭐⭐ · **S** — depuis une entrée
+    d'annuaire, raccourcis vers des flux **DÉJÀ existants** : « Déléguer mes droits à X »
+    (idée 4), « Créer un tricount avec X » (5a), « Inviter au tournoi » (3). **Quasi zéro
+    backend** : transforme la liste passive en point de départ.
+  - **6c · Mini-profil (stats déjà en base)** · 💡 à étudier · ⭐⭐ · **S–M** — parties jouées
+    ce mois, terrain/horaire favori, classement, dérivés de `Booking`/`Attendance`. ⚠️ **RGPD**
+    (contrainte 4) : nouvelle finalité → paragraphe à ajouter à la note de confidentialité.
+  - **6d · Tri/filtre par classement & catégorie** · 💡 à étudier · ⭐ · **XS** — `clt/rang/cat`
+    sont déjà exposés par `/api/directory` ; il ne manque que le tri/filtre côté UI.
+  - **6e · Pastille « actif récemment »** · 💡 à étudier · ⭐ · **XS** — `lastLoginAt` existe
+    déjà (exploité dans le dashboard admin) ; un point discret indique qui est joignable.
+    ⚠️ petite note RGPD (exposer une présence récente).
+  - **Reco** : **6b + 6d + 6e** = petite vague de quick wins peu risqués qui rentabilisent
+    l'annuaire ; **6a** si le besoin « trouver un partenaire » se confirme ; **6c** ensuite.
+    **5b** (messagerie générale, ci-dessus) reste l'usage lourd déjà tracé.
 
 ## 7. Sélection multi-créneaux + couleurs asso en vue semaine ✅ fait
 
@@ -282,6 +306,11 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 | S | Classement squashnet | ⭐⭐ | M | 3, 6 | ✅ **fait** (gated `FEATURE_RANKING`, **on en prod**) |
 | 2 | Reprise auto via « +1 » | ⭐⭐ | L | Attendance | À cadrer (risqué) |
 | 5b | Messagerie générale | ⭐⭐ | L–XL | 6 | Basse |
+| 6a | Annuaire — « je cherche à jouer » | ⭐⭐⭐ | M | 6, push | 💡 à étudier |
+| 6b | Annuaire — fiche = hub d'actions | ⭐⭐⭐ | S | 6 · 3/4/5a | 💡 à étudier |
+| 6c | Annuaire — mini-profil (stats) | ⭐⭐ | S–M | 6, Booking | 💡 à étudier |
+| 6d | Annuaire — tri/filtre classement | ⭐ | XS | 6, S | 💡 à étudier |
+| 6e | Annuaire — pastille « actif » | ⭐ | XS | 6 | 💡 à étudier |
 
 ### Séquencement recommandé (par vagues)
 
