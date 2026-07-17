@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
+import { getFeatures } from "@/lib/features-server";
 import { prisma } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -24,4 +25,37 @@ export async function DELETE(
     return NextResponse.json({ error: "Passkey introuvable" }, { status: 404 });
   }
   return NextResponse.json({ ok: true });
+}
+
+// PATCH /api/auth/webauthn/passkeys/{id}  { deviceLabel } — renomme UN de MES passkeys (donner un
+// nom lisible à un appareil : « iPhone de Tom »). Gated comme le GET : la section Réglages qui
+// l'appelle n'est montrée que quand la connexion par e-mail est active.
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  if (!(await getFeatures()).emailLogin) {
+    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
+  }
+  const session = await getSession(req.cookies.get("sid")?.value);
+  if (!session) {
+    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+  }
+  const { id } = await params;
+  const body = (await req.json().catch(() => ({}))) as { deviceLabel?: unknown };
+  // Libellé vide/absent → null (revient à « Cet appareil »). Sinon borné à 40 caractères,
+  // comme à l'enrôlement.
+  const deviceLabel =
+    typeof body.deviceLabel === "string" && body.deviceLabel.trim()
+      ? body.deviceLabel.trim().slice(0, 40)
+      : null;
+  // updateMany borné à userId : impossible de renommer le passkey d'un autre.
+  const r = await prisma.passkey.updateMany({
+    where: { id, userId: session.userId },
+    data: { deviceLabel },
+  });
+  if (r.count === 0) {
+    return NextResponse.json({ error: "Passkey introuvable" }, { status: 404 });
+  }
+  return NextResponse.json({ ok: true, deviceLabel });
 }

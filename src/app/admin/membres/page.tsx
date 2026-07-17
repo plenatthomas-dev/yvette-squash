@@ -172,7 +172,14 @@ export default function MembersPage() {
       {state === "ready" && (
         <>
           <p className="muted tiny">
-            {members.length} compte{members.length > 1 ? "s" : ""}.
+            {members.length} compte{members.length > 1 ? "s" : ""}
+            {members.length > 0 && (
+              <>
+                {" · "}🔐 {members.filter((m) => m.passkeys.length > 0).length}/{members.length} ont
+                activé la biométrie
+              </>
+            )}
+            .
           </p>
           {/* Grille responsive : plusieurs cartes de front sur PC, une seule sur mobile, sans
               jamais de défilement horizontal (min(280px,100%) empêche tout débordement). */}

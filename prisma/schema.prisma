@@ -100,6 +100,10 @@ model Passkey {
   counter      Int      @default(0) // compteur d'usage de l'authenticator (détection de rejeu/clonage)
   transports   String? // CSV des transports (ex. "internal,hybrid"), pour un meilleur prompt
   deviceLabel  String? // libellé lisible saisi à l'enrôlement (ex. « iPhone de Tom »)
+  // État de sauvegarde du passkey, renvoyé par WebAuthn à l'enrôlement (null pour les passkeys
+  // créés avant l'ajout de ces colonnes) :
+  backedUp     Boolean? // true = synchronisé (iCloud/Google) → survit à la perte de l'appareil
+  deviceType   String? // "singleDevice" (lié à l'appareil) | "multiDevice" (synchronisable)
   createdAt    DateTime @default(now())
   lastUsedAt   DateTime?
 

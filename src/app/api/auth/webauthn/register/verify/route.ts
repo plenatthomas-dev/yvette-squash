@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     return fail(400, "Enrôlement non vérifié.");
   }
 
-  const { credential } = verification.registrationInfo;
+  const { credential, credentialBackedUp, credentialDeviceType } = verification.registrationInfo;
   try {
     await prisma.passkey.create({
       data: {
@@ -80,6 +80,10 @@ export async function POST(req: NextRequest) {
         counter: credential.counter,
         transports: credential.transports?.join(",") ?? null,
         deviceLabel,
+        // Synchronisé (iCloud/Google) vs lié à l'appareil : sert à avertir un membre qui n'a
+        // que des passkeys device-bound (risque de blocage si l'appareil est perdu).
+        backedUp: credentialBackedUp,
+        deviceType: credentialDeviceType,
       },
     });
   } catch {

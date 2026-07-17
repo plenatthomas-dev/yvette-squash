@@ -20,7 +20,14 @@ export async function GET(req: NextRequest) {
   }
   const passkeys = await prisma.passkey.findMany({
     where: { userId: session.userId },
-    select: { id: true, deviceLabel: true, createdAt: true, lastUsedAt: true },
+    select: {
+      id: true,
+      deviceLabel: true,
+      createdAt: true,
+      lastUsedAt: true,
+      backedUp: true, // synchronisé (iCloud/Google) → survit à la perte de l'appareil
+      deviceType: true, // "singleDevice" | "multiDevice"
+    },
     orderBy: { createdAt: "desc" },
   });
   return NextResponse.json({ passkeys });

@@ -20,7 +20,14 @@ import {
   hasPasskeyOnDevice,
 } from "@/lib/webauthnClient";
 
-type PasskeyInfo = { id: string; deviceLabel: string | null; createdAt: string; lastUsedAt: string | null };
+type PasskeyInfo = {
+  id: string;
+  deviceLabel: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  backedUp: boolean | null; // true = synchronisé (iCloud/Google) ; false = lié à l'appareil ; null = inconnu
+  deviceType: string | null; // "singleDevice" | "multiDevice"
+};
 
 // Thèmes disponibles. "rose" = variante « pinky » (voir globals.css). Persisté en localStorage.
 type Theme = "system" | "light" | "dark" | "rose";
@@ -216,6 +223,12 @@ export function SettingsButton({
   // alors que le passkey a été supprimé depuis un autre appareil.
   const [pkOnDevice, setPkOnDevice] = useState(false);
   const enabledOnThisDevice = pkOnDevice && (passkeys?.length ?? 0) > 0;
+  // Avertissement « risque de blocage » : le membre a au moins un passkey LIÉ à l'appareil
+  // (backedUp=false) et AUCUN synchronisé (backedUp=true) → perdre l'appareil = perdre l'accès
+  // biométrique. Les passkeys d'avant la migration (backedUp=null) sont ignorés (état inconnu).
+  const anyBackedUp = (passkeys ?? []).some((p) => p.backedUp === true);
+  const anyDeviceBound = (passkeys ?? []).some((p) => p.backedUp === false);
+  const showLockoutWarning = anyDeviceBound && !anyBackedUp;
 
   const loadPasskeys = async () => {
     try {
@@ -249,6 +262,31 @@ export function SettingsButton({
       loadPasskeys();
     } else {
       toast("err", r.error ?? "Activation impossible.");
+    }
+  };
+
+  // Renomme un appareil (ex. « iPhone de Tom ») : prompt simple → PATCH borné à mes passkeys.
+  const renamePasskey = async (id: string, current: string | null) => {
+    if (typeof window === "undefined") return;
+    const input = window.prompt("Nom de cet appareil :", current ?? "");
+    if (input === null) return; // annulé
+    setPkBusy(true);
+    try {
+      const res = await fetch(`/api/auth/webauthn/passkeys/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceLabel: input.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      setPasskeys((prev) =>
+        (prev ?? []).map((p) => (p.id === id ? { ...p, deviceLabel: data.deviceLabel ?? null } : p)),
+      );
+      toast("ok", "Appareil renommé.");
+    } catch (e) {
+      toast("err", (e as Error).message);
+    } finally {
+      setPkBusy(false);
     }
   };
 
@@ -783,30 +821,65 @@ export function SettingsButton({
                   <p className="muted tiny">Chargement…</p>
                 ) : (
                   passkeys.length > 0 && (
-                    <ul className="passkey-list">
-                      {passkeys.map((p) => (
-                        <li key={p.id} className="passkey-item">
-                          <span className="tiny">
-                            🔐 {p.deviceLabel || "Cet appareil"}
-                            <span className="muted">
-                              {" · ajouté le "}
-                              {new Date(p.createdAt).toLocaleDateString("fr-FR", {
-                                day: "numeric",
-                                month: "short",
-                              })}
+                    <>
+                      {showLockoutWarning && (
+                        <p className="tiny" style={{ color: "var(--danger-fg)", margin: "0 0 8px" }}>
+                          ⚠️ Tes passkeys sont liés à cet appareil : si tu le perds, tu devras te
+                          reconnecter par mot de passe puis les réactiver. Astuce : ajoutes-en un
+                          sur un appareil qui synchronise tes passkeys (iCloud / Google).
+                        </p>
+                      )}
+                      <ul className="passkey-list">
+                        {passkeys.map((p) => (
+                          <li key={p.id} className="passkey-item">
+                            <span className="tiny" style={{ minWidth: 0 }}>
+                              🔐 {p.deviceLabel || "Cet appareil"}
+                              {p.backedUp === true && (
+                                <span className="muted" title="Passkey synchronisé (iCloud / Google)">
+                                  {" · 🔁 synchronisé"}
+                                </span>
+                              )}
+                              {p.backedUp === false && (
+                                <span className="muted" title="Passkey lié à cet appareil uniquement">
+                                  {" · 📱 cet appareil"}
+                                </span>
+                              )}
+                              <span className="muted">
+                                {" · ajouté le "}
+                                {new Date(p.createdAt).toLocaleDateString("fr-FR", {
+                                  day: "numeric",
+                                  month: "short",
+                                })}
+                                {p.lastUsedAt
+                                  ? ` · vu le ${new Date(p.lastUsedAt).toLocaleDateString("fr-FR", {
+                                      day: "numeric",
+                                      month: "short",
+                                    })}`
+                                  : " · jamais utilisé"}
+                              </span>
                             </span>
-                          </span>
-                          <button
-                            className="secondary"
-                            onClick={() => removePasskey(p.id)}
-                            disabled={pkBusy}
-                            title="Retirer ce passkey"
-                          >
-                            Retirer
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
+                            <span style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                              <button
+                                className="secondary"
+                                onClick={() => renamePasskey(p.id, p.deviceLabel)}
+                                disabled={pkBusy}
+                                title="Renommer cet appareil"
+                              >
+                                Renommer
+                              </button>
+                              <button
+                                className="secondary"
+                                onClick={() => removePasskey(p.id)}
+                                disabled={pkBusy}
+                                title="Retirer ce passkey"
+                              >
+                                Retirer
+                              </button>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
                   )
                 )}
                 {/* Cet appareil déjà enrôlé : le seul bouton pertinent est le « Retirer » de sa
