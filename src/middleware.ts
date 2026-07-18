@@ -40,15 +40,23 @@ const REPORT_ONLY = false;
 // C'est acceptable : la preview n'est pas une frontière de sécurité, tout le reste est same-origin.
 const IS_PREVIEW = process.env.VERCEL_ENV === "preview";
 
+// En DÉVELOPPEMENT (`next dev`) uniquement : le HMR / runtime webpack et React Refresh
+// s'appuient sur eval()/new Function(). Sans `'unsafe-eval'`, la CSP stricte bloque ce
+// runtime → l'app ne s'hydrate jamais et reste figée sur l'écran de chargement. On l'ajoute
+// donc au script-src EN DEV SEULEMENT — la prod (et les builds) restent sans `unsafe-eval`.
+const IS_DEV = process.env.NODE_ENV !== "production";
+
 function buildCsp(nonce: string): string {
   const live = IS_PREVIEW ? " https://vercel.live" : "";
+  const evalDev = IS_DEV ? " 'unsafe-eval'" : "";
   return [
     "default-src 'self'",
     // Prod : nonce + strict-dynamic (le plus strict). Preview : par hôte pour laisser passer
     // le script vercel.live, qui n'est pas noncé par Vercel donc bloqué par strict-dynamic.
+    // Dev : + 'unsafe-eval' (HMR), jamais en prod.
     IS_PREVIEW
-      ? `script-src 'self' 'nonce-${nonce}'${live}`
-      : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+      ? `script-src 'self' 'nonce-${nonce}'${live}${evalDev}`
+      : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${evalDev}`,
     // Styles inline (React/Next/Pico) non contenables par nonce, non exécutables.
     `style-src 'self' 'unsafe-inline'${live}`,
     `img-src 'self' data: blob:${IS_PREVIEW ? " https://vercel.live https://vercel.com" : ""}`,
