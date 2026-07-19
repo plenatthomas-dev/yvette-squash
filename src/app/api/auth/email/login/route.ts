@@ -10,11 +10,18 @@ export const dynamic = "force-dynamic";
 
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 jours
 
-// Rate limiting partagé avec la connexion ResaMania : au-delà de MAX_FAILURES échecs en
-// WINDOW_MS pour une même IP, on refuse (protège du brute-force). Compteur en base
-// (les fonctions serverless n'ont pas de mémoire partagée).
+// Rate limiting partagé avec la connexion ResaMania. Compteur en base (les fonctions
+// serverless n'ont pas de mémoire partagée entre elles).
+//
+// DEUX dimensions, et il en faut deux :
+//  - par IP : arrête celui qui balaie plusieurs comptes depuis une machine ;
+//  - par COMPTE : arrête l'inverse, celui qui vise UN membre depuis plein d'IP (botnet, ou
+//    simple rotation d'IP mobile). Une limite par IP seule ne protège pas un mot de passe donné.
+// Le plafond par compte est plus large : plusieurs personnes peuvent partager une IP (club,
+// foyer), alors que les échecs sur un même identifiant sont rarement légitimes.
 const WINDOW_MS = 15 * 60_000;
-const MAX_FAILURES = 5;
+const MAX_FAILURES = 5; // par IP
+const MAX_FAILURES_ACCOUNT = 10; // par identifiant visé
 
 // Hash « leurre » calculé une fois : sert à dépenser le même temps CPU quand l'email n'a pas
 // de compte, pour ne pas révéler par le timing si un compte existe (anti-énumération).
@@ -35,9 +42,16 @@ export async function POST(req: NextRequest) {
   const email = normalizeEmail(body.email);
   const ip = clientIp(req);
   const since = new Date(Date.now() - WINDOW_MS);
+  // Purge opportuniste des échecs sortis de la fenêtre (toutes IP : garde la table minuscule),
+  // puis comptage sur les DEUX dimensions.
   await prisma.loginAttempt.deleteMany({ where: { createdAt: { lt: since } } });
-  const failures = await prisma.loginAttempt.count({ where: { ip, createdAt: { gte: since } } });
-  if (failures >= MAX_FAILURES) {
+  const [ipFailures, accountFailures] = await Promise.all([
+    prisma.loginAttempt.count({ where: { ip, createdAt: { gte: since } } }),
+    prisma.loginAttempt.count({ where: { identifier: email, createdAt: { gte: since } } }),
+  ]);
+  if (ipFailures >= MAX_FAILURES || accountFailures >= MAX_FAILURES_ACCOUNT) {
+    // Message identique dans les deux cas : ne pas révéler laquelle des deux limites a sauté
+    // (sinon on apprend à l'attaquant que le compte visé existe et est ciblé).
     return NextResponse.json(
       { error: "Trop de tentatives — réessaie dans quelques minutes." },
       { status: 429 },
@@ -56,7 +70,8 @@ export async function POST(req: NextRequest) {
   }
 
   if (!ok || !user) {
-    await prisma.loginAttempt.create({ data: { ip } }).catch(() => {});
+    // Échec : on incrémente les deux compteurs (IP et identifiant visé).
+    await prisma.loginAttempt.create({ data: { ip, identifier: email } }).catch(() => {});
     return NextResponse.json({ error: "Email ou mot de passe incorrect." }, { status: 401 });
   }
   // Compte désactivé par un admin : identifiants corrects, mais accès bloqué localement.
@@ -67,8 +82,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Succès : on efface l'ardoise de cette IP puis on ouvre une session « email seul ».
-  await prisma.loginAttempt.deleteMany({ where: { ip } });
+  // Succès : on efface l'ardoise de cette IP ET de ce compte (les fautes de frappe précédentes
+  // ne doivent pénaliser ni les prochains logins du foyer/club, ni le membre), puis on ouvre
+  // une session « email seul ».
+  await prisma.loginAttempt.deleteMany({ where: { OR: [{ ip }, { identifier: email }] } });
   const sid = await createEmailSession(user.id);
   const res = NextResponse.json({ displayName: user.displayName });
   res.cookies.set("sid", sid, {
