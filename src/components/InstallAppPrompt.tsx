@@ -17,9 +17,11 @@ import { useEffect, useState } from "react";
 const SNOOZE_KEY = "installPromptSnooze";
 const SNOOZE_MS = 14 * 24 * 60 * 60 * 1000; // 14 jours
 // Délai avant de basculer sur les instructions manuelles Android si le prompt natif n'a pas
-// été reçu. `beforeinstallprompt` peut arriver quelques secondes après le chargement (le SW
-// doit s'activer + heuristique d'engagement de Chrome) : on lui laisse sa chance d'abord.
-const ANDROID_FALLBACK_MS = 4000;
+// été reçu. `beforeinstallprompt` peut arriver un court instant après le chargement (le SW
+// doit s'activer) : on lui laisse sa chance d'abord, mais court pour ne pas faire attendre.
+// Si l'event arrive APRÈS ce délai, il remplace de toute façon les instructions par le vrai
+// prompt (upgrade transparent), donc on peut être agressif ici.
+const ANDROID_FALLBACK_MS = 2000;
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -136,11 +138,37 @@ export default function InstallAppPrompt() {
     setDeferred(null);
   };
 
+  // En mode `prompt`, toute la bannière est un déclencheur : un tap n'importe où (hors bouton
+  // « Plus tard ») ouvre DIRECTEMENT la popup native d'installation (où l'on nomme l'appli).
+  // Note : cet appel doit venir d'un geste utilisateur — impossible de l'ouvrir automatiquement.
+  const clickable = mode === "prompt";
+
   return (
-    <div className="install-banner" role="status">
+    <div
+      className={`install-banner${clickable ? " clickable" : ""}`}
+      role={clickable ? "button" : "status"}
+      tabIndex={clickable ? 0 : undefined}
+      onClick={clickable ? install : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                install();
+              }
+            }
+          : undefined
+      }
+    >
       <img src="/logo_squash.jpeg" alt="" aria-hidden="true" className="install-banner-icon" />
       <span className="install-banner-text">
-        {mode === "prompt" && <>Installe l'appli pour l'ouvrir en un tap depuis ton écran d'accueil.</>}
+        {mode === "prompt" && (
+          <>
+            <strong>Installer l'appli sur ton téléphone</strong>
+            <br />
+            Un tap pour l'ajouter à ton écran d'accueil.
+          </>
+        )}
         {mode === "android-manual" && (
           <>
             Installe l'appli : menu <strong>⋮</strong> du navigateur →{" "}
@@ -156,11 +184,26 @@ export default function InstallAppPrompt() {
       </span>
       <span className="install-banner-actions">
         {mode === "prompt" && (
-          <button type="button" onClick={install}>
+          // Bouton explicite en plus de la bannière cliquable (redondant mais rassurant).
+          // stopPropagation : sinon le clic remonte au conteneur et appelle install() deux fois.
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              install();
+            }}
+          >
             Installer
           </button>
         )}
-        <button type="button" className="secondary" onClick={dismiss}>
+        <button
+          type="button"
+          className="secondary"
+          onClick={(e) => {
+            e.stopPropagation(); // ne pas déclencher l'installation via la bannière cliquable
+            dismiss();
+          }}
+        >
           {mode === "prompt" ? "Plus tard" : "J'ai compris"}
         </button>
       </span>

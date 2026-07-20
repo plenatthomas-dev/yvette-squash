@@ -2074,6 +2074,11 @@ table.planning.week th.time.selhead {
   box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.18);
 }
 
+/* Mode `prompt` : toute la bannière est cliquable (un tap ouvre la popup d'installation). */
+.install-banner.clickable {
+  cursor: pointer;
+}
+
 .install-banner-icon {
   width: 32px;
   height: 32px;
