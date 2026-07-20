@@ -12,18 +12,26 @@ export default function manifest(): MetadataRoute.Manifest {
     display: "standalone",
     background_color: "#ffffff", // fond blanc = se fond avec le logo (fond blanc)
     theme_color: "#0f1115",
+    // Icônes en PNG (format le plus fiable pour l'installabilité Chrome ; le JPEG passait mal).
+    // Une icône « maskable » en plus → Android peut la rogner (cercle/goutte) sans couper le logo.
     icons: [
       {
-        src: "/logo_squash.jpeg",
-        sizes: "512x512",
-        type: "image/jpeg",
+        src: "/icon-192.png",
+        sizes: "192x192",
+        type: "image/png",
         purpose: "any",
       },
       {
-        src: "/logo_squash.jpeg",
-        sizes: "192x192",
-        type: "image/jpeg",
+        src: "/icon-512.png",
+        sizes: "512x512",
+        type: "image/png",
         purpose: "any",
+      },
+      {
+        src: "/icon-maskable-512.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "maskable",
       },
     ],
   };
