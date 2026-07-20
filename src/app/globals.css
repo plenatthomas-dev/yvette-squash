@@ -2053,6 +2053,54 @@ table.planning.week th.time.selhead {
   padding: 10px 22px;
 }
 
+/* Bannière « installer l'appli » (mobile), collée en bas comme .wk-actionbar mais sous les
+   toasts (z-index plus bas) : elle reste affichée plus longtemps, les toasts restent lisibles. */
+.install-banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  max-width: 900px;
+  margin-inline: auto;
+  padding: 12px 16px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  background: var(--pico-card-background-color);
+  border-top: 1px solid var(--pico-card-border-color);
+  box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.18);
+}
+
+.install-banner-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.install-banner-text {
+  flex: 1;
+  font-size: 0.85rem;
+  min-width: 180px;
+}
+
+.install-banner-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.install-banner-actions button {
+  margin: 0;
+  width: auto;
+  padding: 8px 16px;
+  white-space: nowrap;
+}
+
 /* Modale de détail des 2 terrains (ouverte au clic sur une case semaine). */
 .wk-detail-list {
   display: flex;

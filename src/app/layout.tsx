@@ -5,6 +5,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import AnnouncementBanner from "@/components/AnnouncementBanner";
 import AnnounceModal from "@/components/AnnounceModal";
 import FeatureProvider from "@/components/FeatureProvider";
+import InstallAppPrompt from "@/components/InstallAppPrompt";
 import "@picocss/pico/css/pico.min.css";
 import "./globals.css";
 
@@ -51,6 +52,7 @@ export default async function RootLayout({
         <AnnouncementBanner />
         <FeatureProvider>{children}</FeatureProvider>
         <AnnounceModal />
+        <InstallAppPrompt />
         <Analytics />
         <SpeedInsights />
       </body>
