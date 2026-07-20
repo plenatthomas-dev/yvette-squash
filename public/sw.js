@@ -37,7 +37,18 @@ self.addEventListener("push", (event) => {
     tag: data.tag || undefined, // remplace une notif de même tag plutôt que d'empiler
     data: { url: data.url || "/" },
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+
+  // Si l'appli est OUVERTE, on prévient les onglets pour qu'ils jouent le son d'alerte
+  // « terrain libéré » (tag `alert-…`). Appli fermée : seule la notification système sonne.
+  const isSlotFree = typeof data.tag === "string" && data.tag.startsWith("alert-");
+  event.waitUntil(
+    (async () => {
+      await self.registration.showNotification(title, options);
+      if (!isSlotFree) return;
+      const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const client of list) client.postMessage({ type: "slot-free" });
+    })(),
+  );
 });
 
 self.addEventListener("notificationclick", (event) => {

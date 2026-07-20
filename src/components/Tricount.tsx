@@ -8,6 +8,7 @@ import {
   splitByWeights,
 } from "@/lib/tricount";
 import { Dialog } from "@/components/Dialog";
+import { playPaymentJingle } from "@/lib/sound";
 
 // Vue « Frais » : tricounts par jour (un tricount = les dépenses d'une date),
 // avec historique, validation des payeurs puis remboursements guidés.
@@ -401,6 +402,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
       const j = await res.json();
       if (!res.ok) throw new Error(j.error ?? `Erreur ${res.status}`);
       toast("ok", "Remboursement enregistré 💸");
+      playPaymentJingle(); // son « cha-ching » quand on déclare avoir remboursé
       setRefundFor(null);
       load();
     } catch (e) {

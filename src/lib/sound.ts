@@ -84,38 +84,88 @@ export function unlockAudio(): void {
   window.addEventListener("touchstart", unlock, { once: true });
 }
 
+// Prépare le contexte audio pour jouer : renvoie le contexte prêt, ou null si indisponible
+// / son désactivé. Factorise les gardes communes à tous les jingles.
+function ready(): AudioContext | null {
+  if (!isSoundEnabled()) return null;
+  const c = getCtx();
+  if (!c) return null;
+  if (c.state === "suspended") c.resume().catch(() => {});
+  return c;
+}
+
+// Joue UNE note : oscillateur + enveloppe douce (attaque courte, décroissance exponentielle).
+function tone(
+  c: AudioContext,
+  freq: number,
+  t0: number,
+  dur: number,
+  opts: { type?: OscillatorType; peak?: number } = {},
+): void {
+  const { type = "triangle", peak = 0.18 } = opts;
+  const osc = c.createOscillator();
+  const gain = c.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(peak, t0 + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(gain).connect(c.destination);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.02);
+}
+
 /**
- * Joue un petit jingle de succès (~1,6 s) : arpège ascendant Do–Mi–Sol–Do puis une note tenue,
- * avec une enveloppe douce (attaque courte, longue décroissance) pour un rendu « cloche » discret.
- * No-op si le son est désactivé, si le navigateur n'a pas Web Audio, ou si l'audio n'a pas encore
- * été déverrouillé par un geste.
+ * Jingle de succès (~1,6 s) : arpège majeur ascendant Do–Mi–Sol–Do, dernière note tenue.
+ * Joué à la confirmation d'une réservation.
  */
 export function playSuccessJingle(): void {
-  if (!isSoundEnabled()) return;
-  const c = getCtx();
+  const c = ready();
   if (!c) return;
-  if (c.state === "suspended") c.resume().catch(() => {});
-
   const now = c.currentTime + 0.02;
-  // Do5, Mi5, Sol5, Do6 (Hz). Arpège majeur = sonorité « réussite » claire et positive.
-  const notes = [523.25, 659.25, 783.99, 1046.5];
-  const step = 0.13; // écart entre les notes de l'arpège
-  const master = 0.18; // volume global modéré (ne pas agresser)
-
+  const notes = [523.25, 659.25, 783.99, 1046.5]; // Do5, Mi5, Sol5, Do6
   notes.forEach((freq, i) => {
-    const t0 = now + i * step;
-    // La dernière note est tenue plus longtemps (résolution du jingle).
-    const dur = i === notes.length - 1 ? 0.9 : 0.28;
-    const osc = c.createOscillator();
-    const gain = c.createGain();
-    osc.type = "triangle"; // plus doux/rond qu'un sinus pur, sans être criard
-    osc.frequency.value = freq;
-    // Enveloppe : montée quasi immédiate puis décroissance exponentielle.
-    gain.gain.setValueAtTime(0.0001, t0);
-    gain.gain.exponentialRampToValueAtTime(master, t0 + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    osc.connect(gain).connect(c.destination);
-    osc.start(t0);
-    osc.stop(t0 + dur + 0.02);
+    tone(c, freq, now + i * 0.13, i === notes.length - 1 ? 0.9 : 0.28);
   });
+}
+
+/**
+ * Son d'ERREUR (~0,45 s) : deux notes descendantes (La4 → Mi4), timbre plus mat et discret.
+ * Joué quand une réservation échoue.
+ */
+export function playError(): void {
+  const c = ready();
+  if (!c) return;
+  const now = c.currentTime + 0.02;
+  tone(c, 440, now, 0.18, { type: "sawtooth", peak: 0.12 }); // La4
+  tone(c, 329.63, now + 0.16, 0.32, { type: "sawtooth", peak: 0.12 }); // Mi4
+}
+
+/**
+ * ALERTE « terrain libéré » (~1,2 s) : motif « ding-ding » brillant répété, plus insistant que
+ * le jingle de succès (c'est un signal à ne pas rater). Joué quand l'appli est ouverte et qu'une
+ * notification de terrain libéré arrive (relayée par le service worker).
+ */
+export function playAlert(): void {
+  const c = ready();
+  if (!c) return;
+  const now = c.currentTime + 0.02;
+  // Deux notes hautes (Sol5, Do6) répétées deux fois → carillon d'attention.
+  const pattern = [783.99, 1046.5, 783.99, 1046.5];
+  pattern.forEach((freq, i) => {
+    tone(c, freq, now + i * 0.16, 0.22, { type: "triangle", peak: 0.22 });
+  });
+}
+
+/**
+ * Son de PAIEMENT « cha-ching » (~0,7 s) : deux notes brillantes rapprochées + une pointe aiguë,
+ * évoque une caisse. Joué quand on déclare avoir remboursé un tricount.
+ */
+export function playPaymentJingle(): void {
+  const c = ready();
+  if (!c) return;
+  const now = c.currentTime + 0.02;
+  tone(c, 987.77, now, 0.12, { type: "triangle", peak: 0.16 }); // Si5
+  tone(c, 1318.51, now + 0.1, 0.5, { type: "triangle", peak: 0.18 }); // Mi6 (tenue)
+  tone(c, 1975.53, now + 0.12, 0.4, { type: "sine", peak: 0.08 }); // Si6, pointe « brillance »
 }

@@ -42,7 +42,7 @@ import {
 } from "@/lib/pushClient";
 import { useFeatures } from "@/components/FeatureProvider";
 import { recheckBanner } from "@/components/AnnouncementBanner";
-import { unlockAudio, playSuccessJingle } from "@/lib/sound";
+import { unlockAudio, playSuccessJingle, playError, playAlert } from "@/lib/sound";
 
 function toISODate(d: Date): string {
   return d.toLocaleDateString("en-CA"); // YYYY-MM-DD local
@@ -261,6 +261,18 @@ export default function Home() {
   // de confirmation de réservation puisse être joué ensuite, même après un appel réseau.
   useEffect(() => {
     unlockAudio();
+  }, []);
+
+  // Alerte « terrain libéré » quand l'appli est OUVERTE : le service worker relaie la notification
+  // push par postMessage (cf. public/sw.js), on joue alors le son d'alerte. Appli fermée : c'est
+  // la notification système qui sonne (le navigateur ne nous laisse pas jouer notre son).
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    const onMessage = (e: MessageEvent) => {
+      if (e.data && e.data.type === "slot-free") playAlert();
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
   }, []);
 
   const loadAlerts = useCallback(async () => {
@@ -556,6 +568,7 @@ export default function Home() {
       reload();
     } catch (e) {
       toast("err", "Réservation impossible : " + (e as Error).message);
+      playError(); // son d'échec de réservation
     } finally {
       setBusy(false);
     }
@@ -756,6 +769,7 @@ export default function Home() {
       playSuccessJingle(); // au moins une réservation a réussi → jingle de succès
     } else {
       toast("err", "Aucune réservation : " + (fails[0] ?? "échec"));
+      playError(); // aucune réservation n'a abouti → son d'échec
     }
     reload();
   };
