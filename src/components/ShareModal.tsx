@@ -96,7 +96,7 @@ export function ShareModal({
           await navigator.share({
             files: [file],
             title: "Squash de l'Yvette",
-            text: "Réserve un terrain de squash 🎾",
+            text: "Réserve un terrain de squash",
           });
         } else {
           const a = document.createElement("a");
