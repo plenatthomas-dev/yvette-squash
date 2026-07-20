@@ -1,5 +1,26 @@
-/* Service worker minimal : uniquement les notifications Web Push.
+/* Service worker minimal : notifications Web Push + handler fetch requis pour l'installabilité.
    (Pas de cache offline pour l'instant — on garde l'appli toujours fraîche.) */
+
+// Prise de contrôle immédiate : sans ça, une nouvelle version du SW reste « en attente »
+// tant qu'un ancien onglet vit, et ne contrôle pas la page au premier chargement — or Chrome
+// n'émet `beforeinstallprompt` que si un SW avec handler fetch CONTRÔLE déjà la page.
+self.addEventListener("install", () => {
+  self.skipWaiting();
+});
+self.addEventListener("activate", (event) => {
+  event.waitUntil(self.clients.claim());
+});
+
+// Handler fetch : condition d'« installabilité » PWA (sans lui, aucun prompt Android). Il ne
+// fait PAS de cache offline. ATTENTION : un handler VIDE est détecté par Chrome comme « no-op »
+// et ignoré (donc pas de prompt) — il doit faire quelque chose de réel. On se contente donc
+// d'un passthrough réseau sur les navigations : comportement identique à sans SW, mais le
+// handler est « réel » aux yeux de Chrome.
+self.addEventListener("fetch", (event) => {
+  if (event.request.mode === "navigate") {
+    event.respondWith(fetch(event.request));
+  }
+});
 
 self.addEventListener("push", (event) => {
   let data = {};
