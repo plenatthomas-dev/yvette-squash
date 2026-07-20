@@ -164,9 +164,11 @@ export default function InstallAppPrompt() {
       <span className="install-banner-text">
         {mode === "prompt" && (
           <>
-            <strong>Installer l'appli sur ton téléphone</strong>
+            <strong>Installer l'appli Squash de l'Yvette</strong>
             <br />
-            Un tap pour l'ajouter à ton écran d'accueil.
+            Ajoute-la à ton écran d'accueil : accès direct en un tap, affichage plein écran (sans
+            la barre du navigateur) et alertes quand un terrain se libère. Rien à télécharger sur
+            un store.
           </>
         )}
         {mode === "android-manual" && (
