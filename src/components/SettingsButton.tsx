@@ -19,6 +19,7 @@ import {
   forgetPasskeyOnDevice,
   hasPasskeyOnDevice,
 } from "@/lib/webauthnClient";
+import { isSoundEnabled, setSoundEnabled, playSuccessJingle } from "@/lib/sound";
 
 type PasskeyInfo = {
   id: string;
@@ -181,6 +182,8 @@ export function SettingsButton({
   const [savingListed, setSavingListed] = useState(false);
   const [comment, setComment] = useState("");
   const [sending, setSending] = useState(false);
+  // Son de confirmation de réservation (activé par défaut). Lu depuis localStorage à l'ouverture.
+  const [soundOn, setSoundOn] = useState(true);
   // Doit rester synchronisé avec MAX_LEN côté serveur (api/feedback/route.ts).
   const COMMENT_MAX = 1000;
 
@@ -468,7 +471,15 @@ export function SettingsButton({
     const t: Theme = isTheme(saved) ? saved : "system";
     setTheme(t);
     applyTheme(t);
+    // Reflète la préférence de son (localStorage) dans l'interrupteur, côté client uniquement.
+    setSoundOn(isSoundEnabled());
   }, []);
+
+  const toggleSound = (on: boolean) => {
+    setSoundOn(on);
+    setSoundEnabled(on);
+    if (on) playSuccessJingle(); // aperçu immédiat quand on (ré)active
+  };
 
   // Resynchronise le champ quand le pseudo change côté serveur / à l'ouverture.
   useEffect(() => {
@@ -893,6 +904,22 @@ export function SettingsButton({
                 )}
               </section>
             )}
+
+            <section className="setting">
+              <SettingInfo title="Son de confirmation">
+                Joue un petit jingle quand une réservation est confirmée. Sur iPhone, le son
+                suit l'interrupteur silencieux du téléphone.
+              </SettingInfo>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={soundOn}
+                  onChange={(e) => toggleSound(e.target.checked)}
+                />
+                <span>Son à la réservation</span>
+              </label>
+            </section>
 
             <section className="setting comment-section">
               <h4>Un commentaire ?</h4>

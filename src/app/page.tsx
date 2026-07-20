@@ -42,6 +42,7 @@ import {
 } from "@/lib/pushClient";
 import { useFeatures } from "@/components/FeatureProvider";
 import { recheckBanner } from "@/components/AnnouncementBanner";
+import { unlockAudio, playSuccessJingle } from "@/lib/sound";
 
 function toISODate(d: Date): string {
   return d.toLocaleDateString("en-CA"); // YYYY-MM-DD local
@@ -254,6 +255,12 @@ export default function Home() {
   useEffect(() => {
     const t = setTimeout(() => setSplashDone(true), SPLASH_MIN_MS);
     return () => clearTimeout(t);
+  }, []);
+
+  // Déverrouille l'audio dès le premier geste utilisateur (requis par iOS) pour que le jingle
+  // de confirmation de réservation puisse être joué ensuite, même après un appel réseau.
+  useEffect(() => {
+    unlockAudio();
   }, []);
 
   const loadAlerts = useCallback(async () => {
@@ -545,6 +552,7 @@ export default function Home() {
         throw new Error(data.error ?? `Erreur ${res.status}`);
       }
       toast("ok", "Réservation confirmée");
+      playSuccessJingle(); // petit jingle de succès (réglable dans les Paramètres)
       reload();
     } catch (e) {
       toast("err", "Réservation impossible : " + (e as Error).message);
@@ -745,6 +753,7 @@ export default function Home() {
         `${done} réservation${done > 1 ? "s" : ""} confirmée${done > 1 ? "s" : ""}` +
           (fails.length ? ` · ${fails.length} échec${fails.length > 1 ? "s" : ""}` : ""),
       );
+      playSuccessJingle(); // au moins une réservation a réussi → jingle de succès
     } else {
       toast("err", "Aucune réservation : " + (fails[0] ?? "échec"));
     }
