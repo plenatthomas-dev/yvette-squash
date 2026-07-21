@@ -36,7 +36,7 @@ function purposeLabel(p: PendingRequest["purpose"]): string {
 }
 
 export default function AdminPage() {
-  const { emailLogin } = useFeatures();
+  const { emailLogin, ranking } = useFeatures();
   const [state, setState] = useState<"loading" | "forbidden" | "ready" | "error">("loading");
   const [requests, setRequests] = useState<PendingRequest[]>([]);
   // Lien généré à l'approbation, à transmettre à la personne (par id de demande).
@@ -62,6 +62,10 @@ export default function AdminPage() {
 
   // Mini-tableau de bord (étape 4).
   const [dash, setDash] = useState<Dashboard | null>(null);
+
+  // Rafraîchissement à la demande du classement squashnet (rattrape les nouveaux inscrits).
+  const [rkBusy, setRkBusy] = useState(false);
+  const [rkResult, setRkResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     if (!emailLogin) return;
@@ -190,6 +194,34 @@ export default function AdminPage() {
       setBnResult({ ok: false, text: "Enregistrement impossible." });
     } finally {
       setBnBusy(false);
+    }
+  };
+
+  const refreshRankings = async () => {
+    setRkBusy(true);
+    setRkResult(null);
+    try {
+      const res = await fetch("/api/admin/refresh-rankings", { method: "POST" });
+      const data = (await res.json().catch(() => ({}))) as {
+        matched?: number;
+        members?: number;
+        cleared?: number;
+        error?: string;
+      };
+      if (!res.ok) {
+        setRkResult({ ok: false, text: data.error ?? "Rafraîchissement impossible." });
+        return;
+      }
+      const matched = data.matched ?? 0;
+      const cleared = data.cleared ?? 0;
+      setRkResult({
+        ok: true,
+        text: `${matched} classement${matched > 1 ? "s" : ""} à jour${cleared ? `, ${cleared} retiré${cleared > 1 ? "s" : ""}` : ""} sur ${data.members ?? 0} membre${(data.members ?? 0) > 1 ? "s" : ""} listé${(data.members ?? 0) > 1 ? "s" : ""}.`,
+      });
+    } catch {
+      setRkResult({ ok: false, text: "Rafraîchissement impossible." });
+    } finally {
+      setRkBusy(false);
     }
   };
 
@@ -374,6 +406,28 @@ export default function AdminPage() {
               </div>
             )}
           </section>
+
+          {/* Classement squashnet : rafraîchissement manuel (rattrape les nouveaux inscrits
+              sans attendre le cron mensuel du 8). */}
+          {ranking && (
+            <section style={{ marginBottom: 24 }}>
+              <h2 style={{ fontSize: "1.1rem" }}>Classement squashnet</h2>
+              <p className="muted tiny">
+                Récupère le classement fédéral de tous les membres listés dans l'annuaire. À
+                utiliser pour les nouveaux inscrits (le rafraîchissement automatique n'a lieu
+                qu'une fois par mois).
+              </p>
+              <button type="button" disabled={rkBusy} onClick={refreshRankings}>
+                {rkBusy ? "Récupération…" : "Rafraîchir les classements"}
+              </button>
+              {rkResult && (
+                <div className={`notice ${rkResult.ok ? "info" : "error"}`} style={{ marginTop: 8 }}>
+                  {rkResult.ok ? "✓ " : "⚠️ "}
+                  {rkResult.text}
+                </div>
+              )}
+            </section>
+          )}
 
           <h2 style={{ fontSize: "1.1rem" }}>Demandes en attente</h2>
           <p className="muted tiny">

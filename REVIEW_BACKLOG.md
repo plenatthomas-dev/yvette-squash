@@ -5,6 +5,19 @@ perdre. Géré par le système `blind-review` (voir `~/.claude/skills/blind-revi
 
 ---
 
+## Blind-review 2026-07-21 — diff e2463dfbd47ef70a (round 1, pass)
+
+Bouton admin « Rafraîchir les classements » + fonction partagée `refreshRankings`.
+VERDICT : 0 BLOCKER, 0 MAJOR, 3 MINOR, 2 INFO. Aucun bloquant → commit débloqué.
+
+- [MINOR] Le run manuel écrase le heartbeat `warm-rankings` — src/app/api/admin/refresh-rankings/route.ts:32 — un clic admin réussi peut masquer une panne du cron mensuel (dashboard repasse au vert). Piste : clé de heartbeat distincte ou marqueur manuel/auto.
+- [MINOR] Réponse squashnet vide (200) ⇒ suppression de classements valides — src/lib/squashnet/refresh.ts:57 — comportement pré-existant, mais le bouton le rend rejouable à volonté hors fenêtre mensuelle. Piste : ne supprimer que sur signal positif « absent du classement », distinguer réponse vide de réponse peuplée-sans-match.
+- [MINOR] Pas de verrou anti-concurrence (bouton + cron, ou 2 admins) — src/lib/squashnet/refresh.ts:44 — double salve vers squashnet, compteurs non représentatifs. Pas de corruption (idempotent par userId). Piste : garde-fou léger basé sur CronRun.lastRunAt.
+- [INFO] Divergence de contrat `month === null` : cron 200 vs bouton 502 — volontaire (UX différentes), noté pour un futur monitoring.
+- [INFO] Risque de timeout partiel sur maxDuration=60 si l'annuaire grossit — src/app/api/admin/refresh-rankings/route.ts:8 — pré-existant, identique au cron ; envisager traitement par lots au-delà de quelques dizaines de membres listés.
+
+---
+
 ## Blind-review 2026-07-19 — audit complet du code (pas de diff ; round 1)
 
 VERDICT initial : 0 BLOCKER, 1 MAJOR, 3 MINOR, 3 INFO.
