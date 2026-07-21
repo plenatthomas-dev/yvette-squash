@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
 import { recordCronRun } from "@/lib/cron-run";
 import { getFeatures } from "@/lib/features-server";
-import { refreshRankings } from "@/lib/squashnet/refresh";
+import { refreshRankings, summarizeRefresh } from "@/lib/squashnet/refresh";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,15 +21,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
 
-  const { month, members, matched, cleared } = await refreshRankings();
-  if (!month) {
+  const result = await refreshRankings();
+  if (!result.month) {
     return NextResponse.json(
       { error: "Période de classement introuvable (squashnet indisponible ?)." },
       { status: 502 },
     );
   }
 
-  // Met à jour le heartbeat partagé avec le cron : le tableau de bord reflète cette fraîcheur.
-  await recordCronRun("warm-rankings", true, `${matched} rapproché(s), ${cleared} retiré(s) · manuel`);
-  return NextResponse.json({ month, members, matched, cleared });
+  // Heartbeat sous une clé DISTINCTE du cron planifié : un rafraîchissement manuel ne doit pas
+  // repasser au vert la ligne « warm-rankings » du tableau de bord et masquer une panne du cron.
+  const { ok, info } = summarizeRefresh(result);
+  await recordCronRun("warm-rankings-manuel", ok, info);
+  const { month, members, matched, cleared, skipped, failed, bulkMoveBlocked } = result;
+  // On renvoie `ok` (même critère que le heartbeat) pour que l'UI n'affiche pas un faux succès
+  // vert quand squashnet est muet (tous `skipped`) sans échec base ni blocage.
+  return NextResponse.json({ ok, month, members, matched, cleared, skipped, failed, bulkMoveBlocked });
 }

@@ -61,6 +61,18 @@ function nameMatches(member: MemberIdentity, rowName: string): boolean {
   return true;
 }
 
+function toMatch(c: RankingRow): RankingMatch {
+  const rangNum = parseInt(c.rang.replace(/\s/g, ""), 10);
+  return {
+    clt: c.clt,
+    rang: Number.isFinite(rangNum) ? rangNum : null,
+    licence: c.licence,
+    cat: c.cat,
+    club: c.club,
+    name: c.name,
+  };
+}
+
 /**
  * Renvoie la ligne de classement correspondant au membre dans le club cible, ou null si
  * l'appariement est ambigu ou absent. `opts.club` permet de viser un autre club (défaut :
@@ -79,16 +91,41 @@ export function matchRanking(
       nameMatches(member, r.name),
   );
   if (candidates.length !== 1) return null; // 0 ou homonymes → on n'affirme rien
-  const c = candidates[0];
-  const rangNum = parseInt(c.rang.replace(/\s/g, ""), 10);
-  return {
-    clt: c.clt,
-    rang: Number.isFinite(rangNum) ? rangNum : null,
-    licence: c.licence,
-    cat: c.cat,
-    club: c.club,
-    name: c.name,
-  };
+  return toMatch(candidates[0]);
+}
+
+/**
+ * Verdict d'appariement pour décider quoi FAIRE du classement d'un membre :
+ *  - `matched` : une seule ligne du club cible colle → on met à jour ce classement ;
+ *  - `moved`   : le nom du membre est retrouvé, mais UNIQUEMENT dans d'autres clubs → il a
+ *                quitté le club → signal POSITIF d'absence, on peut retirer son classement ;
+ *  - `unknown` : tout le reste (aucune ligne au nom du membre — possible troncature/pagination
+ *                ou hoquet squashnet —, ou plusieurs lignes ambiguës dans le club cible) → on
+ *                ne touche à RIEN (ni écriture ni suppression). C'est le défaut sûr.
+ *
+ * Contrairement à `matchRanking`, ce classifieur ne confond jamais « pas trouvé » avec
+ * « absent » : une simple absence de hit (fréquente à cause de la pagination sur les noms
+ * courants) ne déclenche plus de suppression.
+ */
+export type RankingVerdict =
+  | { status: "matched"; match: RankingMatch }
+  | { status: "moved" }
+  | { status: "unknown" };
+
+export function classifyRanking(
+  member: MemberIdentity,
+  rows: RankingRow[],
+  opts: { club?: string } = {},
+): RankingVerdict {
+  const target = normalize(opts.club ?? YVETTE_CLUB);
+  // Lignes qui portent le nom (et le genre) du membre, tous clubs confondus.
+  const byName = rows.filter((r) => genderOk(member.gender, r.gender) && nameMatches(member, r.name));
+  const inClub = byName.filter((r) => normalize(r.club) === target);
+  if (inClub.length === 1) return { status: "matched", match: toMatch(inClub[0]) };
+  // Nom retrouvé, mais aucune occurrence dans le club cible → parti ailleurs (signal fiable).
+  if (inClub.length === 0 && byName.length > 0) return { status: "moved" };
+  // 0 hit au nom (peut-être en page 2 / squashnet muet) OU homonymes ambigus dans le club.
+  return { status: "unknown" };
 }
 
 /** Terme de recherche squashnet pour un membre : le nom de famille (le plus discriminant). */

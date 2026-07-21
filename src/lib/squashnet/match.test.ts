@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalize, matchRanking, searchQuery, YVETTE_CLUB } from "./match";
+import { normalize, matchRanking, classifyRanking, searchQuery, YVETTE_CLUB } from "./match";
 import type { RankingRow } from "./client";
 
 // Fabrique une ligne minimale (les champs non testés ont des valeurs neutres).
@@ -89,6 +89,52 @@ describe("matchRanking", () => {
 
   it("aucune ligne → null", () => {
     expect(matchRanking(jerome, [])).toBeNull();
+  });
+});
+
+describe("classifyRanking", () => {
+  const jerome = { givenName: "Jérôme", familyName: "Courtaut", gender: "male" };
+
+  it("une seule ligne du club → matched (porte le classement)", () => {
+    const rows = [row({ name: "COURTAUT JEROME", club: YVETTE_CLUB, clt: "5A" })];
+    const v = classifyRanking(jerome, rows);
+    expect(v.status).toBe("matched");
+    expect(v.status === "matched" && v.match.clt).toBe("5A");
+  });
+
+  it("nom retrouvé UNIQUEMENT hors du club → moved (absence fiable)", () => {
+    const rows = [row({ name: "COURTAUT JEROME", club: "Squash Club de Rennes" })];
+    expect(classifyRanking(jerome, rows).status).toBe("moved");
+  });
+
+  it("aucune ligne au nom (autres joueurs du même NOM) → unknown (pas d'absence sûre)", () => {
+    // Homonymes de nom de famille, prénoms différents : le membre est peut-être en page 2.
+    const rows = [
+      row({ name: "COURTAUT PAUL", club: "Autre Club" }),
+      row({ name: "COURTAUT MARIE", club: "Encore Autre" }),
+    ];
+    expect(classifyRanking(jerome, rows).status).toBe("unknown");
+  });
+
+  it("homonymes ambigus DANS le club → unknown (ni match ni suppression)", () => {
+    const rows = [
+      row({ name: "COURTAUT JEROME", club: YVETTE_CLUB, clt: "5A" }),
+      row({ name: "COURTAUT JEROME", club: "Squash de l yvette", clt: "4B" }),
+    ];
+    expect(classifyRanking(jerome, rows).status).toBe("unknown");
+  });
+
+  it("membre présent au club MALGRÉ des homonymes ailleurs → matched", () => {
+    const rows = [
+      row({ name: "COURTAUT JEROME", club: "Squash Club de Rennes", clt: "2C" }),
+      row({ name: "COURTAUT JEROME", club: YVETTE_CLUB, clt: "5A" }),
+    ];
+    const v = classifyRanking(jerome, rows);
+    expect(v.status === "matched" && v.match.clt).toBe("5A");
+  });
+
+  it("réponse vide → unknown (jamais moved)", () => {
+    expect(classifyRanking(jerome, []).status).toBe("unknown");
   });
 });
 

@@ -10,11 +10,48 @@ perdre. Géré par le système `blind-review` (voir `~/.claude/skills/blind-revi
 Bouton admin « Rafraîchir les classements » + fonction partagée `refreshRankings`.
 VERDICT : 0 BLOCKER, 0 MAJOR, 3 MINOR, 2 INFO. Aucun bloquant → commit débloqué.
 
-- [MINOR] Le run manuel écrase le heartbeat `warm-rankings` — src/app/api/admin/refresh-rankings/route.ts:32 — un clic admin réussi peut masquer une panne du cron mensuel (dashboard repasse au vert). Piste : clé de heartbeat distincte ou marqueur manuel/auto.
-- [MINOR] Réponse squashnet vide (200) ⇒ suppression de classements valides — src/lib/squashnet/refresh.ts:57 — comportement pré-existant, mais le bouton le rend rejouable à volonté hors fenêtre mensuelle. Piste : ne supprimer que sur signal positif « absent du classement », distinguer réponse vide de réponse peuplée-sans-match.
-- [MINOR] Pas de verrou anti-concurrence (bouton + cron, ou 2 admins) — src/lib/squashnet/refresh.ts:44 — double salve vers squashnet, compteurs non représentatifs. Pas de corruption (idempotent par userId). Piste : garde-fou léger basé sur CronRun.lastRunAt.
+- [x] [MINOR] ~~Le run manuel écrase le heartbeat `warm-rankings`~~ — CORRIGÉ 2026-07-21 : le bouton écrit désormais sous une clé distincte `warm-rankings-manuel` → ne masque plus une panne du cron planifié.
+- [x] [MINOR] ~~Réponse squashnet vide (200) ⇒ suppression de classements valides~~ — 1re correction (signal `rows.length > 0`) jugée INSUFFISANTE à la re-revue (cf. MAJOR ci-dessous), puis CORRIGÉE pour de bon le 2026-07-21.
+- [MINOR] Pas de verrou anti-concurrence (bouton + cron, ou 2 admins) — src/lib/squashnet/refresh.ts — double salve vers squashnet, compteurs non représentatifs. Pas de corruption (idempotent par userId). Piste : garde-fou léger basé sur CronRun.lastRunAt. **Non traité** (impact limité).
 - [INFO] Divergence de contrat `month === null` : cron 200 vs bouton 502 — volontaire (UX différentes), noté pour un futur monitoring.
 - [INFO] Risque de timeout partiel sur maxDuration=60 si l'annuaire grossit — src/app/api/admin/refresh-rankings/route.ts:8 — pré-existant, identique au cron ; envisager traitement par lots au-delà de quelques dizaines de membres listés.
+
+---
+
+## Blind-review 2026-07-21 — diff 589b600d253ca0ab (round 1) — re-revue des correctifs
+
+Re-revue des correctifs des 2 MINOR ci-dessus. VERDICT : 0 BLOCKER, 1 MAJOR, 2 MINOR, 2 INFO.
+
+- [x] **[MAJOR]** ~~Le « signal positif d'absence » (`rows.length > 0`) supprimait encore des classements valides~~ (pagination page 2 sur noms courants ; homonymes internes ambigus) — CORRIGÉ 2026-07-21 : nouveau classifieur `classifyRanking` (match.ts) à 3 verdicts. On ne supprime QUE sur `moved` (nom du membre retrouvé uniquement HORS du club) ; « pas de hit » / ambiguïté / réponse vide ⇒ `unknown` ⇒ on ne touche à rien. Tests dédiés (match.test.ts + refresh.test.ts).
+- [x] [MINOR] ~~Erreurs d'écriture DB comptées comme « squashnet sans réponse »~~ — CORRIGÉ (affiné au tour 3, cf. ci-dessous) : compteur `failed` distinct, jamais confondu avec squashnet.
+- [x] [MINOR] ~~Libellé UI approximatif pour `skipped`~~ — CORRIGÉ : message neutre « (non concluant) » (couvre réponse vide ET hoquet réseau).
+- [INFO] `warm-rankings-manuel` s'affiche comme un « cron » vert figé dans le dashboard — accepté (objectif du fix atteint ; simple lisibilité).
+- [INFO] `matched + cleared + skipped` ne partitionne pas `members` (displayName vide, déjà-à-jour-sans-changement) — accepté ; le texte dit « sur N listés » (total balayé).
+
+---
+
+## Blind-review 2026-07-21 — diff cc6c0ea4c2fd617e — re-revue #2 (disjoncteur)
+
+VERDICT : 0 BLOCKER, 1 MAJOR, 3 MINOR, 2 INFO.
+
+- [x] **[MAJOR]** ~~Un renommage du libellé du club côté squashnet transformait TOUS les membres en `moved` → effacement massif silencieux~~ — CORRIGÉ 2026-07-21 : disjoncteur de volume dans `refreshRankings` (suppressions différées + neutralisées si `moved >= 4` ET `> 34 %` des membres balayés → `bulkMoveBlocked`). Signalé en erreur à l'admin et heartbeat `ok=false`. Tests dédiés.
+- [x] [MINOR] ~~Batch non atomique : 1re erreur DB avortait tout le lot~~ — CORRIGÉ : écriture base entourée d'un try PAR membre → erreur comptée `failed`, le lot continue (plus de propagation qui tue le batch).
+- [x] [MINOR] ~~Heartbeat `ok:true` même si 100 % `skipped`~~ — CORRIGÉ : `summarizeRefresh` dérive `ok` de `failed`/`bulkMoveBlocked`/(`skipped == members`).
+- [MINOR] `cleared` compte des LIGNES DB, `matched`/`skipped` des MEMBRES — écart possible entre la somme et N. **Non traité** (cosmétique ; `cleared` = « classements réellement retirés », sémantique honnête).
+- [INFO] Faux `moved` résiduel via homonyme plein-nom exact + pagination (membre en page 2, homonyme d'un autre club en page 1) — fenêtre très étroite ; le disjoncteur borne l'ampleur. **Non traité** (suivre la pagination si l'annuaire grossit).
+- [INFO] `skipped` agrège erreur réseau et réponse vide, UI « (non concluant) » — accepté (déjà tracé).
+
+---
+
+## Blind-review 2026-07-21 — diff 030d9aef7347275e — re-revue #3 (finitions)
+
+VERDICT : 0 BLOCKER, 0 MAJOR, 3 MINOR, 2 INFO. Aucun bloquant → commit débloqué.
+
+- [x] [MINOR] ~~UI admin (bannière verte) et heartbeat divergeaient sur « squashnet muet » (`skipped == members`)~~ — CORRIGÉ : la route renvoie `ok` (même critère que `summarizeRefresh`) et le client s'aligne dessus (plus de faux succès vert).
+- [x] [MINOR] ~~`displayName` vides diluaient le ratio du disjoncteur et le critère « tous ignorés »~~ — CORRIGÉ : les noms vides sont filtrés en amont ; `members` ne compte que les évaluables.
+- [MINOR] Ratio du disjoncteur calculé sur tous les membres évaluables, pas sur la population effectivement jugeable (`matched + moved`) : une grosse fraction en timeout réseau pourrait laisser passer une suppression de masse *partielle*. **Non traité** (le filtrage des noms vides atténue ; borné par le nombre de `moved` ; à revoir si besoin).
+- [INFO] Faux `moved` isolé (homonyme plein-nom + pagination) — idem entrées précédentes, suivre si l'annuaire grossit.
+- [INFO] Plancher `BULK_MOVE_MIN=4` peu opérant pour un très petit club (≤ ~11 membres) — acceptable (l'annuaire est destiné à grossir).
 
 ---
 

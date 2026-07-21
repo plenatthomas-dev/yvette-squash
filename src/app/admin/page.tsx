@@ -203,9 +203,13 @@ export default function AdminPage() {
     try {
       const res = await fetch("/api/admin/refresh-rankings", { method: "POST" });
       const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
         matched?: number;
         members?: number;
         cleared?: number;
+        skipped?: number;
+        failed?: number;
+        bulkMoveBlocked?: boolean;
         error?: string;
       };
       if (!res.ok) {
@@ -214,9 +218,23 @@ export default function AdminPage() {
       }
       const matched = data.matched ?? 0;
       const cleared = data.cleared ?? 0;
+      const skipped = data.skipped ?? 0;
+      const failed = data.failed ?? 0;
+      const members = data.members ?? 0;
+      const text =
+        `${matched} classement${matched > 1 ? "s" : ""} à jour` +
+        `${cleared ? `, ${cleared} retiré${cleared > 1 ? "s" : ""}` : ""}` +
+        `${skipped ? `, ${skipped} ignoré${skipped > 1 ? "s" : ""} (non concluant)` : ""}` +
+        `${failed ? `, ${failed} échec${failed > 1 ? "s" : ""} (base)` : ""}` +
+        ` sur ${members} membre${members > 1 ? "s" : ""} listé${members > 1 ? "s" : ""}.`;
+      // On reprend le `ok` de la route (échec base, blocage anti-effacement, OU squashnet muet
+      // = tous ignorés) plutôt que de recomposer le critère ici. Le blocage a un message dédié.
+      const succeeded = data.ok ?? true;
       setRkResult({
-        ok: true,
-        text: `${matched} classement${matched > 1 ? "s" : ""} à jour${cleared ? `, ${cleared} retiré${cleared > 1 ? "s" : ""}` : ""} sur ${data.members ?? 0} membre${(data.members ?? 0) > 1 ? "s" : ""} listé${(data.members ?? 0) > 1 ? "s" : ""}.`,
+        ok: succeeded,
+        text: data.bulkMoveBlocked
+          ? `⚠️ Anomalie : trop de membres « absents » d'un coup — suppressions bloquées (libellé du club changé côté squashnet ?). ${text}`
+          : text,
       });
     } catch {
       setRkResult({ ok: false, text: "Rafraîchissement impossible." });

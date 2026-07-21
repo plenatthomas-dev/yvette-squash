@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cronAuthorized } from "@/lib/cron-auth";
 import { recordCronRun } from "@/lib/cron-run";
 import { getFeatures } from "@/lib/features-server";
-import { refreshRankings } from "@/lib/squashnet/refresh";
+import { refreshRankings, summarizeRefresh } from "@/lib/squashnet/refresh";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,11 +20,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Interdit" }, { status: 401 });
   }
 
-  const { month, members, matched, cleared } = await refreshRankings();
-  if (!month) {
+  const result = await refreshRankings();
+  if (!result.month) {
     return NextResponse.json({ matched: 0, reason: "Période de classement introuvable." });
   }
 
-  await recordCronRun("warm-rankings", true, `${matched} rapproché(s), ${cleared} retiré(s)`);
-  return NextResponse.json({ month, members, matched, cleared });
+  const { ok, info } = summarizeRefresh(result);
+  await recordCronRun("warm-rankings", ok, info);
+  const { month, members, matched, cleared, skipped, failed, bulkMoveBlocked } = result;
+  return NextResponse.json({ month, members, matched, cleared, skipped, failed, bulkMoveBlocked });
 }
