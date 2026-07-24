@@ -3,7 +3,7 @@
 // Espace admin — modération des tricounts (étape 5). Liste et suppression d'un groupe de
 // partage de frais. Accès verrouillé CÔTÉ SERVEUR par /api/admin/tricounts (allowlist).
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import Link from "next/link";
 
 type Tricount = {
@@ -14,6 +14,14 @@ type Tricount = {
   totalCents: number;
   participantCount: number;
   createdAt: string;
+};
+
+// Carte encadrée, cohérente avec les autres pages /admin (bordure/fond thémés).
+const card: CSSProperties = {
+  border: "1px solid var(--pico-card-border-color, #e5e7eb)",
+  borderRadius: 10,
+  padding: "14px 16px",
+  background: "var(--pico-card-background-color, transparent)",
 };
 
 function euros(cents: number): string {
@@ -66,7 +74,7 @@ export default function TricountsAdminPage() {
   };
 
   return (
-    <main className="login">
+    <main style={{ maxWidth: 1000 }}>
       <h1>Tricounts</h1>
       <p className="muted tiny">
         <Link href="/admin">← Retour à l'admin</Link>
@@ -79,13 +87,13 @@ export default function TricountsAdminPage() {
       )}
 
       {state === "ready" && (
-        <>
-          <p className="muted tiny">
+        <section style={card}>
+          <p className="muted tiny" style={{ marginTop: 0 }}>
             {tricounts.length} tricount{tricounts.length > 1 ? "s" : ""}. La suppression efface
             aussi ses dépenses, parts, approbations et commentaires.
           </p>
           {tricounts.length === 0 ? (
-            <p className="muted">Aucun tricount.</p>
+            <p className="muted" style={{ marginBottom: 0 }}>Aucun tricount.</p>
           ) : (
             <div style={{ overflowX: "auto" }}>
               <table>
@@ -125,7 +133,7 @@ export default function TricountsAdminPage() {
               </table>
             </div>
           )}
-        </>
+        </section>
       )}
     </main>
   );
