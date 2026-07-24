@@ -284,40 +284,50 @@ async function resolveResaToken(s: SessionTokenFields): Promise<ResaSession | nu
  * lecture par clé primaire, sans déchiffrer ni rafraîchir le jeton ResaMania (contrairement à
  * `getSession`, qui peut appeler ResaMania au passage — inacceptable sur une route publique
  * appelée à chaque chargement de page). S'y ajoute une écriture `lastSeenAt` best-effort et
- * throttlée (cf. `touchLastSeen`) : un second aller-retour DB léger, jamais bloquant pour
- * l'appelant (son échec est avalé).
+ * throttlée (cf. `touchLastSeen`), lancée EN PARALLÈLE de la lecture (aucun aller-retour série
+ * supplémentaire) et dont l'échec est avalé.
  *
  * ⚠️ À réserver aux décisions d'AFFICHAGE. Ne jamais s'en servir pour autoriser une action :
  * pour ça, c'est `getSession` (qui seule garantit un jeton exploitable).
  */
 export async function getLiveSessionUserId(sid: string | undefined): Promise<string | null> {
   if (!sid) return null;
-  const s = await prisma.session.findUnique({
-    where: { id: sid },
-    select: { userId: true, expiresAt: true },
-  });
-  if (!s || s.expiresAt <= new Date()) return null;
-  // Best-effort : marquer l'activité ne doit jamais faire échouer l'affichage (bannière
-  // publique). Un échec d'écriture (pool saturé, timeout Neon…) est avalé, pas propagé en 500.
-  await touchLastSeen(s.userId).catch(() => {});
-  return s.userId;
+  const now = new Date();
+  // Lecture (userId) et écriture best-effort de `lastSeenAt` en PARALLÈLE : l'écriture est cadrée
+  // sur le COOKIE (jointure `sessions`), pas sur le userId retourné par la lecture, donc aucune
+  // dépendance série → un seul aller-retour de latence. L'échec de l'écriture est avalé : marquer
+  // l'activité ne doit jamais faire échouer l'affichage (bannière publique).
+  const [s] = await Promise.all([
+    prisma.session.findUnique({
+      where: { id: sid },
+      select: { userId: true, expiresAt: true },
+    }),
+    touchLastSeen(sid, now).catch(() => {}),
+  ]);
+  return s && s.expiresAt > now ? s.userId : null;
 }
 
 const LAST_SEEN_THROTTLE_MS = 3_600_000; // 1 h
 
 /**
- * Marque l'activité réelle du membre, appelé à CHAQUE chargement de page (via /api/banner, monté
- * dans le layout). Un `UPDATE ... WHERE` conditionnel est bien ÉMIS à chaque appel — c'est
- * l'ÉCRITURE effective de la ligne qui est throttlée : elle n'a lieu que si `lastSeenAt` est vide
- * ou plus vieux que le throttle (au plus 1×/h/membre). Une seule requête atomique, sans lecture
- * préalable. Contrairement à `lastLoginAt` (posé uniquement à l'authentification), ce champ suit
- * le membre qui revient avec un cookie encore valide.
+ * Marque l'activité réelle du membre propriétaire de la session `sid`, appelé à CHAQUE chargement
+ * de page (via /api/banner, monté dans le layout). Cadré sur le COOKIE (filtre de relation
+ * `sessions: { some }`) et non sur un userId déjà résolu, pour pouvoir tourner EN PARALLÈLE de la
+ * lecture de session sans dépendance série. Un `UPDATE ... WHERE` conditionnel est ÉMIS à chaque
+ * appel ; c'est l'ÉCRITURE effective de la ligne qui est throttlée (au plus 1×/h/membre), et
+ * uniquement si la session est encore valide (`expiresAt > now`) — un cookie expiré, ou un compte
+ * désactivé (dont les sessions sont supprimées), n'écrit donc rien. Une seule requête atomique,
+ * sans lecture préalable. Contrairement à `lastLoginAt` (posé uniquement à l'authentification),
+ * ce champ suit le membre qui revient avec un cookie encore valide.
  */
-async function touchLastSeen(userId: string): Promise<void> {
-  const cutoff = new Date(Date.now() - LAST_SEEN_THROTTLE_MS);
-  await prisma.user.updateMany({
-    where: { id: userId, OR: [{ lastSeenAt: null }, { lastSeenAt: { lt: cutoff } }] },
-    data: { lastSeenAt: new Date() },
+function touchLastSeen(sid: string, now: Date): Promise<unknown> {
+  const cutoff = new Date(now.getTime() - LAST_SEEN_THROTTLE_MS);
+  return prisma.user.updateMany({
+    where: {
+      sessions: { some: { id: sid, expiresAt: { gt: now } } },
+      OR: [{ lastSeenAt: null }, { lastSeenAt: { lt: cutoff } }],
+    },
+    data: { lastSeenAt: now },
   });
 }
 

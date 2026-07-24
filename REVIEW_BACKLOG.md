@@ -12,7 +12,7 @@ VERDICT : 0 BLOCKER, 0 MAJOR, 3 MINOR, 1 INFO. Aucun bloquant → commit débloq
 
 - [x] [MINOR] ~~`touchLastSeen` awaité sans isolation → un échec d'écriture ferait planter la bannière publique (500)~~ — CORRIGÉ : appel entouré d'un `.catch(() => {})` (best-effort).
 - [x] [MINOR] ~~Docstring « lecture seule / VOLONTAIREMENT légère » et commentaire « 1 écriture/h » devenus inexacts~~ — CORRIGÉ : docstrings reformulées (requête émise à chaque appel vs écriture effective throttlée).
-- [MINOR] `getLiveSessionUserId` fait désormais 2 allers-retours DB en série (findUnique + updateMany) sur le chemin chaud — src/lib/session.ts. **Non traité** : atténué par la colocalisation `fra1` (fonctions ↔ Neon Francfort, intra-région ~qq ms). Piste future si latence : fusionner ou paralléliser.
+- [x] [MINOR] ~~`getLiveSessionUserId` fait 2 allers-retours DB en série (findUnique + updateMany) sur le chemin chaud~~ — CORRIGÉ 2026-07-24 : l'écriture `lastSeenAt` est désormais cadrée sur le cookie (filtre `sessions: { some }`) au lieu du userId, ce qui la rend indépendante de la lecture → les deux requêtes tournent en parallèle (`Promise.all`), un seul aller-retour de latence.
 - [INFO] Juste après déploiement, « Dernière connexion » (`lastSeenAt`) affiche « — » pour tous jusqu'à leur prochaine visite — src/app/admin/membres/page.tsx. **Non traité** : transitoire et cosmétique ; les deux lignes étant affichées, l'absence est auto-explicative (« Dernière authentification » reste renseignée).
 
 ## Blind-review 2026-07-21 — diff e2463dfbd47ef70a (round 1, pass)
