@@ -5,6 +5,14 @@ perdre. Géré par le système `blind-review` (voir `~/.claude/skills/blind-revi
 
 ---
 
+## Blind-review 2026-07-24 — diff 85d47b8593bb8c0c (round 1, pass)
+
+Réorganisation de la page /admin : conteneur élargi (400→1000px) + options regroupées en cartes, outils en masonry (CSS multi-colonnes).
+VERDICT : 0 BLOCKER, 0 MAJOR, 0 MINOR, 2 INFO. Refactor propre, aucune régression → commit débloqué.
+
+- [x] [INFO] ~~Vignettes `Stat` du dashboard avec bordure `#e5e7eb` en dur (incohérent en mode sombre)~~ — CORRIGÉ : passées à `var(--pico-card-border-color)` comme les autres cartes.
+- [INFO] Ordre visuel des 4 cartes outils non déterministe (`column-fill: balance` équilibre les hauteurs, pas une grille 2×2 fixe) — src/app/admin/page.tsx. **Non traité** : purement esthétique, tab-order (accessibilité) suit le DOM. Piste si besoin d'un ordre stable : `column-fill: auto` ou grille explicite.
+
 ## Blind-review 2026-07-24 — diff e1f541a51527a887 (round 1, pass)
 
 Champ `lastSeenAt` (dernière activité réelle) distinct de `lastLoginAt` (dernière authentification) ; affichage admin sur deux lignes.

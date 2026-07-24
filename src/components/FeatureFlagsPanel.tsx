@@ -66,8 +66,8 @@ export default function FeatureFlagsPanel() {
   };
 
   return (
-    <section style={{ marginBottom: 24 }}>
-      <h2 style={{ fontSize: "1.1rem" }}>Fonctions de l'appli</h2>
+    <section>
+      <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Fonctions de l'appli</h2>
       <p className="muted tiny">
         Activer ou couper une fonction sans redéploiement. « Auto » suit la configuration de
         l'environnement. Un changement met jusqu'à ~15 s à se propager, et il faut recharger

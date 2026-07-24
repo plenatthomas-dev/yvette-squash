@@ -4,7 +4,7 @@
 // réinitialisation. L'accès est verrouillé CÔTÉ SERVEUR par /api/admin/requests (allowlist
 // ADMIN_EMAILS) — cette page ne fait qu'afficher ce que l'API veut bien lui rendre.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useFeatures } from "@/components/FeatureProvider";
 import FeatureFlagsPanel from "@/components/FeatureFlagsPanel";
@@ -34,6 +34,19 @@ type Dashboard = {
 function purposeLabel(p: PendingRequest["purpose"]): string {
   return p === "signup" ? "Nouveau compte" : "Mot de passe oublié";
 }
+
+// Carte encadrée : donne une identité visuelle à chaque bloc d'options (plus lisible qu'une
+// longue pile de sections sans séparation).
+const card: CSSProperties = {
+  border: "1px solid var(--pico-card-border-color, #e5e7eb)",
+  borderRadius: 10,
+  padding: "14px 16px",
+  background: "var(--pico-card-background-color, transparent)",
+};
+
+// Variante pour les cartes disposées en colonnes (masonry) : `breakInside: avoid` empêche
+// qu'une carte soit coupée entre deux colonnes.
+const masonryCard: CSSProperties = { ...card, breakInside: "avoid", marginBottom: 16 };
 
 export default function AdminPage() {
   const { emailLogin, ranking } = useFeatures();
@@ -258,7 +271,7 @@ export default function AdminPage() {
   // l'admin hors du seul écran permettant de le rallumer.
   if (!emailLogin) {
     return (
-      <main className="login">
+      <main style={{ maxWidth: 720 }}>
         <h1>Admin</h1>
         <p className="muted tiny">
           <Link href="/">← Retour à mon compte</Link>
@@ -266,13 +279,15 @@ export default function AdminPage() {
         <div className="notice error">
           ⚠️ La connexion « email seul » est coupée : la file des demandes est indisponible.
         </div>
-        <FeatureFlagsPanel />
+        <div style={card}>
+          <FeatureFlagsPanel />
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="login">
+    <main style={{ maxWidth: 1000 }}>
       <h1>Admin</h1>
       <p className="muted tiny">
         <Link href="/">← Retour à mon compte</Link>
@@ -288,7 +303,8 @@ export default function AdminPage() {
         <>
           {/* Mini-tableau de bord (étape 4) : indicateurs d'un coup d'œil. */}
           {dash && (
-            <section style={{ marginBottom: 20 }}>
+            <section style={{ ...card, marginBottom: 20 }}>
+              <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Tableau de bord</h2>
               <div
                 style={{
                   display: "grid",
@@ -337,186 +353,196 @@ export default function AdminPage() {
             <Link href="/admin/tricounts">💶 Tricounts →</Link>
           </p>
 
-          {/* Pilotage à chaud des fonctions (étape #9). */}
-          <FeatureFlagsPanel />
-
-          {/* Annonce push à tous les membres abonnés (« Terrain fermé samedi »…). */}
-          <section style={{ marginBottom: 24 }}>
-            <h2 style={{ fontSize: "1.1rem" }}>Annonce à tous les membres</h2>
+          {/* Demandes en attente : tâche quotidienne de l'admin → mise en avant, pleine largeur. */}
+          <section style={{ ...card, marginBottom: 20 }}>
+            <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Demandes en attente</h2>
             <p className="muted tiny">
-              Envoie une notification push aux membres qui ont activé les notifications.
+              Approuve une demande pour générer son lien, puis transmets-le à la personne
+              (WhatsApp, SMS…). Le lien ne s'affiche qu'une seule fois.
             </p>
-            <input
-              type="text"
-              placeholder="Titre (ex. Terrain fermé samedi)"
-              value={annTitle}
-              maxLength={80}
-              disabled={annBusy}
-              onChange={(e) => setAnnTitle(e.target.value)}
-              style={{ width: "100%", marginBottom: 8 }}
-            />
-            <textarea
-              placeholder="Message"
-              value={annBody}
-              maxLength={300}
-              rows={3}
-              disabled={annBusy}
-              onChange={(e) => setAnnBody(e.target.value)}
-              style={{ width: "100%", marginBottom: 8 }}
-            />
-            <button
-              type="button"
-              disabled={annBusy || !annTitle.trim() || !annBody.trim()}
-              onClick={sendAnnounce}
-            >
-              {annBusy ? "Envoi…" : "Envoyer l'annonce"}
-            </button>
-            {annResult && (
-              <div className={`notice ${annResult.ok ? "info" : "error"}`} style={{ marginTop: 8 }}>
-                {annResult.ok ? "✓ " : "⚠️ "}
-                {annResult.text}
+
+            {/* Liens générés (demandes tout juste approuvées) */}
+            {Object.entries(links).map(([id, link]) => (
+              <div key={id} className="notice info" style={{ wordBreak: "break-all" }}>
+                <strong>Lien à transmettre :</strong>
+                <br />
+                {link}
+                <br />
+                <button type="button" onClick={() => copy(id, link)}>
+                  {copied === id ? "Copié ✓" : "Copier le lien"}
+                </button>
               </div>
+            ))}
+
+            {requests.length === 0 && Object.keys(links).length === 0 && (
+              <p className="muted" style={{ marginBottom: 0 }}>Aucune demande en attente.</p>
             )}
+
+            <ul className="admin-requests" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              {requests.map((r) => (
+                <li
+                  key={r.id}
+                  style={{
+                    border: "1px solid var(--pico-card-border-color, #e5e7eb)",
+                    borderRadius: 8,
+                    padding: "10px 12px",
+                    marginBottom: 10,
+                  }}
+                >
+                  <div>
+                    <strong>{r.email}</strong>
+                    {r.displayName ? ` — ${r.displayName}` : ""}
+                  </div>
+                  <div className="muted tiny">
+                    {purposeLabel(r.purpose)} · {new Date(r.createdAt).toLocaleString("fr-FR")}
+                  </div>
+                  <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      disabled={busyId === r.id}
+                      onClick={() => act(r.id, "approve")}
+                    >
+                      Approuver
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busyId === r.id}
+                      onClick={() => act(r.id, "reject")}
+                    >
+                      Rejeter
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busyId === r.id}
+                      onClick={() => act(r.id, "reject-block")}
+                      style={{ color: "#b91c1c" }}
+                    >
+                      Rejeter et bloquer
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
           </section>
 
-          {/* Bannière affichée en haut de l'appli pour tous (même sans notifications). */}
-          <section style={{ marginBottom: 24 }}>
-            <h2 style={{ fontSize: "1.1rem" }}>Bannière d'annonce</h2>
-            <p className="muted tiny">
-              Affichée en haut de l'appli pour tous. Laisse vide et « Retirer » pour l'enlever.
-            </p>
-            <textarea
-              placeholder="Message de la bannière (ex. Assemblée générale vendredi 20 h)"
-              value={bnMessage}
-              maxLength={280}
-              rows={2}
-              disabled={bnBusy}
-              onChange={(e) => setBnMessage(e.target.value)}
-              style={{ width: "100%", marginBottom: 8 }}
-            />
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <select
-                value={bnLevel}
-                disabled={bnBusy}
-                onChange={(e) => setBnLevel(e.target.value as "info" | "warn")}
-                style={{ width: "auto", marginBottom: 0 }}
-              >
-                <option value="info">Info (bleu)</option>
-                <option value="warn">Alerte (orange)</option>
-              </select>
-              <button type="button" disabled={bnBusy || !bnMessage.trim()} onClick={() => saveBanner(false)}>
-                {bnBusy ? "…" : "Enregistrer"}
-              </button>
+          {/* Outils d'administration : cartes disposées en colonnes (masonry). columnWidth borne
+              la largeur → 2 cartes de front sur PC, 1 seule sur écran étroit, sans trous de
+              hauteur (chaque carte porte `breakInside: avoid`). */}
+          <div style={{ columnWidth: 440, columnGap: 16 }}>
+            {/* Pilotage à chaud des fonctions (étape #9). */}
+            <div style={masonryCard}>
+              <FeatureFlagsPanel />
+            </div>
+
+            {/* Annonce push à tous les membres abonnés (« Terrain fermé samedi »…). */}
+            <section style={masonryCard}>
+              <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Annonce à tous les membres</h2>
+              <p className="muted tiny">
+                Envoie une notification push aux membres qui ont activé les notifications.
+              </p>
+              <input
+                type="text"
+                placeholder="Titre (ex. Terrain fermé samedi)"
+                value={annTitle}
+                maxLength={80}
+                disabled={annBusy}
+                onChange={(e) => setAnnTitle(e.target.value)}
+                style={{ width: "100%", marginBottom: 8 }}
+              />
+              <textarea
+                placeholder="Message"
+                value={annBody}
+                maxLength={300}
+                rows={3}
+                disabled={annBusy}
+                onChange={(e) => setAnnBody(e.target.value)}
+                style={{ width: "100%", marginBottom: 8 }}
+              />
               <button
                 type="button"
-                className="secondary"
-                disabled={bnBusy || !bnPublished}
-                onClick={() => saveBanner(true)}
-                title={bnPublished ? "Enlève l'annonce affichée" : "Aucune annonce publiée"}
+                disabled={annBusy || !annTitle.trim() || !annBody.trim()}
+                onClick={sendAnnounce}
               >
-                Retirer
+                {annBusy ? "Envoi…" : "Envoyer l'annonce"}
               </button>
-            </div>
-            {bnResult && (
-              <div className={`notice ${bnResult.ok ? "info" : "error"}`} style={{ marginTop: 8 }}>
-                {bnResult.ok ? "✓ " : "⚠️ "}
-                {bnResult.text}
-              </div>
-            )}
-          </section>
-
-          {/* Classement squashnet : rafraîchissement manuel (rattrape les nouveaux inscrits
-              sans attendre le cron mensuel du 8). */}
-          {ranking && (
-            <section style={{ marginBottom: 24 }}>
-              <h2 style={{ fontSize: "1.1rem" }}>Classement squashnet</h2>
-              <p className="muted tiny">
-                Récupère le classement fédéral de tous les membres listés dans l'annuaire. À
-                utiliser pour les nouveaux inscrits (le rafraîchissement automatique n'a lieu
-                qu'une fois par mois).
-              </p>
-              <button type="button" disabled={rkBusy} onClick={refreshRankings}>
-                {rkBusy ? "Récupération…" : "Rafraîchir les classements"}
-              </button>
-              {rkResult && (
-                <div className={`notice ${rkResult.ok ? "info" : "error"}`} style={{ marginTop: 8 }}>
-                  {rkResult.ok ? "✓ " : "⚠️ "}
-                  {rkResult.text}
+              {annResult && (
+                <div className={`notice ${annResult.ok ? "info" : "error"}`} style={{ marginTop: 8 }}>
+                  {annResult.ok ? "✓ " : "⚠️ "}
+                  {annResult.text}
                 </div>
               )}
             </section>
-          )}
 
-          <h2 style={{ fontSize: "1.1rem" }}>Demandes en attente</h2>
-          <p className="muted tiny">
-            Approuve une demande pour générer son lien, puis transmets-le à la personne
-            (WhatsApp, SMS…). Le lien ne s'affiche qu'une seule fois.
-          </p>
-
-          {/* Liens générés (demandes tout juste approuvées) */}
-          {Object.entries(links).map(([id, link]) => (
-            <div key={id} className="notice info" style={{ wordBreak: "break-all" }}>
-              <strong>Lien à transmettre :</strong>
-              <br />
-              {link}
-              <br />
-              <button type="button" onClick={() => copy(id, link)}>
-                {copied === id ? "Copié ✓" : "Copier le lien"}
-              </button>
-            </div>
-          ))}
-
-          {requests.length === 0 && Object.keys(links).length === 0 && (
-            <p className="muted">Aucune demande en attente.</p>
-          )}
-
-          <ul className="admin-requests" style={{ listStyle: "none", padding: 0 }}>
-            {requests.map((r) => (
-              <li
-                key={r.id}
-                style={{
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 8,
-                  padding: "10px 12px",
-                  marginBottom: 10,
-                }}
-              >
-                <div>
-                  <strong>{r.email}</strong>
-                  {r.displayName ? ` — ${r.displayName}` : ""}
+            {/* Bannière affichée en haut de l'appli pour tous (même sans notifications). */}
+            <section style={masonryCard}>
+              <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Bannière d'annonce</h2>
+              <p className="muted tiny">
+                Affichée en haut de l'appli pour tous. Laisse vide et « Retirer » pour l'enlever.
+              </p>
+              <textarea
+                placeholder="Message de la bannière (ex. Assemblée générale vendredi 20 h)"
+                value={bnMessage}
+                maxLength={280}
+                rows={2}
+                disabled={bnBusy}
+                onChange={(e) => setBnMessage(e.target.value)}
+                style={{ width: "100%", marginBottom: 8 }}
+              />
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <select
+                  value={bnLevel}
+                  disabled={bnBusy}
+                  onChange={(e) => setBnLevel(e.target.value as "info" | "warn")}
+                  style={{ width: "auto", marginBottom: 0 }}
+                >
+                  <option value="info">Info (bleu)</option>
+                  <option value="warn">Alerte (orange)</option>
+                </select>
+                <button type="button" disabled={bnBusy || !bnMessage.trim()} onClick={() => saveBanner(false)}>
+                  {bnBusy ? "…" : "Enregistrer"}
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={bnBusy || !bnPublished}
+                  onClick={() => saveBanner(true)}
+                  title={bnPublished ? "Enlève l'annonce affichée" : "Aucune annonce publiée"}
+                >
+                  Retirer
+                </button>
+              </div>
+              {bnResult && (
+                <div className={`notice ${bnResult.ok ? "info" : "error"}`} style={{ marginTop: 8 }}>
+                  {bnResult.ok ? "✓ " : "⚠️ "}
+                  {bnResult.text}
                 </div>
-                <div className="muted tiny">
-                  {purposeLabel(r.purpose)} · {new Date(r.createdAt).toLocaleString("fr-FR")}
-                </div>
-                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    disabled={busyId === r.id}
-                    onClick={() => act(r.id, "approve")}
-                  >
-                    Approuver
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={busyId === r.id}
-                    onClick={() => act(r.id, "reject")}
-                  >
-                    Rejeter
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={busyId === r.id}
-                    onClick={() => act(r.id, "reject-block")}
-                    style={{ color: "#b91c1c" }}
-                  >
-                    Rejeter et bloquer
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
+              )}
+            </section>
+
+            {/* Classement squashnet : rafraîchissement manuel (rattrape les nouveaux inscrits
+                sans attendre le cron mensuel du 8). */}
+            {ranking && (
+              <section style={masonryCard}>
+                <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Classement squashnet</h2>
+                <p className="muted tiny">
+                  Récupère le classement fédéral de tous les membres listés dans l'annuaire. À
+                  utiliser pour les nouveaux inscrits (le rafraîchissement automatique n'a lieu
+                  qu'une fois par mois).
+                </p>
+                <button type="button" disabled={rkBusy} onClick={refreshRankings}>
+                  {rkBusy ? "Récupération…" : "Rafraîchir les classements"}
+                </button>
+                {rkResult && (
+                  <div className={`notice ${rkResult.ok ? "info" : "error"}`} style={{ marginTop: 8 }}>
+                    {rkResult.ok ? "✓ " : "⚠️ "}
+                    {rkResult.text}
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
         </>
       )}
     </main>
@@ -528,7 +554,7 @@ function Stat({ label, value, hint }: { label: string; value: number; hint?: str
   return (
     <div
       style={{
-        border: "1px solid #e5e7eb",
+        border: "1px solid var(--pico-card-border-color, #e5e7eb)",
         borderRadius: 8,
         padding: "8px 10px",
         textAlign: "center",
