@@ -27,6 +27,7 @@ type Member = {
   verified: boolean;
   passkeys: MemberPasskey[];
   lastLoginAt: string | null;
+  lastSeenAt: string | null;
   disabledAt: string | null;
   createdAt: string;
 };
@@ -217,7 +218,8 @@ export default function MembersPage() {
                 {/* Dates */}
                 <div className="tiny muted">
                   <div>Inscrit&nbsp;: {fmtDate(m.createdAt)}</div>
-                  <div>Dernière connexion&nbsp;: {fmtDateTime(m.lastLoginAt)}</div>
+                  <div>Dernière authentification&nbsp;: {fmtDateTime(m.lastLoginAt)}</div>
+                  <div>Dernière connexion&nbsp;: {fmtDateTime(m.lastSeenAt)}</div>
                 </div>
 
                 {/* Appareils biométriques : un « Retirer » par appareil (téléphone perdu, etc.). */}

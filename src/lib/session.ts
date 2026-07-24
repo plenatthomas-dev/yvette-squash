@@ -280,10 +280,12 @@ async function resolveResaToken(s: SessionTokenFields): Promise<ResaSession | nu
 }
 
 /**
- * `userId` derrière ce cookie, ou `null` si aucune session vivante. Vérification
- * VOLONTAIREMENT légère : une lecture par clé primaire, sans déchiffrer ni rafraîchir le jeton
- * ResaMania (contrairement à `getSession`, qui peut appeler ResaMania au passage — inacceptable
- * sur une route publique appelée à chaque chargement de page).
+ * `userId` derrière ce cookie, ou `null` si aucune session vivante. Vérification légère : une
+ * lecture par clé primaire, sans déchiffrer ni rafraîchir le jeton ResaMania (contrairement à
+ * `getSession`, qui peut appeler ResaMania au passage — inacceptable sur une route publique
+ * appelée à chaque chargement de page). S'y ajoute une écriture `lastSeenAt` best-effort et
+ * throttlée (cf. `touchLastSeen`) : un second aller-retour DB léger, jamais bloquant pour
+ * l'appelant (son échec est avalé).
  *
  * ⚠️ À réserver aux décisions d'AFFICHAGE. Ne jamais s'en servir pour autoriser une action :
  * pour ça, c'est `getSession` (qui seule garantit un jeton exploitable).
@@ -294,7 +296,29 @@ export async function getLiveSessionUserId(sid: string | undefined): Promise<str
     where: { id: sid },
     select: { userId: true, expiresAt: true },
   });
-  return s && s.expiresAt > new Date() ? s.userId : null;
+  if (!s || s.expiresAt <= new Date()) return null;
+  // Best-effort : marquer l'activité ne doit jamais faire échouer l'affichage (bannière
+  // publique). Un échec d'écriture (pool saturé, timeout Neon…) est avalé, pas propagé en 500.
+  await touchLastSeen(s.userId).catch(() => {});
+  return s.userId;
+}
+
+const LAST_SEEN_THROTTLE_MS = 3_600_000; // 1 h
+
+/**
+ * Marque l'activité réelle du membre, appelé à CHAQUE chargement de page (via /api/banner, monté
+ * dans le layout). Un `UPDATE ... WHERE` conditionnel est bien ÉMIS à chaque appel — c'est
+ * l'ÉCRITURE effective de la ligne qui est throttlée : elle n'a lieu que si `lastSeenAt` est vide
+ * ou plus vieux que le throttle (au plus 1×/h/membre). Une seule requête atomique, sans lecture
+ * préalable. Contrairement à `lastLoginAt` (posé uniquement à l'authentification), ce champ suit
+ * le membre qui revient avec un cookie encore valide.
+ */
+async function touchLastSeen(userId: string): Promise<void> {
+  const cutoff = new Date(Date.now() - LAST_SEEN_THROTTLE_MS);
+  await prisma.user.updateMany({
+    where: { id: userId, OR: [{ lastSeenAt: null }, { lastSeenAt: { lt: cutoff } }] },
+    data: { lastSeenAt: new Date() },
+  });
 }
 
 /** Récupère la session depuis l'id de cookie, en rafraîchissant le token ResaMania si besoin. */

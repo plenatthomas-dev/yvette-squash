@@ -21,7 +21,8 @@ export type MemberRow = {
   hasPassword: boolean; // pilote « lien d'activation » (non) vs « lien de réinitialisation » (oui)
   verified: boolean; // email prouvé (lien cliqué ou connexion ResaMania)
   passkeys: MemberPasskey[]; // passkeys enrôlés → badge « 🔐 N » + révocation (par appareil ou en masse)
-  lastLoginAt: string | null;
+  lastLoginAt: string | null; // dernière AUTHENTIFICATION (login ResaMania / email / biométrie)
+  lastSeenAt: string | null; // dernière ACTIVITÉ réelle (throttlée), même sans ré-authentification
   disabledAt: string | null;
   createdAt: string;
 };
@@ -39,6 +40,7 @@ export async function listMembers(): Promise<MemberRow[]> {
       passwordHash: true,
       emailVerifiedAt: true,
       lastLoginAt: true,
+      lastSeenAt: true,
       disabledAt: true,
       createdAt: true,
       passkeys: {
@@ -62,6 +64,7 @@ export async function listMembers(): Promise<MemberRow[]> {
       lastUsedAt: p.lastUsedAt?.toISOString() ?? null,
     })),
     lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
+    lastSeenAt: u.lastSeenAt?.toISOString() ?? null,
     disabledAt: u.disabledAt?.toISOString() ?? null,
     createdAt: u.createdAt.toISOString(),
   }));

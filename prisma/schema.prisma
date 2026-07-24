@@ -32,13 +32,18 @@ model User {
   // Seuls `id` + nom/pseudo sont exposés par /api/directory (jamais email ni contactId).
   listed      Boolean      @default(true)
   // Gestion des membres (espace admin, étape 1) :
-  //  - lastLoginAt : horodaté à CHAQUE connexion réussie (ResaMania ou email) — repère les
-  //    comptes inactifs. NULL = jamais connecté depuis l'ajout de la colonne.
+  //  - lastLoginAt : horodaté à chaque AUTHENTIFICATION réussie (login ResaMania, lien email ou
+  //    biométrie) — repère les comptes inactifs. NULL = jamais authentifié depuis l'ajout de la
+  //    colonne. ⚠️ Ne bouge PAS quand un membre revient avec un cookie encore valide (session
+  //    30 j) : c'est `lastSeenAt` qui reflète alors l'activité réelle.
+  //  - lastSeenAt  : dernière ACTIVITÉ réelle, rafraîchie (avec throttle) à chaque chargement de
+  //    page tant que la session vit — donc à jour même sans nouvelle authentification.
   //  - disabledAt  : compte désactivé par un admin → connexion refusée (ResaMania ET email) et
   //    sessions en cours révoquées. Alternative NON destructive à la suppression, seule option
   //    pour un membre ResaMania (qui se recréerait à la prochaine connexion) ou porteur d'un
   //    historique financier (dépenses Tricount `Restrict`).
   lastLoginAt DateTime?
+  lastSeenAt  DateTime?
   disabledAt  DateTime?
   // Annonce (bannière + modale, étape 2) : la `version` de l'annonce que ce membre a masquée /
   // dont il a déjà vu la modale. Rattaché au COMPTE et non au navigateur : `localStorage` est
