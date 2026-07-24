@@ -3,7 +3,7 @@
 // Espace admin — historique des demandes traitées + blocklist (étape 3). Accès verrouillé
 // CÔTÉ SERVEUR par /api/admin/history et /api/admin/blocklist (allowlist ADMIN_EMAILS).
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import Link from "next/link";
 
 type HistoryEntry = {
@@ -19,6 +19,14 @@ type Block = { email: string; reason: string | null; createdAt: string };
 function purposeLabel(p: HistoryEntry["purpose"]): string {
   return p === "signup" ? "Nouveau compte" : "Mot de passe oublié";
 }
+
+// Carte encadrée, cohérente avec la page /admin (bordure/fond thémés).
+const card: CSSProperties = {
+  border: "1px solid var(--pico-card-border-color, #e5e7eb)",
+  borderRadius: 10,
+  padding: "14px 16px",
+  background: "var(--pico-card-background-color, transparent)",
+};
 
 export default function RequestsHistoryPage() {
   const [state, setState] = useState<"loading" | "forbidden" | "ready" | "error">("loading");
@@ -76,7 +84,7 @@ export default function RequestsHistoryPage() {
   };
 
   return (
-    <main className="login">
+    <main style={{ maxWidth: 1000 }}>
       <h1>Historique &amp; blocklist</h1>
       <p className="muted tiny">
         <Link href="/admin">← Retour à l'admin</Link>
@@ -91,8 +99,8 @@ export default function RequestsHistoryPage() {
       {state === "ready" && (
         <>
           {/* Blocklist */}
-          <section style={{ marginBottom: 28 }}>
-            <h2 style={{ fontSize: "1.1rem" }}>Blocklist</h2>
+          <section style={{ ...card, marginBottom: 20 }}>
+            <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Blocklist</h2>
             <p className="muted tiny">
               Une adresse bloquée ne peut plus déposer de demande d'inscription (silencieusement).
             </p>
@@ -133,7 +141,7 @@ export default function RequestsHistoryPage() {
                       display: "flex",
                       alignItems: "center",
                       gap: 8,
-                      borderBottom: "1px solid #eee",
+                      borderBottom: "1px solid var(--pico-card-border-color, #eee)",
                       padding: "6px 0",
                     }}
                   >
@@ -156,8 +164,8 @@ export default function RequestsHistoryPage() {
           </section>
 
           {/* Historique */}
-          <section>
-            <h2 style={{ fontSize: "1.1rem" }}>Historique des demandes</h2>
+          <section style={card}>
+            <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Historique des demandes</h2>
             {history.length === 0 ? (
               <p className="muted tiny">Aucune demande traitée.</p>
             ) : (
