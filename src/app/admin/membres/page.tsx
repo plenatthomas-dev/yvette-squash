@@ -154,11 +154,13 @@ export default function MembersPage() {
     }
   };
 
-  // Pas de className="login" ici : cette page a besoin de toute la largeur (jusqu'à 900px, cf.
-  // la règle `main`) pour étaler la grille de cartes — la contrainte 400px de `.login` est
-  // justement ce qui rendait le tableau illisible sur PC.
+  // Pas de className="login" ici : cette page a besoin de toute la largeur pour étaler la grille
+  // de cartes — la contrainte 400px de `.login` est justement ce qui rendait le tableau illisible
+  // sur PC. On élargit même AU-DELÀ des 900px de la règle globale `main` (override inline, propre
+  // à cette page) : sur grand écran, 900px ne tenait que 2 cartes en laissant de larges marges
+  // vides. `margin-inline:auto` et le `padding` de la règle `main` restent hérités.
   return (
-    <main>
+    <main style={{ maxWidth: 1200 }}>
       <h1>Membres</h1>
       <p className="muted tiny">
         <Link href="/admin">← Retour à l'admin</Link>
@@ -182,12 +184,14 @@ export default function MembersPage() {
             )}
             .
           </p>
-          {/* Grille responsive : plusieurs cartes de front sur PC, une seule sur mobile, sans
-              jamais de défilement horizontal (min(280px,100%) empêche tout débordement). */}
+          {/* Grille responsive : plusieurs cartes de front sur PC (≈3 colonnes dans les 1200px),
+              une seule sur mobile, sans jamais de défilement horizontal (min(320px,100%) empêche
+              tout débordement). Largeur mini montée à 320px pour des cartes confortables plutôt
+              que des colonnes trop étroites. */}
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(min(280px, 100%), 1fr))",
+              gridTemplateColumns: "repeat(auto-fill, minmax(min(320px, 100%), 1fr))",
               gap: 12,
               alignItems: "start",
             }}
