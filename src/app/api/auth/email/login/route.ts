@@ -4,6 +4,7 @@ import { hashPassword, verifyPassword } from "@/lib/crypto";
 import { normalizeEmail, createEmailSession } from "@/lib/session";
 import { getFeatures } from "@/lib/features-server";
 import { EMAIL_RE, clientIp } from "@/lib/email-auth";
+import { isDbUnavailable, dbUnavailableResponse } from "@/lib/db-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,58 +43,66 @@ export async function POST(req: NextRequest) {
   const email = normalizeEmail(body.email);
   const ip = clientIp(req);
   const since = new Date(Date.now() - WINDOW_MS);
-  // Purge opportuniste des échecs sortis de la fenêtre (toutes IP : garde la table minuscule),
-  // puis comptage sur les DEUX dimensions.
-  await prisma.loginAttempt.deleteMany({ where: { createdAt: { lt: since } } });
-  const [ipFailures, accountFailures] = await Promise.all([
-    prisma.loginAttempt.count({ where: { ip, createdAt: { gte: since } } }),
-    prisma.loginAttempt.count({ where: { identifier: email, createdAt: { gte: since } } }),
-  ]);
-  if (ipFailures >= MAX_FAILURES || accountFailures >= MAX_FAILURES_ACCOUNT) {
-    // Message identique dans les deux cas : ne pas révéler laquelle des deux limites a sauté
-    // (sinon on apprend à l'attaquant que le compte visé existe et est ciblé).
-    return NextResponse.json(
-      { error: "Trop de tentatives — réessaie dans quelques minutes." },
-      { status: 429 },
-    );
-  }
+  // Toutes les opérations base sont sous garde : si la base est injoignable (Neon en veille /
+  // au-delà du quota compute), on répond 503 « maintenance » lisible AU LIEU d'un 500 au corps
+  // vide qui casserait `res.json()` côté client (cf. lib/apiFetch, lib/db-error).
+  try {
+    // Purge opportuniste des échecs sortis de la fenêtre (toutes IP : garde la table minuscule),
+    // puis comptage sur les DEUX dimensions.
+    await prisma.loginAttempt.deleteMany({ where: { createdAt: { lt: since } } });
+    const [ipFailures, accountFailures] = await Promise.all([
+      prisma.loginAttempt.count({ where: { ip, createdAt: { gte: since } } }),
+      prisma.loginAttempt.count({ where: { identifier: email, createdAt: { gte: since } } }),
+    ]);
+    if (ipFailures >= MAX_FAILURES || accountFailures >= MAX_FAILURES_ACCOUNT) {
+      // Message identique dans les deux cas : ne pas révéler laquelle des deux limites a sauté
+      // (sinon on apprend à l'attaquant que le compte visé existe et est ciblé).
+      return NextResponse.json(
+        { error: "Trop de tentatives — réessaie dans quelques minutes." },
+        { status: 429 },
+      );
+    }
 
-  const user = await prisma.user.findUnique({ where: { email } });
-  // Connexion possible seulement si un mot de passe est posé ET l'email est vérifié.
-  let ok = false;
-  if (user?.passwordHash && user.emailVerifiedAt) {
-    ok = await verifyPassword(body.password, user.passwordHash);
-  } else {
-    // Aucun compte utilisable : on vérifie quand même contre un hash leurre pour dépenser
-    // le même temps CPU (pas d'oracle de timing révélant l'existence d'un compte).
-    await verifyPassword(body.password, await dummyHash);
-  }
+    const user = await prisma.user.findUnique({ where: { email } });
+    // Connexion possible seulement si un mot de passe est posé ET l'email est vérifié.
+    let ok = false;
+    if (user?.passwordHash && user.emailVerifiedAt) {
+      ok = await verifyPassword(body.password, user.passwordHash);
+    } else {
+      // Aucun compte utilisable : on vérifie quand même contre un hash leurre pour dépenser
+      // le même temps CPU (pas d'oracle de timing révélant l'existence d'un compte).
+      await verifyPassword(body.password, await dummyHash);
+    }
 
-  if (!ok || !user) {
-    // Échec : on incrémente les deux compteurs (IP et identifiant visé).
-    await prisma.loginAttempt.create({ data: { ip, identifier: email } }).catch(() => {});
-    return NextResponse.json({ error: "Email ou mot de passe incorrect." }, { status: 401 });
-  }
-  // Compte désactivé par un admin : identifiants corrects, mais accès bloqué localement.
-  if (user.disabledAt) {
-    return NextResponse.json(
-      { error: "Ce compte a été désactivé. Contacte un responsable du club." },
-      { status: 403 },
-    );
-  }
+    if (!ok || !user) {
+      // Échec : on incrémente les deux compteurs (IP et identifiant visé).
+      await prisma.loginAttempt.create({ data: { ip, identifier: email } }).catch(() => {});
+      return NextResponse.json({ error: "Email ou mot de passe incorrect." }, { status: 401 });
+    }
+    // Compte désactivé par un admin : identifiants corrects, mais accès bloqué localement.
+    if (user.disabledAt) {
+      return NextResponse.json(
+        { error: "Ce compte a été désactivé. Contacte un responsable du club." },
+        { status: 403 },
+      );
+    }
 
-  // Succès : on efface l'ardoise de cette IP ET de ce compte (les fautes de frappe précédentes
-  // ne doivent pénaliser ni les prochains logins du foyer/club, ni le membre), puis on ouvre
-  // une session « email seul ».
-  await prisma.loginAttempt.deleteMany({ where: { OR: [{ ip }, { identifier: email }] } });
-  const sid = await createEmailSession(user.id);
-  const res = NextResponse.json({ displayName: user.displayName });
-  res.cookies.set("sid", sid, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: SESSION_MAX_AGE,
-  });
-  return res;
+    // Succès : on efface l'ardoise de cette IP ET de ce compte (les fautes de frappe précédentes
+    // ne doivent pénaliser ni les prochains logins du foyer/club, ni le membre), puis on ouvre
+    // une session « email seul ».
+    await prisma.loginAttempt.deleteMany({ where: { OR: [{ ip }, { identifier: email }] } });
+    const sid = await createEmailSession(user.id);
+    const res = NextResponse.json({ displayName: user.displayName });
+    res.cookies.set("sid", sid, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: SESSION_MAX_AGE,
+    });
+    return res;
+  } catch (e) {
+    if (isDbUnavailable(e)) return dbUnavailableResponse();
+    throw e; // vraie erreur inattendue → laisse Next répondre 500
+  }
 }

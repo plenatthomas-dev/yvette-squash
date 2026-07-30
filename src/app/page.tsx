@@ -42,6 +42,7 @@ import {
 } from "@/lib/pushClient";
 import { useFeatures } from "@/components/FeatureProvider";
 import { recheckBanner } from "@/components/AnnouncementBanner";
+import { reportMaintenance } from "@/lib/apiFetch";
 import { unlockAudio, playSuccessJingle, playError, playAlert } from "@/lib/sound";
 
 function toISODate(d: Date): string {
@@ -227,7 +228,16 @@ export default function Home() {
   };
 
   const checkMe = useCallback(async () => {
-    const res = await fetch("/api/auth/me");
+    let res: Response;
+    try {
+      res = await fetch("/api/auth/me");
+    } catch {
+      // Serveur/réseau injoignable au démarrage : possible indisponibilité de la base → on laisse
+      // la bannière de maintenance confirmer (via /api/health) et on retombe sur l'écran de login.
+      reportMaintenance();
+      setMe(null);
+      return;
+    }
     if (res.ok) {
       const data = await res.json();
       setMe(data.displayName);
@@ -239,6 +249,9 @@ export default function Home() {
       setIsAdmin(data.isAdmin ?? false);
       setPendingRequests(data.pendingRequests ?? 0);
     } else {
+      // 401 = simplement pas connecté (cas normal). Un 5xx, lui, trahit une panne serveur —
+      // typiquement la base à terre : on signale la maintenance (la bannière confirmera).
+      if (res.status >= 500) reportMaintenance();
       setMe(null);
       setMyId(null);
       setMyHandle("");

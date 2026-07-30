@@ -3,6 +3,7 @@ import { login } from "@/lib/resamania/client";
 import { createSession, AccountDisabledError, normalizeEmail } from "@/lib/session";
 import { clientIp } from "@/lib/client-ip";
 import { prisma } from "@/lib/db";
+import { isDbUnavailable, dbUnavailableResponse } from "@/lib/db-error";
 
 export const runtime = "nodejs";
 
@@ -34,55 +35,66 @@ export async function POST(req: NextRequest) {
   const ip = clientIp(req);
   const account = normalizeEmail(username); // même clé quelle que soit la casse/les espaces
   const since = new Date(Date.now() - WINDOW_MS);
-  // Purge opportuniste des échecs sortis de la fenêtre (toutes IP : garde la table minuscule),
-  // puis comptage sur les DEUX dimensions.
-  await prisma.loginAttempt.deleteMany({ where: { createdAt: { lt: since } } });
-  const [ipFailures, accountFailures] = await Promise.all([
-    prisma.loginAttempt.count({ where: { ip, createdAt: { gte: since } } }),
-    prisma.loginAttempt.count({ where: { identifier: account, createdAt: { gte: since } } }),
-  ]);
-  if (ipFailures >= MAX_FAILURES || accountFailures >= MAX_FAILURES_ACCOUNT) {
-    // Message identique dans les deux cas : ne pas révéler laquelle des deux limites a sauté
-    // (sinon on apprend à l'attaquant que le compte visé existe et est ciblé).
-    return NextResponse.json(
-      { error: "Trop de tentatives — réessaie dans quelques minutes." },
-      { status: 429 },
-    );
-  }
-
+  // Garde base : si la base est injoignable (Neon en veille / au-delà du quota compute), on répond
+  // 503 « maintenance » lisible AU LIEU d'un 500 au corps vide qui casserait `res.json()` côté
+  // client (cf. lib/apiFetch, lib/db-error).
   try {
-    const resa = await login({ username, password });
-    // Connexion réussie : on efface l'ardoise de cette IP ET de ce compte (les fautes de frappe
-    // précédentes ne doivent pénaliser ni les prochains logins du foyer/club, ni le membre).
-    await prisma.loginAttempt.deleteMany({ where: { OR: [{ ip }, { identifier: account }] } });
-    const sid = await createSession(resa);
-    const res = NextResponse.json({
-      displayName: `${resa.identity.givenName} ${resa.identity.familyName}`.trim(),
-    });
-    res.cookies.set("sid", sid, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 30,
-    });
-    return res;
-  } catch (e) {
-    // Compte désactivé par un admin : l'authentification ResaMania a réussi, ce n'est PAS un
-    // échec d'identifiants → 403 explicite, sans incrémenter le compteur anti-brute-force.
-    if (e instanceof AccountDisabledError) {
+    // Purge opportuniste des échecs sortis de la fenêtre (toutes IP : garde la table minuscule),
+    // puis comptage sur les DEUX dimensions.
+    await prisma.loginAttempt.deleteMany({ where: { createdAt: { lt: since } } });
+    const [ipFailures, accountFailures] = await Promise.all([
+      prisma.loginAttempt.count({ where: { ip, createdAt: { gte: since } } }),
+      prisma.loginAttempt.count({ where: { identifier: account, createdAt: { gte: since } } }),
+    ]);
+    if (ipFailures >= MAX_FAILURES || accountFailures >= MAX_FAILURES_ACCOUNT) {
+      // Message identique dans les deux cas : ne pas révéler laquelle des deux limites a sauté
+      // (sinon on apprend à l'attaquant que le compte visé existe et est ciblé).
       return NextResponse.json(
-        { error: "Ce compte a été désactivé. Contacte un responsable du club." },
-        { status: 403 },
+        { error: "Trop de tentatives — réessaie dans quelques minutes." },
+        { status: 429 },
       );
     }
-    // Échec (identifiants invalides ou flux interrompu) : on incrémente les deux compteurs.
-    await prisma.loginAttempt.create({ data: { ip, identifier: account } }).catch(() => {});
-    // Détail journalisé côté serveur ; message générique pour ne rien divulguer de l'amont.
-    console.error("[login] échec:", e);
-    return NextResponse.json(
-      { error: "Identifiants invalides ou service momentanément indisponible" },
-      { status: 401 },
-    );
+
+    try {
+      const resa = await login({ username, password });
+      // Connexion réussie : on efface l'ardoise de cette IP ET de ce compte (les fautes de frappe
+      // précédentes ne doivent pénaliser ni les prochains logins du foyer/club, ni le membre).
+      await prisma.loginAttempt.deleteMany({ where: { OR: [{ ip }, { identifier: account }] } });
+      const sid = await createSession(resa);
+      const res = NextResponse.json({
+        displayName: `${resa.identity.givenName} ${resa.identity.familyName}`.trim(),
+      });
+      res.cookies.set("sid", sid, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: 60 * 60 * 24 * 30,
+      });
+      return res;
+    } catch (e) {
+      // Compte désactivé par un admin : l'authentification ResaMania a réussi, ce n'est PAS un
+      // échec d'identifiants → 403 explicite, sans incrémenter le compteur anti-brute-force.
+      if (e instanceof AccountDisabledError) {
+        return NextResponse.json(
+          { error: "Ce compte a été désactivé. Contacte un responsable du club." },
+          { status: 403 },
+        );
+      }
+      // Base injoignable (ex. createSession qui écrit la session) : ce N'EST PAS un mauvais mot de
+      // passe → on la laisse remonter à la garde externe (→ 503) plutôt que de la maquiller en 401.
+      if (isDbUnavailable(e)) throw e;
+      // Échec (identifiants invalides ou flux interrompu) : on incrémente les deux compteurs.
+      await prisma.loginAttempt.create({ data: { ip, identifier: account } }).catch(() => {});
+      // Détail journalisé côté serveur ; message générique pour ne rien divulguer de l'amont.
+      console.error("[login] échec:", e);
+      return NextResponse.json(
+        { error: "Identifiants invalides ou service momentanément indisponible" },
+        { status: 401 },
+      );
+    }
+  } catch (e) {
+    if (isDbUnavailable(e)) return dbUnavailableResponse();
+    throw e; // vraie erreur inattendue → laisse Next répondre 500
   }
 }

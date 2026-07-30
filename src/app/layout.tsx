@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import MaintenanceBanner from "@/components/MaintenanceBanner";
 import AnnouncementBanner from "@/components/AnnouncementBanner";
 import AnnounceModal from "@/components/AnnounceModal";
 import FeatureProvider from "@/components/FeatureProvider";
@@ -49,6 +50,7 @@ export default async function RootLayout({
     <html lang="fr" suppressHydrationWarning>
       <body>
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <MaintenanceBanner />
         <AnnouncementBanner />
         <FeatureProvider>{children}</FeatureProvider>
         <AnnounceModal />

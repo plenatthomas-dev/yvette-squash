@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
 import { useFeatures } from "@/components/FeatureProvider";
+import { readJson } from "@/lib/apiFetch";
 import {
   loginWithPasskey,
   passkeySupported,
@@ -170,7 +171,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
-      const data = await res.json();
+      const data = await readJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(data.error ?? "Connexion impossible");
       onLoggedIn();
     } catch (e) {
@@ -191,7 +192,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password: emailPassword }),
       });
-      const data = await res.json();
+      const data = await readJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(data.error ?? "Connexion impossible");
       onLoggedIn();
     } catch (e) {
@@ -213,7 +214,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, name: name.trim() || undefined }),
       });
-      const data = await res.json();
+      const data = await readJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(data.error ?? "Inscription impossible");
       setInfo(
         `Demande envoyée ✅ Un administrateur va la valider et te transmettre ton lien d'activation directement (WhatsApp, SMS…). Rien à surveiller dans tes mails.`,
@@ -237,7 +238,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
-      const data = await res.json();
+      const data = await readJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(data.error ?? "Envoi impossible");
       setInfo(
         `Si un compte existe pour ${email}, un administrateur validera ta demande et te transmettra un lien de réinitialisation directement.`,
