@@ -14,10 +14,15 @@ const h = vi.hoisted(() => ({
   create: vi.fn(async (_args: { data: { ip: string; identifier: string } }) => ({})),
   deleteMany: vi.fn(async (_args: { where: Record<string, unknown> }) => ({ count: 0 })),
   login: vi.fn(),
+  // Réglage `block` lu par la garde « appli fermée ». `null` = appli ouverte (défaut).
+  appSetting: vi.fn(async () => null as { value: string } | null),
 }));
 
 vi.mock("@/lib/db", () => ({
-  prisma: { loginAttempt: { count: h.count, create: h.create, deleteMany: h.deleteMany } },
+  prisma: {
+    loginAttempt: { count: h.count, create: h.create, deleteMany: h.deleteMany },
+    appSetting: { findUnique: h.appSetting },
+  },
 }));
 vi.mock("@/lib/resamania/client", () => ({ login: h.login }));
 vi.mock("@/lib/session", () => ({
@@ -45,6 +50,8 @@ beforeEach(() => {
     args.where.ip !== undefined ? h.ipCount : h.accountCount,
   );
   h.login.mockResolvedValue({ identity: { givenName: "Alice", familyName: "Martin" } });
+  h.appSetting.mockResolvedValue(null); // appli ouverte par défaut
+  process.env.ADMIN_EMAILS = "chef@example.com";
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -102,5 +109,43 @@ describe("POST /api/auth/login — rate limiting", () => {
     const res = await POST(req({ username: { $ne: null }, password: "pw" }));
     expect(res.status).toBe(400);
     expect(h.count).not.toHaveBeenCalled();
+  });
+});
+
+// Blocage de l'appli piloté depuis /admin : les membres ne se connectent plus, les admins si.
+describe("POST /api/auth/login — appli bloquée", () => {
+  const blocked = { value: JSON.stringify({ enabled: true, message: "Appli en maintenance" }) };
+
+  it("refuse un membre avec le message de l'admin, sans appeler ResaMania", async () => {
+    h.appSetting.mockResolvedValue(blocked);
+    const res = await POST(req(creds, { "x-real-ip": "1.2.3.4" }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: "Appli en maintenance", blocked: true });
+    expect(h.login).not.toHaveBeenCalled();
+  });
+
+  it("laisse passer un ADMIN (c'est tout l'intérêt : intervenir appli fermée)", async () => {
+    h.appSetting.mockResolvedValue(blocked);
+    const res = await POST(
+      req({ username: "chef@example.com", password: "pw" }, { "x-real-ip": "1.2.3.4" }),
+    );
+    expect(res.status).toBe(200);
+    expect(h.login).toHaveBeenCalled();
+  });
+
+  it("ne renvoie PAS le drapeau `maintenance` (ne doit pas passer pour une panne de base)", async () => {
+    h.appSetting.mockResolvedValue(blocked);
+    const res = await POST(req(creds, { "x-real-ip": "1.2.3.4" }));
+    // `maintenance: true` déclencherait la bannière automatique côté client (cf. lib/apiFetch),
+    // qui annonce une base injoignable — ici c'est une fermeture VOLONTAIRE, message différent.
+    expect(await res.json()).not.toHaveProperty("maintenance");
+  });
+
+  it("laisse l'appli OUVERTE si la lecture du réglage échoue (fail-open)", async () => {
+    // Se tromper en fermant le club entier serait bien plus grave que de laisser passer
+    // quelqu'un pendant une panne de réglage.
+    h.appSetting.mockRejectedValue(new Error("base injoignable"));
+    const res = await POST(req(creds, { "x-real-ip": "1.2.3.4" }));
+    expect(res.status).toBe(200);
   });
 });

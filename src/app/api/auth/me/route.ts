@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { buildHandleMap } from "@/lib/handle";
 import { isAdminEmail } from "@/lib/admin";
 import { countPendingRequests } from "@/lib/email-auth";
+import { getAppBlock } from "@/lib/settings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +28,12 @@ export async function GET(req: NextRequest) {
   // Admin (allowlist ADMIN_EMAILS) : pilote l'entrée « Admin » + son badge de demandes en attente.
   const isAdmin = isAdminEmail(me?.email);
   const pendingRequests = isAdmin ? await countPendingRequests() : 0;
+  // Appli fermée par un admin : les sessions DÉJÀ ouvertes doivent l'apprendre ici. Sans ça,
+  // bloquer la connexion n'aurait quasiment aucun effet le jour où on l'active — les sessions
+  // durent 30 jours, donc presque personne n'a besoin de se reconnecter. `null` pour l'admin.
+  const block = isAdmin ? null : await getAppBlock();
   return NextResponse.json({
+    blocked: block?.message ?? null,
     // Id interne du membre : permet au client de se reconnaître dans les listes
     // issues de l'annuaire (ex. s'exclure du choix des délégués).
     id: session.userId,

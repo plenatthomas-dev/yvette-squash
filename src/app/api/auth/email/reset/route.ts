@@ -10,6 +10,7 @@ import {
   nameFromEmail,
 } from "@/lib/email-auth";
 import type { TokenPurpose } from "@/lib/email-auth";
+import { appBlockForEmail, appBlockedResponse } from "@/lib/app-block";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,6 +40,12 @@ export async function POST(req: NextRequest) {
   if (!row) {
     return NextResponse.json({ error: "Lien invalide ou expiré." }, { status: 400 });
   }
+  // Appli fermée par un admin : on refuse AVANT de toucher à quoi que ce soit. Le jeton n'est
+  // donc PAS consommé et le lien reste valable une fois l'appli rouverte (sous réserve de sa
+  // propre expiration) — refuser après coup aurait brûlé le lien pour rien.
+  const block = await appBlockForEmail(row.email);
+  if (block) return appBlockedResponse(block);
+
   const purpose = row.purpose as TokenPurpose;
   const passwordHash = await hashPassword(body.password as string);
 

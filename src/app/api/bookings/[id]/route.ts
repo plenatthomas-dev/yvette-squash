@@ -4,6 +4,7 @@ import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { resolveActingContext } from "@/lib/delegation";
 import { refreshSnapshotFromResa } from "@/lib/planning-snapshot";
+import { appBlockForUserId, appBlockedResponse } from "@/lib/app-block";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,10 @@ export async function DELETE(
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
+  // Appli fermée par un admin : plus d'annulation côté membres (les admins passent).
+  const block = await appBlockForUserId(session.userId);
+  if (block) return appBlockedResponse(block);
+
   const { onBehalfOf } = (await req.json().catch(() => ({}))) as { onBehalfOf?: unknown };
 
   const acting = await resolveActingContext(

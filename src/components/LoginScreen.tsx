@@ -311,7 +311,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
           <form onSubmit={submitResa}>
             <input
               type="text"
-              placeholder="Identifiant (email)"
+              placeholder="Identifiant ResaMania (email)"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               // « webauthn » (quand la biométrie est active) branche l'autofill conditionnel :

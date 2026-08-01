@@ -73,6 +73,15 @@ export default function AdminPage() {
   // « Bannière retirée » alors qu'il n'avait rien retiré.
   const [bnPublished, setBnPublished] = useState(false);
 
+  // Blocage de l'appli : ferme l'appli aux membres (connexion + réservation), l'admin garde
+  // l'accès complet. `blkLoaded` évite d'afficher un switch « ouvert » avant d'avoir lu l'état
+  // réel — sur une appli fermée, ce faux « ouvert » serait trompeur.
+  const [blkEnabled, setBlkEnabled] = useState(false);
+  const [blkMessage, setBlkMessage] = useState("");
+  const [blkLoaded, setBlkLoaded] = useState(false);
+  const [blkBusy, setBlkBusy] = useState(false);
+  const [blkResult, setBlkResult] = useState<{ ok: boolean; text: string } | null>(null);
+
   // Mini-tableau de bord (étape 4).
   const [dash, setDash] = useState<Dashboard | null>(null);
 
@@ -112,6 +121,22 @@ export default function AdminPage() {
         }
       } catch {
         /* pas de bannière à pré-remplir */
+      }
+    })();
+  }, []);
+
+  // État courant du blocage (switch + message déjà saisi).
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/block");
+        if (!res.ok) return;
+        const data = (await res.json()) as { enabled: boolean; message: string };
+        setBlkEnabled(data.enabled);
+        setBlkMessage(data.message);
+        setBlkLoaded(true);
+      } catch {
+        /* état indisponible : le panneau reste en lecture « inconnue » */
       }
     })();
   }, []);
@@ -207,6 +232,42 @@ export default function AdminPage() {
       setBnResult({ ok: false, text: "Enregistrement impossible." });
     } finally {
       setBnBusy(false);
+    }
+  };
+
+  // Ferme ou rouvre l'appli. `enabled` est l'état VOULU (le switch est piloté par le serveur :
+  // on ne bascule l'affichage qu'après confirmation, pour ne jamais laisser croire que l'appli
+  // est fermée si l'enregistrement a échoué).
+  const saveBlock = async (enabled: boolean) => {
+    setBlkBusy(true);
+    setBlkResult(null);
+    try {
+      const res = await fetch("/api/admin/block", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled, message: blkMessage.trim() }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        enabled?: boolean;
+        message?: string;
+      };
+      if (!res.ok) {
+        setBlkResult({ ok: false, text: data.error ?? "Enregistrement impossible." });
+        return;
+      }
+      setBlkEnabled(data.enabled ?? enabled);
+      if (typeof data.message === "string") setBlkMessage(data.message);
+      setBlkResult({
+        ok: true,
+        text: enabled
+          ? "Appli fermée aux membres. Toi, tu gardes l'accès complet."
+          : "Appli rouverte à tous les membres.",
+      });
+    } catch {
+      setBlkResult({ ok: false, text: "Enregistrement impossible." });
+    } finally {
+      setBlkBusy(false);
     }
   };
 
@@ -431,6 +492,65 @@ export default function AdminPage() {
               la largeur → 2 cartes de front sur PC, 1 seule sur écran étroit, sans trous de
               hauteur (chaque carte porte `breakInside: avoid`). */}
           <div style={{ columnWidth: 440, columnGap: 16 }}>
+            {/* Fermeture de l'appli aux membres. Placée en tête : c'est le bouton le plus
+                lourd de conséquences de cette page. */}
+            <section style={masonryCard}>
+              <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Blocage de l&apos;appli</h2>
+              <p className="muted tiny">
+                Ferme l&apos;appli aux membres : plus de connexion (mot de passe, email et
+                biométrie) ni de réservation, et un écran affichant ton message pour ceux déjà
+                connectés. <strong>Les administrateurs gardent un accès complet.</strong>
+              </p>
+              <textarea
+                placeholder="Message affiché aux membres (ex. Appli en maintenance)"
+                value={blkMessage}
+                maxLength={280}
+                rows={2}
+                disabled={blkBusy}
+                onChange={(e) => setBlkMessage(e.target.value)}
+                style={{ width: "100%", marginBottom: 8 }}
+              />
+              <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={blkEnabled}
+                  disabled={blkBusy || !blkLoaded}
+                  onChange={(e) => saveBlock(e.target.checked)}
+                  style={{ marginBottom: 0 }}
+                />
+                <span>
+                  {!blkLoaded
+                    ? "Lecture de l'état…"
+                    : blkEnabled
+                      ? "🔴 Appli fermée aux membres"
+                      : "🟢 Appli ouverte à tous"}
+                </span>
+              </label>
+              {blkEnabled && blkLoaded && (
+                <p className="muted tiny" style={{ marginBottom: 8 }}>
+                  Modifier le message ci-dessus ne le republie pas tout seul : rebascule le
+                  switch, ou clique « Mettre à jour le message ».
+                </p>
+              )}
+              {blkEnabled && blkLoaded && (
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={blkBusy}
+                  onClick={() => saveBlock(true)}
+                >
+                  {blkBusy ? "…" : "Mettre à jour le message"}
+                </button>
+              )}
+              {blkResult && (
+                <div className={`notice ${blkResult.ok ? "info" : "error"}`} style={{ marginTop: 8 }}>
+                  {blkResult.ok ? "✓ " : "⚠️ "}
+                  {blkResult.text}
+                </div>
+              )}
+            </section>
+
             {/* Pilotage à chaud des fonctions (étape #9). */}
             <div style={masonryCard}>
               <FeatureFlagsPanel />

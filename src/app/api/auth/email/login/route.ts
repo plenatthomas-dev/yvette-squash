@@ -5,6 +5,7 @@ import { normalizeEmail, createEmailSession } from "@/lib/session";
 import { getFeatures } from "@/lib/features-server";
 import { EMAIL_RE, clientIp } from "@/lib/email-auth";
 import { isDbUnavailable, dbUnavailableResponse } from "@/lib/db-error";
+import { appBlockForEmail, appBlockedResponse } from "@/lib/app-block";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,6 +48,11 @@ export async function POST(req: NextRequest) {
   // au-delà du quota compute), on répond 503 « maintenance » lisible AU LIEU d'un 500 au corps
   // vide qui casserait `res.json()` côté client (cf. lib/apiFetch, lib/db-error).
   try {
+    // Appli fermée par un admin (switch de /admin) : les membres ne se connectent plus, les
+    // admins traversent (le mot de passe reste évidemment exigé juste après).
+    const block = await appBlockForEmail(email);
+    if (block) return appBlockedResponse(block);
+
     // Purge opportuniste des échecs sortis de la fenêtre (toutes IP : garde la table minuscule),
     // puis comptage sur les DEUX dimensions.
     await prisma.loginAttempt.deleteMany({ where: { createdAt: { lt: since } } });

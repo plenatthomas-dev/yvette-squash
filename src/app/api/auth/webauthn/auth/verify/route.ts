@@ -16,6 +16,7 @@ import {
   CHALLENGE_COOKIE,
   challengeCookieOptions,
 } from "@/lib/webauthn";
+import { appBlockForEmail, appBlockedResponse } from "@/lib/app-block";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,6 +70,15 @@ export async function POST(req: NextRequest) {
   }
   if (passkey.user.disabledAt) {
     return fail(403, "Ce compte a été désactivé. Contacte un responsable du club.");
+  }
+  // Appli fermée par un admin : la biométrie est un CHEMIN DE CONNEXION à part entière — sans
+  // cette garde, un membre déjà appairé continuerait d'entrer alors que mot de passe et email
+  // sont bloqués. Le passkey ayant déjà identifié le compte, on sait si c'est un admin.
+  const block = await appBlockForEmail(passkey.user.email);
+  if (block) {
+    const res = appBlockedResponse(block);
+    res.cookies.set(CHALLENGE_COOKIE, "", challengeCookieOptions(0)); // défi à usage unique
+    return res;
   }
 
   const { rpID, origin } = rpParams(req);

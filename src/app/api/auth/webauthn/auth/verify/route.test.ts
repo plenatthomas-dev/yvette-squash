@@ -27,7 +27,11 @@ vi.mock("@/lib/features-server", () => ({
   getFeatures: async () => ({ biometry: h.biometry }),
 }));
 vi.mock("@/lib/client-ip", () => ({ clientIp: () => "1.2.3.4" }));
-vi.mock("@/lib/session", () => ({
+// Mock PARTIEL : la route passe désormais par la garde « appli bloquée », qui remonte à
+// `normalizeEmail` (lib/session) via lib/admin. Remplacer tout le module ferait disparaître cet
+// export et casserait la route pour une raison sans rapport avec ce qu'on teste ici.
+vi.mock("@/lib/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/session")>()),
   createResaSessionFromUser: vi.fn(async () => h.resaSid),
   createEmailSession: vi.fn(async () => h.emailSid),
 }));
@@ -45,6 +49,9 @@ vi.mock("@/lib/db", () => ({
       findUnique: vi.fn(async () => h.passkey),
       update: h.passkeyUpdate,
     },
+    // Lu par la garde « appli bloquée » (lib/settings). `null` = appli ouverte : ces tests
+    // portent sur la cérémonie biométrique, pas sur le blocage.
+    appSetting: { findUnique: vi.fn(async () => null) },
   },
 }));
 

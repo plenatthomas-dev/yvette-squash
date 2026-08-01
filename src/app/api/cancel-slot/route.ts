@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { isClassEventId } from "@/lib/validation";
 import { resolveActingContext } from "@/lib/delegation";
 import { refreshSnapshotFromResa } from "@/lib/planning-snapshot";
+import { appBlockForUserId, appBlockedResponse } from "@/lib/app-block";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,10 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
+  // Appli fermée par un admin : plus d'annulation côté membres (les admins passent).
+  const block = await appBlockForUserId(session.userId);
+  if (block) return appBlockedResponse(block);
+
   const { classEventId, onBehalfOf } = (await req.json().catch(() => ({}))) as {
     classEventId?: unknown;
     onBehalfOf?: unknown;

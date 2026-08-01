@@ -1,10 +1,11 @@
 // Réglages applicatifs éditables sans redéploiement (store clé/valeur AppSetting, étape 2).
-// Pour l'instant : la bannière d'annonce. Les routes restent minces en s'appuyant sur ces
-// helpers ; `value` est une chaîne opaque dont la forme dépend de la clé.
+// Aujourd'hui : la bannière d'annonce et le blocage de l'appli. Les routes restent minces en
+// s'appuyant sur ces helpers ; `value` est une chaîne opaque dont la forme dépend de la clé.
 
 import { prisma } from "./db";
 
 export const BANNER_MAX = 280;
+export const BLOCK_MAX = 280;
 
 export type BannerLevel = "info" | "warn";
 export type Banner = {
@@ -61,6 +62,90 @@ export async function setBanner(
 /** Retire la bannière (plus rien n'est affiché). */
 export async function clearBanner(): Promise<void> {
   await prisma.appSetting.deleteMany({ where: { key: BANNER_KEY } });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Blocage de l'appli (« Appli en maintenance »), piloté depuis /admin.
+//
+// Quand il est actif, les MEMBRES ne peuvent plus ni se connecter ni réserver ; les ADMINS
+// gardent un accès complet (c'est tout l'intérêt : intervenir pendant que l'appli est fermée).
+// Volontairement distinct de la bannière `MaintenanceBanner`, qui, elle, est AUTOMATIQUE et
+// signale une base injoignable — ici c'est une décision humaine, réversible d'un clic.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const BLOCK_KEY = "block";
+
+export const BLOCK_DEFAULT_MESSAGE = "Appli en maintenance";
+
+export type AppBlock = { message: string };
+
+/**
+ * Blocage courant, ou `null` si l'appli est ouverte. Ne jette jamais : un pépin de lecture doit
+ * laisser l'appli OUVERTE (fail-open). C'est le bon défaut ici — se tromper en fermant le club
+ * entier serait bien plus grave que de laisser passer quelqu'un pendant une panne de réglage.
+ */
+export async function getAppBlock(): Promise<AppBlock | null> {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: BLOCK_KEY } });
+    if (!row) return null;
+    const parsed = JSON.parse(row.value) as { enabled?: unknown; message?: unknown };
+    if (parsed.enabled !== true) return null;
+    const message =
+      typeof parsed.message === "string" && parsed.message.trim()
+        ? parsed.message.trim()
+        : BLOCK_DEFAULT_MESSAGE;
+    return { message };
+  } catch (e) {
+    console.error("[settings] lecture du blocage impossible — appli laissée ouverte", e);
+    return null;
+  }
+}
+
+/** Active le blocage avec ce message (vide → message par défaut). */
+export async function setAppBlock(message: string, updatedById: string): Promise<void> {
+  const value = JSON.stringify({
+    enabled: true,
+    message: (message.trim() || BLOCK_DEFAULT_MESSAGE).slice(0, BLOCK_MAX),
+  });
+  await prisma.appSetting.upsert({
+    where: { key: BLOCK_KEY },
+    create: { key: BLOCK_KEY, value, updatedById },
+    update: { value, updatedById },
+  });
+}
+
+/**
+ * Rouvre l'appli. On CONSERVE la ligne (`enabled: false`) au lieu de la supprimer : le message
+ * saisi reste pré-rempli dans /admin pour la prochaine fois.
+ */
+export async function clearAppBlock(message: string, updatedById: string): Promise<void> {
+  const value = JSON.stringify({
+    enabled: false,
+    message: (message.trim() || BLOCK_DEFAULT_MESSAGE).slice(0, BLOCK_MAX),
+  });
+  await prisma.appSetting.upsert({
+    where: { key: BLOCK_KEY },
+    create: { key: BLOCK_KEY, value, updatedById },
+    update: { value, updatedById },
+  });
+}
+
+/** État brut pour l'écran d'admin : le switch ET le message, même blocage inactif. */
+export async function getAppBlockSetting(): Promise<{ enabled: boolean; message: string }> {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: BLOCK_KEY } });
+    if (!row) return { enabled: false, message: BLOCK_DEFAULT_MESSAGE };
+    const parsed = JSON.parse(row.value) as { enabled?: unknown; message?: unknown };
+    return {
+      enabled: parsed.enabled === true,
+      message:
+        typeof parsed.message === "string" && parsed.message.trim()
+          ? parsed.message.trim()
+          : BLOCK_DEFAULT_MESSAGE,
+    };
+  } catch {
+    return { enabled: false, message: BLOCK_DEFAULT_MESSAGE };
+  }
 }
 
 /** Ce que ce membre a déjà masqué : versions du bandeau fermé / de la modale vue. */

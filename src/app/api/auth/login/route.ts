@@ -4,6 +4,7 @@ import { createSession, AccountDisabledError, normalizeEmail } from "@/lib/sessi
 import { clientIp } from "@/lib/client-ip";
 import { prisma } from "@/lib/db";
 import { isDbUnavailable, dbUnavailableResponse } from "@/lib/db-error";
+import { appBlockForEmail, appBlockedResponse } from "@/lib/app-block";
 
 export const runtime = "nodejs";
 
@@ -39,6 +40,12 @@ export async function POST(req: NextRequest) {
   // 503 « maintenance » lisible AU LIEU d'un 500 au corps vide qui casserait `res.json()` côté
   // client (cf. lib/apiFetch, lib/db-error).
   try {
+    // Appli fermée par un admin (switch de /admin) : on refuse AVANT d'appeler ResaMania —
+    // inutile de solliciter l'amont pour une connexion qu'on n'accordera pas. Les admins
+    // traversent (l'authentification reste évidemment exigée juste après).
+    const block = await appBlockForEmail(account);
+    if (block) return appBlockedResponse(block);
+
     // Purge opportuniste des échecs sortis de la fenêtre (toutes IP : garde la table minuscule),
     // puis comptage sur les DEUX dimensions.
     await prisma.loginAttempt.deleteMany({ where: { createdAt: { lt: since } } });

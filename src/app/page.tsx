@@ -152,6 +152,9 @@ export default function Home() {
   const [canBook, setCanBook] = useState(true); // false = session « email seul » (lecture seule)
   const [isAdmin, setIsAdmin] = useState(false); // admin (allowlist) → entrée « Admin » dans le menu
   const [pendingRequests, setPendingRequests] = useState(0); // demandes d'inscription en attente (badge)
+  // Appli fermée par un admin (switch de /admin) : message à afficher, `null` = appli ouverte.
+  // Toujours `null` pour un admin — c'est le serveur qui tranche (cf. api/auth/me).
+  const [blocked, setBlocked] = useState<string | null>(null);
   const [date, setDate] = useState<string>(() => defaultOpenDate());
   const [planning, setPlanning] = useState<PlanningDay | null>(null);
   const [journal, setJournal] = useState<JournalEntry[]>([]);
@@ -248,6 +251,7 @@ export default function Home() {
       setCanBook(data.canBook ?? true);
       setIsAdmin(data.isAdmin ?? false);
       setPendingRequests(data.pendingRequests ?? 0);
+      setBlocked(data.blocked ?? null);
     } else {
       // 401 = simplement pas connecté (cas normal). Un 5xx, lui, trahit une panne serveur —
       // typiquement la base à terre : on signale la maintenance (la bannière confirmera).
@@ -890,6 +894,33 @@ export default function Home() {
 
   if (me === null) {
     return <LoginScreen onLoggedIn={onLoggedIn} />;
+  }
+
+  // Appli fermée par un admin. Les sessions durant 30 jours, bloquer la connexion ne suffit pas :
+  // sans cet écran, un membre déjà connecté continuerait d'utiliser l'appli comme si de rien
+  // n'était. Les routes de réservation refusent aussi côté serveur (cf. lib/app-block) — cet
+  // écran est la porte visible, pas la serrure. L'admin ne le voit jamais (`blocked` reste nul).
+  if (blocked) {
+    return (
+      <main className="login">
+        <h1 className="sr-only">Squash de l'Yvette</h1>
+        <img src="/logo_squash.jpeg" alt="Squash de l'Yvette" className="logo-hero" />
+        <div className="notice warn" role="status" aria-live="polite">
+          <strong>🚧 {blocked}</strong>
+        </div>
+        <p className="muted">
+          L&apos;appli est momentanément fermée par le club. Réessaie un peu plus tard.
+        </p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" onClick={() => checkMe()}>
+            Réessayer
+          </button>
+          <button type="button" className="secondary" onClick={logout}>
+            Se déconnecter
+          </button>
+        </div>
+      </main>
+    );
   }
 
   return (
