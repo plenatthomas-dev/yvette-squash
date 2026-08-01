@@ -1149,7 +1149,9 @@ export default function Home() {
           « Aujourd'hui » (toujours présente, inactive si on y est déjà), le tout sur UNE ligne. */}
       {!isSpecial && (
       <div className="toolbar">
-        <button className="secondary nav" aria-label="Jour précédent" onClick={() => setDate(addDays(date, view === "week" ? -7 : -1))}>←</button>
+        {/* Le libellé DOIT suivre la vue : le handler recule de 7 jours en vue semaine.
+            Annoncer « jour précédent » et reculer d'une semaine trompe qui n'a que l'audio. */}
+        <button className="secondary nav" aria-label={view === "week" ? "Semaine précédente" : "Jour précédent"} onClick={() => setDate(addDays(date, view === "week" ? -7 : -1))}>←</button>
         <button
           type="button"
           className="secondary datebtn"
@@ -1160,7 +1162,7 @@ export default function Home() {
           <CalendarIcon />
           <span className="date">{view === "week" ? weekLabel(date) : shortPretty(date)}</span>
         </button>
-        <button className="secondary nav" aria-label="Jour suivant" onClick={() => setDate(addDays(date, view === "week" ? 7 : 1))}>→</button>
+        <button className="secondary nav" aria-label={view === "week" ? "Semaine suivante" : "Jour suivant"} onClick={() => setDate(addDays(date, view === "week" ? 7 : 1))}>→</button>
         {/* Toujours présent (place fixe dans la barre) ; inactif quand on est déjà sur aujourd'hui. */}
         <button
           type="button"
@@ -1251,8 +1253,12 @@ export default function Home() {
         </p>
       )}
 
-      {/* Cible du lien d'évitement : saute l'en-tête et la barre de navigation. */}
-      <div id="main-content" tabIndex={-1} />
+      {/* Cible du lien d'évitement : saute l'en-tête et la barre de navigation. Porte un
+          titre `sr-only` — un <div> vide et sans nom ne fait rien annoncer au lecteur
+          d'écran, qui ne sait donc pas si le saut a fonctionné. */}
+      <div id="main-content" tabIndex={-1}>
+        <h2 className="sr-only">Planning des terrains</h2>
+      </div>
 
       {/* Annonce discrète pour lecteurs d'écran (chargement / erreur). */}
       <p className="sr-only" role="status" aria-live="polite">

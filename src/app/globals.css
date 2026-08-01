@@ -30,6 +30,13 @@
   --group: #dbe7ff;
   --group-fg: #29508f;
   --closed: #eceef2;
+  /* Créneau PASSÉ : paire dédiée, calculée pour tenir 4,5:1 (ici 4,96:1). Avant, la case
+     réutilisait --closed avec `opacity: 0.55`, qui composite À LA FOIS le texte et le fond
+     et effondrait un contraste par ailleurs conforme à ~2,1:1 — illisible au soleil, sur un
+     écran usé, ou pour un presbyte, c'est-à-dire exactement le public que PRODUCT.md engage
+     à servir. L'opacité ne peut pas assombrir un texte : elle le fait disparaître. */
+  --past: #e4e7ec;
+  --past-fg: #5b626e;
   --accent: #2f6fe0;
   --notice-bg: #eef2f8;
   --error-fg: #b3261e;
@@ -71,6 +78,11 @@
     --group: #1b2a4a;
     --group-fg: #bcd2ff;
     --closed: #14171d;
+    --past: #10141a;
+    --past-fg: #8b94a5;
+    /* Muted relevé de #7b8495 : il tombait à 4,44:1 sur les cartes et 4,18:1 sur les
+       encarts, sous le seuil de 4,5. Touche TOUT le texte secondaire du thème sombre. */
+    --pico-muted-color: #8b94a5;
     --accent: #4f8cff;
     --notice-bg: #1d2330;
     --error-fg: #ff9a9a;
@@ -98,6 +110,10 @@
   --group: #1b2a4a;
   --group-fg: #bcd2ff;
   --closed: #14171d;
+  --past: #10141a;
+  --past-fg: #8b94a5;
+  /* Cf. bloc prefers-color-scheme ci-dessus : #7b8495 échouait à 4,44:1 / 4,18:1. */
+  --pico-muted-color: #8b94a5;
   --accent: #4f8cff;
   --notice-bg: #1d2330;
   --error-fg: #ff9a9a;
@@ -157,7 +173,9 @@
   --pico-form-element-background-color: #ffe8f4;
   --pico-form-element-border-color: #ff9ecb;
   --pico-form-element-color: #7a0f46;
-  --pico-form-element-placeholder-color: #c884a4;
+  /* Assombri depuis #c884a4, qui n'était qu'à 2,48:1 sur le fond de champ rose (#ffe8f4).
+     Un placeholder porte souvent la seule indication de ce qu'on attend dans le champ. */
+  --pico-form-element-placeholder-color: #9c4f76;
   --pico-form-element-active-background-color: #fff2f8;
   --pico-form-element-active-border-color: #e6007e;
 
@@ -169,6 +187,8 @@
   --group: #e6d4ff; /* lavande = réservé asso (distinct du rose « pris ») */
   --group-fg: #6b3fa0;
   --closed: #ffcbe4;
+  --past: #ffd9ee;
+  --past-fg: #8f3563;
   --accent: #c8008f;
   --notice-bg: #ffdcef;
   --error-fg: #9b1b1b;
@@ -1014,9 +1034,8 @@ td.cell.attending {
 }
 
 td.cell.past {
-  background: var(--closed);
-  color: var(--pico-muted-color);
-  opacity: 0.55;
+  background: var(--past);
+  color: var(--past-fg);
   cursor: default;
 }
 
@@ -1308,6 +1327,17 @@ td.cell.past {
   z-index: 1000;
   width: max-content;
   max-width: 92vw;
+  /* Trois échecs simultanés (réservation groupée) empilaient trois toasts par-dessus les
+     barres du bas. On borne la pile et on la fait défiler plutôt que déborder. */
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+/* Les toasts sont désormais répartis en DEUX régions live (erreurs assertives / reste poli,
+   cf. Toasts.tsx). `display: contents` fait disparaître ces conteneurs de la mise en page :
+   la pile reste une seule colonne, comme avant. */
+.toasts-stack {
+  display: contents;
   pointer-events: none;
 }
 
@@ -3128,6 +3158,28 @@ body[data-bottombar] .install-banner {
   .modal,
   .header-menu-panel {
     animation-duration: 0.01ms !important;
+  }
+  /* Transitions qui DÉPLACENT un élément. Le commentaire d'origine estimait que « les
+     transitions courtes restent, elles ne posent pas problème » : l'argument tient pour une
+     couleur de fond, il ne tient pas pour un déplacement. WCAG 2.3.3 vise justement le
+     mouvement déclenché par l'interaction. On neutralise le déplacement, pas la couleur. */
+  .filters button,
+  .journal li,
+  .passkey-fab {
+    transition-property: background, color, border-color, box-shadow;
+  }
+  .journal li:hover,
+  .passkey-fab:active,
+  .cell.pending,
+  .wk-seg.pending {
+    transform: none !important;
+    animation: none !important;
+  }
+  /* Le point d'attente cesse de pulser mais doit rester VISIBLE : sans ça, une case en
+     cours redeviendrait indiscernable d'une case inerte. */
+  .pending-dot {
+    animation: none !important;
+    opacity: 1;
   }
 }
 
