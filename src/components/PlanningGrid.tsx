@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { fmtTime } from "@/lib/time";
+import { useBottomBar } from "@/lib/useBottomBar";
 
 // Déclenche l'action au clavier (Entrée / Espace) sur les cellules cliquables.
 function onKey(fn: () => void) {
@@ -96,6 +97,10 @@ export function PlanningGrid({
   // - times   : lignes = horaires distincts triés
   // - byKey   : accès O(1) au créneau d'un (terrain, horaire)
   // - endByTime : fin de chaque horaire (pour afficher « début – fin »)
+  // Barre d'action en bas → masque la bannière d'installation PWA, qui la recouvrait.
+  const barUp = !!progress || (selMode && selected.size > 0);
+  useBottomBar(barUp);
+
   const { times, byKey, endByTime } = useMemo(() => {
     const times = [...new Set(planning.slots.map((s) => s.startsAt))].sort();
     const byKey = new Map(

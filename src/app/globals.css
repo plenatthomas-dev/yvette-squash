@@ -317,6 +317,10 @@ header.app .sub {
   padding: 6px 12px;
   font-size: 0.82rem;
   width: auto;
+  /* Navigation primaire (alertes, réglages, menu ⋯) : ces boutons faisaient 44 × 32px.
+     La largeur passait, la hauteur non. On la porte à 44 sans toucher au padding
+     horizontal, donc sans élargir l'en-tête. */
+  min-height: 44px;
 }
 
 /* Cloche « alertes » + pastille de compteur */
@@ -846,8 +850,16 @@ table.planning:not(.week) th.time {
   transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 2px;
-  padding: 1px 6px;
+  /* Cible tactile : ce bouton faisait ~20 × 17px, soit SOUS le plancher WCAG 2.5.8 (24px),
+     collé au bord d'un conteneur qui défile horizontalement — viser d'une main en marchant
+     déclenchait le scroll au lieu de l'inscription. La même fonction est un bouton
+     confortable en vue semaine ; rien n'indiquait qu'il fallait changer de vue pour l'obtenir.
+     On reste compact (la densité est assumée) mais au-dessus du plancher. */
+  min-width: 32px;
+  min-height: 28px;
+  padding: 2px 7px;
   font-size: 0.6rem;
   line-height: 1.4;
   border: 1px solid var(--pico-muted-border-color);
@@ -1286,7 +1298,9 @@ td.cell.past {
 .toasts {
   position: fixed;
   left: 50%;
-  bottom: 20px;
+  /* Remonte au-dessus de la barre d'action quand elle est là (--bottombar-h posée sur body
+     par useBottomBar) : sinon les toasts se posaient PAR-DESSUS le bouton « Réserver ». */
+  bottom: calc(20px + var(--bottombar-h, 0px));
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
@@ -1906,11 +1920,23 @@ td.cell.past {
 }
 
 /* --- Vue semaine -------------------------------------------------------- */
-/* Desktop : les 7 jours tiennent dans la largeur (table-layout: fixed hérité les répartit).
-   Mobile : colonnes élargies + défilement horizontal (voir media query plus bas), car à
-   7 jours × 2 terrains cliquables les cases étaient trop petites au doigt. */
+/* La largeur plancher et la hauteur de cellule sont désormais le DÉFAUT, et non une
+   exception mobile.
+   Avant : `min-width: 660px` et `height: 46px` ne s'appliquaient QUE sous 560px. Résultat,
+   à 561px la table cessait de défiler et comprimait 7 jours × 2 terrains dans la largeur
+   disponible — le segment tombait de 41,3 × 46 à 31,2 × 42 px pour UN pixel de viewport en
+   plus. Toute la bande 561–740px (petites tablettes, écran partagé, téléphone en paysage)
+   recevait donc des cibles PIRES que la disposition mobile que ce point de rupture était
+   censé protéger, et la hauteur ne revenait jamais à 44px au-delà.
+   Maintenant : la table garde son plancher de 660px et défile tant qu'elle n'a pas la place,
+   quel que soit l'écran. Au-delà de 760px la largeur naturelle repasse le seuil de confort,
+   on relâche donc le plancher et la table reprend toute la largeur sans défilement. */
 table.planning.week {
-  min-width: 0;
+  min-width: 660px;
+}
+
+table.planning.week .wk-cell {
+  height: 46px;
 }
 
 /* Colonne « Heure » plus étroite en vue semaine pour laisser la place aux 7 jours. */
@@ -1919,18 +1945,11 @@ table.planning.week th.time {
   font-size: 0.66rem;
 }
 
-/* Petit écran : on cesse de comprimer les 7 jours. Chaque jour prend une largeur fixe
-   confortable (2 terrains tappables) et la semaine défile horizontalement ; la colonne
-   « Heure » reste figée à gauche (position: sticky déjà posé plus haut). */
-@media (max-width: 560px) {
-  /* min-width > largeur de l'écran → la table déborde et défile ; table-layout: fixed
-     répartit : Heure = 40px (figée), les 7 jours se partagent le reste (~88px chacun,
-     soit ~44px par terrain → tap confortable). */
+/* Au-delà de 760px, les 7 jours tiennent confortablement sans plancher : chaque jour
+   dispose d'au moins ~94px, soit ~44px par terrain. On rend la largeur au conteneur. */
+@media (min-width: 761px) {
   table.planning.week {
-    min-width: 660px;
-  }
-  table.planning.week .wk-cell {
-    height: 46px;
+    min-width: 0;
   }
 }
 
@@ -2068,7 +2087,11 @@ table.planning.week th.time.selhead {
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 50;
+  /* Au-dessus de .install-banner (900). La bannière d'installation la recouvrait : sur iOS
+     Safari elle s'affiche tout de suite et persiste 14 jours, donc le bouton qui valide la
+     réservation était inatteignable. Elle est en outre masquée quand cette barre est là
+     (cf. body[data-bottombar]), mais on garde l'ordre correct comme second filet. */
+  z-index: 950;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2092,6 +2115,13 @@ table.planning.week th.time.selhead {
 
 /* Bannière « installer l'appli » (mobile), collée en bas comme .wk-actionbar mais sous les
    toasts (z-index plus bas) : elle reste affichée plus longtemps, les toasts restent lisibles. */
+/* Tant qu'une barre d'action occupe le bas de l'écran (sélection de créneaux, réservation
+   groupée en cours), la bannière d'installation s'efface. L'installation n'est jamais
+   urgente ; la réservation l'est. Sans ça elle recouvrait le bouton « Réserver ». */
+body[data-bottombar] .install-banner {
+  display: none;
+}
+
 .install-banner {
   position: fixed;
   left: 0;

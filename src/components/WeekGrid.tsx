@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { fmtTime } from "@/lib/time";
 import { downloadIcs } from "@/lib/ics";
+import { useBottomBar } from "@/lib/useBottomBar";
 
 function shortDay(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString("fr-FR", {
@@ -105,6 +106,9 @@ export function WeekGrid({
   useEffect(() => {
     if (!selMode) setSelected(new Set());
   }, [selMode]);
+  // Barre d'action en bas → masque la bannière d'installation PWA, qui la recouvrait.
+  useBottomBar(!!progress || (selMode && selected.size > 0));
+
   const now = Date.now();
   const todayStr = new Date().toLocaleDateString("en-CA");
 
