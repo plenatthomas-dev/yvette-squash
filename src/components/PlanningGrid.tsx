@@ -162,8 +162,13 @@ export function PlanningGrid({
 
   return (
     <>
+      {/* Le libellé disait « Sélection multi créneau » : un groupe nominal agrammatical qui
+          n'indiquait ni comment cocher, ni comment sortir. On dit quoi faire. */}
       {selMode && (
-        <p className="muted tiny selmode-hint">Sélection multi créneau</p>
+        <p className="muted tiny selmode-hint">
+          Touche les créneaux libres à réserver, puis « Réserver » en bas. Retouche l&apos;icône
+          de sélection pour quitter.
+        </p>
       )}
 
       <div className="grid-wrap">

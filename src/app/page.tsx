@@ -75,6 +75,23 @@ function shortPretty(date: string): string {
     month: "short",
   });
 }
+// Mot RELATIF pour la date affichée (« Auj. », « Demain »), ou null.
+//
+// Pourquoi c'est nécessaire : `defaultOpenDate()` ouvre sur DEMAIN à partir de 21 h. La
+// règle est bonne — après 21 h on cherche un créneau pour le lendemain — mais elle déplace
+// le contexte de l'utilisateur sans le lui dire. Le seul indice était que la pastille
+// « Auj. » cessait d'être grisée : une différence d'opacité sur un bouton de 0,8 rem.
+// À 21 h 15, on ouvre l'appli pour voir s'il reste un terrain CE SOIR, on voit une grille
+// pleine de vert, on réserve — et on a réservé pour demain. C'est l'erreur de mode
+// classique, sur la question centrale du produit.
+function relativeDay(date: string): string | null {
+  const today = new Date().toLocaleDateString("en-CA");
+  if (date === today) return "Auj.";
+  const t = new Date(`${today}T12:00:00`);
+  t.setDate(t.getDate() + 1);
+  if (date === t.toLocaleDateString("en-CA")) return "Demain";
+  return null;
+}
 // --- Semaine -----------------------------------------------------------------
 function mondayOf(date: string): string {
   const d = new Date(`${date}T12:00:00`);
@@ -593,7 +610,7 @@ export default function Home() {
           toast("info", data.error);
           return;
         }
-        throw new Error(data.error ?? `Erreur ${res.status}`);
+        throw new Error(data.error ?? "le service n'a pas répondu comme prévu");
       }
       toast("ok", "Réservation confirmée");
       playSuccessJingle(); // petit jingle de succès (réglable dans les Paramètres)
@@ -629,7 +646,7 @@ export default function Home() {
       });
       if (handleExpired(res.status)) return;
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      if (!res.ok) throw new Error(data.error ?? "le service n'a pas répondu comme prévu");
       toast("ok", "Réservation annulée");
       reload();
     } catch (e) {
@@ -660,7 +677,7 @@ export default function Home() {
       });
       if (handleExpired(res.status)) return;
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      if (!res.ok) throw new Error(data.error ?? "le service n'a pas répondu comme prévu");
       toast("ok", "Réservation annulée");
       reload();
     } catch (e) {
@@ -1049,7 +1066,9 @@ export default function Home() {
                   : []),
                 {
                   key: "money",
-                  label: "Tricount",
+                  // « Tricount » est une marque tierce ; PRODUCT.md, le code (`view === "money"`)
+                  // et les commentaires disent tous « Frais ». On aligne le seul endroit visible.
+                  label: "Frais partagés",
                   icon: <EuroIcon />,
                   active: view === "money",
                   badge: tricount && triOwed > 0 ? triOwed : undefined,
@@ -1160,7 +1179,18 @@ export default function Home() {
           aria-label="Choisir une date"
         >
           <CalendarIcon />
-          <span className="date">{view === "week" ? weekLabel(date) : shortPretty(date)}</span>
+          <span className="date">
+            {view === "week" ? (
+              weekLabel(date)
+            ) : (
+              <>
+                {relativeDay(date) && (
+                  <strong className="date-rel">{relativeDay(date)} · </strong>
+                )}
+                {shortPretty(date)}
+              </>
+            )}
+          </span>
         </button>
         <button className="secondary nav" aria-label={view === "week" ? "Semaine suivante" : "Jour suivant"} onClick={() => setDate(addDays(date, view === "week" ? 7 : 1))}>→</button>
         {/* Toujours présent (place fixe dans la barre) ; inactif quand on est déjà sur aujourd'hui. */}
