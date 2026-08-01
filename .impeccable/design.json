@@ -1,0 +1,445 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-01T21:58:31.308Z",
+  "title": "Design System: Squash de l'Yvette",
+  "extensions": {
+    "colorMeta": {
+      "vert-signal": {
+        "role": "primary",
+        "displayName": "Vert Signal",
+        "canonical": "oklch(61.4% 0.148 152.9)",
+        "tonalRamp": [
+          "oklch(15.0% 0.082 152.9)",
+          "oklch(26.0% 0.101 152.9)",
+          "oklch(37.0% 0.119 152.9)",
+          "oklch(48.0% 0.137 152.9)",
+          "oklch(59.0% 0.142 152.9)",
+          "oklch(70.0% 0.124 152.9)",
+          "oklch(82.0% 0.104 152.9)",
+          "oklch(95.0% 0.082 152.9)"
+        ]
+      },
+      "vert-libre": {
+        "role": "primary",
+        "displayName": "Vert Libre",
+        "canonical": "oklch(52.9% 0.130 152.4)",
+        "tonalRamp": [
+          "oklch(15.0% 0.072 152.4)",
+          "oklch(26.0% 0.088 152.4)",
+          "oklch(37.0% 0.104 152.4)",
+          "oklch(48.0% 0.120 152.4)",
+          "oklch(59.0% 0.125 152.4)",
+          "oklch(70.0% 0.109 152.4)",
+          "oklch(82.0% 0.091 152.4)",
+          "oklch(95.0% 0.072 152.4)"
+        ]
+      },
+      "reserve-surface": {
+        "role": "tertiary",
+        "displayName": "Réservé — surface",
+        "canonical": "oklch(92.5% 0.028 358.0)",
+        "tonalRamp": [
+          "oklch(15.0% 0.015 358.0)",
+          "oklch(26.0% 0.019 358.0)",
+          "oklch(37.0% 0.022 358.0)",
+          "oklch(48.0% 0.026 358.0)",
+          "oklch(59.0% 0.027 358.0)",
+          "oklch(70.0% 0.023 358.0)",
+          "oklch(82.0% 0.020 358.0)",
+          "oklch(95.0% 0.015 358.0)"
+        ]
+      },
+      "reserve-encre": {
+        "role": "tertiary",
+        "displayName": "Réservé — encre",
+        "canonical": "oklch(48.0% 0.147 2.6)",
+        "tonalRamp": [
+          "oklch(15.0% 0.082 2.6)",
+          "oklch(26.0% 0.100 2.6)",
+          "oklch(37.0% 0.118 2.6)",
+          "oklch(48.0% 0.136 2.6)",
+          "oklch(59.0% 0.141 2.6)",
+          "oklch(70.0% 0.123 2.6)",
+          "oklch(82.0% 0.103 2.6)",
+          "oklch(95.0% 0.082 2.6)"
+        ]
+      },
+      "club-surface": {
+        "role": "tertiary",
+        "displayName": "Club — surface",
+        "canonical": "oklch(92.6% 0.035 264.4)",
+        "tonalRamp": [
+          "oklch(15.0% 0.020 264.4)",
+          "oklch(26.0% 0.024 264.4)",
+          "oklch(37.0% 0.028 264.4)",
+          "oklch(48.0% 0.032 264.4)",
+          "oklch(59.0% 0.034 264.4)",
+          "oklch(70.0% 0.029 264.4)",
+          "oklch(82.0% 0.025 264.4)",
+          "oklch(95.0% 0.020 264.4)"
+        ]
+      },
+      "club-encre": {
+        "role": "tertiary",
+        "displayName": "Club — encre",
+        "canonical": "oklch(43.7% 0.113 259.6)",
+        "tonalRamp": [
+          "oklch(15.0% 0.063 259.6)",
+          "oklch(26.0% 0.077 259.6)",
+          "oklch(37.0% 0.091 259.6)",
+          "oklch(48.0% 0.104 259.6)",
+          "oklch(59.0% 0.108 259.6)",
+          "oklch(70.0% 0.094 259.6)",
+          "oklch(82.0% 0.079 259.6)",
+          "oklch(95.0% 0.063 259.6)"
+        ]
+      },
+      "ferme": {
+        "role": "neutral",
+        "displayName": "Fermé",
+        "canonical": "oklch(94.9% 0.006 264.5)",
+        "tonalRamp": [
+          "oklch(15.0% 0.003 264.5)",
+          "oklch(26.0% 0.004 264.5)",
+          "oklch(37.0% 0.005 264.5)",
+          "oklch(48.0% 0.005 264.5)",
+          "oklch(59.0% 0.006 264.5)",
+          "oklch(70.0% 0.005 264.5)",
+          "oklch(82.0% 0.004 264.5)",
+          "oklch(95.0% 0.003 264.5)"
+        ]
+      },
+      "bleu-info": {
+        "role": "secondary",
+        "displayName": "Bleu Info",
+        "canonical": "oklch(56.4% 0.185 260.8)",
+        "tonalRamp": [
+          "oklch(15.0% 0.103 260.8)",
+          "oklch(26.0% 0.125 260.8)",
+          "oklch(37.0% 0.148 260.8)",
+          "oklch(48.0% 0.170 260.8)",
+          "oklch(59.0% 0.176 260.8)",
+          "oklch(70.0% 0.154 260.8)",
+          "oklch(82.0% 0.129 260.8)",
+          "oklch(95.0% 0.103 260.8)"
+        ]
+      },
+      "rouge-alerte": {
+        "role": "secondary",
+        "displayName": "Rouge Alerte",
+        "canonical": "oklch(62.6% 0.193 23.0)",
+        "tonalRamp": [
+          "oklch(15.0% 0.107 23.0)",
+          "oklch(26.0% 0.131 23.0)",
+          "oklch(37.0% 0.155 23.0)",
+          "oklch(48.0% 0.178 23.0)",
+          "oklch(59.0% 0.185 23.0)",
+          "oklch(70.0% 0.161 23.0)",
+          "oklch(82.0% 0.135 23.0)",
+          "oklch(95.0% 0.107 23.0)"
+        ]
+      },
+      "page-claire": {
+        "role": "neutral",
+        "displayName": "Page Claire",
+        "canonical": "oklch(94.2% 0.007 260.7)",
+        "tonalRamp": [
+          "oklch(15.0% 0.004 260.7)",
+          "oklch(26.0% 0.005 260.7)",
+          "oklch(37.0% 0.006 260.7)",
+          "oklch(48.0% 0.007 260.7)",
+          "oklch(59.0% 0.007 260.7)",
+          "oklch(70.0% 0.006 260.7)",
+          "oklch(82.0% 0.005 260.7)",
+          "oklch(95.0% 0.004 260.7)"
+        ]
+      },
+      "page-sombre": {
+        "role": "neutral",
+        "displayName": "Page Sombre",
+        "canonical": "oklch(17.7% 0.011 260.6)",
+        "tonalRamp": [
+          "oklch(15.0% 0.006 260.6)",
+          "oklch(26.0% 0.008 260.6)",
+          "oklch(37.0% 0.009 260.6)",
+          "oklch(48.0% 0.011 260.6)",
+          "oklch(59.0% 0.011 260.6)",
+          "oklch(70.0% 0.010 260.6)",
+          "oklch(82.0% 0.008 260.6)",
+          "oklch(95.0% 0.006 260.6)"
+        ]
+      },
+      "carte-sombre": {
+        "role": "neutral",
+        "displayName": "Carte Sombre",
+        "canonical": "oklch(23.4% 0.017 259.8)",
+        "tonalRamp": [
+          "oklch(15.0% 0.010 259.8)",
+          "oklch(26.0% 0.012 259.8)",
+          "oklch(37.0% 0.014 259.8)",
+          "oklch(48.0% 0.016 259.8)",
+          "oklch(59.0% 0.016 259.8)",
+          "oklch(70.0% 0.014 259.8)",
+          "oklch(82.0% 0.012 259.8)",
+          "oklch(95.0% 0.010 259.8)"
+        ]
+      },
+      "rose-short": {
+        "role": "tertiary",
+        "displayName": "Rose Short",
+        "canonical": "oklch(60.0% 0.244 358.6)",
+        "tonalRamp": [
+          "oklch(15.0% 0.136 358.6)",
+          "oklch(26.0% 0.165 358.6)",
+          "oklch(37.0% 0.195 358.6)",
+          "oklch(48.0% 0.225 358.6)",
+          "oklch(59.0% 0.233 358.6)",
+          "oklch(70.0% 0.203 358.6)",
+          "oklch(82.0% 0.171 358.6)",
+          "oklch(95.0% 0.136 358.6)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Titre de l'en-tête applicatif, à côté du logo."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Titres de cartes et de sections."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Texte courant, hérité de Pico."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Encarts, textes secondaires, barre d'outils."
+      },
+      "micro": {
+        "displayName": "Micro",
+        "purpose": "Badges, pastilles de comptage, présences empilées. Poids 700 pour compenser la taille ; toujours étiqueté."
+      }
+    },
+    "shadows": [
+      {
+        "name": "elev-1",
+        "value": "0 2px 4px rgba(16, 24, 40, 0.10), 0 8px 18px rgba(16, 24, 40, 0.14)",
+        "purpose": "Surfaces au repos, cartes. Thème clair."
+      },
+      {
+        "name": "elev-2",
+        "value": "0 4px 10px rgba(16, 24, 40, 0.14), 0 18px 38px rgba(16, 24, 40, 0.20)",
+        "purpose": "Éléments détachés du flux : encarts, badge du logo. Thème clair."
+      },
+      {
+        "name": "elev-3",
+        "value": "0 10px 24px rgba(16, 24, 40, 0.20), 0 34px 70px rgba(16, 24, 40, 0.28)",
+        "purpose": "Le plus fort, porté par le conteneur de la grille. Thème clair."
+      },
+      {
+        "name": "elev-1-sombre",
+        "value": "0 2px 6px rgba(0, 0, 0, 0.55), 0 8px 20px rgba(0, 0, 0, 0.6)",
+        "purpose": "Équivalent sombre : une ombre calculée pour du gris clair disparaît sur fond sombre."
+      },
+      {
+        "name": "elev-2-sombre",
+        "value": "0 4px 12px rgba(0, 0, 0, 0.6), 0 18px 40px rgba(0, 0, 0, 0.68)",
+        "purpose": "Équivalent sombre de elev-2."
+      },
+      {
+        "name": "elev-3-sombre",
+        "value": "0 12px 28px rgba(0, 0, 0, 0.66), 0 36px 76px rgba(0, 0, 0, 0.74)",
+        "purpose": "Équivalent sombre de elev-3."
+      },
+      {
+        "name": "card-grad",
+        "value": "linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0) 60%)",
+        "purpose": "Dégradé de surface sur les cartes, pour éviter l'aplat mort. 0.08 en thème sombre."
+      }
+    ],
+    "motion": [
+      {
+        "name": "tap",
+        "value": "0.12s ease",
+        "purpose": "Survol et appui des cases de grille. Court, jamais moelleux."
+      },
+      {
+        "name": "lift",
+        "value": "transform 0.15s ease, box-shadow 0.15s ease",
+        "purpose": "Soulèvement au survol (--lift: -4px), composé par le GPU."
+      },
+      {
+        "name": "modal-in",
+        "value": "0.14s ease-out",
+        "purpose": "Entrée des modales."
+      },
+      {
+        "name": "toast-in",
+        "value": "0.18s ease-out",
+        "purpose": "Entrée des notifications éphémères."
+      },
+      {
+        "name": "spin",
+        "value": "0.8s linear infinite",
+        "purpose": "Indicateur de chargement."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "@media (prefers-reduced-motion: reduce) { transition: none }",
+        "purpose": "Respecté dans le système : les transitions sont coupées, pas seulement ralenties."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact",
+        "value": "560px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Bouton primaire",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Action principale. Le vert ne se pose que sur de l'actionnable.",
+      "html": "<button class=\"ds-btn-primary\">Se connecter</button>",
+      "css": ".ds-btn-primary { background: var(--pico-primary, #1f9d57); color: #fff; border: none; border-radius: var(--pico-border-radius, 10px); padding: 10px 18px; font-family: system-ui, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; font-size: 1rem; font-weight: 500; cursor: pointer; transition: background 0.12s ease; } .ds-btn-primary:hover { background: var(--pico-primary-hover, #24b365); } .ds-btn-primary:focus-visible { outline: 2px solid var(--pico-primary, #1f9d57); outline-offset: 2px; }"
+    },
+    {
+      "name": "Case libre (grille)",
+      "kind": "custom",
+      "refersTo": "cell-free",
+      "description": "Créneau réservable. Vert plus profond que le primaire pour un contraste AA 5:1 du texte blanc.",
+      "html": "<div class=\"ds-cell-free\" role=\"button\" tabindex=\"0\">Libre</div>",
+      "css": ".ds-cell-free { background: var(--free, #158044); color: var(--free-fg, #fff); font-family: system-ui, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; font-size: 0.85rem; font-weight: 600; text-align: center; padding: 12px 8px; border: 1px solid var(--pico-card-border-color, #cfd6e0); cursor: pointer; touch-action: manipulation; transition: background 0.12s ease, box-shadow 0.1s ease; } .ds-cell-free:hover { background: var(--free-hover, #127a40); } .ds-cell-free:active { background: var(--free-hover, #127a40); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.35); } .ds-cell-free:focus-visible { outline: 2px solid var(--pico-primary, #1f9d57); outline-offset: -2px; }"
+    },
+    {
+      "name": "Case réservée (grille)",
+      "kind": "custom",
+      "refersTo": "cell-booked",
+      "description": "Créneau pris par quelqu'un d'autre. Rose sourd : lisible mais éteint, car non actionnable.",
+      "html": "<div class=\"ds-cell-booked\">Thomas</div>",
+      "css": ".ds-cell-booked { background: var(--booked, #f7dfe6); color: var(--booked-fg, #9c2f56); font-family: system-ui, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; font-size: 0.85rem; text-align: center; padding: 12px 8px; border: 1px solid var(--pico-card-border-color, #cfd6e0); }"
+    },
+    {
+      "name": "Case club / mienne (grille)",
+      "kind": "custom",
+      "refersTo": "cell-club",
+      "description": "Créneau de l'asso ou le sien. Même bleu pour les deux ; seule l'étoile distingue « mes créneaux ».",
+      "html": "<div class=\"ds-cell-club\" role=\"button\" tabindex=\"0\">★ Thomas<br>+2</div>",
+      "css": ".ds-cell-club { background: var(--group, #dbe7ff); color: var(--group-fg, #29508f); font-family: system-ui, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; font-size: 0.72rem; font-weight: 600; line-height: 1.15; text-align: center; padding: 4px; border: 1px solid var(--pico-card-border-color, #cfd6e0); cursor: pointer; } .ds-cell-club:focus-visible { outline: 2px solid var(--pico-primary, #1f9d57); outline-offset: -2px; }"
+    },
+    {
+      "name": "Case fermée (grille)",
+      "kind": "custom",
+      "refersTo": "cell-closed",
+      "description": "Hors ouverture. Gris quasi neutre, sans texte : rien à lire, rien à faire.",
+      "html": "<div class=\"ds-cell-closed\"></div>",
+      "css": ".ds-cell-closed { background: var(--closed, #eceef2); min-height: 40px; border: 1px solid var(--pico-card-border-color, #cfd6e0); }"
+    },
+    {
+      "name": "Encart d'information",
+      "kind": "card",
+      "refersTo": "notice",
+      "description": "Message neutre non urgent. Liseré gauche bleu : signale sans alerter.",
+      "html": "<div class=\"ds-notice\">Connecte-toi avec ton compte ResaMania.</div>",
+      "css": ".ds-notice { background: var(--notice-bg, #eef2f8); border: 1px solid var(--pico-card-border-color, #cfd6e0); border-left: 3px solid var(--accent, #2f6fe0); border-radius: 8px; padding: 10px 14px; font-family: system-ui, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; font-size: 0.85rem; color: var(--pico-muted-color, #5c6370); box-shadow: 0 4px 10px rgba(16,24,40,0.14), 0 18px 38px rgba(16,24,40,0.20); }"
+    },
+    {
+      "name": "Encart d'erreur",
+      "kind": "card",
+      "refersTo": "notice",
+      "description": "Variante d'erreur : la couleur est portée par le message et le liseré, jamais par le champ.",
+      "html": "<div class=\"ds-notice-error\">Identifiants invalides ou service momentanément indisponible.</div>",
+      "css": ".ds-notice-error { background: var(--notice-bg, #eef2f8); border: 1px solid var(--pico-card-border-color, #cfd6e0); border-left: 3px solid var(--error-accent, #e5484d); border-radius: 8px; padding: 10px 14px; font-family: system-ui, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; font-size: 0.85rem; color: var(--error-fg, #b3261e); }"
+    },
+    {
+      "name": "Carte",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Surface au repos. Le contraste avec la page fait autant de travail que l'ombre.",
+      "html": "<div class=\"ds-card\"><strong>Blocage de l'appli</strong><p>Ferme l'appli aux membres.</p></div>",
+      "css": ".ds-card { background: var(--pico-card-background-color, #fff); border: 1px solid var(--pico-card-border-color, #cfd6e0); border-radius: 12px; padding: 14px 16px; font-family: system-ui, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; box-shadow: 0 2px 4px rgba(16,24,40,0.10), 0 8px 18px rgba(16,24,40,0.14); } .ds-card p { margin: 6px 0 0; font-size: 0.85rem; color: var(--pico-muted-color, #5c6370); }"
+    },
+    {
+      "name": "Champ de saisie",
+      "kind": "input",
+      "refersTo": null,
+      "description": "Champ Pico. À l'erreur, le champ n'est pas repeint : c'est le message qui porte la couleur.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Identifiant ResaMania (email)\" />",
+      "css": ".ds-input { width: 100%; background: var(--pico-form-element-background-color, #fff); color: var(--pico-form-element-color, #1b1f24); border: 1px solid var(--pico-form-element-border-color, #cfd6e0); border-radius: var(--pico-border-radius, 10px); padding: 10px 12px; font-family: system-ui, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; font-size: 1rem; } .ds-input:focus { outline: none; border-color: var(--pico-primary, #1f9d57); box-shadow: 0 0 0 3px var(--pico-primary-focus, rgba(31,157,87,0.3)); }"
+    },
+    {
+      "name": "Pastille « Aujourd'hui »",
+      "kind": "chip",
+      "refersTo": null,
+      "description": "Retour au jour courant. Désactivée quand on y est déjà — elle reste visible plutôt que de disparaître.",
+      "html": "<button class=\"ds-chip-today\">Aujourd'hui</button>",
+      "css": ".ds-chip-today { background: transparent; color: var(--pico-primary, #1f9d57); border: 1px solid var(--pico-primary, #1f9d57); border-radius: 999px; padding: 4px 12px; font-family: system-ui, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; font-size: 0.8rem; font-weight: 500; cursor: pointer; } .ds-chip-today:hover { background: var(--pico-primary, #1f9d57); color: #fff; } .ds-chip-today:disabled { opacity: 0.45; cursor: default; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "L'outil de vestiaire",
+    "overview": "Cette interface est un outil qu'on sort debout, d'une main, entre deux portes. Elle ne cherche ni à impressionner ni à accueillir : elle répond. La densité est ici une qualité assumée — l'échelle typographique descend jusqu'à 0,62rem et une case de tableau porte à la fois un nom, des présences et un badge, parce que voir plus d'un coup d'œil vaut mieux que scroller.\n\nLe système est délibérément sobre et fonctionnel : Pico CSS assure toute la base (typographie, formulaires, boutons, thème sombre), et la couche maison ne fait qu'ajouter ce que Pico ne connaît pas — la palette des états de créneau, la grille, la barre d'outils. Aucune police n'est chargée : la typographie est celle du système d'exploitation. Ce n'est pas un oubli, c'est cohérent avec l'outil : rendu natif, aucun octet de webfont, aucun décalage de rendu.\n\nLe relief est ambiant. Les ombres à deux couches et le léger dégradé de surface donnent une facture moderne, mais ils n'encodent aucune hiérarchie : ils habillent, ils n'informent pas. La seule couleur qui parle est le vert.\n\nAnti-référence confirmée : ResaMania. L'appli existe parce que son amont oblige à naviguer pour savoir s'il reste un terrain. Reproduire cette logique — enfouir la réponse derrière un clic — serait perdre la raison d'être du produit.",
+    "keyCharacteristics": [
+      "Densité assumée, jamais cryptique : chaque abréviation est étiquetée ou porte un title.",
+      "Un seul accent, le vert, strictement réservé à ce qui est jouable ou actionnable.",
+      "Typographie 100 % système, aucune police chargée.",
+      "Relief décoratif à coût runtime nul (CSS pur), retéclé par thème pour rester visible.",
+      "Trois thèmes complets et égaux : clair, sombre, et « short rose »."
+    ],
+    "rules": [
+      {
+        "name": "La Règle du Vert Actionnable",
+        "body": "Le vert ne se pose que sur ce qu'on peut toucher : un bouton primaire, une case libre, un contour de focus. Un élément vert non actionnable est une faute, et elle se repère à l'œil nu sur une capture d'écran.",
+        "section": "colors"
+      },
+      {
+        "name": "La Règle du Fond Toujours Plus Sombre",
+        "body": "Quel que soit le thème, la page est plus sombre que les cartes en clair, et plus sombre que tout en sombre. Une carte qui se confond avec sa page a cassé le système, même si son ombre est intacte.",
+        "section": "colors"
+      },
+      {
+        "name": "La Règle du Contraste Avant la Marque",
+        "body": "Quand la couleur de marque ne passe pas le seuil AA sur une surface, c'est la couleur qui plie. vert-libre existe uniquement pour cette raison.",
+        "section": "colors"
+      },
+      {
+        "name": "La Règle du Micro Étiqueté",
+        "body": "En dessous de 0,75rem, un texte doit être soit un chiffre, soit accompagné d'un libellé accessible (title, aria-label, ou texte sr-only). La densité se gagne par l'étiquetage, jamais en supposant que le lecteur sait déjà.",
+        "section": "typography"
+      },
+      {
+        "name": "La Règle des Deux Axes",
+        "body": "Dans toute vue tabulaire dense, l'en-tête et la première colonne restent visibles pendant le défilement. Une donnée qu'on ne peut plus rattacher à sa ligne et à sa colonne ne vaut rien.",
+        "section": "layout"
+      },
+      {
+        "name": "La Règle du Coût Nul",
+        "body": "Le relief est intégralement CSS et ne coûte rien à l'exécution. Tout effet de profondeur qui demanderait du JavaScript, un filtre de flou animé ou un recalcul par image est refusé — les téléphones du club ne sont pas des machines de développement.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do réserver le vert à ce qui est jouable ou actionnable (Règle du Vert Actionnable).",
+      "Do garder la page plus sombre que les cartes, dans les trois thèmes.",
+      "Do faire plier la couleur de marque devant le contraste AA, comme vert-libre le fait déjà pour le texte blanc des cases.",
+      "Do étiqueter tout texte sous 0,75rem par un title, un aria-label ou un texte sr-only.",
+      "Do figer les deux axes de toute vue tabulaire dense.",
+      "Do thémer les bordures par --pico-card-border-color plutôt que de coder une couleur.",
+      "Do réutiliser les valeurs d'espacement déjà présentes (4, 6, 10, 14, 16, 18px) au lieu d'en introduire de nouvelles.",
+      "Do traiter les trois thèmes comme égaux : une nouveauté doit être vérifiée en clair, en sombre et en rose."
+    ],
+    "donts": [
+      "Don't obliger à naviguer pour savoir s'il reste un terrain. La réponse est visible, ou le design a échoué. C'est l'anti-référence ResaMania, et c'est la raison d'être du produit.",
+      "Don't utiliser l'ombre pour signifier une importance : le relief est ambiant ici, pas sémantique.",
+      "Don't ajouter un effet de profondeur qui coûte du JavaScript, un flou animé ou un recalcul par image (Règle du Coût Nul).",
+      "Don't charger une police web. La typographie est celle du système, dans tout le produit.",
+      "Don't confondre densité et opacité : une abréviation non étiquetée n'est pas de la densité, c'est une devinette.",
+      "Don't repeindre un champ en rouge à l'erreur ; le message porte la couleur, pas le champ.",
+      "Don't coder une couleur de bordure en dur : elle cassera l'un des trois thèmes."
+    ]
+  }
+}
