@@ -926,6 +926,43 @@ td.cell.closed {
   background: var(--closed);
 }
 
+/* --- Case « action en cours » -------------------------------------------------------
+   Entre le tap et la réponse de ResaMania il pouvait s'écouler plusieurs secondes sans
+   qu'un pixel bouge : ça se lit « ça n'a pas marché », donc on retape, et le garde
+   anti-double-clic avalait les taps en silence. La case engagée devient donc inerte et
+   visiblement occupée. Le point est MUTED et non vert : une case en cours n'est pas
+   actionnable, et le vert est réservé à l'actionnable (cf. DESIGN.md). */
+td.cell.pending {
+  background: var(--closed);
+  cursor: progress;
+}
+
+.pending-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--pico-muted-color);
+  animation: pending-pulse 1s ease-in-out infinite;
+}
+
+/* Même traitement pour le segment de la vue semaine (un segment = un terrain). */
+.wk-seg.pending {
+  background: var(--closed);
+  cursor: progress;
+  animation: pending-pulse 1s ease-in-out infinite;
+}
+
+@keyframes pending-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 /* Mes créneaux : même bleu que l'asso ; seule l'étoile (★) dans le contenu me distingue.
    Cliquable → annulation directe depuis la grille. */
 td.cell.mine {

@@ -168,6 +168,19 @@ export default function Home() {
   const isSpecial = view === "money" || view === "tourney";
   const [week, setWeek] = useState<{ date: string; planning: PlanningDay }[]>([]);
   const [busy, setBusy] = useState(false);
+  // Retour visuel de `busy` DANS la grille. `busy` seul ne se voit nulle part : entre le tap
+  // et le toast, l'appel traverse ResaMania sans qu'un pixel bouge, ce qui se lit « ça n'a pas
+  // marché » et pousse à retaper (re-taps avalés en silence par le garde anti-double-clic).
+  //  - pendingIds : le ou les créneaux réellement engagés → case en attente, inerte ;
+  //  - progress   : avancement de la réservation groupée (séquentielle, N allers-retours) ;
+  //  - busyVerb   : même information pour les lecteurs d'écran, via un role="status" dédié.
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [busyVerb, setBusyVerb] = useState("");
+  // Créneaux qui viennent d'échouer en réservation groupée : la grille les re-coche pour
+  // qu'un nouvel essai ne demande pas de reconstituer la sélection de mémoire (la sélection
+  // est vidée à la sortie du mode). Un nouveau tableau à chaque bilan → l'effet se rejoue.
+  const [failedSel, setFailedSel] = useState<string[]>([]);
   // Mode « sélection multiple » (piloté depuis la barre de vue, appliqué dans la grille
   // affichée). Remonté ici pour que le bouton bascule vive dans la barre d'outils compacte.
   const [selMode, setSelMode] = useState(false);
@@ -558,6 +571,8 @@ export default function Home() {
     });
     if (!ok) return;
     setBusy(true);
+    setPendingIds(new Set([slot.id]));
+    setBusyVerb("Réservation en cours…");
     try {
       const res = await fetch("/api/book", {
         method: "POST",
@@ -588,6 +603,8 @@ export default function Home() {
       playError(); // son d'échec de réservation
     } finally {
       setBusy(false);
+      setPendingIds(new Set());
+      setBusyVerb("");
     }
   };
 
@@ -633,6 +650,8 @@ export default function Home() {
     });
     if (!ok) return;
     setBusy(true);
+    setPendingIds(new Set([slot.id]));
+    setBusyVerb("Annulation en cours…");
     try {
       const res = await fetch("/api/cancel-slot", {
         method: "POST",
@@ -648,6 +667,8 @@ export default function Home() {
       toast("err", "Annulation impossible : " + (e as Error).message);
     } finally {
       setBusy(false);
+      setPendingIds(new Set());
+      setBusyVerb("");
     }
   };
 
@@ -744,10 +765,18 @@ export default function Home() {
     });
     if (!ok) return;
     setBusy(true);
+    setBusyVerb(`Réservation de ${slots.length} créneaux en cours…`);
+    setProgress({ done: 0, total: slots.length });
     let done = 0;
     const fails: string[] = [];
+    // Créneaux effectivement ratés : on les garde cochés à la sortie (voir plus bas), pour
+    // que l'utilisateur puisse retenter sans avoir à recomposer sa sélection de mémoire.
+    const failedIds: string[] = [];
     try {
-      for (const slot of slots) {
+      for (const [i, slot] of slots.entries()) {
+        // La case en cours passe en attente ; la barre affiche « Réservation 3 / 7… ».
+        setPendingIds(new Set([slot.id]));
+        setProgress({ done: i, total: slots.length });
         try {
           const res = await fetch("/api/book", {
             method: "POST",
@@ -766,29 +795,52 @@ export default function Home() {
           }
           const data = await res.json().catch(() => ({}));
           if (res.ok) done++;
-          else
+          else {
             fails.push(
-              `${shortPretty(slot.startsAt.slice(0, 10))} ${fmtTime(slot.startsAt)} : ${data.error ?? res.status}`,
+              `${shortPretty(slot.startsAt.slice(0, 10))} ${fmtTime(slot.startsAt)} — ${slot.courtName} : ${data.error ?? `refusé (${res.status})`}`,
             );
+            failedIds.push(slot.id);
+          }
         } catch {
-          fails.push(`${shortPretty(slot.startsAt.slice(0, 10))} ${fmtTime(slot.startsAt)} : réseau`);
+          fails.push(
+            `${shortPretty(slot.startsAt.slice(0, 10))} ${fmtTime(slot.startsAt)} — ${slot.courtName} : réseau indisponible`,
+          );
+          failedIds.push(slot.id);
         }
       }
     } finally {
       setBusy(false);
+      setPendingIds(new Set());
+      setProgress(null);
+      setBusyVerb("");
     }
-    if (done > 0) {
-      toast(
-        fails.length ? "info" : "ok",
-        `${done} réservation${done > 1 ? "s" : ""} confirmée${done > 1 ? "s" : ""}` +
-          (fails.length ? ` · ${fails.length} échec${fails.length > 1 ? "s" : ""}` : ""),
-      );
-      playSuccessJingle(); // au moins une réservation a réussi → jingle de succès
-    } else {
-      toast("err", "Aucune réservation : " + (fails[0] ?? "échec"));
-      playError(); // aucune réservation n'a abouti → son d'échec
+    // Tout a réussi : le toast suffit, l'information tient en une phrase.
+    if (done > 0 && fails.length === 0) {
+      toast("ok", `${done} réservation${done > 1 ? "s" : ""} confirmée${done > 1 ? "s" : ""}`);
+      playSuccessJingle();
+      reload();
+      return;
     }
+    // Au moins un échec : le détail créneau-par-créneau existe, il ne doit PAS être jeté dans
+    // un toast de 3,5 s intappable. Un membre qui bloque 5 créneaux pour un tournoi et en
+    // obtient 3 doit savoir LESQUELS ont raté pour retenter ou prévenir son partenaire.
+    if (done > 0) playSuccessJingle();
+    else playError();
+    setFailedSel(failedIds); // ces créneaux restent cochés dans la grille
     reload();
+    await askConfirm({
+      title:
+        done > 0
+          ? `${done} réservée${done > 1 ? "s" : ""}, ${fails.length} échouée${fails.length > 1 ? "s" : ""}`
+          : `Aucune réservation (${fails.length} échec${fails.length > 1 ? "s" : ""})`,
+      body:
+        done > 0
+          ? "Ces créneaux n'ont pas pu être réservés — ils restent cochés dans la grille :"
+          : "Aucun créneau n'a pu être réservé :",
+      lines: fails,
+      confirmLabel: "Compris",
+      noCancel: true,
+    });
   };
 
   // Rafraîchit les compteurs « N en attente » pour la plage actuellement affichée.
@@ -1207,6 +1259,14 @@ export default function Home() {
         {loading ? "Chargement du planning…" : error ? `Erreur : ${error}` : ""}
       </p>
 
+      {/* Région DISTINCTE pour l'action en cours (réserver / annuler). Séparée de celle du
+          chargement : sans ça, l'annonce « Réservation en cours » se met en file derrière
+          « Chargement du planning » et arrive après coup — voire jamais. */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {busyVerb}
+        {progress ? ` ${progress.done} sur ${progress.total}` : ""}
+      </p>
+
       {error && !isSpecial && <div className="notice error" role="alert">⚠️ {error}</div>}
 
       {tricount && view === "money" && (
@@ -1240,6 +1300,9 @@ export default function Home() {
                   canWatch={canNotify}
                   waitCountFor={waitCountFor}
                   myWaitFor={myWaitFor}
+                  pendingIds={pendingIds}
+                  progress={progress}
+                  retryIds={failedSel}
                 />
               );
             })()
@@ -1247,7 +1310,7 @@ export default function Home() {
             ? <Skeleton />
             : null
         : week.length
-          ? <WeekGrid days={week} filter={(iso) => inRange(iso, range)} onPick={pickDay} onBook={onBook} onCancelMine={onCancelMine} onTogglePresence={onTogglePresenceWeek} onBookMany={onBookMany} selMode={selMode} setSelMode={setSelMode} onWatch={onWatch} onUnwatch={onUnwatch} canWatch={canNotify} waitCountFor={waitCountFor} myWaitFor={myWaitFor} />
+          ? <WeekGrid days={week} filter={(iso) => inRange(iso, range)} onPick={pickDay} onBook={onBook} onCancelMine={onCancelMine} onTogglePresence={onTogglePresenceWeek} onBookMany={onBookMany} selMode={selMode} setSelMode={setSelMode} onWatch={onWatch} onUnwatch={onUnwatch} canWatch={canNotify} waitCountFor={waitCountFor} myWaitFor={myWaitFor} pendingIds={pendingIds} progress={progress} />
           : loading
             ? <Skeleton />
             : null}

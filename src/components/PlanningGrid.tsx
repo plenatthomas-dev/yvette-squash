@@ -43,6 +43,9 @@ export function PlanningGrid({
   canWatch,
   waitCountFor,
   myWaitFor,
+  pendingIds,
+  progress,
+  retryIds,
 }: {
   planning: PlanningDay;
   onBook: (slot: Slot) => void;
@@ -58,6 +61,14 @@ export function PlanningGrid({
   // Liste d'attente (idée D) : compteur et mon inscription par créneau.
   waitCountFor?: (date: string, hm: string) => number;
   myWaitFor?: (date: string, hm: string) => { position?: number } | null;
+  // Retour visuel de l'action en cours : la ou les cases réellement engagées auprès de
+  // ResaMania. Elles deviennent inertes et affichent un point d'attente, pour que le membre
+  // voie que ça travaille au lieu de croire que son tap n'a rien fait.
+  pendingIds?: Set<string>;
+  // Avancement de la réservation groupée (séquentielle) : « Réservation 3 / 7… ».
+  progress?: { done: number; total: number } | null;
+  // Créneaux à re-cocher après un bilan groupé partiel (ceux qui ont échoué).
+  retryIds?: string[];
 }) {
   // On coche des créneaux libres (un seul terrain par horaire, règle ResaMania), puis on
   // réserve tout d'un coup. La sélection se vide dès qu'on quitte le mode.
@@ -65,6 +76,17 @@ export function PlanningGrid({
   useEffect(() => {
     if (!selMode) setSelected(new Set());
   }, [selMode]);
+
+  // Après un bilan groupé partiel, la page renvoie les créneaux qui ont échoué : on rouvre
+  // le mode sélection avec eux déjà cochés. Sans ça, l'utilisateur devrait se rappeler
+  // lesquels ont raté et les recocher un par un.
+  useEffect(() => {
+    if (!retryIds || retryIds.length === 0) return;
+    setSelMode(true);
+    setSelected(new Set(retryIds));
+    // setSelMode est stable côté page (useState setter) ; on ne suit que la liste.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retryIds]);
 
   // Alerte « préviens-moi si ça se libère » : proposée sur les créneaux réservés HORS asso
   // (les créneaux asso servent, eux, à signaler sa présence — cf. onTogglePresence).
@@ -197,7 +219,26 @@ export function PlanningGrid({
                   </th>
                   {planning.courts.map((c) => {
                     const slot = byKey.get(c.id + "|" + t);
-                    if (!slot) return <td key={c.id} className="cell closed" />;
+                    if (!slot)
+                      return (
+                        <td
+                          key={c.id}
+                          className="cell closed"
+                          title="Terrain fermé à cet horaire"
+                          aria-label="Terrain fermé à cet horaire"
+                        />
+                      );
+                    // Créneau en cours de traitement auprès de ResaMania : case inerte et
+                    // visiblement occupée. Placé AVANT tous les autres cas — pendant l'appel,
+                    // aucun geste ne doit plus partir depuis cette case.
+                    if (pendingIds?.has(slot.id)) {
+                      return (
+                        <td key={c.id} className="cell pending" aria-busy="true">
+                          <span className="pending-dot" aria-hidden="true" />
+                          <span className="sr-only">Action en cours…</span>
+                        </td>
+                      );
+                    }
                     if (slot.mine) {
                       // En mode sélection, la case est inerte (pas d'annulation accidentelle).
                       return (
@@ -323,16 +364,31 @@ export function PlanningGrid({
         </table>
       </div>
 
-      {/* Barre d'action collante quand des créneaux sont sélectionnés. */}
-      {selMode && selected.size > 0 && (
+      {/* Barre d'action collante quand des créneaux sont sélectionnés. Pendant la réservation
+          groupée elle porte l'avancement : la boucle est séquentielle (N allers-retours vers
+          ResaMania), donc sans ce compteur l'écran resterait figé plusieurs secondes. */}
+      {(progress || (selMode && selected.size > 0)) && (
         <div className="wk-actionbar">
-          <span>
-            {selected.size} créneau{selected.size > 1 ? "x" : ""} sélectionné
-            {selected.size > 1 ? "s" : ""}
-          </span>
-          <button type="button" onClick={bookSelected}>
-            Réserver
-          </button>
+          {progress ? (
+            <>
+              <span>
+                Réservation {Math.min(progress.done + 1, progress.total)} / {progress.total}…
+              </span>
+              <button type="button" disabled>
+                Réservation…
+              </button>
+            </>
+          ) : (
+            <>
+              <span>
+                {selected.size} créneau{selected.size > 1 ? "x" : ""} sélectionné
+                {selected.size > 1 ? "s" : ""}
+              </span>
+              <button type="button" onClick={bookSelected}>
+                Réserver
+              </button>
+            </>
+          )}
         </div>
       )}
     </>
