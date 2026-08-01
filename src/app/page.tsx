@@ -1111,7 +1111,10 @@ export default function Home() {
         </div>
         {/* Sous-titre pleine largeur : accueil + lieu réunis sur une seule ligne
             (l'ancienne ligne « Bonjour » séparée est supprimée pour gagner de la place). */}
-        <div className="sub">Bonjour {nickname || me.split(" ")[0]} 👋 · Le Complexe, Bures</div>
+        {/* « Le Complexe, Bures » retiré : ce lieu est invariant et n'a jamais changé de
+            session en session. Il appartient à la modale « Confidentialité », pas à la
+            ligne 2 de chaque chargement — ~20 px rendus à la grille, qui est le produit. */}
+        <div className="sub">Bonjour {nickname || me.split(" ")[0]} 👋</div>
       </header>
 
       {/* Relance d'enrôlement biométrique (une seule fois, masquable) : gated en interne sur le
@@ -1193,17 +1196,21 @@ export default function Home() {
           </span>
         </button>
         <button className="secondary nav" aria-label={view === "week" ? "Semaine suivante" : "Jour suivant"} onClick={() => setDate(addDays(date, view === "week" ? 7 : 1))}>→</button>
-        {/* Toujours présent (place fixe dans la barre) ; inactif quand on est déjà sur aujourd'hui. */}
-        <button
-          type="button"
-          className="secondary today-chip"
-          onClick={() => setDate(today)}
-          disabled={date === today}
-          aria-label="Revenir à aujourd'hui"
-          title={date === today ? "Tu es déjà sur aujourd'hui" : "Revenir à aujourd'hui"}
-        >
-          Auj.
-        </button>
+        {/* Affiché SEULEMENT quand il sert. Il occupait une place fixe et restait grisé quand
+            on était déjà sur aujourd'hui — un contrôle inerte de plus dans une barre qui en
+            comptait treize avant d'atteindre la grille. Le libellé de date porte désormais
+            « Auj. · » ou « Demain · », donc l'information reste lisible sans lui. */}
+        {date !== today && (
+          <button
+            type="button"
+            className="secondary today-chip"
+            onClick={() => setDate(today)}
+            aria-label="Revenir à aujourd'hui"
+            title="Revenir à aujourd'hui"
+          >
+            Auj.
+          </button>
+        )}
         {/* Champ natif masqué : ouvert via showPicker() au clic sur le libellé de date. */}
         <input
           ref={dateInputRef}
@@ -1218,13 +1225,16 @@ export default function Home() {
       )}
 
       {/* Vue (Jour/Semaine) à gauche ; à droite les actions compactes en icônes :
-          sélection multiple, légende (ⓘ) et rafraîchir. */}
+          sélection multiple, légende (ⓘ) et rafraîchir.
+          Démontée dans les vues Frais/Tournoi : les onglets Jour/Semaine y flottaient seuls
+          au-dessus d'un module qui n'a ni jour ni semaine, avec l'un des deux allumé. */}
+      {!isSpecial && (
       <div className="viewbar">
         <div className="viewtabs" role="group" aria-label="Vue">
           <button className={view === "day" ? "active" : ""} aria-pressed={view === "day"} onClick={() => setView("day")}>Jour</button>
           <button className={view === "week" ? "active" : ""} aria-pressed={view === "week"} onClick={() => setView("week")}>Semaine</button>
         </div>
-        {!isSpecial && (
+        {/* La condition !isSpecial porte désormais sur la barre entière (voir plus haut). */}
         <div className="viewbar-icons">
           <button
             type="button"
@@ -1247,8 +1257,8 @@ export default function Home() {
             <RefreshIcon />
           </button>
         </div>
-        )}
       </div>
+      )}
 
       {!isSpecial && (
       <div className="filters" role="group" aria-label="Plage horaire">
