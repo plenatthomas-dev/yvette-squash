@@ -11,6 +11,8 @@ colors:
   club-surface: "#dbe7ff"
   club-encre: "#29508f"
   ferme: "#eceef2"
+  passe: "#e4e7ec"
+  passe-encre: "#5b626e"
   bleu-info: "#2f6fe0"
   notice-fond: "#eef2f8"
   rouge-encre: "#b3261e"
@@ -47,8 +49,8 @@ typography:
 rounded:
   sm: "8px"
   md: "12px"
-  lg: "16px"
   controle: "10px"
+  pilule: "999px"
 components:
   button-primary:
     backgroundColor: "{colors.vert-signal}"
@@ -142,7 +144,10 @@ Les états de créneau, qui ne sont ni des accents ni des neutres mais un vocabu
   sourd, lisible mais éteint — il ne sollicite pas le regard puisqu'on ne peut rien en faire.
 - **Club** (`club-surface` / `club-encre`) : créneau de l'asso, ou le sien. Bleu clair. Le même
   bleu sert aux deux ; seule l'étoile (★) dans le contenu distingue « mes créneaux ».
-- **Fermé** (`ferme`) : hors ouverture. Gris quasi neutre, sans texte.
+- **Fermé** (`ferme`) : hors ouverture. Gris quasi neutre.
+- **Passé** (`passe` / `passe-encre`) : créneau écoulé. Paire dédiée et non une opacité —
+  l'opacité composite le texte AVEC le fond et fait tomber le contraste sous 2,5:1, ce qui
+  ne « grise » pas le texte mais le fait disparaître.
 
 ### Neutral
 
@@ -185,6 +190,13 @@ et des emojis fonctionnels, jamais du dessin des lettres.
 - **Label** (500, 0.85rem) : encarts, textes secondaires, libellés de la barre d'outils.
 - **Micro** (700, 0.62–0.66rem, line-height 16–18px) : badges, pastilles de comptage, présences
   empilées dans une case. Le poids 700 compense la taille.
+
+**⚠️ L'échelle ci-dessus décrit les RÔLES, pas l'implémentation.** Le code contient
+**vingt-cinq tailles de police distinctes** entre 0,58rem et 2rem. Il n'existe donc pas
+d'échelle typographique tokenisée, exactement comme pour l'espacement — c'est un fait du
+système, pas une recommandation. Les cinq rôles nommés ici sont la cible vers laquelle
+converger : une nouvelle règle doit se rattacher à l'un d'eux plutôt qu'introduire une
+vingt-sixième valeur.
 
 ### Named Rules
 
@@ -246,10 +258,15 @@ image est refusé — les téléphones du club ne sont pas des machines de déve
 
 ## Shapes
 
-Langage de formes doux et régulier, sans angle vif ni découpe. Trois rayons applicatifs
-(`sm` 8px, `md` 12px, `lg` 16px) et un rayon de contrôle propre à Pico (10px) pour les boutons
-et les champs. Le badge du logo utilise 11px, calé sur le rayon de contrôle plutôt que sur
-l'échelle applicative.
+Langage de formes doux et régulier, sans angle vif ni découpe. Quatre rayons portent
+l'essentiel : `sm` (8px) pour les encarts, `md` (12px) pour les cartes et le conteneur de
+grille, `controle` (10px, hérité de Pico) pour les boutons et les champs, et `pilule` (999px)
+pour tout ce qui est chip, badge ou pastille.
+
+**Le code contient dix valeurs de rayon distinctes**, dont six hors de cette échelle
+(4, 6, 7, 9, 11, 24px), utilisées une ou deux fois chacune. Ce n'est pas un système
+parallèle, c'est de la dérive ponctuelle : chaque nouvelle règle doit se rattacher à
+l'échelle ci-dessus plutôt qu'ajouter un onzième rayon.
 
 Les bordures sont fines (1px) et systématiquement thémées via `--pico-card-border-color`, jamais
 codées en dur — c'est ce qui permet aux trois thèmes de rester cohérents. La grille est le seul
@@ -339,3 +356,8 @@ Le cœur du produit, et le seul composant qui justifie son propre vocabulaire.
   densité, c'est une devinette.
 - **Don't** repeindre un champ en rouge à l'erreur ; le message porte la couleur, pas le champ.
 - **Don't** coder une couleur de bordure en dur : elle cassera l'un des trois thèmes.
+- **Don't** griser par `opacity` un élément qui porte du texte : l'opacité composite le texte
+  et son fond, et effondre un contraste par ailleurs conforme. Utiliser une paire de couleurs
+  dédiée, calculée par thème.
+- **Don't** peindre un ÉTAT avec l'aplat vert. Un onglet ou un filtre sélectionné se marque
+  par le poids et un trait, jamais par le vert plein qui appartient à l'action.
