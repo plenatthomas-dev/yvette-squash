@@ -43,7 +43,11 @@ export async function GET(req: NextRequest) {
   // --- Chemin ResaMania (avec jeton) : fetch live → réconciliation → snapshot → annotation. ---
   const resa = session.resa;
   try {
-    const planning = await getPlanning(date, resa.accessToken);
+    // `fresh=1` : le client vient de réserver/annuler et attend de VOIR le résultat. On
+    // ignore alors le cache mémoire, qui peut être celui d'une autre instance serverless
+    // que celle ayant traité l'écriture (cf. getPlanning).
+    const fresh = new URL(req.url).searchParams.get("fresh") === "1";
+    const planning = await getPlanning(date, resa.accessToken, undefined, fresh);
 
     // Réconciliation base ↔ ResaMania (nécessite l'état LIVE) : une résa dont le créneau
     // est redevenu libre — ou pris par quelqu'un d'autre — a été annulée ailleurs → on la

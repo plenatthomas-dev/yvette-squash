@@ -8,6 +8,7 @@
 // /admin est indisponible — cf. le garde-fou anti-verrouillage dans admin/page.tsx.
 
 import { useEffect, useState } from "react";
+import { notifyFeaturesChanged } from "@/components/FeatureProvider";
 import {
   FEATURE_KEYS,
   FEATURE_LABELS,
@@ -58,6 +59,9 @@ export default function FeatureFlagsPanel() {
       const body = (await res.json()) as State & { error?: string };
       if (!res.ok) throw new Error(body.error ?? "Modification impossible");
       setData({ env: body.env, overrides: body.overrides, features: body.features });
+      // Le provider vit dans le layout et ne se remonte jamais : sans ce signal, le reste de
+      // l'appli garderait l'ancien état jusqu'à un rechargement complet du navigateur.
+      notifyFeaturesChanged();
     } catch (e) {
       setErr((e as Error).message);
     } finally {

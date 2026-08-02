@@ -138,8 +138,10 @@ export async function GET(req: NextRequest) {
       () => new Map<string, string>(),
     );
 
+    // Même logique que /api/planning : après une mutation, le client demande du frais.
+    const fresh = new URL(req.url).searchParams.get("fresh") === "1";
     const settled = await Promise.allSettled(
-      dates.map((d) => getPlanning(d, resa.accessToken, studios)),
+      dates.map((d) => getPlanning(d, resa.accessToken, studios, fresh)),
     );
 
     // Jours réellement récupérés (à re-snapshotter) ; les échecs retombent sur le snapshot.

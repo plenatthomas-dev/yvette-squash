@@ -386,13 +386,16 @@ export default function Home() {
   }, [actingAsId, incomingDelegations]);
 
   const load = useCallback(
-    async (d: string) => {
+    // `fresh` : on vient de réserver ou d'annuler et on attend de VOIR le résultat. Le cache
+    // planning vit en mémoire de process : l'invalidation faite par la route d'écriture ne
+    // vaut que pour SON instance serverless, et ce GET peut tomber ailleurs (cf. getPlanning).
+    async (d: string, fresh = false) => {
       setLoading(true);
       setError(null);
       try {
         // Séquentiel à dessein : /api/planning réconcilie la base (résas annulées ailleurs),
         // puis /api/bookings lit un journal déjà à jour.
-        const pr = await fetch(`/api/planning?date=${d}`);
+        const pr = await fetch(`/api/planning?date=${d}${fresh ? "&fresh=1" : ""}`);
         if (pr.status === 401) {
           setMe(null);
           return;
@@ -413,12 +416,12 @@ export default function Home() {
     [loadWaitCounts],
   );
 
-  const loadWeek = useCallback(async (d: string) => {
+  const loadWeek = useCallback(async (d: string, fresh = false) => {
     setLoading(true);
     setError(null);
     try {
       // Un seul appel : /api/week renvoie les 7 jours (planning brut, sans réconciliation).
-      const r = await fetch(`/api/week?date=${d}`);
+      const r = await fetch(`/api/week?date=${d}${fresh ? "&fresh=1" : ""}`);
       if (r.status === 401) {
         setMe(null);
         return;
@@ -495,11 +498,18 @@ export default function Home() {
     setSelMode(false);
   }, [view, date]);
 
-  const reload = useCallback(() => {
-    if (view === "money" || view === "tourney") return; // ces vues se rechargent seules
-    if (view === "week") loadWeek(date);
-    else load(date);
-  }, [view, date, load, loadWeek]);
+  // `fresh` à passer APRÈS une mutation (réservation, annulation) : sans lui, le GET peut
+  // être servi par le cache mémoire d'une instance serverless qui n'a pas vu l'écriture, et
+  // la grille reste inchangée jusqu'à expiration du TTL (20 s) — le symptôme « il faut
+  // actualiser plusieurs fois ».
+  const reload = useCallback(
+    (fresh = false) => {
+      if (view === "money" || view === "tourney") return; // ces vues se rechargent seules
+      if (view === "week") loadWeek(date, fresh);
+      else load(date, fresh);
+    },
+    [view, date, load, loadWeek],
+  );
 
   // Rafraîchit au retour sur l'onglet (throttle 15 s) : le planning peut avoir bougé
   // pendant l'absence (un autre membre a réservé). Évite de réserver un créneau déjà pris.
@@ -614,7 +624,7 @@ export default function Home() {
       }
       toast("ok", "Réservation confirmée");
       playSuccessJingle(); // petit jingle de succès (réglable dans les Paramètres)
-      reload();
+      reload(true); // frais : on vient d'écrire, on doit VOIR le créneau changer
     } catch (e) {
       toast("err", "Réservation impossible : " + (e as Error).message);
       playError(); // son d'échec de réservation
@@ -648,7 +658,7 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "le service n'a pas répondu comme prévu");
       toast("ok", "Réservation annulée");
-      reload();
+      reload(true); // frais : on vient d'écrire
     } catch (e) {
       toast("err", "Annulation impossible : " + (e as Error).message);
     } finally {
@@ -679,7 +689,7 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "le service n'a pas répondu comme prévu");
       toast("ok", "Réservation annulée");
-      reload();
+      reload(true); // frais : on vient d'écrire
     } catch (e) {
       toast("err", "Annulation impossible : " + (e as Error).message);
     } finally {
@@ -835,7 +845,7 @@ export default function Home() {
     if (done > 0 && fails.length === 0) {
       toast("ok", `${done} réservation${done > 1 ? "s" : ""} confirmée${done > 1 ? "s" : ""}`);
       playSuccessJingle();
-      reload();
+      reload(true); // frais : N écritures viennent d'avoir lieu
       return;
     }
     // Au moins un échec : le détail créneau-par-créneau existe, il ne doit PAS être jeté dans
@@ -844,7 +854,7 @@ export default function Home() {
     if (done > 0) playSuccessJingle();
     else playError();
     setFailedSel(failedIds); // ces créneaux restent cochés dans la grille
-    reload();
+    reload(true); // frais : au moins une écriture a abouti
     await askConfirm({
       title:
         done > 0
@@ -1250,9 +1260,12 @@ export default function Home() {
             <MultiSelectIcon />
           </button>
           <LegendInfo />
+          {/* `() => reload(true)` et non `reload` : passer le handler directement lui
+              transmettrait l'événement de clic comme argument. Et un rafraîchissement
+              DEMANDÉ doit de toute façon ignorer le cache — c'est tout son objet. */}
           <button
             className={"secondary icon-btn refresh" + (loading ? " spin" : "")}
-            onClick={reload}
+            onClick={() => reload(true)}
             disabled={loading}
             aria-label="Rafraîchir"
             title="Rafraîchir"
