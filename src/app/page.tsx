@@ -1226,15 +1226,18 @@ export default function Home() {
 
       {/* Vue (Jour/Semaine) à gauche ; à droite les actions compactes en icônes :
           sélection multiple, légende (ⓘ) et rafraîchir.
-          Démontée dans les vues Frais/Tournoi : les onglets Jour/Semaine y flottaient seuls
-          au-dessus d'un module qui n'a ni jour ni semaine, avec l'un des deux allumé. */}
-      {!isSpecial && (
+          ⚠️ Les onglets Jour/Semaine restent montés dans les vues Frais et Tournoi : ce sont
+          les SEULS contrôles qui ramènent au planning. Les démonter enfermait l'utilisateur
+          dans ces modules, sans aucun retour. Seules les icônes (sélection, légende,
+          rafraîchir), qui n'ont pas de sens hors planning, sont masquées. */}
       <div className="viewbar">
         <div className="viewtabs" role="group" aria-label="Vue">
           <button className={view === "day" ? "active" : ""} aria-pressed={view === "day"} onClick={() => setView("day")}>Jour</button>
           <button className={view === "week" ? "active" : ""} aria-pressed={view === "week"} onClick={() => setView("week")}>Semaine</button>
         </div>
-        {/* La condition !isSpecial porte désormais sur la barre entière (voir plus haut). */}
+        {/* Icônes masquées hors planning : sélection, légende et rafraîchir n'ont pas de
+            sens dans Frais / Tournoi. Les onglets, eux, restent — ils sont le retour. */}
+        {!isSpecial && (
         <div className="viewbar-icons">
           <button
             type="button"
@@ -1257,8 +1260,8 @@ export default function Home() {
             <RefreshIcon />
           </button>
         </div>
+        )}
       </div>
-      )}
 
       {!isSpecial && (
       <div className="filters" role="group" aria-label="Plage horaire">

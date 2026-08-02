@@ -635,7 +635,11 @@ header.app .sub {
    aplat : il indique sans revendiquer l'action. */
 .filters button.active {
   background: var(--pico-card-background-color);
-  color: var(--pico-color);
+  /* PAS `--pico-color` : Pico le REDÉFINIT à l'intérieur des boutons (vers --pico-primary,
+     --pico-secondary ou leur inverse blanc). Sur ces pilules secondaires il résolvait donc en
+     BLANC, soit du blanc sur fond de carte blanc — invisible en thème clair.
+     `--pico-h1-color` est un token de texte global, jamais rescopé dans un bouton. */
+  color: var(--pico-h1-color);
   border-color: var(--pico-primary);
   font-weight: 600;
   box-shadow: inset 0 -2px 0 var(--pico-primary);
@@ -709,7 +713,8 @@ header.app .sub {
 /* Même raison que .filters button.active : Jour/Semaine est un ÉTAT, pas une action. */
 .viewtabs button.active {
   background: var(--pico-card-background-color);
-  color: var(--pico-color);
+  /* Même piège que .filters button.active : voir le commentaire là-haut. */
+  color: var(--pico-h1-color);
   border-color: var(--pico-primary);
   font-weight: 600;
   box-shadow: inset 0 -2px 0 var(--pico-primary);
@@ -1408,6 +1413,42 @@ td.cell.past {
   padding: 20px;
   z-index: 1000;
   animation: fade-in 0.15s ease-out;
+}
+
+/* En-tête collant des Paramètres : le titre et sa croix restent visibles pendant tout le
+   défilement du panneau. Les marges négatives annulent le padding de .modal pour que la
+   bande occupe toute la largeur et que son fond masque le contenu qui passe dessous. */
+.settings-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -20px -20px 10px;
+  padding: 16px 20px 10px;
+  background: var(--pico-card-background-color);
+  border-bottom: 1px solid var(--pico-card-border-color);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.settings-head h3 {
+  margin: 0;
+}
+
+.settings-close {
+  margin: 0;
+  flex-shrink: 0;
+  /* Cible confortable, et carrée : c'est une croix, pas un libellé. */
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.05rem;
+  line-height: 1;
 }
 
 .modal {

@@ -49,6 +49,7 @@ typography:
 rounded:
   sm: "8px"
   md: "12px"
+  lg: "16px"
   controle: "10px"
   pilule: "999px"
 components:
@@ -258,15 +259,20 @@ image est refusé — les téléphones du club ne sont pas des machines de déve
 
 ## Shapes
 
-Langage de formes doux et régulier, sans angle vif ni découpe. Quatre rayons portent
-l'essentiel : `sm` (8px) pour les encarts, `md` (12px) pour les cartes et le conteneur de
-grille, `controle` (10px, hérité de Pico) pour les boutons et les champs, et `pilule` (999px)
-pour tout ce qui est chip, badge ou pastille.
+Langage de formes doux et régulier, sans angle vif ni découpe. Cinq rayons portent
+l'essentiel : `sm` (8px, `--radius-sm`) pour les encarts, `md` (12px, `--radius`) pour les
+cartes et le conteneur de grille, `lg` (16px, `--radius-lg`) pour les modales et le panneau
+d'annonce, `controle` (10px, `--pico-border-radius`) pour les boutons et les champs, et
+`pilule` (999px) pour les chips, badges et pastilles.
 
-**Le code contient dix valeurs de rayon distinctes**, dont six hors de cette échelle
-(4, 6, 7, 9, 11, 24px), utilisées une ou deux fois chacune. Ce n'est pas un système
-parallèle, c'est de la dérive ponctuelle : chaque nouvelle règle doit se rattacher à
-l'échelle ci-dessus plutôt qu'ajouter un onzième rayon.
+Deux formes de dérive coexistent, et elles n'appellent pas la même réponse :
+
+- **Des littéraux qui doublonnent un token.** `8px`, `10px` et `12px` sont écrits en dur à
+  une vingtaine d'endroits alors que `--radius-sm`, `--pico-border-radius` et `--radius`
+  existent. Correction mécanique et sans risque visuel : utiliser le token.
+- **Six valeurs hors échelle** (4, 6, 7, 9, 11, 24px), utilisées une ou deux fois chacune.
+  Celles-là demandent un arbitrage : se rattacher à l'échelle, ou justifier l'exception.
+  `pilule` (999px) est le cas particulier — massivement utilisé mais jamais tokenisé.
 
 Les bordures sont fines (1px) et systématiquement thémées via `--pico-card-border-color`, jamais
 codées en dur — c'est ce qui permet aux trois thèmes de rester cohérents. La grille est le seul
