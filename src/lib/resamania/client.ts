@@ -286,12 +286,24 @@ export async function getPlanning(
   accessToken?: string,
   // Map studios pré-chargée (vue Semaine : évite 7 appels /studios concurrents).
   studios?: Map<string, string>,
+  // Force un aller-retour ResaMania en ignorant le cache mémoire.
+  //
+  // POURQUOI c'est nécessaire : `planningCache` vit dans la mémoire du PROCESS. En
+  // serverless, `invalidatePlanningCache()` appelé après une réservation ne vide que le
+  // cache de l'instance qui a traité l'écriture. Le GET suivant peut atterrir sur une AUTRE
+  // instance, dont le cache contient encore le planning d'avant — pendant 20 s. Le membre
+  // réserve, la grille ne bouge pas, il actualise plusieurs fois, et ça finit par apparaître.
+  // Le client demande donc explicitement du frais juste après avoir muté (cf. /api/planning
+  // et /api/week, paramètre `fresh`). Coût : un seul appel amont de plus, au moment précis
+  // où l'utilisateur attend un résultat — et surtout aucune requête base supplémentaire,
+  // contrairement à un cache partagé qui pèserait sur le quota Neon.
+  fresh?: boolean,
 ): Promise<PlanningDay> {
   if (USE_MOCK || !accessToken) {
     return mockPlanning(date, CLUB_ID);
   }
 
-  const cached = planningCache.get(date);
+  const cached = fresh ? undefined : planningCache.get(date);
   if (cached && Date.now() - cached.at < PLANNING_TTL_MS) {
     // Clone OBLIGATOIRE : les appelants MUTENT les slots (annotation par joueur, snapshot).
     // Servir l'objet caché tel quel polluerait le cache avec l'annotation d'un autre joueur.

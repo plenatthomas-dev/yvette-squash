@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { fmtTime } from "@/lib/time";
+import { useBottomBar } from "@/lib/useBottomBar";
 
 // Déclenche l'action au clavier (Entrée / Espace) sur les cellules cliquables.
 function onKey(fn: () => void) {
@@ -12,6 +13,61 @@ function onKey(fn: () => void) {
       fn();
     }
   };
+}
+
+// Navigation au clavier DANS la grille (flèches, Origine/Fin).
+//
+// Avant, chaque cellule interactive était un arrêt de tabulation : atteindre le créneau de
+// 20 h demandait jusqu'à 40 tabulations en vue jour — et 280 segments en vue semaine. La
+// grille était donc théoriquement accessible et pratiquement inutilisable sans souris.
+// On déplace le focus de proche en proche dans le tableau, comme le fait un tableur.
+function moveFocus(from: HTMLElement, dRow: number, dCol: number, toEnd?: "start" | "end") {
+  const cell = from.closest("td, th");
+  const row = cell?.closest("tr");
+  const table = row?.closest("table");
+  if (!cell || !row || !table) return;
+
+  const rows = [...table.querySelectorAll("tbody tr")];
+  const cells = [...row.children];
+  const r = rows.indexOf(row as HTMLTableRowElement);
+  const c = cells.indexOf(cell);
+  if (r < 0) return;
+
+  // Cible : même colonne sur une autre ligne, ou autre colonne sur la même ligne.
+  const targetRow = rows[Math.min(Math.max(r + dRow, 0), rows.length - 1)];
+  const sameRow = dRow === 0;
+  const cols = [...targetRow.children];
+  let targetCol = sameRow ? c + dCol : c;
+  if (toEnd === "start") targetCol = 1; // 0 = colonne « Heure », non interactive
+  if (toEnd === "end") targetCol = cols.length - 1;
+  targetCol = Math.min(Math.max(targetCol, 0), cols.length - 1);
+
+  // On cherche le prochain élément focalisable à partir de la cible, dans le sens du geste.
+  const step = dCol < 0 || toEnd === "start" ? -1 : 1;
+  for (let i = targetCol; i >= 0 && i < cols.length; i += step) {
+    const candidate = cols[i] as HTMLElement;
+    if (candidate.tabIndex === 0) {
+      candidate.focus();
+      return;
+    }
+  }
+}
+
+function onGridKey(e: KeyboardEvent) {
+  const el = e.target as HTMLElement;
+  const map: Record<string, [number, number] | "start" | "end"> = {
+    ArrowUp: [-1, 0],
+    ArrowDown: [1, 0],
+    ArrowLeft: [0, -1],
+    ArrowRight: [0, 1],
+    Home: "start",
+    End: "end",
+  };
+  const move = map[e.key];
+  if (!move) return;
+  e.preventDefault();
+  if (move === "start" || move === "end") moveFocus(el, 0, 0, move);
+  else moveFocus(el, move[0], move[1]);
 }
 
 // Prénoms des membres « présents » (hors réservataire). Passent à la ligne ; au-delà de
@@ -43,6 +99,9 @@ export function PlanningGrid({
   canWatch,
   waitCountFor,
   myWaitFor,
+  pendingIds,
+  progress,
+  retryIds,
 }: {
   planning: PlanningDay;
   onBook: (slot: Slot) => void;
@@ -58,6 +117,14 @@ export function PlanningGrid({
   // Liste d'attente (idée D) : compteur et mon inscription par créneau.
   waitCountFor?: (date: string, hm: string) => number;
   myWaitFor?: (date: string, hm: string) => { position?: number } | null;
+  // Retour visuel de l'action en cours : la ou les cases réellement engagées auprès de
+  // ResaMania. Elles deviennent inertes et affichent un point d'attente, pour que le membre
+  // voie que ça travaille au lieu de croire que son tap n'a rien fait.
+  pendingIds?: Set<string>;
+  // Avancement de la réservation groupée (séquentielle) : « Réservation 3 / 7… ».
+  progress?: { done: number; total: number } | null;
+  // Créneaux à re-cocher après un bilan groupé partiel (ceux qui ont échoué).
+  retryIds?: string[];
 }) {
   // On coche des créneaux libres (un seul terrain par horaire, règle ResaMania), puis on
   // réserve tout d'un coup. La sélection se vide dès qu'on quitte le mode.
@@ -65,6 +132,17 @@ export function PlanningGrid({
   useEffect(() => {
     if (!selMode) setSelected(new Set());
   }, [selMode]);
+
+  // Après un bilan groupé partiel, la page renvoie les créneaux qui ont échoué : on rouvre
+  // le mode sélection avec eux déjà cochés. Sans ça, l'utilisateur devrait se rappeler
+  // lesquels ont raté et les recocher un par un.
+  useEffect(() => {
+    if (!retryIds || retryIds.length === 0) return;
+    setSelMode(true);
+    setSelected(new Set(retryIds));
+    // setSelMode est stable côté page (useState setter) ; on ne suit que la liste.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retryIds]);
 
   // Alerte « préviens-moi si ça se libère » : proposée sur les créneaux réservés HORS asso
   // (les créneaux asso servent, eux, à signaler sa présence — cf. onTogglePresence).
@@ -74,6 +152,10 @@ export function PlanningGrid({
   // - times   : lignes = horaires distincts triés
   // - byKey   : accès O(1) au créneau d'un (terrain, horaire)
   // - endByTime : fin de chaque horaire (pour afficher « début – fin »)
+  // Barre d'action en bas → masque la bannière d'installation PWA, qui la recouvrait.
+  const barUp = !!progress || (selMode && selected.size > 0);
+  useBottomBar(barUp);
+
   const { times, byKey, endByTime } = useMemo(() => {
     const times = [...new Set(planning.slots.map((s) => s.startsAt))].sort();
     const byKey = new Map(
@@ -135,12 +217,20 @@ export function PlanningGrid({
 
   return (
     <>
+      {/* Le libellé disait « Sélection multi créneau » : un groupe nominal agrammatical qui
+          n'indiquait ni comment cocher, ni comment sortir. On dit quoi faire. */}
       {selMode && (
-        <p className="muted tiny selmode-hint">Sélection multi créneau</p>
+        <p className="muted tiny selmode-hint">
+          Touche les créneaux libres à réserver, puis « Réserver » en bas. Retouche l&apos;icône
+          de sélection pour quitter.
+        </p>
       )}
 
       <div className="grid-wrap">
-        <table className="planning">
+        {/* La navigation par flèches est posée UNE fois sur le tableau : les événements des
+            cellules remontent jusqu'ici. Les cellules gardent leur Entrée/Espace pour
+            déclencher l'action ; les flèches ne font que déplacer le focus. */}
+        <table className="planning" onKeyDown={onGridKey}>
           <thead>
             <tr>
               <th className="time">Heure</th>
@@ -197,7 +287,26 @@ export function PlanningGrid({
                   </th>
                   {planning.courts.map((c) => {
                     const slot = byKey.get(c.id + "|" + t);
-                    if (!slot) return <td key={c.id} className="cell closed" />;
+                    if (!slot)
+                      return (
+                        <td
+                          key={c.id}
+                          className="cell closed"
+                          title="Terrain fermé à cet horaire"
+                          aria-label="Terrain fermé à cet horaire"
+                        />
+                      );
+                    // Créneau en cours de traitement auprès de ResaMania : case inerte et
+                    // visiblement occupée. Placé AVANT tous les autres cas — pendant l'appel,
+                    // aucun geste ne doit plus partir depuis cette case.
+                    if (pendingIds?.has(slot.id)) {
+                      return (
+                        <td key={c.id} className="cell pending" aria-busy="true">
+                          <span className="pending-dot" aria-hidden="true" />
+                          <span className="sr-only">Action en cours…</span>
+                        </td>
+                      );
+                    }
                     if (slot.mine) {
                       // En mode sélection, la case est inerte (pas d'annulation accidentelle).
                       return (
@@ -323,16 +432,31 @@ export function PlanningGrid({
         </table>
       </div>
 
-      {/* Barre d'action collante quand des créneaux sont sélectionnés. */}
-      {selMode && selected.size > 0 && (
+      {/* Barre d'action collante quand des créneaux sont sélectionnés. Pendant la réservation
+          groupée elle porte l'avancement : la boucle est séquentielle (N allers-retours vers
+          ResaMania), donc sans ce compteur l'écran resterait figé plusieurs secondes. */}
+      {(progress || (selMode && selected.size > 0)) && (
         <div className="wk-actionbar">
-          <span>
-            {selected.size} créneau{selected.size > 1 ? "x" : ""} sélectionné
-            {selected.size > 1 ? "s" : ""}
-          </span>
-          <button type="button" onClick={bookSelected}>
-            Réserver
-          </button>
+          {progress ? (
+            <>
+              <span>
+                Réservation {Math.min(progress.done + 1, progress.total)} / {progress.total}…
+              </span>
+              <button type="button" disabled>
+                Réservation…
+              </button>
+            </>
+          ) : (
+            <>
+              <span>
+                {selected.size} créneau{selected.size > 1 ? "x" : ""} sélectionné
+                {selected.size > 1 ? "s" : ""}
+              </span>
+              <button type="button" onClick={bookSelected}>
+                Réserver
+              </button>
+            </>
+          )}
         </div>
       )}
     </>

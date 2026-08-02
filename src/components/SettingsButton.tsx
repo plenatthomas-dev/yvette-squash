@@ -583,7 +583,22 @@ export function SettingsButton({
       </button>
       {open && (
         <Dialog onClose={() => setOpen(false)} label="Paramètres" className="settings">
-            <h3>Paramètres</h3>
+            {/* En-tête COLLANT avec sa propre croix. Le seul bouton « Fermer » était tout en
+                bas : sur un panneau riche (thème, pseudo, annuaire, délégation, biométrie,
+                son, commentaire), il fallait faire défiler l'intégralité de la fenêtre pour
+                pouvoir la refermer. La croix reste à portée quel que soit le défilement. */}
+            <div className="settings-head">
+              <h3>Paramètres</h3>
+              <button
+                type="button"
+                className="secondary settings-close"
+                onClick={() => setOpen(false)}
+                aria-label="Fermer les paramètres"
+                title="Fermer"
+              >
+                ✕
+              </button>
+            </div>
 
             <section className="setting">
               <h4>Thème</h4>

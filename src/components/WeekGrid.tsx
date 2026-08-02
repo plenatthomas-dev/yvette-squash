@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { fmtTime } from "@/lib/time";
 import { downloadIcs } from "@/lib/ics";
+import { useBottomBar } from "@/lib/useBottomBar";
 
 function shortDay(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString("fr-FR", {
@@ -73,6 +74,8 @@ export function WeekGrid({
   canWatch,
   waitCountFor,
   myWaitFor,
+  pendingIds,
+  progress,
 }: {
   days: { date: string; planning: PlanningDay }[];
   filter: (iso: string) => boolean;
@@ -91,6 +94,10 @@ export function WeekGrid({
   canWatch?: boolean;
   waitCountFor?: (date: string, hm: string) => number;
   myWaitFor?: (date: string, hm: string) => { position?: number } | null;
+  // Créneaux en cours de traitement auprès de ResaMania (cf. PlanningGrid) et avancement
+  // de la réservation groupée. Sans ce retour, l'écran reste figé pendant N allers-retours.
+  pendingIds?: Set<string>;
+  progress?: { done: number; total: number } | null;
 }) {
   const [sheet, setSheet] = useState<{ date: string; hm: string; courtId: string } | null>(
     null,
@@ -99,6 +106,9 @@ export function WeekGrid({
   useEffect(() => {
     if (!selMode) setSelected(new Set());
   }, [selMode]);
+  // Barre d'action en bas → masque la bannière d'installation PWA, qui la recouvrait.
+  useBottomBar(!!progress || (selMode && selected.size > 0));
+
   const now = Date.now();
   const todayStr = new Date().toLocaleDateString("en-CA");
 
@@ -336,12 +346,28 @@ export function WeekGrid({
                         const seg = segOf(slot, now);
                         const canSel = selMode && isReservable(slot, d.date, hm);
                         const isSel = selected.has(segKey(d.date, hm, c.id));
-                        const interactive = selMode
-                          ? canSel
-                          : seg === "free" ||
-                            seg === "asso" ||
-                            seg === "mine" ||
-                            seg === "other";
+                        // Segment engagé auprès de ResaMania : inerte et visiblement occupé,
+                        // exactement comme la case en vue jour.
+                        const isPending = !!slot && !!pendingIds?.has(slot.id);
+                        const interactive =
+                          !isPending &&
+                          (selMode
+                            ? canSel
+                            : seg === "free" ||
+                              seg === "asso" ||
+                              seg === "mine" ||
+                              seg === "other");
+                        if (isPending) {
+                          return (
+                            <span
+                              key={c.id}
+                              className={"wk-seg " + seg + " pending"}
+                              aria-busy="true"
+                              aria-label="Action en cours…"
+                              title="Action en cours…"
+                            />
+                          );
+                        }
                         return (
                           <span
                             key={c.id}
@@ -379,16 +405,30 @@ export function WeekGrid({
         </table>
       </div>
 
-      {/* Barre d'action collante quand des terrains sont sélectionnés. */}
-      {selMode && selected.size > 0 && (
+      {/* Barre d'action collante quand des terrains sont sélectionnés, ou porteuse de
+          l'avancement pendant la réservation groupée (boucle séquentielle). */}
+      {(progress || (selMode && selected.size > 0)) && (
         <div className="wk-actionbar">
-          <span>
-            {selected.size} terrain{selected.size > 1 ? "s" : ""} sélectionné
-            {selected.size > 1 ? "s" : ""}
-          </span>
-          <button type="button" onClick={bookSelected}>
-            Réserver
-          </button>
+          {progress ? (
+            <>
+              <span>
+                Réservation {Math.min(progress.done + 1, progress.total)} / {progress.total}…
+              </span>
+              <button type="button" disabled>
+                Réservation…
+              </button>
+            </>
+          ) : (
+            <>
+              <span>
+                {selected.size} terrain{selected.size > 1 ? "s" : ""} sélectionné
+                {selected.size > 1 ? "s" : ""}
+              </span>
+              <button type="button" onClick={bookSelected}>
+                Réserver
+              </button>
+            </>
+          )}
         </div>
       )}
 

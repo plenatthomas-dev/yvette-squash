@@ -75,6 +75,23 @@ function shortPretty(date: string): string {
     month: "short",
   });
 }
+// Mot RELATIF pour la date affichée (« Auj. », « Demain »), ou null.
+//
+// Pourquoi c'est nécessaire : `defaultOpenDate()` ouvre sur DEMAIN à partir de 21 h. La
+// règle est bonne — après 21 h on cherche un créneau pour le lendemain — mais elle déplace
+// le contexte de l'utilisateur sans le lui dire. Le seul indice était que la pastille
+// « Auj. » cessait d'être grisée : une différence d'opacité sur un bouton de 0,8 rem.
+// À 21 h 15, on ouvre l'appli pour voir s'il reste un terrain CE SOIR, on voit une grille
+// pleine de vert, on réserve — et on a réservé pour demain. C'est l'erreur de mode
+// classique, sur la question centrale du produit.
+function relativeDay(date: string): string | null {
+  const today = new Date().toLocaleDateString("en-CA");
+  if (date === today) return "Auj.";
+  const t = new Date(`${today}T12:00:00`);
+  t.setDate(t.getDate() + 1);
+  if (date === t.toLocaleDateString("en-CA")) return "Demain";
+  return null;
+}
 // --- Semaine -----------------------------------------------------------------
 function mondayOf(date: string): string {
   const d = new Date(`${date}T12:00:00`);
@@ -168,6 +185,19 @@ export default function Home() {
   const isSpecial = view === "money" || view === "tourney";
   const [week, setWeek] = useState<{ date: string; planning: PlanningDay }[]>([]);
   const [busy, setBusy] = useState(false);
+  // Retour visuel de `busy` DANS la grille. `busy` seul ne se voit nulle part : entre le tap
+  // et le toast, l'appel traverse ResaMania sans qu'un pixel bouge, ce qui se lit « ça n'a pas
+  // marché » et pousse à retaper (re-taps avalés en silence par le garde anti-double-clic).
+  //  - pendingIds : le ou les créneaux réellement engagés → case en attente, inerte ;
+  //  - progress   : avancement de la réservation groupée (séquentielle, N allers-retours) ;
+  //  - busyVerb   : même information pour les lecteurs d'écran, via un role="status" dédié.
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [busyVerb, setBusyVerb] = useState("");
+  // Créneaux qui viennent d'échouer en réservation groupée : la grille les re-coche pour
+  // qu'un nouvel essai ne demande pas de reconstituer la sélection de mémoire (la sélection
+  // est vidée à la sortie du mode). Un nouveau tableau à chaque bilan → l'effet se rejoue.
+  const [failedSel, setFailedSel] = useState<string[]>([]);
   // Mode « sélection multiple » (piloté depuis la barre de vue, appliqué dans la grille
   // affichée). Remonté ici pour que le bouton bascule vive dans la barre d'outils compacte.
   const [selMode, setSelMode] = useState(false);
@@ -356,13 +386,16 @@ export default function Home() {
   }, [actingAsId, incomingDelegations]);
 
   const load = useCallback(
-    async (d: string) => {
+    // `fresh` : on vient de réserver ou d'annuler et on attend de VOIR le résultat. Le cache
+    // planning vit en mémoire de process : l'invalidation faite par la route d'écriture ne
+    // vaut que pour SON instance serverless, et ce GET peut tomber ailleurs (cf. getPlanning).
+    async (d: string, fresh = false) => {
       setLoading(true);
       setError(null);
       try {
         // Séquentiel à dessein : /api/planning réconcilie la base (résas annulées ailleurs),
         // puis /api/bookings lit un journal déjà à jour.
-        const pr = await fetch(`/api/planning?date=${d}`);
+        const pr = await fetch(`/api/planning?date=${d}${fresh ? "&fresh=1" : ""}`);
         if (pr.status === 401) {
           setMe(null);
           return;
@@ -383,12 +416,12 @@ export default function Home() {
     [loadWaitCounts],
   );
 
-  const loadWeek = useCallback(async (d: string) => {
+  const loadWeek = useCallback(async (d: string, fresh = false) => {
     setLoading(true);
     setError(null);
     try {
       // Un seul appel : /api/week renvoie les 7 jours (planning brut, sans réconciliation).
-      const r = await fetch(`/api/week?date=${d}`);
+      const r = await fetch(`/api/week?date=${d}${fresh ? "&fresh=1" : ""}`);
       if (r.status === 401) {
         setMe(null);
         return;
@@ -465,11 +498,18 @@ export default function Home() {
     setSelMode(false);
   }, [view, date]);
 
-  const reload = useCallback(() => {
-    if (view === "money" || view === "tourney") return; // ces vues se rechargent seules
-    if (view === "week") loadWeek(date);
-    else load(date);
-  }, [view, date, load, loadWeek]);
+  // `fresh` à passer APRÈS une mutation (réservation, annulation) : sans lui, le GET peut
+  // être servi par le cache mémoire d'une instance serverless qui n'a pas vu l'écriture, et
+  // la grille reste inchangée jusqu'à expiration du TTL (20 s) — le symptôme « il faut
+  // actualiser plusieurs fois ».
+  const reload = useCallback(
+    (fresh = false) => {
+      if (view === "money" || view === "tourney") return; // ces vues se rechargent seules
+      if (view === "week") loadWeek(date, fresh);
+      else load(date, fresh);
+    },
+    [view, date, load, loadWeek],
+  );
 
   // Rafraîchit au retour sur l'onglet (throttle 15 s) : le planning peut avoir bougé
   // pendant l'absence (un autre membre a réservé). Évite de réserver un créneau déjà pris.
@@ -558,6 +598,8 @@ export default function Home() {
     });
     if (!ok) return;
     setBusy(true);
+    setPendingIds(new Set([slot.id]));
+    setBusyVerb("Réservation en cours…");
     try {
       const res = await fetch("/api/book", {
         method: "POST",
@@ -578,16 +620,18 @@ export default function Home() {
           toast("info", data.error);
           return;
         }
-        throw new Error(data.error ?? `Erreur ${res.status}`);
+        throw new Error(data.error ?? "le service n'a pas répondu comme prévu");
       }
       toast("ok", "Réservation confirmée");
       playSuccessJingle(); // petit jingle de succès (réglable dans les Paramètres)
-      reload();
+      reload(true); // frais : on vient d'écrire, on doit VOIR le créneau changer
     } catch (e) {
       toast("err", "Réservation impossible : " + (e as Error).message);
       playError(); // son d'échec de réservation
     } finally {
       setBusy(false);
+      setPendingIds(new Set());
+      setBusyVerb("");
     }
   };
 
@@ -612,9 +656,9 @@ export default function Home() {
       });
       if (handleExpired(res.status)) return;
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      if (!res.ok) throw new Error(data.error ?? "le service n'a pas répondu comme prévu");
       toast("ok", "Réservation annulée");
-      reload();
+      reload(true); // frais : on vient d'écrire
     } catch (e) {
       toast("err", "Annulation impossible : " + (e as Error).message);
     } finally {
@@ -633,6 +677,8 @@ export default function Home() {
     });
     if (!ok) return;
     setBusy(true);
+    setPendingIds(new Set([slot.id]));
+    setBusyVerb("Annulation en cours…");
     try {
       const res = await fetch("/api/cancel-slot", {
         method: "POST",
@@ -641,13 +687,15 @@ export default function Home() {
       });
       if (handleExpired(res.status)) return;
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `Erreur ${res.status}`);
+      if (!res.ok) throw new Error(data.error ?? "le service n'a pas répondu comme prévu");
       toast("ok", "Réservation annulée");
-      reload();
+      reload(true); // frais : on vient d'écrire
     } catch (e) {
       toast("err", "Annulation impossible : " + (e as Error).message);
     } finally {
       setBusy(false);
+      setPendingIds(new Set());
+      setBusyVerb("");
     }
   };
 
@@ -744,10 +792,18 @@ export default function Home() {
     });
     if (!ok) return;
     setBusy(true);
+    setBusyVerb(`Réservation de ${slots.length} créneaux en cours…`);
+    setProgress({ done: 0, total: slots.length });
     let done = 0;
     const fails: string[] = [];
+    // Créneaux effectivement ratés : on les garde cochés à la sortie (voir plus bas), pour
+    // que l'utilisateur puisse retenter sans avoir à recomposer sa sélection de mémoire.
+    const failedIds: string[] = [];
     try {
-      for (const slot of slots) {
+      for (const [i, slot] of slots.entries()) {
+        // La case en cours passe en attente ; la barre affiche « Réservation 3 / 7… ».
+        setPendingIds(new Set([slot.id]));
+        setProgress({ done: i, total: slots.length });
         try {
           const res = await fetch("/api/book", {
             method: "POST",
@@ -766,29 +822,52 @@ export default function Home() {
           }
           const data = await res.json().catch(() => ({}));
           if (res.ok) done++;
-          else
+          else {
             fails.push(
-              `${shortPretty(slot.startsAt.slice(0, 10))} ${fmtTime(slot.startsAt)} : ${data.error ?? res.status}`,
+              `${shortPretty(slot.startsAt.slice(0, 10))} ${fmtTime(slot.startsAt)} — ${slot.courtName} : ${data.error ?? `refusé (${res.status})`}`,
             );
+            failedIds.push(slot.id);
+          }
         } catch {
-          fails.push(`${shortPretty(slot.startsAt.slice(0, 10))} ${fmtTime(slot.startsAt)} : réseau`);
+          fails.push(
+            `${shortPretty(slot.startsAt.slice(0, 10))} ${fmtTime(slot.startsAt)} — ${slot.courtName} : réseau indisponible`,
+          );
+          failedIds.push(slot.id);
         }
       }
     } finally {
       setBusy(false);
+      setPendingIds(new Set());
+      setProgress(null);
+      setBusyVerb("");
     }
-    if (done > 0) {
-      toast(
-        fails.length ? "info" : "ok",
-        `${done} réservation${done > 1 ? "s" : ""} confirmée${done > 1 ? "s" : ""}` +
-          (fails.length ? ` · ${fails.length} échec${fails.length > 1 ? "s" : ""}` : ""),
-      );
-      playSuccessJingle(); // au moins une réservation a réussi → jingle de succès
-    } else {
-      toast("err", "Aucune réservation : " + (fails[0] ?? "échec"));
-      playError(); // aucune réservation n'a abouti → son d'échec
+    // Tout a réussi : le toast suffit, l'information tient en une phrase.
+    if (done > 0 && fails.length === 0) {
+      toast("ok", `${done} réservation${done > 1 ? "s" : ""} confirmée${done > 1 ? "s" : ""}`);
+      playSuccessJingle();
+      reload(true); // frais : N écritures viennent d'avoir lieu
+      return;
     }
-    reload();
+    // Au moins un échec : le détail créneau-par-créneau existe, il ne doit PAS être jeté dans
+    // un toast de 3,5 s intappable. Un membre qui bloque 5 créneaux pour un tournoi et en
+    // obtient 3 doit savoir LESQUELS ont raté pour retenter ou prévenir son partenaire.
+    if (done > 0) playSuccessJingle();
+    else playError();
+    setFailedSel(failedIds); // ces créneaux restent cochés dans la grille
+    reload(true); // frais : au moins une écriture a abouti
+    await askConfirm({
+      title:
+        done > 0
+          ? `${done} réservée${done > 1 ? "s" : ""}, ${fails.length} échouée${fails.length > 1 ? "s" : ""}`
+          : `Aucune réservation (${fails.length} échec${fails.length > 1 ? "s" : ""})`,
+      body:
+        done > 0
+          ? "Ces créneaux n'ont pas pu être réservés — ils restent cochés dans la grille :"
+          : "Aucun créneau n'a pu être réservé :",
+      lines: fails,
+      confirmLabel: "Compris",
+      noCancel: true,
+    });
   };
 
   // Rafraîchit les compteurs « N en attente » pour la plage actuellement affichée.
@@ -997,7 +1076,9 @@ export default function Home() {
                   : []),
                 {
                   key: "money",
-                  label: "Tricount",
+                  // « Tricount » est une marque tierce ; PRODUCT.md, le code (`view === "money"`)
+                  // et les commentaires disent tous « Frais ». On aligne le seul endroit visible.
+                  label: "Frais partagés",
                   icon: <EuroIcon />,
                   active: view === "money",
                   badge: tricount && triOwed > 0 ? triOwed : undefined,
@@ -1040,7 +1121,10 @@ export default function Home() {
         </div>
         {/* Sous-titre pleine largeur : accueil + lieu réunis sur une seule ligne
             (l'ancienne ligne « Bonjour » séparée est supprimée pour gagner de la place). */}
-        <div className="sub">Bonjour {nickname || me.split(" ")[0]} 👋 · Le Complexe, Bures</div>
+        {/* « Le Complexe, Bures » retiré : ce lieu est invariant et n'a jamais changé de
+            session en session. Il appartient à la modale « Confidentialité », pas à la
+            ligne 2 de chaque chargement — ~20 px rendus à la grille, qui est le produit. */}
+        <div className="sub">Bonjour {nickname || me.split(" ")[0]} 👋</div>
       </header>
 
       {/* Relance d'enrôlement biométrique (une seule fois, masquable) : gated en interne sur le
@@ -1097,7 +1181,9 @@ export default function Home() {
           « Aujourd'hui » (toujours présente, inactive si on y est déjà), le tout sur UNE ligne. */}
       {!isSpecial && (
       <div className="toolbar">
-        <button className="secondary nav" aria-label="Jour précédent" onClick={() => setDate(addDays(date, view === "week" ? -7 : -1))}>←</button>
+        {/* Le libellé DOIT suivre la vue : le handler recule de 7 jours en vue semaine.
+            Annoncer « jour précédent » et reculer d'une semaine trompe qui n'a que l'audio. */}
+        <button className="secondary nav" aria-label={view === "week" ? "Semaine précédente" : "Jour précédent"} onClick={() => setDate(addDays(date, view === "week" ? -7 : -1))}>←</button>
         <button
           type="button"
           className="secondary datebtn"
@@ -1106,10 +1192,25 @@ export default function Home() {
           aria-label="Choisir une date"
         >
           <CalendarIcon />
-          <span className="date">{view === "week" ? weekLabel(date) : shortPretty(date)}</span>
+          <span className="date">
+            {view === "week" ? (
+              weekLabel(date)
+            ) : (
+              <>
+                {relativeDay(date) && (
+                  <strong className="date-rel">{relativeDay(date)} · </strong>
+                )}
+                {shortPretty(date)}
+              </>
+            )}
+          </span>
         </button>
-        <button className="secondary nav" aria-label="Jour suivant" onClick={() => setDate(addDays(date, view === "week" ? 7 : 1))}>→</button>
-        {/* Toujours présent (place fixe dans la barre) ; inactif quand on est déjà sur aujourd'hui. */}
+        <button className="secondary nav" aria-label={view === "week" ? "Semaine suivante" : "Jour suivant"} onClick={() => setDate(addDays(date, view === "week" ? 7 : 1))}>→</button>
+        {/* TOUJOURS rendu, grisé quand on est déjà sur aujourd'hui. Sa place dans la barre
+            doit être FIXE : le masquer faisait sauter les flèches ← → d'un cran dès qu'on
+            revenait sur aujourd'hui, donc sous le doigt entre deux navigations de jour.
+            Une cible qui se déplace pendant qu'on l'utilise coûte plus cher que le contrôle
+            inerte qu'on économise. */}
         <button
           type="button"
           className="secondary today-chip"
@@ -1134,12 +1235,18 @@ export default function Home() {
       )}
 
       {/* Vue (Jour/Semaine) à gauche ; à droite les actions compactes en icônes :
-          sélection multiple, légende (ⓘ) et rafraîchir. */}
+          sélection multiple, légende (ⓘ) et rafraîchir.
+          ⚠️ Les onglets Jour/Semaine restent montés dans les vues Frais et Tournoi : ce sont
+          les SEULS contrôles qui ramènent au planning. Les démonter enfermait l'utilisateur
+          dans ces modules, sans aucun retour. Seules les icônes (sélection, légende,
+          rafraîchir), qui n'ont pas de sens hors planning, sont masquées. */}
       <div className="viewbar">
         <div className="viewtabs" role="group" aria-label="Vue">
           <button className={view === "day" ? "active" : ""} aria-pressed={view === "day"} onClick={() => setView("day")}>Jour</button>
           <button className={view === "week" ? "active" : ""} aria-pressed={view === "week"} onClick={() => setView("week")}>Semaine</button>
         </div>
+        {/* Icônes masquées hors planning : sélection, légende et rafraîchir n'ont pas de
+            sens dans Frais / Tournoi. Les onglets, eux, restent — ils sont le retour. */}
         {!isSpecial && (
         <div className="viewbar-icons">
           <button
@@ -1153,9 +1260,12 @@ export default function Home() {
             <MultiSelectIcon />
           </button>
           <LegendInfo />
+          {/* `() => reload(true)` et non `reload` : passer le handler directement lui
+              transmettrait l'événement de clic comme argument. Et un rafraîchissement
+              DEMANDÉ doit de toute façon ignorer le cache — c'est tout son objet. */}
           <button
             className={"secondary icon-btn refresh" + (loading ? " spin" : "")}
-            onClick={reload}
+            onClick={() => reload(true)}
             disabled={loading}
             aria-label="Rafraîchir"
             title="Rafraîchir"
@@ -1199,12 +1309,24 @@ export default function Home() {
         </p>
       )}
 
-      {/* Cible du lien d'évitement : saute l'en-tête et la barre de navigation. */}
-      <div id="main-content" tabIndex={-1} />
+      {/* Cible du lien d'évitement : saute l'en-tête et la barre de navigation. Porte un
+          titre `sr-only` — un <div> vide et sans nom ne fait rien annoncer au lecteur
+          d'écran, qui ne sait donc pas si le saut a fonctionné. */}
+      <div id="main-content" tabIndex={-1}>
+        <h2 className="sr-only">Planning des terrains</h2>
+      </div>
 
       {/* Annonce discrète pour lecteurs d'écran (chargement / erreur). */}
       <p className="sr-only" role="status" aria-live="polite">
         {loading ? "Chargement du planning…" : error ? `Erreur : ${error}` : ""}
+      </p>
+
+      {/* Région DISTINCTE pour l'action en cours (réserver / annuler). Séparée de celle du
+          chargement : sans ça, l'annonce « Réservation en cours » se met en file derrière
+          « Chargement du planning » et arrive après coup — voire jamais. */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {busyVerb}
+        {progress ? ` ${progress.done} sur ${progress.total}` : ""}
       </p>
 
       {error && !isSpecial && <div className="notice error" role="alert">⚠️ {error}</div>}
@@ -1240,6 +1362,9 @@ export default function Home() {
                   canWatch={canNotify}
                   waitCountFor={waitCountFor}
                   myWaitFor={myWaitFor}
+                  pendingIds={pendingIds}
+                  progress={progress}
+                  retryIds={failedSel}
                 />
               );
             })()
@@ -1247,7 +1372,7 @@ export default function Home() {
             ? <Skeleton />
             : null
         : week.length
-          ? <WeekGrid days={week} filter={(iso) => inRange(iso, range)} onPick={pickDay} onBook={onBook} onCancelMine={onCancelMine} onTogglePresence={onTogglePresenceWeek} onBookMany={onBookMany} selMode={selMode} setSelMode={setSelMode} onWatch={onWatch} onUnwatch={onUnwatch} canWatch={canNotify} waitCountFor={waitCountFor} myWaitFor={myWaitFor} />
+          ? <WeekGrid days={week} filter={(iso) => inRange(iso, range)} onPick={pickDay} onBook={onBook} onCancelMine={onCancelMine} onTogglePresence={onTogglePresenceWeek} onBookMany={onBookMany} selMode={selMode} setSelMode={setSelMode} onWatch={onWatch} onUnwatch={onUnwatch} canWatch={canNotify} waitCountFor={waitCountFor} myWaitFor={myWaitFor} pendingIds={pendingIds} progress={progress} />
           : loading
             ? <Skeleton />
             : null}

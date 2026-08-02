@@ -37,7 +37,11 @@ export function HeaderMenu({ items }: { items: HeaderMenuItem[] }) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      // Rend le focus au déclencheur : sans ça il repart au début du document et
+      // l'utilisateur au clavier doit retraverser tout l'en-tête.
+      ref.current?.querySelector("button")?.focus();
     };
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
@@ -63,7 +67,36 @@ export function HeaderMenu({ items }: { items: HeaderMenuItem[] }) {
         {anyBadge && <span className="badge dot" aria-hidden="true" />}
       </button>
       {open && (
-        <div className="header-menu-panel" role="menu">
+        // `role="menu"` promet le patron menu : flèches haut/bas, Origine/Fin, et focus placé
+        // sur le panneau à l'ouverture. Sans ça, un lecteur d'écran annonce « menu »,
+        // l'utilisateur active le patron attendu, et rien ne répond — un rôle ARIA qui ment
+        // est pire que pas de rôle. Le focus revient au déclencheur à la fermeture (cf. Échap
+        // plus haut), sinon il repart au début du document.
+        <div
+          className="header-menu-panel"
+          role="menu"
+          onKeyDown={(e) => {
+            const focusables = [
+              ...e.currentTarget.querySelectorAll<HTMLButtonElement>(
+                '[role="menuitem"]:not(:disabled)',
+              ),
+            ];
+            if (focusables.length === 0) return;
+            const i = focusables.indexOf(document.activeElement as HTMLButtonElement);
+            const go = (n: number) => {
+              e.preventDefault();
+              focusables[(n + focusables.length) % focusables.length].focus();
+            };
+            if (e.key === "ArrowDown") go(i + 1);
+            else if (e.key === "ArrowUp") go(i - 1);
+            else if (e.key === "Home") go(0);
+            else if (e.key === "End") go(focusables.length - 1);
+          }}
+          ref={(el) => {
+            // Focus initial sur le premier item : c'est ce que le patron menu impose.
+            el?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus();
+          }}
+        >
           {items.map((it) => (
             <button
               key={it.key}

@@ -192,7 +192,7 @@ export default function RequestsHistoryPage() {
                           {h.outcome === "approved" ? (
                             <span style={{ color: "#166534" }}>approuvée</span>
                           ) : (
-                            <span style={{ color: "#b91c1c" }}>rejetée</span>
+                            <span style={{ color: "var(--error-fg)" }}>rejetée</span>
                           )}
                         </td>
                         <td className="tiny" style={{ whiteSpace: "nowrap" }}>

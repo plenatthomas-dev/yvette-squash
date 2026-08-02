@@ -12,6 +12,10 @@ export type ConfirmOpts = {
   lines?: string[]; // si fourni, affiché en liste (une réservation par ligne) sous le body
   confirmLabel: string;
   danger?: boolean;
+  // Dialogue de RÉSULTAT (et non de confirmation) : masque « Retour », il n'y a rien à
+  // annuler. Sert au bilan d'une réservation groupée, dont le détail créneau-par-créneau
+  // ne tient pas dans un toast qui s'efface au bout de 3,5 s.
+  noCancel?: boolean;
 };
 export type ConfirmState = (ConfirmOpts & { resolve: (v: boolean) => void }) | null;
 
@@ -35,9 +39,11 @@ export function ConfirmDialog({
         </ul>
       )}
       <div className="modal-actions">
-        <button className="secondary" onClick={() => onResolve(false)}>
-          Retour
-        </button>
+        {!state.noCancel && (
+          <button className="secondary" onClick={() => onResolve(false)}>
+            Retour
+          </button>
+        )}
         <button
           className={state.danger ? "danger" : ""}
           onClick={() => onResolve(true)}

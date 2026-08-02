@@ -46,6 +46,14 @@ const IS_PREVIEW = process.env.VERCEL_ENV === "preview";
 // donc au script-src EN DEV SEULEMENT — la prod (et les builds) restent sans `unsafe-eval`.
 const IS_DEV = process.env.NODE_ENV !== "production";
 
+// En DÉVELOPPEMENT uniquement : autorise le mode d'itération visuelle « impeccable live »,
+// dont le picker est servi par un serveur local sur http://localhost:8400 (script + websocket).
+// Même piège que vercel.live ci-dessus : le script vient d'un autre hôte et n'est pas noncé,
+// donc `strict-dynamic` le bloquerait en faisant ignorer la liste d'hôtes. En dev on retombe
+// donc, comme en preview, sur un script-src PAR HÔTE sans strict-dynamic. La prod n'est jamais
+// concernée (IS_DEV et IS_PREVIEW y sont faux : elle garde nonce + strict-dynamic).
+const LIVE_DEV = IS_DEV ? " http://localhost:8400" : "";
+
 function buildCsp(nonce: string): string {
   const live = IS_PREVIEW ? " https://vercel.live" : "";
   const evalDev = IS_DEV ? " 'unsafe-eval'" : "";
@@ -54,8 +62,8 @@ function buildCsp(nonce: string): string {
     // Prod : nonce + strict-dynamic (le plus strict). Preview : par hôte pour laisser passer
     // le script vercel.live, qui n'est pas noncé par Vercel donc bloqué par strict-dynamic.
     // Dev : + 'unsafe-eval' (HMR), jamais en prod.
-    IS_PREVIEW
-      ? `script-src 'self' 'nonce-${nonce}'${live}${evalDev}`
+    IS_PREVIEW || IS_DEV
+      ? `script-src 'self' 'nonce-${nonce}'${live}${LIVE_DEV}${evalDev}`
       : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${evalDev}`,
     // Styles inline (React/Next/Pico) non contenables par nonce, non exécutables.
     `style-src 'self' 'unsafe-inline'${live}`,
@@ -63,7 +71,7 @@ function buildCsp(nonce: string): string {
     `font-src 'self'${IS_PREVIEW ? " https://vercel.live https://assets.vercel.com" : ""}`,
     // API interne + beacons Vercel (insights/vitals) + BotID : tous en same-origin.
     // Preview : + vercel.live et son websocket Pusher (temps réel de la barre d'outils).
-    `connect-src 'self'${IS_PREVIEW ? " https://vercel.live https://*.pusher.com wss://*.pusher.com" : ""}`,
+    `connect-src 'self'${IS_PREVIEW ? " https://vercel.live https://*.pusher.com wss://*.pusher.com" : ""}${LIVE_DEV}${IS_DEV ? " ws://localhost:8400" : ""}`,
     "worker-src 'self'", // service worker /sw.js (web push)
     "manifest-src 'self'", // /manifest.webmanifest (PWA)
     // Preview : la barre d'outils s'affiche dans une iframe vercel.live. Prod : retombe sur default-src 'self'.

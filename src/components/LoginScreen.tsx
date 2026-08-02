@@ -308,21 +308,32 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
               pour réserver ton terrain. Ta biométrie restera active ensuite.
             </div>
           )}
+          {/* Libellés VISIBLES et rattachés (htmlFor/id). Le placeholder seul ne suffit pas :
+              il disparaît à la première frappe — un membre interrompu ne sait plus quel champ
+              il remplissait — et son interprétation comme libellé par les lecteurs d'écran
+              n'est pas fiable. WCAG 3.3.2 est de niveau A, et c'est l'écran que voit chaque
+              membre à chaque reconnexion. */}
           <form onSubmit={submitResa}>
+            <label className="field-label" htmlFor="resa-username">
+              Identifiant ResaMania (email)
+            </label>
             <input
+              id="resa-username"
               type="text"
-              placeholder="Identifiant ResaMania (email)"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               // « webauthn » (quand la biométrie est active) branche l'autofill conditionnel :
               // le passkey apparaît dans la liste d'autocomplétion de ce champ.
               autoComplete={biometry ? "username webauthn" : "username"}
             />
+            <label className="field-label" htmlFor="resa-password">
+              Mot de passe
+            </label>
             <div className="pwd-field">
               <input
+                id="resa-password"
                 ref={passwordRef}
                 type={showPwd ? "text" : "password"}
-                placeholder="Mot de passe"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
@@ -353,9 +364,12 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
 
           {emailMode === "forgot" ? (
             <form onSubmit={submitForgot}>
+              <label className="field-label" htmlFor="forgot-email">
+                Ton email
+              </label>
               <input
+                id="forgot-email"
                 type="email"
-                placeholder="Ton email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 autoComplete="email"
@@ -374,9 +388,12 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
             </form>
           ) : (
             <form onSubmit={emailMode === "register" ? submitRegister : submitEmailLogin}>
+              <label className="field-label" htmlFor="email-address">
+                Ton email
+              </label>
               <input
+                id="email-address"
                 type="email"
-                placeholder="Ton email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 // « webauthn » : autofill conditionnel du passkey sur ce champ (cf. onglet ResaMania),
@@ -384,22 +401,31 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
                 autoComplete={biometry ? "email webauthn" : "email"}
               />
               {emailMode === "register" && (
-                <input
-                  type="text"
-                  placeholder="Ton nom (prénom + nom)"
-                  value={name}
-                  maxLength={60}
-                  onChange={(e) => setName(e.target.value)}
-                  autoComplete="name"
-                />
+                <>
+                  <label className="field-label" htmlFor="register-name">
+                    Ton nom (prénom + nom)
+                  </label>
+                  <input
+                    id="register-name"
+                    type="text"
+                    value={name}
+                    maxLength={60}
+                    onChange={(e) => setName(e.target.value)}
+                    autoComplete="name"
+                  />
+                </>
               )}
               {/* Le mot de passe ne se choisit PAS ici à l'inscription : c'est au moment
                   d'activer le compte (via le lien transmis par l'admin) — cf. /reinitialiser. */}
               {emailMode === "login" && (
+                <>
+                <label className="field-label" htmlFor="email-password">
+                  Mot de passe
+                </label>
                 <div className="pwd-field">
                   <input
+                    id="email-password"
                     type={showEmailPwd ? "text" : "password"}
-                    placeholder="Mot de passe"
                     value={emailPassword}
                     onChange={(e) => setEmailPassword(e.target.value)}
                     autoComplete="current-password"
@@ -415,6 +441,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
                     <EyeIcon off={showEmailPwd} />
                   </button>
                 </div>
+                </>
               )}
               <button
                 type="submit"

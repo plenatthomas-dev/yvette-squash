@@ -35,3 +35,8 @@ npm-debug.log*
 revue-code-yvette-squash.pdf
 .vercel
 .env*
+
+# impeccable — le live mode écrit des artefacts d'EXÉCUTION dans .impeccable/live/
+# (journal d'injection, état de session). Seule sa config est versionnée.
+/.impeccable/live/*
+!/.impeccable/live/config.json
