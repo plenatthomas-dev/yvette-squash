@@ -564,10 +564,14 @@ header.app .sub {
   padding: 7px 11px;
   font-size: 0.8rem;
 }
-/* (La règle `.today-chip:disabled` a été retirée : la pastille n'est plus rendue du tout
-   quand on est déjà sur aujourd'hui, elle ne peut donc plus être désactivée. Son ancien
-   état grisé était d'ailleurs le seul signal indiquant qu'on n'était PAS sur aujourd'hui —
-   c'est désormais le libellé de date qui le dit, en toutes lettres.) */
+/* Grisée quand on est déjà sur aujourd'hui, mais TOUJOURS présente : sa largeur réserve la
+   place et empêche les flèches ← → de sauter d'un cran au retour sur aujourd'hui.
+   Elle n'est plus le seul indice du jour affiché — le libellé de date porte « Auj. · » et
+   « Demain · » — donc son rôle est désormais purement celui d'un point d'ancrage stable. */
+.toolbar .today-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 
 /* Champ date natif rendu invisible mais présent dans le DOM (support de showPicker). */
 .datepick-hidden {

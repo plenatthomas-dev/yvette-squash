@@ -1206,21 +1206,21 @@ export default function Home() {
           </span>
         </button>
         <button className="secondary nav" aria-label={view === "week" ? "Semaine suivante" : "Jour suivant"} onClick={() => setDate(addDays(date, view === "week" ? 7 : 1))}>→</button>
-        {/* Affiché SEULEMENT quand il sert. Il occupait une place fixe et restait grisé quand
-            on était déjà sur aujourd'hui — un contrôle inerte de plus dans une barre qui en
-            comptait treize avant d'atteindre la grille. Le libellé de date porte désormais
-            « Auj. · » ou « Demain · », donc l'information reste lisible sans lui. */}
-        {date !== today && (
-          <button
-            type="button"
-            className="secondary today-chip"
-            onClick={() => setDate(today)}
-            aria-label="Revenir à aujourd'hui"
-            title="Revenir à aujourd'hui"
-          >
-            Auj.
-          </button>
-        )}
+        {/* TOUJOURS rendu, grisé quand on est déjà sur aujourd'hui. Sa place dans la barre
+            doit être FIXE : le masquer faisait sauter les flèches ← → d'un cran dès qu'on
+            revenait sur aujourd'hui, donc sous le doigt entre deux navigations de jour.
+            Une cible qui se déplace pendant qu'on l'utilise coûte plus cher que le contrôle
+            inerte qu'on économise. */}
+        <button
+          type="button"
+          className="secondary today-chip"
+          onClick={() => setDate(today)}
+          disabled={date === today}
+          aria-label="Revenir à aujourd'hui"
+          title={date === today ? "Tu es déjà sur aujourd'hui" : "Revenir à aujourd'hui"}
+        >
+          Auj.
+        </button>
         {/* Champ natif masqué : ouvert via showPicker() au clic sur le libellé de date. */}
         <input
           ref={dateInputRef}
