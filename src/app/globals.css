@@ -599,6 +599,16 @@ header.app .sub {
 /* Champ date natif rendu invisible mais présent dans le DOM (support de showPicker). */
 .datepick-hidden {
   position: absolute;
+  /* ANCRÉ en haut à gauche — et ce n'est pas cosmétique.
+     Sans `left`/`top`, un élément en position absolue reste à sa position STATIQUE : ici en
+     fin de barre d'outils, soit vers 395px sur un écran de 412. Or la largeur d'un champ
+     date natif est imposée par le navigateur (contrôle à sous-champs jj/mm/aaaa) et
+     `width: 1px` ne la réduit pas : son bord droit tombait à 428px, débordant de 16px.
+     Comme il est en position absolue, il ne poussait rien — il ajoutait juste une zone
+     défilable, d'où le scroll horizontal de TOUTE l'appli, sans élément visible pour
+     l'expliquer. Ancré à 0, la largeur que le navigateur lui impose reste dans l'écran. */
+  left: 0;
+  top: 0;
   width: 1px;
   height: 1px;
   padding: 0;
