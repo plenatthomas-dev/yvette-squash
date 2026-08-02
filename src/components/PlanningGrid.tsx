@@ -15,6 +15,61 @@ function onKey(fn: () => void) {
   };
 }
 
+// Navigation au clavier DANS la grille (flèches, Origine/Fin).
+//
+// Avant, chaque cellule interactive était un arrêt de tabulation : atteindre le créneau de
+// 20 h demandait jusqu'à 40 tabulations en vue jour — et 280 segments en vue semaine. La
+// grille était donc théoriquement accessible et pratiquement inutilisable sans souris.
+// On déplace le focus de proche en proche dans le tableau, comme le fait un tableur.
+function moveFocus(from: HTMLElement, dRow: number, dCol: number, toEnd?: "start" | "end") {
+  const cell = from.closest("td, th");
+  const row = cell?.closest("tr");
+  const table = row?.closest("table");
+  if (!cell || !row || !table) return;
+
+  const rows = [...table.querySelectorAll("tbody tr")];
+  const cells = [...row.children];
+  const r = rows.indexOf(row as HTMLTableRowElement);
+  const c = cells.indexOf(cell);
+  if (r < 0) return;
+
+  // Cible : même colonne sur une autre ligne, ou autre colonne sur la même ligne.
+  const targetRow = rows[Math.min(Math.max(r + dRow, 0), rows.length - 1)];
+  const sameRow = dRow === 0;
+  const cols = [...targetRow.children];
+  let targetCol = sameRow ? c + dCol : c;
+  if (toEnd === "start") targetCol = 1; // 0 = colonne « Heure », non interactive
+  if (toEnd === "end") targetCol = cols.length - 1;
+  targetCol = Math.min(Math.max(targetCol, 0), cols.length - 1);
+
+  // On cherche le prochain élément focalisable à partir de la cible, dans le sens du geste.
+  const step = dCol < 0 || toEnd === "start" ? -1 : 1;
+  for (let i = targetCol; i >= 0 && i < cols.length; i += step) {
+    const candidate = cols[i] as HTMLElement;
+    if (candidate.tabIndex === 0) {
+      candidate.focus();
+      return;
+    }
+  }
+}
+
+function onGridKey(e: KeyboardEvent) {
+  const el = e.target as HTMLElement;
+  const map: Record<string, [number, number] | "start" | "end"> = {
+    ArrowUp: [-1, 0],
+    ArrowDown: [1, 0],
+    ArrowLeft: [0, -1],
+    ArrowRight: [0, 1],
+    Home: "start",
+    End: "end",
+  };
+  const move = map[e.key];
+  if (!move) return;
+  e.preventDefault();
+  if (move === "start" || move === "end") moveFocus(el, 0, 0, move);
+  else moveFocus(el, move[0], move[1]);
+}
+
 // Prénoms des membres « présents » (hors réservataire). Passent à la ligne ; au-delà de
 // 3, on tronque à 4 lettres pour tenir dans la case (liste complète dans l'infobulle).
 function AttendeeList({ names }: { names: string[] }) {
@@ -172,7 +227,10 @@ export function PlanningGrid({
       )}
 
       <div className="grid-wrap">
-        <table className="planning">
+        {/* La navigation par flèches est posée UNE fois sur le tableau : les événements des
+            cellules remontent jusqu'ici. Les cellules gardent leur Entrée/Espace pour
+            déclencher l'action ; les flèches ne font que déplacer le focus. */}
+        <table className="planning" onKeyDown={onGridKey}>
           <thead>
             <tr>
               <th className="time">Heure</th>

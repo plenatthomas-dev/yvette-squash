@@ -122,7 +122,7 @@ export default function TricountsAdminPage() {
                           className="secondary tiny"
                           disabled={busyId === t.id}
                           onClick={() => remove(t)}
-                          style={{ color: "#b91c1c" }}
+                          style={{ color: "var(--error-fg)" }}
                         >
                           Supprimer
                         </button>

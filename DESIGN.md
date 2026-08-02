@@ -136,6 +136,8 @@ des pastels sourds, et tout le reste est gris-bleu.
   urgents. Jamais utilisé pour une action.
 - **Rouge Alerte** (`rouge-alerte`) et **Rouge Encre** (`rouge-encre`) : erreurs et actions
   destructrices. Le liseré et le texte, jamais un aplat de fond.
+- **Ambre Avertissement** (`--warn-fg`) : états intermédiaires non bloquants (« non vérifié »).
+  Décliné par thème — `#8a4a00` en clair et en rose, `#e0a955` en sombre.
 
 ### Tertiary
 
@@ -158,6 +160,23 @@ Les états de créneau, qui ne sont ni des accents ni des neutres mais un vocabu
 - **Page Sombre** (`page-sombre`) et **Carte Sombre** (`carte-sombre`) : en thème sombre la
   logique s'inverse, la carte est plus CLAIRE que la page ; le fond reste toujours le plus foncé.
 - **Notice Fond** (`notice-fond`) : fond des encarts d'information.
+
+### Couleurs volontairement hors thème
+
+Deux paires échappent au système, et c'est délibéré. Toutes deux fixent **fond ET texte
+ensemble**, elles rendent donc à l'identique sur les trois thèmes — contrairement à une
+couleur de texte posée seule, qui suit le fond du thème et finit par échouer au contraste.
+
+- **Vert WhatsApp** (`#25d366` / texte `#073b26`, 6,37:1) : bouton de lien vers le groupe.
+  C'est une couleur de marque ; un bouton WhatsApp doit ressembler à WhatsApp partout.
+- **Pastille « en cours »** (`#fcd34d` / texte `#78350f`, 6,29:1) : ambre pleine, choisie
+  précisément parce qu'elle reste lisible en clair, en sombre et en rose, là où l'ancien gris
+  muet ne l'était pas.
+
+**La Règle de la Paire Complète.** Une couleur hors thème n'est acceptable que si elle
+définit son fond ET son texte. Poser une seule des deux fait suivre l'autre au thème et
+produit un échec de contraste dans au moins un des trois — c'est exactement ce qui est arrivé
+aux libellés d'état de l'admin (2,59:1 en sombre).
 
 ### Named Rules
 

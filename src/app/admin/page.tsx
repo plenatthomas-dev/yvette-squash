@@ -478,7 +478,7 @@ export default function AdminPage() {
                       className="secondary"
                       disabled={busyId === r.id}
                       onClick={() => act(r.id, "reject-block")}
-                      style={{ color: "#b91c1c" }}
+                      style={{ color: "var(--error-fg)" }}
                     >
                       Rejeter et bloquer
                     </button>

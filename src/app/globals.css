@@ -40,6 +40,9 @@
   --accent: #2f6fe0;
   --notice-bg: #eef2f8;
   --error-fg: #b3261e;
+  /* Avertissement (« non vérifié » dans l'admin). Décliné par thème : la valeur en dur qu'il
+     remplace ne suivait aucun thème et tombait à 3,33:1 en sombre, 4,19:1 en rose. Ici 6,86:1. */
+  --warn-fg: #8a4a00;
   --error-accent: #e5484d;
   --danger-fg: #b3261e;
   --danger-border: #e2b8b8;
@@ -86,6 +89,7 @@
     --accent: #4f8cff;
     --notice-bg: #1d2330;
     --error-fg: #ff9a9a;
+    --warn-fg: #e0a955; /* 7,95:1 sur la carte sombre */
     --error-accent: #ff6b6b;
     --danger-fg: #ff9a9a;
     --danger-border: #5a2a2a;
@@ -117,6 +121,7 @@
   --accent: #4f8cff;
   --notice-bg: #1d2330;
   --error-fg: #ff9a9a;
+  --warn-fg: #e0a955; /* 7,95:1 sur la carte sombre */
   --error-accent: #ff6b6b;
   --danger-fg: #ff9a9a;
   --danger-border: #5a2a2a;
@@ -192,6 +197,7 @@
   --accent: #c8008f;
   --notice-bg: #ffdcef;
   --error-fg: #9b1b1b;
+  --warn-fg: #8a4a00; /* 5,73:1 sur la carte rose */
   --error-accent: #e5484d;
   --danger-fg: #9b1b1b;
   --danger-border: #e2a8b8;
@@ -571,6 +577,18 @@ header.app .sub {
 .toolbar .today-chip:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* Libellés des champs de connexion. Discrets mais VISIBLES et permanents : le placeholder
+   qu'ils remplacent disparaissait à la première frappe, laissant un membre interrompu sans
+   moyen de savoir quel champ il remplissait (WCAG 3.3.2, niveau A). */
+.field-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--pico-muted-color);
+  text-align: left;
 }
 
 /* Champ date natif rendu invisible mais présent dans le DOM (support de showPicker). */

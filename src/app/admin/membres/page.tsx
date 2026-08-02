@@ -211,7 +211,7 @@ export default function MembersPage() {
                 <div className="tiny" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <span style={badge}>{m.mode === "resamania" ? "ResaMania" : "Email"}</span>
                   {m.disabledAt && <span style={{ ...badge, color: "var(--danger-fg)" }}>désactivé</span>}
-                  {!m.verified && <span style={{ ...badge, color: "#b45309" }}>non vérifié</span>}
+                  {!m.verified && <span style={{ ...badge, color: "var(--warn-fg)" }}>non vérifié</span>}
                   {m.passkeys.length > 0 && (
                     <span style={badge} title="Passkeys enrôlés (connexion biométrique)">
                       🔐 {m.passkeys.length}
