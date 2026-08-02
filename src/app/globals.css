@@ -287,7 +287,7 @@ header.app h1 {
   top: -48px;
   z-index: 1000;
   padding: 8px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--pico-primary-background);
   color: #fff;
   text-decoration: none;
@@ -357,7 +357,7 @@ header.app .sub {
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--error-accent);
   color: #fff;
   font-size: 0.62rem;
@@ -393,7 +393,7 @@ header.app .sub {
   z-index: 200;
   min-width: 216px;
   padding: 6px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--pico-card-background-color);
   border: 1px solid var(--pico-card-border-color);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
@@ -411,7 +411,7 @@ header.app .sub {
   margin: 0;
   padding: 9px 10px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   /* Pico traite tout <button> comme un bouton et REDÉFINIT --pico-color en blanc :
      le label + les icônes SVG (currentColor) devenaient blanc sur blanc (invisibles),
@@ -564,11 +564,10 @@ header.app .sub {
   padding: 7px 11px;
   font-size: 0.8rem;
 }
-/* Toujours affichée, mais grisée/inactive quand on est déjà sur aujourd'hui. */
-.toolbar .today-chip:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
+/* (La règle `.today-chip:disabled` a été retirée : la pastille n'est plus rendue du tout
+   quand on est déjà sur aujourd'hui, elle ne peut donc plus être désactivée. Son ancien
+   état grisé était d'ailleurs le seul signal indiquant qu'on n'était PAS sur aujourd'hui —
+   c'est désormais le libellé de date qui le dit, en toutes lettres.) */
 
 /* Champ date natif rendu invisible mais présent dans le DOM (support de showPicker). */
 .datepick-hidden {
@@ -1352,10 +1351,15 @@ td.cell.past {
   z-index: 1000;
   width: max-content;
   max-width: 92vw;
-  /* Trois échecs simultanés (réservation groupée) empilaient trois toasts par-dessus les
-     barres du bas. On borne la pile et on la fait défiler plutôt que déborder. */
-  max-height: 40vh;
-  overflow-y: auto;
+  /* NE JAMAIS RETIRER : un toast est une notification, pas une cible. Sans ça le conteneur
+     intercepte les taps sur toute sa surface pendant 3,5 s — y compris sur le bouton
+     « Réserver » qu'il recouvre, puisqu'il est fixé en bas avec un z-index de 1000.
+     `pointer-events` étant hérité, les toasts eux-mêmes en héritent.
+     (Le plafonnement de la pile que j'avais ajouté ici est retiré : il visait l'empilement
+     de trois échecs simultanés, or le bilan groupé passe désormais par un dialogue unique.
+     Et `overflow-y: auto` était contradictoire — on ne fait pas défiler ce qui n'est pas
+     cliquable.) */
+  pointer-events: none;
 }
 
 /* Les toasts sont désormais répartis en DEUX régions live (erreurs assertives / reste poli,
@@ -1363,7 +1367,6 @@ td.cell.past {
    la pile reste une seule colonne, comme avant. */
 .toasts-stack {
   display: contents;
-  pointer-events: none;
 }
 
 .toast {
@@ -1493,7 +1496,7 @@ td.cell.past {
 }
 .confirm-lines li {
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--pico-card-sectioning-background-color, rgba(127, 127, 127, 0.1));
   font-weight: 600;
   font-size: 0.92rem;
@@ -1614,7 +1617,7 @@ td.cell.past {
   background: var(--pico-card-background-color);
   color: var(--pico-muted-color);
   border: 1px solid var(--pico-card-border-color);
-  border-radius: 10px;
+  border-radius: var(--pico-border-radius);
 }
 
 .theme-chip.active {
@@ -1954,7 +1957,7 @@ td.cell.past {
   width: 260px;
   max-width: 100%;
   height: auto;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: #fff;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
 }
@@ -2273,7 +2276,7 @@ body[data-bottombar] .install-banner {
 }
 .wk-detail {
   border: 1px solid var(--pico-card-border-color);
-  border-radius: 10px;
+  border-radius: var(--pico-border-radius);
   padding: 10px 12px;
 }
 .wk-detail-head {
@@ -2459,7 +2462,7 @@ body[data-bottombar] .install-banner {
   gap: 10px;
   padding: 10px 12px;
   border: 1px solid var(--pico-card-border-color);
-  border-radius: 10px;
+  border-radius: var(--pico-border-radius);
   margin-bottom: 8px;
   font-size: 0.88rem;
   background: var(--pico-card-background-color);
@@ -2529,7 +2532,7 @@ body[data-bottombar] .install-banner {
 
 .tri-participants {
   border: 1px solid var(--pico-card-border-color);
-  border-radius: 10px;
+  border-radius: var(--pico-border-radius);
   padding: 10px 12px;
   margin: 0;
   max-height: 200px;
@@ -2571,7 +2574,7 @@ body[data-bottombar] .install-banner {
   background: var(--pico-background-color);
   color: var(--pico-color);
   border: 1px solid var(--pico-muted-border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .tri-splitmode button.on {
@@ -2651,7 +2654,7 @@ body[data-bottombar] .install-banner {
 
 .tri-card {
   border: 1px solid var(--pico-card-border-color);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--pico-card-background-color);
   margin-bottom: 12px;
   overflow: hidden;
@@ -2836,7 +2839,7 @@ body[data-bottombar] .install-banner {
   gap: 2px;
   padding: 12px;
   border: 1px solid var(--pico-muted-border-color);
-  border-radius: 10px;
+  border-radius: var(--pico-border-radius);
   background: var(--pico-background-color);
   color: var(--pico-color);
   cursor: pointer;
@@ -2859,7 +2862,7 @@ body[data-bottombar] .install-banner {
 .trn-champion {
   font-size: 1.05rem;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--pico-border-radius);
   background: color-mix(in srgb, var(--pico-primary) 12%, transparent);
 }
 .trn-terrain {
@@ -2896,7 +2899,7 @@ body[data-bottombar] .install-banner {
 .trn-match {
   padding: 8px 10px;
   border: 1px solid var(--pico-card-border-color);
-  border-radius: 10px;
+  border-radius: var(--pico-border-radius);
   margin-bottom: 8px;
   background: var(--pico-card-background-color);
 }
@@ -2986,7 +2989,7 @@ body[data-bottombar] .install-banner {
   min-width: 196px;
   border: 1px solid var(--pico-card-border-color);
   border-left: 4px solid var(--trn-accent, var(--pico-primary));
-  border-radius: 10px;
+  border-radius: var(--pico-border-radius);
   overflow: hidden;
   background: var(--pico-card-background-color);
 }
@@ -3105,7 +3108,7 @@ body[data-bottombar] .install-banner {
   /* PAS de bordure + police constante → l'état sélectionné ne change QUE la couleur, jamais
      la taille. Fond gris SOLIDE (rgba, supporté partout) : jamais blanc/illisible. */
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: rgba(127, 127, 127, 0.22);
   color: var(--pico-color);
   font-weight: 600;
@@ -3124,7 +3127,7 @@ body[data-bottombar] .install-banner {
   padding: 8px 10px;
   margin-bottom: 6px;
   border: 1px solid var(--pico-card-border-color);
-  border-radius: 10px;
+  border-radius: var(--pico-border-radius);
   background: var(--pico-card-background-color);
   cursor: grab;
 }
@@ -3166,7 +3169,7 @@ body[data-bottombar] .install-banner {
   gap: 3px;
   padding: 12px;
   border: 1px solid var(--pico-muted-border-color);
-  border-radius: 10px;
+  border-radius: var(--pico-border-radius);
   /* MÊME recette que .trn-list-item (lisible) : --pico-background-color, pas
      --pico-card-background-color qui rendait la carte blanche/illisible. */
   background: var(--pico-background-color);
