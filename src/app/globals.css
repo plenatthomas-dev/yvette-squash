@@ -1466,11 +1466,23 @@ td.cell.past {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin: -20px -20px 10px;
+  /* PAS de marge négative en HAUT (elle valait -20px pour annuler le padding de la modale).
+     Combinée à `position: sticky`, elle remontait tout le contenu suivant de 20px pendant que
+     l'en-tête, lui, restait épinglé en haut du conteneur de défilement : le solde avec les
+     10px de marge basse était NÉGATIF, et l'en-tête recouvrait le titre « Thème ».
+     Le padding haut de la modale est retiré à la place (cf. .modal.settings), ce qui donne le
+     même bord à bord sans décaler le flux. Les marges latérales, elles, restent négatives :
+     horizontalement il n'y a pas de sticky, donc pas de désynchronisation. */
+  margin: 0 -20px 14px;
   padding: 16px 20px 10px;
   background: var(--pico-card-background-color);
   border-bottom: 1px solid var(--pico-card-border-color);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+/* Le padding haut est porté par l'en-tête collant, pas par la modale. */
+.modal.settings {
+  padding-top: 0;
 }
 
 .settings-head h3 {
@@ -1569,6 +1581,10 @@ td.cell.past {
 
 .setting {
   margin-bottom: 18px;
+  /* Un défilement automatique (focus d'un champ, ancre) doit s'arrêter SOUS l'en-tête
+     collant, sinon le titre de la section arrive juste dessous et disparaît. Compagnon
+     obligatoire de tout en-tête `sticky` — sa hauteur, arrondie au-dessus. */
+  scroll-margin-top: 60px;
 }
 
 /* Le panneau s'est étoffé (thème, pseudo, annuaire, délégation, commentaire…) : une
