@@ -584,7 +584,12 @@ header.app .sub {
    moyen de savoir quel champ il remplissait (WCAG 3.3.2, niveau A). */
 .field-label {
   display: block;
-  margin-bottom: 4px;
+  /* Collé à SON champ. L'écart qui compte n'est pas la marge seule : à line-height 1.5, le
+     demi-interligne ajoutait ~3,4px sous le texte, soit ~7,5px réels. On resserre les deux.
+     La marge basse du champ (1rem, héritée de Pico) reste, elle : c'est ELLE qui sépare un
+     groupe libellé+champ du suivant, et le rapport 1:5 rend le regroupement évident. */
+  margin-bottom: 2px;
+  line-height: 1.25;
   font-size: 0.82rem;
   font-weight: 500;
   color: var(--pico-muted-color);
