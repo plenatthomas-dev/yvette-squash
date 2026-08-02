@@ -5,7 +5,7 @@
   "description": "Appli de réservation de terrains de squash (front amélioré + journal partagé) au-dessus de ResaMania",
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && prisma migrate deploy && next build",
+    "build": "prisma generate && npm run db:deploy:retry && next build",
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",
@@ -13,6 +13,7 @@
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
+    "db:deploy:retry": "prisma migrate deploy || (echo '↻ Base injoignable (branche Neon probablement archivee) : la tentative precedente a declenche son reveil, on repasse dans 25 s.' && sleep 25 && prisma migrate deploy)",
     "db:studio": "prisma studio",
     "resa:test": "tsx scripts/resa-test.ts"
   },
