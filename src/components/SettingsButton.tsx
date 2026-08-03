@@ -630,6 +630,7 @@ export function SettingsButton({
               <div className="nick-field">
                 <input
                   type="text"
+                  aria-label="Pseudonyme"
                   value={nick}
                   maxLength={24}
                   placeholder="Ton pseudo"
@@ -947,6 +948,7 @@ export function SettingsButton({
               </div>
               <textarea
                 className="comment-field"
+                aria-label="Ton commentaire"
                 value={comment}
                 maxLength={COMMENT_MAX}
                 rows={3}

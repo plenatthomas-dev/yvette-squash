@@ -6,12 +6,17 @@
  * ========================================================================== */
 
 :root {
-  /* accent = vert « squash » repris comme couleur primaire Pico (identique clair/sombre) */
-  --pico-primary: #1f9d57;
-  --pico-primary-hover: #24b365;
-  --pico-primary-background: #1f9d57;
-  --pico-primary-hover-background: #24b365;
-  --pico-primary-focus: rgba(31, 157, 87, 0.3);
+  /* accent = vert « squash » repris comme couleur primaire Pico (identique clair/sombre).
+     Approfondi depuis #1f9d57, qui ne donnait que 3,49:1 au texte blanc des boutons (2,72:1
+     sur son survol #24b365) — sous le plancher AA de 4,5:1 sur TOUT bouton primaire, dans les
+     deux thèmes. La valeur retenue est celle de --free : le système n'a plus qu'UN vert
+     actionnable au lieu de deux presque identiques, et il tient 5,00:1 (survol 5,41:1).
+     Le survol assombrit au lieu d'éclaircir, comme --free/--free-hover le faisait déjà. */
+  --pico-primary: #158044;
+  --pico-primary-hover: #127a40;
+  --pico-primary-background: #158044;
+  --pico-primary-hover-background: #127a40;
+  --pico-primary-focus: rgba(21, 128, 68, 0.3);
   --pico-primary-inverse: #ffffff;
   --pico-border-radius: 10px;
 }
@@ -20,8 +25,9 @@
    ici on ne themme que nos couleurs maison. THÈME CLAIR = défaut. */
 :root,
 [data-theme="light"] {
-  /* vert « libre » un peu plus profond que le primaire (#1f9d57) pour un contraste AA
-     (5:1) du texte blanc sur les cases ; le primaire des boutons ne change pas. */
+  /* vert « libre » calculé pour un contraste AA (5:1) du texte blanc sur les cases.
+     Le primaire des boutons a depuis été aligné SUR cette valeur (cf. bloc :root) : un
+     seul vert actionnable, une seule preuve de contraste à maintenir. */
   --free: #158044;
   --free-fg: #ffffff;
   --free-hover: #127a40;
@@ -47,6 +53,35 @@
   --danger-fg: #b3261e;
   --danger-border: #e2b8b8;
   --danger-hover: #e5484d;
+
+  /* Le primaire comme COULEUR DE TEXTE est un autre problème que le primaire comme fond :
+     il se lit sur la carte, pas sous du blanc. --pico-primary y tombait à 3,49:1 en clair
+     et 3,76:1 en rose. Paire dédiée, même logique que --past/--past-fg. Ici 6,16:1 sur
+     carte blanche, 5,20:1 sur le fond de page. */
+  --primary-fg: #12703c;
+
+  /* Pastilles de compteur (cloche d'alertes, menu ⋯). Elles réutilisaient --error-accent,
+     une teinte pensée pour des LISERÉS, pas pour porter du texte blanc à 10px : 3,91:1 en
+     clair et rose, 2,78:1 en sombre. Paire dédiée, déclarée ici et héritée par les trois
+     thèmes : 4,98:1 pour le chiffre blanc, et la pastille elle-même reste à ≥3:1 de la
+     carte dans les trois thèmes (4,98 clair / 3,36 sombre / 4,15 rose). */
+  --badge-bg: #d32f2f;
+  --badge-fg: #ffffff;
+
+  /* Filet du quadrillage de la grille. DESIGN.md le déclare « structurel », mais il héritait
+     de --pico-card-border-color, que Pico fait basculer sur la COULEUR DE CARTE en thème
+     sombre : le quadrillage tombait à 1,03:1 (clair) et 1,07:1 (sombre) sur tous les états
+     sauf « libre ». Trois créneaux réservés d'affilée fusionnaient en un seul rectangle.
+
+     ⚠️ Pourquoi PAS 3:1 : `border-collapse: collapse` fait PARTAGER un seul filet entre deux
+     cellules voisines, et la grille juxtapose un remplissage très sombre (--free, vert) et
+     des remplissages très pâles (booked/group/closed/past + colonne Heure blanche). Une
+     couleur unique ne peut pas tenir 3:1 contre les deux : l'optimum est le point où les
+     deux contrastes s'égalisent, soit ≈2,0:1. C'est ce point qui est retenu.
+     Mesuré ici : 2,04:1 (réservé) · 2,07:1 (asso) · 2,22:1 (fermé) · 2,58:1 (colonne Heure)
+     · 1,94:1 (libre). L'ancien filet était meilleur sur « libre » (4,14:1) et INVISIBLE sur
+     les cinq autres — c'est ce déséquilibre qu'on corrige, pas un chiffre qu'on maximise. */
+  --grid-line: #9aa2ae;
 
   /* Fond de page LÉGÈREMENT plus foncé que les cartes : c'est ce contraste qui fait
      « flotter » les cartes (blanches) au-dessus de la page (gris clair) et donne toute
@@ -94,6 +129,15 @@
     --danger-fg: #ff9a9a;
     --danger-border: #5a2a2a;
     --danger-hover: #ff6b6b;
+    /* Le primaire des boutons (#158044) est trop sombre pour porter du TEXTE sur une carte
+       sombre : 3,35:1. Ce jeton l'éclaircit sans quitter le vert de marque → 5,52:1. */
+    --primary-fg: #2ea86a;
+    /* Cf. bloc clair, même arbitrage (filet partagé par border-collapse, donc ≈2:1 est
+       l'optimum et non 3:1). En sombre le défaut était total : Pico fait basculer
+       --pico-card-border-color sur la couleur de carte, le filet était donc STRICTEMENT
+       invisible (1,07:1). Mesuré ici : 2,04:1 (fermé) · 1,90:1 (carte) · 1,62:1 (asso)
+       · 1,67:1 (réservé) · 1,76:1 (libre). */
+    --grid-line: #434b58;
     /* En sombre, l'élévation = carte PLUS CLAIRE que la page (le fond reste le plus foncé). */
     --pico-background-color: #0e1116;
     --pico-card-background-color: #191e26;
@@ -126,6 +170,10 @@
   --danger-fg: #ff9a9a;
   --danger-border: #5a2a2a;
   --danger-hover: #ff6b6b;
+  /* Cf. bloc prefers-color-scheme ci-dessus : #158044 tombe à 3,35:1 en TEXTE sur carte
+     sombre ; le quadrillage héritait d'une bordure égale à la couleur de carte. */
+  --primary-fg: #2ea86a;
+  --grid-line: #434b58;
   --pico-background-color: #0e1116;
   --pico-card-background-color: #191e26;
   --pico-card-sectioning-background-color: #191e26;
@@ -141,10 +189,14 @@
 :root[data-theme="rose"] {
   color-scheme: light;
 
+  /* #e6007e tient tout juste AA sous du blanc (4,50:1) : on le garde, c'est la marque du
+     thème. Son survol, lui, ÉCLAIRCISSAIT (#ff2d97) et tombait à 3,46:1 — un bouton
+     devenait moins lisible au moment où on le touche. Le survol assombrit désormais, comme
+     dans les deux autres thèmes : 6,00:1. */
   --pico-primary: #e6007e;
-  --pico-primary-hover: #ff2d97;
+  --pico-primary-hover: #c2006a;
   --pico-primary-background: #e6007e;
-  --pico-primary-hover-background: #ff2d97;
+  --pico-primary-hover-background: #c2006a;
   --pico-primary-focus: rgba(230, 0, 126, 0.3);
   --pico-primary-inverse: #ffffff;
   --pico-primary-underline: rgba(230, 0, 126, 0.5);
@@ -202,6 +254,12 @@
   --danger-fg: #9b1b1b;
   --danger-border: #e2a8b8;
   --danger-hover: #e5484d;
+  /* --pico-primary en TEXTE ne donnait que 3,76:1 sur la carte rose et 4,20:1 sur le fond
+     de page. Rose approfondi réservé au texte : 6,21:1 sur carte, 5,22:1 sur la page. */
+  --primary-fg: #a8005c;
+  /* Quadrillage : cf. bloc clair, même arbitrage ≈2:1 (filet partagé). Mesuré ici :
+     2,28:1 (carte) · 2,01:1 (réservé) · 1,98:1 (asso) · 1,88:1 (libre). */
+  --grid-line: #c98aa8;
   /* Ombres teintées rose (2 couches, cohérentes avec l'ambiance pinky). */
   --elev-1: 0 2px 4px rgba(160, 16, 96, 0.16), 0 8px 18px rgba(160, 16, 96, 0.2);
   --elev-2: 0 4px 10px rgba(160, 16, 96, 0.2), 0 18px 38px rgba(160, 16, 96, 0.28);
@@ -364,8 +422,8 @@ header.app .sub {
   height: 16px;
   padding: 0 4px;
   border-radius: var(--radius-sm);
-  background: var(--error-accent);
-  color: #fff;
+  background: var(--badge-bg);
+  color: var(--badge-fg);
   font-size: 0.62rem;
   font-weight: 700;
   line-height: 16px;
@@ -463,8 +521,8 @@ header.app .sub {
   height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  background: var(--error-accent);
-  color: #fff;
+  background: var(--badge-bg);
+  color: var(--badge-fg);
   font-size: 0.66rem;
   font-weight: 700;
   line-height: 18px;
@@ -862,7 +920,10 @@ table.planning {
 
 table.planning th,
 table.planning td {
-  border: 1px solid var(--pico-card-border-color);
+  /* --grid-line et pas --pico-card-border-color : cf. la déclaration du jeton. Pico
+     redéfinit ce dernier en COULEUR DE CARTE sous thème sombre, ce qui effaçait le
+     quadrillage que DESIGN.md déclare structurel. */
+  border: 1px solid var(--grid-line);
   padding: 0;
   text-align: center;
   margin: 0;
@@ -897,14 +958,22 @@ table.planning thead th.time {
   z-index: 3;
 }
 
+/* Heure de DÉBUT : passe en couleur de texte principale. C'est elle qui portait la
+   hiérarchie du couple début/fin — hiérarchie que l'`opacity` de .t-end assurait au prix
+   du contraste. On la rétablit par le haut (texte plein) au lieu de l'obtenir par le bas. */
 .t-start {
   display: block;
+  color: var(--pico-color);
 }
 
+/* L'`opacity: 0.65` retirée : posée sur un texte DÉJÀ discret, elle faisait tomber l'heure
+   de fin à 2,66:1 en clair (3,10:1 sombre, 3,00:1 rose) — alors que DESIGN.md interdit
+   explicitement de griser par opacité un élément qui porte du texte, règle déjà appliquée
+   à --past. Sans elle, .t-end hérite de --pico-muted-color : 5,36:1 en clair. La différence
+   avec l'heure de début reste portée par la taille (0,78rem vs 0,66rem) et la couleur. */
 .t-end {
   display: block;
   font-size: 0.66rem;
-  opacity: 0.65;
 }
 
 /* Liste d'attente (idée D) : pastille dans l'en-tête d'horaire (vue jour) d'un créneau
@@ -2116,7 +2185,7 @@ table.planning.week thead th {
 }
 
 table.planning.week thead th.today {
-  color: var(--pico-primary);
+  color: var(--primary-fg);
 }
 
 table.planning.week td.cell {
@@ -2218,14 +2287,14 @@ td.cell.free.selcell:hover,
 td.cell.free.selcell:active {
   background: color-mix(in srgb, var(--pico-primary) 32%, var(--pico-card-background-color));
   box-shadow: inset 0 0 0 3px var(--pico-primary);
-  color: var(--pico-primary);
+  color: var(--primary-fg);
 }
 
 /* Mode sélection : horaires cliquables (la sélection des terrains se fait par segment). */
 table.planning.week th.time.selrow,
 table.planning.week th.time.selhead {
   cursor: pointer;
-  color: var(--pico-primary);
+  color: var(--primary-fg);
 }
 
 /* Barre d'action collante en bas quand des cases sont sélectionnées. */
@@ -2470,7 +2539,7 @@ body[data-bottombar] .install-banner {
   font-weight: 700;
   margin: 0 0 2px;
 }
-.tri-me.pos { color: var(--pico-primary); }
+.tri-me.pos { color: var(--primary-fg); }
 .tri-me.neg { color: var(--danger-fg); }
 
 .tri-actions {
@@ -2523,7 +2592,7 @@ body[data-bottombar] .install-banner {
 .tri-block li.mine { border-left: 3px solid var(--pico-primary); }
 .tri-block li.refund { opacity: 0.85; }
 
-.tri-balances strong.pos { color: var(--pico-primary); }
+.tri-balances strong.pos { color: var(--primary-fg); }
 .tri-balances strong.neg { color: var(--danger-fg); }
 
 /* Ligne de dépense : libellé + méta à gauche, montant + suppr à droite */
@@ -2702,7 +2771,7 @@ body[data-bottombar] .install-banner {
 /* --- Tricounts par jour (cartes d'historique) ---------------------------- */
 .money-btn.active {
   border-color: var(--pico-primary);
-  color: var(--pico-primary);
+  color: var(--primary-fg);
 }
 
 .tri-card {
@@ -2784,11 +2853,11 @@ body[data-bottombar] .install-banner {
   border-color: #f59e0b;
 }
 .tri-chip.ready {
-  color: var(--pico-primary);
+  color: var(--primary-fg);
   border-color: var(--pico-primary);
 }
 .tri-chip.ok {
-  color: var(--pico-primary);
+  color: var(--primary-fg);
   background: color-mix(in srgb, var(--pico-primary) 12%, transparent);
   border-color: transparent;
 }
@@ -2980,7 +3049,7 @@ body[data-bottombar] .install-banner {
   gap: 10px;
   font-size: 0.92rem;
 }
-.trn-vs .win { font-weight: 700; color: var(--pico-primary); }
+.trn-vs .win { font-weight: 700; color: var(--primary-fg); }
 .trn-vs-sep, .trn-bye { opacity: 0.6; font-size: 0.8rem; }
 .trn-scoreval { font-variant-numeric: tabular-nums; }
 .trn-scorepick {
@@ -3024,7 +3093,7 @@ body[data-bottombar] .install-banner {
   font-weight: 800;
   letter-spacing: 0.02em;
   text-align: center;
-  color: var(--trn-accent, var(--pico-primary));
+  color: var(--trn-accent, var(--primary-fg));
   margin-bottom: 10px;
 }
 .trn-tree-col-body {
@@ -3050,7 +3119,7 @@ body[data-bottombar] .install-banner {
   font-size: 0.66rem;
   font-weight: 700;
   padding: 2px 8px;
-  color: var(--pico-primary);
+  color: var(--primary-fg);
   background: color-mix(in srgb, var(--pico-primary) 10%, transparent);
 }
 .trn-bkt-row {

@@ -6,6 +6,7 @@
 // est porté par l'URL, rien à charger. Nettoie l'URL à la fermeture (pas de ré-affichage au refresh).
 
 import { useEffect, useState } from "react";
+import { Dialog } from "./Dialog";
 
 export default function AnnounceModal() {
   const [ann, setAnn] = useState<{ title: string; body: string } | null>(null);
@@ -28,47 +29,44 @@ export default function AnnounceModal() {
 
   if (!ann) return null;
 
+  // <Dialog> et pas un overlay écrit à la main : cette modale s'ouvre AUTOMATIQUEMENT au
+  // chargement (clic sur une notification push). Elle annonçait aria-modal="true" sans
+  // gestionnaire de touche — donc sans Échap ni piège de focus : au clavier on en sortait
+  // par Tab pour interagir avec une page qu'on croit bloquée. Un rôle ARIA qui ment est
+  // pire que pas de rôle ; useDialog tient désormais la promesse.
   return (
-    <div className="modal-overlay" onClick={close}>
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Annonce"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
-          <h3 style={{ margin: 0, flex: 1 }}>📣 {ann.title || "Annonce"}</h3>
-          <button
-            type="button"
-            onClick={close}
-            aria-label="Fermer"
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "inherit",
-              cursor: "pointer",
-              padding: 0,
-              margin: 0,
-              width: "auto",
-              fontSize: "1.3rem",
-              lineHeight: 1,
-            }}
-          >
-            ✕
-          </button>
-        </div>
-        {ann.body && (
-          <p style={{ margin: "0 0 18px", whiteSpace: "pre-wrap", color: "var(--pico-color)" }}>
-            {ann.body}
-          </p>
-        )}
-        <div className="modal-actions">
-          <button type="button" onClick={close}>
-            Fermer
-          </button>
-        </div>
+    <Dialog onClose={close} label="Annonce">
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
+        <h3 style={{ margin: 0, flex: 1 }}>📣 {ann.title || "Annonce"}</h3>
+        <button
+          type="button"
+          onClick={close}
+          aria-label="Fermer"
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "inherit",
+            cursor: "pointer",
+            padding: 0,
+            margin: 0,
+            width: "auto",
+            fontSize: "1.3rem",
+            lineHeight: 1,
+          }}
+        >
+          ✕
+        </button>
       </div>
-    </div>
+      {ann.body && (
+        <p style={{ margin: "0 0 18px", whiteSpace: "pre-wrap", color: "var(--pico-color)" }}>
+          {ann.body}
+        </p>
+      )}
+      <div className="modal-actions">
+        <button type="button" onClick={close}>
+          Fermer
+        </button>
+      </div>
+    </Dialog>
   );
 }

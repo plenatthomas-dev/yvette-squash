@@ -105,8 +105,12 @@ export default function RequestsHistoryPage() {
               Une adresse bloquée ne peut plus déposer de demande d'inscription (silencieusement).
             </p>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+              {/* aria-label et pas <label> visible : ces deux champs vivent sur une seule
+                  rangée flex avec le bouton. Le placeholder disparaît à la frappe, donc il
+                  ne peut pas tenir lieu de nom accessible. */}
               <input
                 type="email"
+                aria-label="Adresse e-mail à bloquer"
                 placeholder="email@exemple.fr"
                 value={newEmail}
                 disabled={busy}
@@ -115,6 +119,7 @@ export default function RequestsHistoryPage() {
               />
               <input
                 type="text"
+                aria-label="Motif du blocage (optionnel)"
                 placeholder="Motif (optionnel)"
                 value={newReason}
                 disabled={busy}

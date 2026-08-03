@@ -122,12 +122,21 @@ des pastels sourds, et tout le reste est gris-bleu.
 
 ### Primary
 
-- **Vert Signal** (`vert-signal`) : l'unique accent. Boutons primaires, contours de focus,
-  éléments actionnables. Il ne décore jamais.
-- **Vert Signal Survol** (`vert-signal-survol`) : état de survol du primaire, plus lumineux.
-- **Vert Libre** (`vert-libre`) : le vert des cases réservables dans la grille. Volontairement
-  plus profond que le primaire pour atteindre un contraste AA (5:1) du texte blanc sur la case —
-  la lisibilité de la grille prime sur l'uniformité de la marque.
+- **Vert Signal** (`vert-signal`, `--pico-primary`) : l'unique accent. Boutons primaires,
+  contours de focus, cases réservables. Il ne décore jamais.
+  **Il n'y a plus qu'UN vert actionnable.** Le produit en a longtemps eu deux, presque
+  identiques : un primaire de bouton et un `vert-libre` plus profond, ce dernier ayant seul
+  été calculé pour tenir AA. Le texte blanc des boutons restait donc à 3,49:1 — l'arbitrage
+  avait été posé et appliqué à un seul des deux endroits. Le primaire a adopté la valeur du
+  vert de case : **5,00:1** pour le texte blanc, dans les trois thèmes.
+- **Vert Signal Survol** (`vert-signal-survol`) : **le survol assombrit, il n'éclaircit pas.**
+  5,41:1. Un survol qui éclaircit rend le libellé moins lisible au moment précis où on touche
+  le bouton — c'était le cas en rose, où il tombait à 3,46:1.
+- **Vert Signal Encre** (`--primary-fg`) : le vert **quand il porte du texte**, et non quand il
+  sert de fond. Deux problèmes distincts : sur un fond, il se lit sous du blanc ; en texte, il
+  se lit sur la carte du thème. Le primaire seul y tombait à 3,49:1 en clair et 3,76:1 en rose.
+  Décliné par thème — `#12703c` en clair (6,16:1), `#2ea86a` en sombre (5,52:1, éclairci pour
+  se détacher de la carte foncée), `#a8005c` en rose (6,21:1).
 - **Vert Libre Survol** (`vert-libre-survol`) : survol et appui sur une case libre.
 
 ### Secondary
@@ -138,6 +147,13 @@ des pastels sourds, et tout le reste est gris-bleu.
   destructrices. Le liseré et le texte, jamais un aplat de fond.
 - **Ambre Avertissement** (`--warn-fg`) : états intermédiaires non bloquants (« non vérifié »).
   Décliné par thème — `#8a4a00` en clair et en rose, `#e0a955` en sombre.
+- **Rouge Pastille** (`--badge-bg` / `--badge-fg`, `#d32f2f` / blanc, 4,98:1) : le fond des
+  pastilles de compteur (cloche d'alertes, menu ⋯). Paire à part et non `rouge-alerte`, qui est
+  une teinte de **liseré** : elle ne tenait que 3,91:1 en clair et 2,78:1 en sombre sous un
+  chiffre de ~10px, où aucune exemption de contraste ne s'applique. Déclarée une fois et héritée
+  par les trois thèmes : la pastille reste à ≥3:1 de sa carte partout (4,98 clair / 3,36 sombre
+  / 4,15 rose). Un compteur d'alertes est un signal, pas une couleur de marque — il n'a pas à
+  se décliner.
 
 ### Tertiary
 
@@ -160,6 +176,9 @@ Les états de créneau, qui ne sont ni des accents ni des neutres mais un vocabu
 - **Page Sombre** (`page-sombre`) et **Carte Sombre** (`carte-sombre`) : en thème sombre la
   logique s'inverse, la carte est plus CLAIRE que la page ; le fond reste toujours le plus foncé.
 - **Notice Fond** (`notice-fond`) : fond des encarts d'information.
+- **Filet de Grille** (`--grid-line`) : la couleur du quadrillage de la grille de planning, et
+  d'elle seule. Décliné par thème — `#9aa2ae` clair, `#434b58` sombre, `#c98aa8` rose. Voir la
+  Règle du Filet Partagé ci-dessous : ce jeton ne vise délibérément pas 3:1.
 
 ### Couleurs volontairement hors thème
 
@@ -189,7 +208,24 @@ les cartes en clair, et plus sombre que tout en sombre. Une carte qui se confond
 cassé le système, même si son ombre est intacte.
 
 **La Règle du Contraste Avant la Marque.** Quand la couleur de marque ne passe pas le seuil AA
-sur une surface, c'est la couleur qui plie. `vert-libre` existe uniquement pour cette raison.
+sur une surface, c'est la couleur qui plie. Le vert du produit a été approfondi pour cette
+raison, d'abord sur les cases puis — trop tard — sur les boutons.
+
+**La Règle du Fond et de l'Encre.** Une même couleur de marque a besoin de DEUX valeurs : une
+pour servir de fond sous du texte clair, une pour être elle-même du texte sur la carte du thème.
+Les deux ne coïncident presque jamais. Chaque fois que le produit a réutilisé une valeur de fond
+comme couleur de texte, il a échoué au contraste — le primaire en texte (3,49:1), les pastilles
+de compteur (2,78:1). D'où les paires `--pico-primary`/`--primary-fg` et `--badge-bg`/`--badge-fg`,
+sur le modèle de `--past`/`--past-fg` qui existait déjà.
+
+**La Règle du Filet Partagé.** Le quadrillage de la grille ne peut pas atteindre 3:1, et c'est
+un fait géométrique, pas un renoncement. `border-collapse: collapse` fait **partager un seul
+filet** entre deux cellules voisines, et la grille juxtapose un remplissage très sombre (le vert
+des cases libres) et des remplissages très pâles. Aucune couleur unique ne tient 3:1 contre les
+deux : le seul optimum est le point où les deux contrastes s'égalisent, soit **≈2,0:1**. C'est
+ce point qui est retenu dans les trois thèmes. Ne pas « corriger » ce chiffre vers le haut : le
+remonter d'un côté l'effondre de l'autre. L'état antérieur — filet hérité de la couleur de carte,
+donc 1,03:1 en clair et 1,07:1 en sombre sur cinq états sur six — était le vrai défaut.
 
 ## Typography
 
@@ -341,6 +377,10 @@ menu ⋯ pour désencombrer l'en-tête. Un lien d'évitement (« Aller au conten
 Le cœur du produit, et le seul composant qui justifie son propre vocabulaire.
 
 - **Structure :** table à disposition fixe, terrains en colonnes, horaires en lignes.
+- **Quadrillage :** c'est le seul endroit où la bordure devient structurelle — chaque cellule en
+  porte une, et c'est elle qui dessine la grille. Elle a donc son jeton propre, `--grid-line`, et
+  non le jeton de bordure de carte, qui s'efface en thème sombre. Cf. la Règle du Filet Partagé
+  pour la raison pour laquelle son contraste plafonne à ≈2,0:1.
 - **Axes figés :** en-tête (`z-index` 1), colonne des heures (2), coin haut-gauche (3). Le focus
   clavier sur une cellule monte à 4 pour que son contour passe au-dessus des cellules figées.
 - **États :** libre (aplat `vert-libre`, cliquable), réservé (rose sourd), club/mien (bleu),
@@ -357,12 +397,18 @@ Le cœur du produit, et le seul composant qui justifie son propre vocabulaire.
 
 - **Do** réserver le vert à ce qui est jouable ou actionnable (Règle du Vert Actionnable).
 - **Do** garder la page plus sombre que les cartes, dans les trois thèmes.
-- **Do** faire plier la couleur de marque devant le contraste AA, comme `vert-libre` le fait
-  déjà pour le texte blanc des cases.
+- **Do** faire plier la couleur de marque devant le contraste AA, comme le vert du produit le
+  fait pour le texte blanc des boutons et des cases.
+- **Do** donner à toute couleur de marque une valeur de FOND et une valeur d'ENCRE distinctes
+  avant de l'utiliser en texte (Règle du Fond et de l'Encre).
 - **Do** étiqueter tout texte sous 0,75rem par un `title`, un `aria-label` ou un texte
   `sr-only`.
 - **Do** figer les deux axes de toute vue tabulaire dense.
-- **Do** thémer les bordures par `--pico-card-border-color` plutôt que de coder une couleur.
+- **Do** thémer les bordures par `--pico-card-border-color` plutôt que de coder une couleur —
+  **sauf quand la bordure porte du sens.** Pico redéfinit ce jeton en *couleur de carte* sous
+  thème sombre (`pico.css:448` et `583`) : une bordure décorative y disparaît sans dommage, mais
+  une bordure structurelle disparaît aussi. C'est ce qui a effacé le quadrillage de la grille,
+  qui a désormais son propre jeton `--grid-line`.
 - **Do** réutiliser les valeurs d'espacement déjà présentes (4, 6, 10, 14, 16, 18px) au lieu
   d'en introduire de nouvelles.
 - **Do** traiter les trois thèmes comme égaux : une nouveauté doit être vérifiée en clair, en
