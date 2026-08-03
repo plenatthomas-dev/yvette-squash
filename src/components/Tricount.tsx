@@ -815,20 +815,29 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                   )}
                 </>
               )}
-              <input
-                type="text"
-                placeholder="Libellé (balles, repas, pot…)"
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-                maxLength={80}
-              />
-              <input
-                type="text"
-                inputMode="decimal"
-                placeholder="Montant en € — ex. 12,50"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-              />
+              {/* Les deux champs OBLIGATOIRES de ce formulaire étaient les seuls sans
+                  libellé, entourés de voisins correctement étiquetés : un oubli, pas un
+                  parti pris. On reprend le motif <label className="tri-field"> du fichier. */}
+              <label className="tri-field">
+                Libellé
+                <input
+                  type="text"
+                  placeholder="Libellé (balles, repas, pot…)"
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                  maxLength={80}
+                />
+              </label>
+              <label className="tri-field">
+                Montant
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Montant en € — ex. 12,50"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                />
+              </label>
               <label className="tri-field">
                 Payé par
                 <select value={payerId} onChange={(e) => setPayerId(e.target.value)}>
@@ -967,13 +976,16 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                   ))}
                 </select>
               </label>
-              <input
-                type="text"
-                inputMode="decimal"
-                placeholder="Montant en € — ex. 12,50"
-                value={refundAmount}
-                onChange={(e) => setRefundAmount(e.target.value)}
-              />
+              <label className="tri-field">
+                Montant remboursé
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Montant en € — ex. 12,50"
+                  value={refundAmount}
+                  onChange={(e) => setRefundAmount(e.target.value)}
+                />
+              </label>
               <div className="modal-actions">
                 <button
                   type="button"

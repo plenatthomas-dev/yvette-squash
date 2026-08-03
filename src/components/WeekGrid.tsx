@@ -5,6 +5,7 @@ import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { fmtTime } from "@/lib/time";
 import { downloadIcs } from "@/lib/ics";
 import { useBottomBar } from "@/lib/useBottomBar";
+import { Dialog } from "./Dialog";
 
 function shortDay(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString("fr-FR", {
@@ -432,145 +433,141 @@ export function WeekGrid({
         </div>
       )}
 
+      {/* <Dialog> et pas un overlay écrit à la main : cette feuille de détail annonçait
+          aria-modal="true" sans aucun gestionnaire de touche — pas d'Échap, pas de piège de
+          focus, pas de restitution du focus au déclencheur. Ce fichier n'importait même pas
+          useDialog, alors que 11 autres modales du projet passent par Dialog. */}
       {sheet && sheetCourt && (
-        <div className="modal-overlay" onClick={() => setSheet(null)}>
-          <div
-            className="modal week-detail"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Détail du terrain"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3>
-              {longDay(sheet.date)} · {sheet.hm}
-            </h3>
-            <div className="wk-detail-list">
-              <div className={"wk-detail " + sheetSeg}>
-                <div className="wk-detail-head">
-                  <span className={"wk-chip " + sheetSeg} />
-                  <strong>{sheetCourt.name}</strong>
-                  <span className="wk-state">
-                    {sheetSeg === "mine" ? "Ta réservation ★" : SEG_LABEL[sheetSeg]}
-                    {sheetSeg === "asso" && sheetSlot?.bookedBy ? ` · ${sheetSlot.bookedBy}` : ""}
+        <Dialog onClose={() => setSheet(null)} label="Détail du terrain" className="week-detail">
+          <h3>
+            {longDay(sheet.date)} · {sheet.hm}
+          </h3>
+          <div className="wk-detail-list">
+            <div className={"wk-detail " + sheetSeg}>
+              <div className="wk-detail-head">
+                <span className={"wk-chip " + sheetSeg} />
+                <strong>{sheetCourt.name}</strong>
+                <span className="wk-state">
+                  {sheetSeg === "mine" ? "Ta réservation ★" : SEG_LABEL[sheetSeg]}
+                  {sheetSeg === "asso" && sheetSlot?.bookedBy ? ` · ${sheetSlot.bookedBy}` : ""}
+                </span>
+              </div>
+              {sheetAtt && <div className="wk-att">👥 +1 : {sheetAtt}</div>}
+              <div className="wk-detail-actions">
+                {sheetSeg === "free" && sheetSlot && !sheetOtherMine && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSheet(null);
+                      onBook(sheetSlot);
+                    }}
+                  >
+                    Réserver
+                  </button>
+                )}
+                {sheetSeg === "free" && sheetOtherMine && (
+                  <span className="muted tiny">
+                    Tu joues déjà sur {sheetOtherMineName} à cet horaire — un seul
+                    terrain à la fois.
                   </span>
-                </div>
-                {sheetAtt && <div className="wk-att">👥 +1 : {sheetAtt}</div>}
-                <div className="wk-detail-actions">
-                  {sheetSeg === "free" && sheetSlot && !sheetOtherMine && (
+                )}
+                {sheetSeg === "mine" && sheetSlot && (
+                  <>
                     <button
                       type="button"
+                      className="secondary"
+                      title="Ajouter à mon agenda (.ics, rappel 1 h avant)"
+                      onClick={() => downloadIcs(sheetSlot)}
+                    >
+                      📅 Agenda
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary danger"
                       onClick={() => {
                         setSheet(null);
-                        onBook(sheetSlot);
+                        onCancelMine(sheetSlot);
                       }}
                     >
-                      Réserver
+                      Annuler ma résa
                     </button>
-                  )}
-                  {sheetSeg === "free" && sheetOtherMine && (
-                    <span className="muted tiny">
-                      Tu joues déjà sur {sheetOtherMineName} à cet horaire — un seul
-                      terrain à la fois.
-                    </span>
-                  )}
-                  {sheetSeg === "mine" && sheetSlot && (
-                    <>
-                      <button
-                        type="button"
-                        className="secondary"
-                        title="Ajouter à mon agenda (.ics, rappel 1 h avant)"
-                        onClick={() => downloadIcs(sheetSlot)}
-                      >
-                        📅 Agenda
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary danger"
-                        onClick={() => {
-                          setSheet(null);
-                          onCancelMine(sheetSlot);
-                        }}
-                      >
-                        Annuler ma résa
-                      </button>
-                    </>
-                  )}
-                  {sheetSeg === "asso" && sheetSlot && (
+                  </>
+                )}
+                {sheetSeg === "asso" && sheetSlot && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => {
+                      setSheet(null);
+                      onTogglePresence(sheetSlot);
+                    }}
+                  >
+                    {sheetSlot.iAmAttending ? "Retirer ma présence" : "Je suis +1"}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+          {sheetComplete &&
+            (sheetMyWait || sheetWaitCount > 0 || (canWatch && !sheetAttending)) && (
+            <div className="wait-row">
+              {sheetMyWait ? (
+                <>
+                  <span className="muted tiny">
+                    🕒 Tu es en liste d'attente
+                    {sheetMyWait.position ? ` (${sheetMyWait.position}ᵉ)` : ""} ·{" "}
+                    {sheetWaitCount} en attente
+                  </span>
+                  {canWatch && (
                     <button
                       type="button"
                       className="secondary"
                       onClick={() => {
                         setSheet(null);
-                        onTogglePresence(sheetSlot);
+                        onUnwatch?.(sheet.date, sheet.hm);
                       }}
                     >
-                      {sheetSlot.iAmAttending ? "Retirer ma présence" : "Je suis +1"}
+                      Quitter la liste
                     </button>
                   )}
-                </div>
-              </div>
+                </>
+              ) : (
+                <>
+                  <span className="muted tiny">
+                    🕒 Créneau complet · {sheetWaitCount} en attente
+                    {sheetAttending ? " (tu es déjà +1)" : ""}
+                  </span>
+                  {canWatch && sheetAnySlot && !sheetAttending && (
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => {
+                        setSheet(null);
+                        onWatch?.(sheetAnySlot);
+                      }}
+                    >
+                      Me prévenir si ça se libère
+                    </button>
+                  )}
+                </>
+              )}
             </div>
-            {sheetComplete &&
-              (sheetMyWait || sheetWaitCount > 0 || (canWatch && !sheetAttending)) && (
-              <div className="wait-row">
-                {sheetMyWait ? (
-                  <>
-                    <span className="muted tiny">
-                      🕒 Tu es en liste d'attente
-                      {sheetMyWait.position ? ` (${sheetMyWait.position}ᵉ)` : ""} ·{" "}
-                      {sheetWaitCount} en attente
-                    </span>
-                    {canWatch && (
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => {
-                          setSheet(null);
-                          onUnwatch?.(sheet.date, sheet.hm);
-                        }}
-                      >
-                        Quitter la liste
-                      </button>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <span className="muted tiny">
-                      🕒 Créneau complet · {sheetWaitCount} en attente
-                      {sheetAttending ? " (tu es déjà +1)" : ""}
-                    </span>
-                    {canWatch && sheetAnySlot && !sheetAttending && (
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => {
-                          setSheet(null);
-                          onWatch?.(sheetAnySlot);
-                        }}
-                      >
-                        Me prévenir si ça se libère
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-            <div className="modal-actions">
-              <button
-                className="secondary"
-                onClick={() => {
-                  setSheet(null);
-                  onPick(sheet.date);
-                }}
-              >
-                Voir la journée
-              </button>
-              <button className="secondary" onClick={() => setSheet(null)}>
-                Fermer
-              </button>
-            </div>
+          )}
+          <div className="modal-actions">
+            <button
+              className="secondary"
+              onClick={() => {
+                setSheet(null);
+                onPick(sheet.date);
+              }}
+            >
+              Voir la journée
+            </button>
+            <button className="secondary" onClick={() => setSheet(null)}>
+              Fermer
+            </button>
           </div>
-        </div>
+        </Dialog>
       )}
     </>
   );

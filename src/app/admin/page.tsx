@@ -502,6 +502,7 @@ export default function AdminPage() {
                 connectés. <strong>Les administrateurs gardent un accès complet.</strong>
               </p>
               <textarea
+                aria-label="Message affiché aux membres pendant le blocage"
                 placeholder="Message affiché aux membres (ex. Appli en maintenance)"
                 value={blkMessage}
                 maxLength={280}
@@ -564,6 +565,7 @@ export default function AdminPage() {
               </p>
               <input
                 type="text"
+                aria-label="Titre de l'annonce"
                 placeholder="Titre (ex. Terrain fermé samedi)"
                 value={annTitle}
                 maxLength={80}
@@ -572,6 +574,7 @@ export default function AdminPage() {
                 style={{ width: "100%", marginBottom: 8 }}
               />
               <textarea
+                aria-label="Message de l'annonce"
                 placeholder="Message"
                 value={annBody}
                 maxLength={300}
@@ -602,6 +605,7 @@ export default function AdminPage() {
                 Affichée en haut de l'appli pour tous. Laisse vide et « Retirer » pour l'enlever.
               </p>
               <textarea
+                aria-label="Message de la bannière"
                 placeholder="Message de la bannière (ex. Assemblée générale vendredi 20 h)"
                 value={bnMessage}
                 maxLength={280}
@@ -611,7 +615,10 @@ export default function AdminPage() {
                 style={{ width: "100%", marginBottom: 8 }}
               />
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                {/* Ce select n'avait NI <label>, NI aria-label, NI placeholder : un lecteur
+                    d'écran annonçait « liste » et rien d'autre. */}
                 <select
+                  aria-label="Niveau de la bannière"
                   value={bnLevel}
                   disabled={bnBusy}
                   onChange={(e) => setBnLevel(e.target.value as "info" | "warn")}

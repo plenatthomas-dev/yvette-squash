@@ -67,8 +67,15 @@ export default function ResetPasswordPage() {
         <>
           <p className="muted">Choisis ton mot de passe (8 caractères minimum).</p>
           <form onSubmit={submit}>
+            {/* Libellé VISIBLE et rattaché, comme sur l'écran de connexion : le placeholder
+                seul disparaît dès la première frappe et ne constitue pas un nom accessible
+                fiable (WCAG 3.3.2, niveau A). */}
+            <label className="field-label" htmlFor="reset-password">
+              Nouveau mot de passe
+            </label>
             <div className="pwd-field">
               <input
+                id="reset-password"
                 type={showPwd ? "text" : "password"}
                 placeholder="Nouveau mot de passe"
                 value={password}

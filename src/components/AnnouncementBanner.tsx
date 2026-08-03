@@ -15,6 +15,7 @@
 // Pour un visiteur NON connecté (écran de login) : `localStorage`, faute de compte où le poser.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Dialog } from "./Dialog";
 
 type Banner = { message: string; level: "info" | "warn"; version: string };
 type Seen = { dismissedVersion: string | null; modalSeenVersion: string | null };
@@ -229,47 +230,44 @@ export default function AnnouncementBanner() {
         </div>
       )}
 
-      {/* Modale la première fois qu'on voit cette annonce. */}
+      {/* Modale la première fois qu'on voit cette annonce.
+          <Dialog> et pas un overlay écrit à la main : elle s'ouvre SEULE au chargement dès
+          que le bureau publie une annonce, et elle recouvre tout. Elle annonçait
+          aria-modal="true" sans gestionnaire de touche — ni Échap, ni piège de focus, ni
+          restitution du focus : la seule sortie était le clic, et au clavier on tabulait
+          hors d'une page qu'on croit bloquée. */}
       {showModal && (
-        <div className="modal-overlay" onClick={closeModal}>
-          <div
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Annonce"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
-              <h3 style={{ margin: 0, flex: 1 }}>📣 Annonce</h3>
-              <button
-                type="button"
-                onClick={closeModal}
-                aria-label="Fermer"
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  color: "inherit",
-                  cursor: "pointer",
-                  padding: 0,
-                  margin: 0,
-                  width: "auto",
-                  fontSize: "1.3rem",
-                  lineHeight: 1,
-                }}
-              >
-                ✕
-              </button>
-            </div>
-            <p style={{ margin: "0 0 18px", whiteSpace: "pre-wrap", color: "var(--pico-color)" }}>
-              {banner.message}
-            </p>
-            <div className="modal-actions">
-              <button type="button" onClick={closeModal}>
-                Fermer
-              </button>
-            </div>
+        <Dialog onClose={closeModal} label="Annonce">
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
+            <h3 style={{ margin: 0, flex: 1 }}>📣 Annonce</h3>
+            <button
+              type="button"
+              onClick={closeModal}
+              aria-label="Fermer"
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "inherit",
+                cursor: "pointer",
+                padding: 0,
+                margin: 0,
+                width: "auto",
+                fontSize: "1.3rem",
+                lineHeight: 1,
+              }}
+            >
+              ✕
+            </button>
           </div>
-        </div>
+          <p style={{ margin: "0 0 18px", whiteSpace: "pre-wrap", color: "var(--pico-color)" }}>
+            {banner.message}
+          </p>
+          <div className="modal-actions">
+            <button type="button" onClick={closeModal}>
+              Fermer
+            </button>
+          </div>
+        </Dialog>
       )}
     </>
   );

@@ -915,6 +915,7 @@ export default function Tournament({ toast, onExpired }: Props) {
               <div className="trn-guest-add">
                 <input
                   type="text"
+                  aria-label="Prénom de l'invité à ajouter"
                   placeholder="Ajouter un invité (prénom)"
                   value={guestInput}
                   maxLength={40}
