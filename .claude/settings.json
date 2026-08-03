@@ -1,5 +1,26 @@
 {
-  "description": "Impeccable design detector: immediate-tier checks after Edit/Write/MultiEdit on UI files, full-rule deep pass on Stop. Versionné pour que le hook suive le dépôt sur tout poste ; les permissions restent dans settings.local.json (personnel, non commité).",
+  "description": "Réglages partagés du dépôt : garde-fous de permission + hooks du détecteur de design impeccable. Les autorisations personnelles (allow) restent dans settings.local.json, non commité — les règles de permission fusionnent entre les deux fichiers et deny l'emporte toujours sur allow.",
+  "permissions": {
+    "deny": [
+      "Bash(rm *)",
+      "Bash(rm -rf *)",
+      "Bash(rmdir *)",
+      "Bash(del *)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push --force-with-lease*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -f*)",
+      "Bash(git clean -d*)",
+      "Bash(git branch -D*)",
+      "PowerShell(Remove-Item*)",
+      "PowerShell(rm *)",
+      "PowerShell(del *)",
+      "PowerShell(rmdir *)",
+      "PowerShell(ri *)",
+      "PowerShell(Clear-Content*)"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {
