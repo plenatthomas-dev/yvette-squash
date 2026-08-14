@@ -387,6 +387,46 @@ export async function getResaSessionExpiry(userId: string): Promise<Date | null>
   return s?.expiresAt ?? null;
 }
 
+/**
+ * Ferme la session portée par le cookie. Le `sid` est TOUJOURS invalidé — la ligne qui le
+ * porte est supprimée, donc un cookie qui aurait fuité ne rouvre rien.
+ *
+ * Mais si cette ligne détenait des jetons ResaMania, on les TRANSFÈRE d'abord dans une ligne
+ * « dormante » à identifiant NEUF : aucun cookie ne la désigne (l'identifiant n'est renvoyé
+ * à personne), elle n'ouvre donc aucun accès par elle-même. Elle sert uniquement de réserve
+ * à la reconnexion biométrique, qui reconstruit une session à partir du refresh token le
+ * plus récent du membre (cf. `createResaSessionFromUser`).
+ *
+ * Sans ce transfert, se déconnecter détruisait le seul lien ResaMania réutilisable : la
+ * biométrie répondait alors « Biométrie reconnue mais ta connexion ResaMania a expiré » à
+ * chaque tentative, alors même que l'empreinte venait d'être validée.
+ *
+ * Pour vraiment couper le lien (appareil prêté, perdu…), il faut retirer ses passkeys :
+ * sans passkey, la ligne dormante n'est plus atteignable et s'éteint à son échéance.
+ */
 export async function destroySession(sid: string | undefined): Promise<void> {
-  if (sid) await prisma.session.delete({ where: { id: sid } }).catch(() => {});
+  if (!sid) return;
+  const s = await prisma.session.findUnique({ where: { id: sid } }).catch(() => null);
+  if (!s) return;
+
+  // Ordre volontaire : on crée la réserve AVANT de supprimer, pour ne jamais perdre les
+  // jetons entre les deux. Si la création échoue, la déconnexion aboutit quand même (on
+  // perd seulement la reprise biométrique) — se déconnecter ne doit jamais échouer.
+  if (s.accessToken && s.refreshTokenEnc && s.tokenExpiresAt && s.identityJson) {
+    await prisma.session
+      .create({
+        data: {
+          id: randomBytes(24).toString("base64url"),
+          userId: s.userId,
+          accessToken: s.accessToken,
+          refreshTokenEnc: s.refreshTokenEnc,
+          tokenExpiresAt: s.tokenExpiresAt,
+          identityJson: s.identityJson,
+          expiresAt: s.expiresAt, // même échéance : la déconnexion ne prolonge rien
+        },
+      })
+      .catch(() => {});
+  }
+
+  await prisma.session.delete({ where: { id: sid } }).catch(() => {});
 }
