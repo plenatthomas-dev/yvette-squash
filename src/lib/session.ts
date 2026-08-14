@@ -55,9 +55,16 @@ export async function resolveUser(input: {
   if (email) {
     const byEmail = await prisma.user.findUnique({ where: { email } });
     if (byEmail) {
-      // Réconciliation : on n'attache le contactId que s'il manquait encore
-      // (ne jamais écraser un contactId déjà présent).
-      const attach = contactId && !byEmail.contactId ? { contactId } : {};
+      // Réconciliation : ResaMania fait autorité sur le contactId de CET email. On l'attache
+      // s'il manquait, et on le MET À JOUR s'il a changé — cas d'une migration de club côté
+      // ResaMania (août 2026 : `lecomplexbures` fermé → `omafitness`), où le même membre
+      // reçoit un contactId tout neuf. Sans cette mise à jour, la base garde l'ancien : ses
+      // réservations ne sont plus reconnues comme siennes (planning-annotate) et, pire, la
+      // réconciliation du planning croit le créneau pris par un tiers et passe la résa en
+      // "cancelled" (cf. api/planning : bookerContactId ≠ user.contactId).
+      // Sûr vis-à-vis de l'unicité de `contactId` : si une AUTRE ligne le portait déjà,
+      // l'étape 1 (jointure par contactId) l'aurait trouvée et on ne serait pas ici.
+      const attach = contactId && byEmail.contactId !== contactId ? { contactId } : {};
       // Connexion ResaMania retombant sur une ligne « email seul » → email désormais prouvé.
       const verify = contactId && !byEmail.emailVerifiedAt ? { emailVerifiedAt: now } : {};
       return prisma.user.update({
