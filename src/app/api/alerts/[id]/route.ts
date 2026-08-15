@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import { alertsChanged } from "@/lib/alerts-gate";
 
 export const runtime = "nodejs";
 
@@ -15,6 +16,9 @@ export async function DELETE(
   }
   const { id } = await params;
   // deleteMany borné à mon userId : pas d'accès aux alertes des autres.
-  await prisma.slotAlert.deleteMany({ where: { id, userId: session.userId } });
+  const { count } = await prisma.slotAlert.deleteMany({ where: { id, userId: session.userId } });
+  // Referme la porte du cron si c'était la dernière alerte (cf. lib/alerts-gate.ts). On
+  // n'invalide que si quelque chose a bien été supprimé : un id inconnu ne change rien.
+  if (count > 0) alertsChanged();
   return NextResponse.json({ ok: true });
 }

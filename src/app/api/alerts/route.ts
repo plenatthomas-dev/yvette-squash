@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import {
+  alertsChanged,
+  alertHorizonISO,
+  alertTodayISO,
+  ALERT_MAX_DAYS_AHEAD,
+} from "@/lib/alerts-gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,10 +60,33 @@ export async function POST(req: NextRequest) {
   if (typeof hm !== "string" || !/^\d{2}:\d{2}$/.test(hm)) {
     return NextResponse.json({ error: "Horaire invalide" }, { status: 400 });
   }
+  // Le format seul ne suffit pas. Une date absurde — faute de frappe « 2027 », requête forgée —
+  // donnerait une alerte qui ne se déclenche jamais et qui, elle, tiendrait le cron (donc la
+  // base Neon) éveillé. Bornes des DEUX côtés : une date passée est tout aussi inutile, et
+  // permettrait de provoquer des réveils à volonté. Cf. ALERT_MAX_DAYS_AHEAD.
+  if (date < alertTodayISO()) {
+    return NextResponse.json({ error: "Ce créneau est déjà passé." }, { status: 400 });
+  }
+  if (date > alertHorizonISO()) {
+    return NextResponse.json(
+      { error: `Trop loin : les alertes se posent jusqu'à ${ALERT_MAX_DAYS_AHEAD} jours à l'avance.` },
+      { status: 400 },
+    );
+  }
   const alert = await prisma.slotAlert.upsert({
     where: { userId_date_hm: { userId: session.userId, date, hm } },
     update: { active: true, notifiedAt: null },
     create: { userId: session.userId, date, hm },
   });
+  // Ouvre la porte du cron : sans ça, la surveillance ne démarrerait qu'au bout du TTL
+  // (cf. lib/alerts-gate.ts). C'est l'appel qui rend l'alerte réellement active.
+  //
+  // Une version précédente ajoutait ici un `await alertsPending()` censé « forcer » le
+  // recalcul et refermer une fenêtre de course. C'était inutile : `revalidateTag` n'invalide
+  // pas sur-le-champ, il empile le tag et Next le purge APRÈS la réponse — la valeur qu'on
+  // recalculait était donc écrite puis balayée aussitôt, au prix d'un aller-retour Postgres
+  // par inscription. La fenêtre résiduelle est bornée par le TTL et documentée dans
+  // `alertsChanged`.
+  alertsChanged();
   return NextResponse.json(alert);
 }

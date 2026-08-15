@@ -147,3 +147,34 @@ libellés et fixtures. Ce qui suit n'a PAS été corrigé (cap de 3 tours attein
   par `.gitignore` (dépôt public), le suivi des points restants ne tient qu'à des fichiers
   locaux non versionnés. Les items 🟡 encore ouverts sont déjà listés plus haut dans ce
   fichier ; y reporter les éventuels suivants plutôt que de compter sur les rapports.
+
+## Blind-review 2026-08-15 — porte du cron d'alertes + renumérotage des migrations (round 3, pass-with-backlog)
+
+Trois tours. Corrigés en cours de boucle : procédure de renommage manuelle rendue automatique et
+idempotente (un oubli aurait rejoué 31 migrations sur une base peuplée), battement de cœur du cron
+falsifiable par un membre, borne d'horizon calculée sur le fuseau du serveur, borne calée à tort
+sur J+14 alors que ResaMania publie des créneaux réservables jusqu'à J+45 au moins (mesuré),
+absence de repli en cas de PANNE du Data Cache, appel `alertsPending()` inutile dans POST (la purge
+de fin de requête balayait sa valeur), cascade de suppression d'un membre qui n'invalidait pas la
+porte, et deux explications fausses dans la documentation (tri ASCII au lieu de `localeCompare`,
+chiffre de consommation extrapolé d'un échantillon d'une heure). Ce qui suit n'a PAS été corrigé.
+
+- [ ] **[MINOR]** `/api/health` réveille Neon pour mesurer la latence de réveil de Neon.
+  Cron externe `*/10 17-21`, `SELECT 1`. Il se cache aujourd'hui derrière `check-alerts` ; une
+  fois celui-ci assagi, il devient à lui seul ~19 CU-hours/mois, soit la moitié du gain de ce
+  lot. Le supprimer, ou le faire répondre sans toucher Postgres.
+
+- [ ] **[MINOR]** Le battement de cœur atteste que le cron a été APPELÉ, pas qu'il a réussi.
+  `src/lib/alerts-gate.ts` — il est posé en début de passage, sous le nom distinct
+  `check-alerts-veille` pour ne pas écraser le bilan du dernier passage utile. Un cron qui
+  échouerait systématiquement APRÈS ce point resterait vert sur `/admin` pendant une heure.
+
+- [ ] **[MINOR]** La navigation du planning n'est pas bornée côté client.
+  `src/app/page.tsx` — les flèches permettent d'atteindre une date au-delà de
+  `ALERT_MAX_DAYS_AHEAD` (90 j) et d'y proposer « rejoindre la liste d'attente », qui échouera
+  en 400. Le message du serveur remonte désormais au membre, mais mieux vaudrait rendre le
+  refus impossible à provoquer.
+
+- [ ] **[MINOR]** Le script de renumérotation restera dans le chemin de build après usage.
+  Critère de retrait et requête de vérification écrits dans `prisma/migrations/README.md` ;
+  reste à le faire le jour venu.

@@ -910,12 +910,18 @@ export default function Home() {
         body: JSON.stringify({ date: day, hm }),
       });
       if (handleExpired(res.status)) return;
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        // Le serveur explique parfois précisément le refus (créneau trop lointain, par
+        // exemple). Le remplacer par « impossible de rejoindre » ferait passer une règle
+        // métier pour une panne, et le membre réessaierait.
+        const data = await res.json().catch(() => ({}));
+        throw new Error(typeof data.error === "string" ? data.error : "");
+      }
       toast("ok", "Inscrit en liste d'attente 🕒");
       loadAlerts();
       refreshWaitCounts();
-    } catch {
-      toast("err", "Impossible de rejoindre la liste d'attente.");
+    } catch (e) {
+      toast("err", (e as Error).message || "Impossible de rejoindre la liste d'attente.");
     }
   };
 

@@ -19,6 +19,7 @@ const h = vi.hoisted(() => ({
   sessionDeleteMany: vi.fn(),
   passkeyDeleteMany: vi.fn(),
   createEmailToken: vi.fn(),
+  alertsChanged: vi.fn(),
 }));
 
 vi.mock("@/lib/admin", () => ({
@@ -45,6 +46,10 @@ vi.mock("@/lib/email-auth", () => ({
   authLinkFor: (_o: string, _p: string, token: string) => `https://x/reinitialiser?token=${token}`,
   clientIp: () => "1.2.3.4",
 }));
+// La suppression d'un membre emporte ses alertes en cascade et doit donc invalider la porte du
+// cron (cf. lib/alerts-gate). `revalidateTag` exige un contexte de requête Next, absent quand on
+// appelle le handler directement : on le mocke, et on vérifie l'appel plus bas.
+vi.mock("@/lib/alerts-gate", () => ({ alertsChanged: h.alertsChanged }));
 vi.mock("@/lib/db", () => ({
   prisma: {
     user: {
@@ -215,6 +220,14 @@ describe("POST /api/admin/members", () => {
     const res = await POST(postReq({ id: "u1", action: "delete" }));
     expect(res.status).toBe(200);
     expect(h.userDelete).toHaveBeenCalledWith({ where: { id: "u1" } });
+  });
+
+  it("delete : invalide la porte du cron d'alertes (cascade sur SlotAlert)", async () => {
+    // C'est le SEUL chemin de disparition d'alertes qui ne passe pas par /api/alerts : la
+    // cascade Prisma les emporte silencieusement. Sans invalidation, le cron croirait avoir du
+    // travail et réveillerait Neon toutes les 4 minutes jusqu'au TTL (cf. lib/alerts-gate).
+    await POST(postReq({ id: "u1", action: "delete" }));
+    expect(h.alertsChanged).toHaveBeenCalled();
   });
 
   it("400 sur action inconnue", async () => {

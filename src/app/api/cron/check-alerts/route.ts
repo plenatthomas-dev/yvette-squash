@@ -5,6 +5,7 @@ import { getPlanning } from "@/lib/resamania/client";
 import { pushToUser, pushConfigured } from "@/lib/push";
 import { cronAuthorized } from "@/lib/cron-auth";
 import { recordCronRun } from "@/lib/cron-run";
+import { alertsPending, alertsChanged, alertHorizonISO, noteCronAlive } from "@/lib/alerts-gate";
 import { fmtTime, toInstant } from "@/lib/time";
 
 export const runtime = "nodejs";
@@ -37,8 +38,24 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Clés VAPID non configurées" }, { status: 503 });
   }
 
+  // Porte d'entrée servie par le Data Cache, PAS par Postgres : ce cron passe toutes les
+  // ~4 minutes alors que Neon s'endort après 5, si bien qu'une simple lecture ici suffisait à
+  // maintenir la base éveillée en permanence. Cf. `lib/alerts-gate.ts` pour le raisonnement
+  // complet. Le repli est sûr : un cache froid relit Postgres, comme avant.
+  // Battement de cœur posé par le CRON et lui seul (jamais par une route de membre), et mis en
+  // cache pour n'écrire qu'une fois par heure : journaliser chaque passage réveillerait la base
+  // toutes les 4 minutes, soit exactement ce qu'on cherche à éviter.
+  await noteCronAlive();
+
+  if (!(await alertsPending())) {
+    return NextResponse.json({ checked: 0, notified: 0, expired: 0, skipped: true });
+  }
+
   const allAlerts = await prisma.slotAlert.findMany({ where: { active: true } });
   if (allAlerts.length === 0) {
+    // La porte disait « il y a des alertes » et il n'y en a plus : le cache était en retard
+    // sur la base (invalidation manquée). On le remet d'aplomb tout de suite.
+    alertsChanged();
     await recordCronRun("check-alerts", true, "0 alerte active");
     return NextResponse.json({ checked: 0, notified: 0, expired: 0 });
   }
@@ -47,11 +64,16 @@ export async function GET(req: NextRequest) {
   // ne sert à rien. On désactive ces alertes SANS notifier (évite la notif « 15 h trop
   // tard » reçue quand le cron ne tournait qu'une fois par jour) et on économise l'appel
   // planning associé. Comparaison en instant absolu via toInstant (DST-safe).
+  // On écarte aussi les alertes AU-DELÀ de l'horizon réservable : elles ne se déclencheraient
+  // jamais (le planning n'est pas ouvert si loin) mais tiendraient la porte du cron ouverte
+  // indéfiniment. Traité comme une expiration : désactivation silencieuse, sans notification.
+  const horizon = alertHorizonISO();
   const now = Date.now();
   const expired: typeof allAlerts = [];
   const alerts: typeof allAlerts = [];
   for (const a of allAlerts) {
-    if (new Date(toInstant(`${a.date}T${a.hm}:00`)).getTime() <= now) expired.push(a);
+    const passee = new Date(toInstant(`${a.date}T${a.hm}:00`)).getTime() <= now;
+    if (passee || a.date > horizon) expired.push(a);
     else alerts.push(a);
   }
   if (expired.length > 0) {
@@ -61,6 +83,9 @@ export async function GET(req: NextRequest) {
     });
   }
   if (alerts.length === 0) {
+    // Toutes les alertes restantes viennent d'expirer : la porte doit se refermer, sinon on
+    // continuerait de réveiller Postgres toutes les 4 minutes pour rien jusqu'au TTL.
+    alertsChanged();
     await recordCronRun("check-alerts", true, `${expired.length} expirée(s)`);
     return NextResponse.json({ checked: 0, notified: 0, expired: expired.length });
   }
@@ -76,6 +101,7 @@ export async function GET(req: NextRequest) {
 
   let checked = 0;
   let notified = 0;
+  let deactivated = 0;
 
   for (const [key, group] of groups) {
     const [userId, date] = key.split("|");
@@ -111,9 +137,16 @@ export async function GET(req: NextRequest) {
         where: { id: a.id },
         data: { active: false, notifiedAt: new Date() },
       });
+      // Compté à part de `notified` : l'alerte est désactivée même si aucun push n'est parti
+      // (abonnement expiré). C'est la DÉSACTIVATION qui doit refermer la porte, pas l'envoi.
+      deactivated++;
       if (sent > 0) notified++;
     }
   }
+
+  // Des alertes ont été désactivées (expirées ou notifiées) : la porte doit refléter le nouvel
+  // état. Un seul appel en fin de passe plutôt qu'un par alerte — l'invalidation est globale.
+  if (expired.length > 0 || deactivated > 0) alertsChanged();
 
   await recordCronRun("check-alerts", true, `${notified} notif(s), ${checked} vérifiée(s)`);
   return NextResponse.json({ checked, notified, expired: expired.length });

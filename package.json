@@ -12,8 +12,10 @@
     "test:watch": "vitest",
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy",
-    "db:deploy:retry": "prisma migrate deploy || (echo '↻ Base injoignable (branche Neon probablement archivee) : la tentative precedente a declenche son reveil, on repasse dans 25 s.' && sleep 25 && prisma migrate deploy)",
+    "db:deploy": "npm run db:renumerote && prisma migrate deploy",
+    "db:renumerote": "prisma db execute --schema prisma/schema.prisma --file prisma/renumerotation-migrations.sql",
+    "db:renumerote:retour": "prisma db execute --schema prisma/schema.prisma --file prisma/renumerotation-migrations-retour.sql",
+    "db:deploy:retry": "npm run db:deploy || (echo '↻ Base injoignable (branche Neon probablement archivee) : la tentative precedente a declenche son reveil, on repasse dans 25 s.' && sleep 25 && npm run db:deploy)",
     "db:studio": "prisma studio",
     "resa:test": "tsx scripts/resa-test.ts"
   },

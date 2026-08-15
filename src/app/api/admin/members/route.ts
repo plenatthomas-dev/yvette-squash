@@ -4,6 +4,7 @@ import { requireAdmin, isAdminEmail } from "@/lib/admin";
 import { listMembers, deleteBlockersFor } from "@/lib/members";
 import { getFeatures } from "@/lib/features-server";
 import { createEmailToken, authLinkFor, clientIp } from "@/lib/email-auth";
+import { alertsChanged } from "@/lib/alerts-gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -125,6 +126,11 @@ export async function POST(req: NextRequest) {
     }
     // Les relations restantes sont en Cascade/SetNull : la suppression est propre.
     await prisma.user.delete({ where: { id: target.id } });
+    // La cascade emporte aussi ses `SlotAlert` sans passer par la route des alertes : c'est le
+    // seul chemin de disparition d'alertes qui contourne l'invalidation. Sans cet appel, le
+    // cron continuerait de croire qu'il a du travail et réveillerait Neon toutes les 4 minutes
+    // jusqu'au TTL (cf. lib/alerts-gate.ts).
+    alertsChanged();
     return NextResponse.json({ ok: true });
   }
 
