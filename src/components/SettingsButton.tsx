@@ -906,16 +906,30 @@ export function SettingsButton({
                     </>
                   )
                 )}
-                {/* Cet appareil déjà enrôlé : le seul bouton pertinent est le « Retirer » de sa
-                    ligne ci-dessus — on n'affiche pas « Activer sur cet appareil » en double. */}
-                {enabledOnThisDevice ? null : pkSupported ? (
-                  <button onClick={addPasskey} disabled={pkBusy}>
-                    {pkBusy ? "…" : "Activer sur cet appareil"}
-                  </button>
-                ) : (
-                  <p className="muted tiny">
-                    Cet appareil ne propose pas de connexion biométrique (essaie depuis ton
-                    téléphone).
+                {/* L'ajout est TOUJOURS proposé : ni le marqueur local ni la détection du
+                    capteur ne sont fiables au point de retirer la seule porte d'entrée.
+                    - `pkOnDevice` est un simple drapeau localStorage : il est déjà posé si on
+                      s'est connecté ici avec un passkey synchronisé (iCloud/Google) venu d'un
+                      AUTRE appareil — le membre se retrouvait alors sans aucune option ;
+                    - `passkeySupported()` répond faux sur certains navigateurs intégrés alors
+                      que l'enrôlement marcherait.
+                    Un vrai doublon est de toute façon refusé par WebAuthn lui-même
+                    (excludeCredentials → « déjà enregistré sur cet appareil »). */}
+                <button
+                  className={enabledOnThisDevice || !pkSupported ? "secondary" : undefined}
+                  onClick={addPasskey}
+                  disabled={pkBusy}
+                >
+                  {pkBusy
+                    ? "…"
+                    : enabledOnThisDevice
+                      ? "Ajouter cet appareil"
+                      : "Activer sur cet appareil"}
+                </button>
+                {!pkSupported && (
+                  <p className="muted tiny" style={{ marginTop: 6 }}>
+                    Cet appareil ne semble pas proposer Face ID / empreinte : l'activation peut
+                    échouer (c'est fait pour le téléphone).
                   </p>
                 )}
               </section>
