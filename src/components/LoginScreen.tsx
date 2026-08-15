@@ -298,7 +298,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
       {tab === "resa" || !emailLogin ? (
         <>
           <p className="muted">
-            Connecte-toi avec ton compte ResaMania (Le Complexe Bures).
+            Connecte-toi avec ton compte ResaMania (Le Complex Gym).
           </p>
           {/* Reconnexion guidée après une biométrie réussie mais un lien ResaMania expiré :
               identifiant déjà rempli + focus sur le mot de passe → un seul geste pour réserver. */}
