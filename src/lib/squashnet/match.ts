@@ -18,7 +18,8 @@ export interface MemberIdentity {
 
 export interface RankingMatch {
   clt: string;
-  rang: number | null; // rang national (plus petit = plus fort), pour trier les têtes de série
+  rang: number | null; // rang national DANS SON GENRE (plus petit = plus fort), têtes de série
+  rangM: number | null; // rang national MIXTE (« M » = mixte) — le nombre affiché dans l'annuaire
   licence: string;
   cat: string;
   club: string;
@@ -61,11 +62,22 @@ function nameMatches(member: MemberIdentity, rowName: string): boolean {
   return true;
 }
 
+// Les rangs arrivent en texte, parfois avec une espace de milliers (« 2 339 »). Lecture
+// STRICTE, à deux titres : on n'accepte que des chiffres (« 3184e » ou « NC » → null, là où
+// parseInt aurait retenu 3184), et on refuse zéro. Un rang commence à 1 : un « 0 » est une
+// case vide déguisée, et le laisser passer le placerait en TÊTE du tri « Classement » de
+// l'annuaire — devant les mieux classés du club.
+function toRank(raw: string): number | null {
+  if (!/^\d+$/.test(raw.replace(/\s/g, ""))) return null;
+  const n = parseInt(raw.replace(/\s/g, ""), 10);
+  return n > 0 ? n : null;
+}
+
 function toMatch(c: RankingRow): RankingMatch {
-  const rangNum = parseInt(c.rang.replace(/\s/g, ""), 10);
   return {
     clt: c.clt,
-    rang: Number.isFinite(rangNum) ? rangNum : null,
+    rang: toRank(c.rang),
+    rangM: toRank(c.rangM),
     licence: c.licence,
     cat: c.cat,
     club: c.club,

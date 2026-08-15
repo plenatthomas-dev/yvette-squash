@@ -59,26 +59,43 @@ describe("GET /api/directory", () => {
     expect(members.map((m: { name: string }) => m.name)).toEqual(["Alice Martin", "Bubu", "Zoé Zola"]);
   });
 
-  it("expose clt/rang/cat quand le classement est actif et le rapprochement existe", async () => {
+  it("expose clt/rang/rangM/cat quand le classement est actif et le rapprochement existe", async () => {
     h.users = [
-      { id: "a", displayName: "Alice Martin", nickname: null, squashnetRanking: { clt: "5A", rang: 3184, cat: "+55" } },
+      {
+        id: "a",
+        displayName: "Alice Martin",
+        nickname: null,
+        squashnetRanking: { clt: "5A", rang: 3184, rangM: 412, cat: "+55" },
+      },
       { id: "b", displayName: "Bob Sans", nickname: null, squashnetRanking: null },
     ];
     const res = await GET(req());
     const { members } = await res.json();
-    expect(members[0]).toMatchObject({ name: "Alice Martin", clt: "5A", rang: 3184, cat: "+55" });
+    expect(members[0]).toMatchObject({
+      name: "Alice Martin",
+      clt: "5A",
+      rang: 3184,
+      rangM: 412, // le nombre affiché et trié dans l'annuaire
+      cat: "+55",
+    });
     expect(members[1].clt).toBeUndefined(); // pas de rapprochement → aucun champ classement
   });
 
   it("n'expose jamais le classement quand le classement est désactivé", async () => {
     h.flags.ranking = false;
     h.users = [
-      { id: "a", displayName: "Alice Martin", nickname: null, squashnetRanking: { clt: "5A", rang: 3184, cat: "+55" } },
+      {
+        id: "a",
+        displayName: "Alice Martin",
+        nickname: null,
+        squashnetRanking: { clt: "5A", rang: 3184, rangM: 412, cat: "+55" },
+      },
     ];
     const res = await GET(req());
     const { members } = await res.json();
     expect(members[0].clt).toBeUndefined();
     expect(members[0].rang).toBeUndefined();
+    expect(members[0].rangM).toBeUndefined();
   });
 
   it("n'expose jamais email ni contactId", async () => {

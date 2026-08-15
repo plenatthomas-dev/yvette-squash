@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { Dialog } from "@/components/Dialog";
-import { fetchDirectory, getDirectoryGroupUrl } from "@/lib/directoryCache";
+import { fetchDirectory, getDirectoryGroupUrl, type DirectoryMember } from "@/lib/directoryCache";
+import { byRank } from "@/lib/directorySort";
+
+// Ordre d'affichage. « name » est celui du serveur (déjà trié) et reste le défaut : on cherche
+// d'abord quelqu'un par son nom. « rank » classe du mieux classé au moins bien (cf. byRank).
+type SortKey = "name" | "rank";
 
 // Annuaire des membres (idée 6). Bouton d'en-tête → modale listant les joueurs opt-in,
 // avec une recherche par nom. Gated par le flag `directory` : grisé (« bientôt ») si OFF,
@@ -16,10 +21,9 @@ export function DirectoryModal({
   onClose: () => void;
   toast: (type: "ok" | "err" | "info", msg: string) => void;
 }) {
-  const [members, setMembers] = useState<
-    { id: string; name: string; clt?: string; rang?: number | null; cat?: string | null }[] | null
-  >(null);
+  const [members, setMembers] = useState<DirectoryMember[] | null>(null);
   const [q, setQ] = useState("");
+  const [sort, setSort] = useState<SortKey>("name");
   const [groupUrl, setGroupUrl] = useState<string | null>(null);
 
   // Charge la liste à l'ouverture. Cache mémoire court (cf. fetchDirectory) : une
@@ -48,7 +52,13 @@ export function DirectoryModal({
   }, [open, toast]);
 
   const needle = q.trim().toLowerCase();
-  const shown = (members ?? []).filter((m) => m.name.toLowerCase().includes(needle));
+  const found = (members ?? []).filter((m) => m.name.toLowerCase().includes(needle));
+  // `found` vient déjà trié par nom (serveur) : trier par rang part donc d'une base alpha
+  // stable, ce qui range naturellement les ex æquo et les sans-classement par ordre alpha.
+  const shown = sort === "rank" ? [...found].sort(byRank) : found;
+  // La bascule de tri n'a de sens que si au moins un membre a un classement (flag `ranking`
+  // actif ET rapprochement squashnet réussi) — sinon les deux ordres seraient identiques.
+  const anyRanked = (members ?? []).some((m) => m.rangM != null);
 
   if (!open) return null;
   return (
@@ -72,6 +82,32 @@ export function DirectoryModal({
               onChange={(e) => setQ(e.target.value)}
               aria-label="Rechercher un membre"
             />
+            {anyRanked && (
+              <>
+                <div className="directory-sort" role="group" aria-label="Trier l'annuaire">
+                  <button
+                    type="button"
+                    aria-pressed={sort === "name"}
+                    onClick={() => setSort("name")}
+                  >
+                    A → Z
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={sort === "rank"}
+                    onClick={() => setSort("rank")}
+                  >
+                    Classement
+                  </button>
+                </div>
+                {/* Légende VISIBLE : sans elle, « #2339 » est un nombre nu. L'info-bulle ne
+                    suffit pas — l'appli s'utilise au doigt, et `title` ne se déclenche jamais
+                    au tactile (même limite que le badge de classement, elle pré-existe). */}
+                <p className="directory-legend muted">
+                  <strong>#</strong> rang national, toutes catégories
+                </p>
+              </>
+            )}
             {members === null ? (
               <p className="muted tiny">Chargement…</p>
             ) : shown.length === 0 ? (
@@ -85,12 +121,22 @@ export function DirectoryModal({
                 {shown.map((m) => (
                   <li key={m.id}>
                     <span className="directory-name">{m.name}</span>
+                    {m.rangM != null && (
+                      <span className="directory-rang" title="Rang national, toutes catégories">
+                        {/* Texte pour lecteur d'écran plutôt qu'un aria-label : ARIA ne garantit
+                            pas l'exposition d'une étiquette sur un <span> sans rôle. Le « # »
+                            visible, lui, ne se lit pas à voix haute. */}
+                        <span className="sr-only">Rang national toutes catégories : </span>
+                        <span aria-hidden="true">#</span>
+                        {m.rangM}
+                      </span>
+                    )}
                     {m.clt && (
                       <span
                         className="directory-clt"
                         title={
                           "Classement fédéral" +
-                          (m.rang ? ` · rang national ${m.rang}` : "") +
+                          (m.rang ? ` · rang dans son genre ${m.rang}` : "") +
                           (m.cat ? ` · ${m.cat}` : "")
                         }
                       >

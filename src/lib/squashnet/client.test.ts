@@ -4,6 +4,12 @@ import { parseRankingFragment, parseLatestMonth } from "./client";
 // Fragment réel capté sur squashnet.fr (POST ic_a=131079, name=courtaut) : sélecteur de mois
 // + bloc résultats. La 1re ligne est authentique ; la 2e est synthétique (homonyme dans un
 // autre club) pour couvrir le multi-résultats et le filtrage par club côté « matching ».
+//
+// Ses valeurs respectent l'invariant vérifié sur données réelles : `rangM` (rang MIXTE) est
+// TOUJOURS >= `rang` (rang dans son genre), puisqu'un rang ne peut que grossir dans un
+// ensemble plus large. L'écart est d'autant plus marqué chez une joueuse (44e joueuse mais
+// 1520e toutes catégories). Une fixture qui violerait cet ordre figerait une confusion des
+// deux colonnes — c'est arrivé, d'où ce rappel.
 const MONTH_SELECT = `<select id='month' name='month' class='form-control'><option value='2026-07-07' selected='selected'>Juillet 2026</option>
 <option value='2026-06-02'>Juin 2026</option>
 <option value='2026-05-05'>Mai 2026</option></select>`;
@@ -21,7 +27,7 @@ const ROW_JEROME = `<div class='row ranking'><div class='div-rank-gender'><span 
 </div>`;
 
 const ROW_MARIE = `<div class='row ranking'><div class='div-rank-gender'><span class='material-icons'>female</span></div>
-<div class='div-rank-rangM'><span>12</span></div>
+<div class='div-rank-rangM'><span>1520</span></div>
 <div class='div-rank-name'><span>COURTAUT MARIE</span></div>
 <div class='div-rank-rang'><span>44</span></div>
 <div class='div-rank-clt'><span><span>2C</span></span></div>

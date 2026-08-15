@@ -96,11 +96,20 @@ export async function refreshRankings(): Promise<RefreshResult> {
       try {
         await prisma.squashnetRanking.upsert({
           where: { userId: m.id },
-          update: { clt: hit.clt, rang: hit.rang, licence: hit.licence, cat: hit.cat, club: hit.club, month },
+          update: {
+            clt: hit.clt,
+            rang: hit.rang,
+            rangM: hit.rangM,
+            licence: hit.licence,
+            cat: hit.cat,
+            club: hit.club,
+            month,
+          },
           create: {
             userId: m.id,
             clt: hit.clt,
             rang: hit.rang,
+            rangM: hit.rangM,
             licence: hit.licence,
             cat: hit.cat,
             club: hit.club,

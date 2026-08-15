@@ -20,8 +20,17 @@ export interface RankingRow {
   ligue: string; // "IDF"
   cat: string; // catégorie d'âge, ex. "+55", "Senior"
   gender: string; // "male" | "female" (issu de l'icône)
-  rang: string; // rang général
-  rangM: string; // rang par genre
+  // Les deux rangs de la fiche, à ne pas confondre — c'est déjà arrivé :
+  rang: string; // « Rang » : rang DANS SON GENRE (le genre de la colonne `gender`)
+  rangM: string; // « RangM » : rang MIXTE, toutes catégories — « M » comme mixte, pas masculin.
+  // Vérifié sur données réelles (2026-08), trois fois plutôt qu'une :
+  //  • `rangM` >= `rang` TOUJOURS, à égalité en tête de classement (21/21) et avec un écart qui
+  //    grandit vers le bas — soit le nombre de joueuses devant. Un rang ne peut grossir que
+  //    dans un ensemble plus large : `rangM` est donc le rang du sur-ensemble (mixte) ;
+  //  • ce n'est pas « le rang du mois précédent » : pour le même joueur, 08 = 2219/2339,
+  //    07 = 2300/2432, 06 = 2508/2673 — le 2339 d'août ne vaut pas le 2300 de juillet ;
+  //  • ce n'est pas non plus un rang par catégorie d'ÂGE : sur 90 lignes couvrant 14 catégories
+  //    (U9 → +65), aucune valeur de `rang` n'est dupliquée. C'est une échelle unique.
   mean: string; // moyenne de points, ex. "3 832.17"
 }
 

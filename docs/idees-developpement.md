@@ -161,8 +161,13 @@ d'une soirée à sa place).
   - **6c · Mini-profil (stats déjà en base)** · 💡 à étudier · ⭐⭐ · **S–M** — parties jouées
     ce mois, terrain/horaire favori, classement, dérivés de `Booking`/`Attendance`. ⚠️ **RGPD**
     (contrainte 4) : nouvelle finalité → paragraphe à ajouter à la note de confidentialité.
-  - **6d · Tri/filtre par classement & catégorie** · 💡 à étudier · ⭐ · **XS** — `clt/rang/cat`
-    sont déjà exposés par `/api/directory` ; il ne manque que le tri/filtre côté UI.
+  - **6d · Tri/filtre par classement & catégorie** · ✅ tri fait (2026-08-15) · ⭐ · **XS** — la
+    modale affiche le rang mixte (`rangM`) et propose une bascule A→Z / Classement. **Reste le
+    FILTRE** (par catégorie d'âge `cat`, et éventuellement par plage de classement), non livré.
+    ⚠️ **Étape d'exploitation** : `rangM` est NULL pour toutes les lignes existantes et ne se
+    remplit qu'au rafraîchissement des classements (cron mensuel du 8, ou bouton `/admin`).
+    Tant qu'il l'est, l'annuaire est visuellement identique à avant — il faut donc lancer un
+    rafraîchissement APRÈS le déploiement, sinon la fonction paraît livrée mais absente.
   - **6e · Pastille « actif récemment »** · 💡 à étudier · ⭐ · **XS** — `lastLoginAt` existe
     déjà (exploité dans le dashboard admin) ; un point discret indique qui est joignable.
     ⚠️ petite note RGPD (exposer une présence récente).
@@ -309,7 +314,7 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 | 6a | Annuaire — « je cherche à jouer » | ⭐⭐⭐ | M | 6, push | 💡 à étudier |
 | 6b | Annuaire — fiche = hub d'actions | ⭐⭐⭐ | S | 6 · 3/4/5a | 💡 à étudier |
 | 6c | Annuaire — mini-profil (stats) | ⭐⭐ | S–M | 6, Booking | 💡 à étudier |
-| 6d | Annuaire — tri/filtre classement | ⭐ | XS | 6, S | 💡 à étudier |
+| 6d | Annuaire — tri/filtre classement | ⭐ | XS | 6, S | ✅ tri fait · filtre à étudier |
 | 6e | Annuaire — pastille « actif » | ⭐ | XS | 6 | 💡 à étudier |
 
 ### Séquencement recommandé (par vagues)

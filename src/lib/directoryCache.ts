@@ -9,7 +9,8 @@ export interface DirectoryMember {
   id: string;
   name: string;
   clt?: string;
-  rang?: number | null;
+  rang?: number | null; // rang dans son genre — sert au tri des têtes de série (tournoi)
+  rangM?: number | null; // rang MIXTE toutes catégories — le nombre affiché/trié dans l'annuaire
   cat?: string | null;
 }
 

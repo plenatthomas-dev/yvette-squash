@@ -36,13 +36,18 @@ export async function GET(req: NextRequest) {
       displayName: true,
       nickname: true,
       // Classement fédéral (idée squashnet) : joint seulement si la fonction est active.
-      squashnetRanking: ranking ? { select: { clt: true, rang: true, cat: true } } : false,
+      squashnetRanking: ranking
+        ? { select: { clt: true, rang: true, rangM: true, cat: true } }
+        : false,
     },
   });
 
-  // Nom affiché = pseudo si défini, sinon nom réel. Tri alpha (insensible casse/accents).
-  // Si le classement est actif, on expose clt (affichage) + rang (tri des têtes de série) +
-  // cat (info-bulle) ; jamais la licence ni le club (données de traçabilité internes).
+  // Nom affiché = pseudo si défini, sinon nom réel. Tri alpha (insensible casse/accents) :
+  // c'est l'ordre par défaut de l'annuaire, le client peut rebasculer sur le classement.
+  // Si le classement est actif, on expose clt (badge) + rang (rang dans son genre, tri des
+  // têtes de série) + rangM (rang MIXTE : le nombre affiché et trié dans l'annuaire, seule
+  // échelle comparable entre tous) + cat (info-bulle) ; jamais la licence ni le club
+  // (données de traçabilité internes).
   const members = users
     .map((u) => ({
       id: u.id,
@@ -51,6 +56,7 @@ export async function GET(req: NextRequest) {
         ? {
             clt: u.squashnetRanking.clt,
             rang: u.squashnetRanking.rang,
+            rangM: u.squashnetRanking.rangM,
             cat: u.squashnetRanking.cat,
           }
         : {}),

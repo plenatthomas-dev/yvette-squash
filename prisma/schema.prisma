@@ -501,7 +501,11 @@ model SquashnetRanking {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId    String   @unique
   clt       String // classement affiché, ex. "5A", "NC"
-  rang      Int? // rang national (plus petit = plus fort) — sert au tri des têtes de série
+  rang      Int? // rang national DANS SON GENRE (plus petit = plus fort) — tri têtes de série
+  rangM     Int? // rang national MIXTE, toutes catégories (« M » = mixte, pas masculin) : le
+  // nombre lu sur la fiche squashnet, donc celui qu'affiche l'annuaire. C'est le seul des deux
+  // qui soit comparable entre tous les membres — vérifié sur données réelles : rangM >= rang
+  // toujours, à égalité en tête de classement, l'écart étant le nombre de joueuses devant.
   licence   String? // n° de licence FFSquash lu sur squashnet (traçabilité)
   cat       String? // catégorie d'âge, ex. "+55", "Senior"
   club      String // libellé du club rapproché (audit)

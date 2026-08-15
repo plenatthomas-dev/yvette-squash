@@ -3,19 +3,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "@/components/Dialog";
 import { MIN_PLAYERS, MAX_PLAYERS } from "@/lib/tournament";
-import { fetchDirectory } from "@/lib/directoryCache";
+import { fetchDirectory, type DirectoryMember } from "@/lib/directoryCache";
+import { byRank } from "@/lib/directorySort";
 
 // Vue « Tournoi » : liste des tournois, assistant de création (roster annuaire + invités,
 // cible de matchs) → proposition de formule → génération, puis suivi (poules/tableau,
 // liste des matchs par terrain, saisie des scores). Montants/scores en JEUX.
 
-interface Member {
-  id: string;
-  name: string;
-  clt?: string; // classement fédéral (si le flag `ranking` est actif + rapprochement sûr)
-  rang?: number | null; // rang national (tri des têtes de série)
-  cat?: string | null; // catégorie d'âge (info-bulle)
-}
+// Le tournoi consomme `fetchDirectory()` : on DÉRIVE son type du contrat partagé au lieu d'en
+// redéclarer une copie. Une copie compilait sans broncher quand l'annuaire gagnait un champ —
+// c'est ainsi que le tri des têtes de série est resté sur l'ancien rang sans qu'aucun `tsc` ne
+// le signale. Désormais, toute évolution du contrat se voit ici.
+type Member = DirectoryMember;
 interface PlayerRef {
   id: string;
   name: string;
@@ -174,6 +173,7 @@ export default function Tournament({ toast, onExpired }: Props) {
       guestName: string | null;
       clt?: string | null;
       rang?: number | null;
+      rangM?: number | null; // rang mixte : celui qui a servi à ordonner les têtes de série
       cat?: string | null;
     }[]
   >([]);
@@ -274,17 +274,22 @@ export default function Tournament({ toast, onExpired }: Props) {
   };
 
   // Construit la liste ordonnée (têtes de série) à partir des joueurs choisis. ORDRE PAR
-  // DÉFAUT = classement fédéral (rang national croissant = plus fort en tête), les membres
-  // non classés puis les invités ensuite (ordre alpha). L'utilisateur ré-ordonne à la main.
+  // DÉFAUT = classement fédéral (rang croissant = plus fort en tête), les membres non classés
+  // puis les invités ensuite (ordre alpha). L'utilisateur ré-ordonne à la main.
+  //
+  // On réutilise `byRank`, LE comparateur de l'annuaire (paliers étanches : rang mixte, puis
+  // rang de genre, puis non classés). Deux écrans qui ordonnent les mêmes membres ne doivent
+  // pas pouvoir diverger — et surtout, mélanger les deux barèmes dans une même soustraction
+  // donnerait la tête de série n°1 (bye + branche facile) à celui dont le rang mixte manque.
   const buildSeeded = () => {
     const memberOf = (id: string) => members?.find((x) => x.id === id);
     const sortedIds = [...picked].sort((a, b) => {
-      const ra = memberOf(a)?.rang ?? Infinity;
-      const rb = memberOf(b)?.rang ?? Infinity;
-      if (ra !== rb) return ra - rb;
-      return (memberOf(a)?.name ?? "").localeCompare(memberOf(b)?.name ?? "", "fr", {
-        sensitivity: "base",
-      });
+      const ma = memberOf(a);
+      const mb = memberOf(b);
+      if (!ma || !mb) return 0;
+      const byClassement = byRank(ma, mb);
+      if (byClassement !== 0) return byClassement;
+      return ma.name.localeCompare(mb.name, "fr", { sensitivity: "base" });
     });
     const memberItems = sortedIds.map((id) => ({
       key: `m${id}`,
@@ -293,6 +298,7 @@ export default function Tournament({ toast, onExpired }: Props) {
       guestName: null as string | null,
       clt: memberOf(id)?.clt ?? null,
       rang: memberOf(id)?.rang ?? null,
+      rangM: memberOf(id)?.rangM ?? null,
       cat: memberOf(id)?.cat ?? null,
     }));
     const guestItems = guests.map((g, i) => ({
@@ -302,6 +308,7 @@ export default function Tournament({ toast, onExpired }: Props) {
       guestName: g as string | null,
       clt: null as string | null,
       rang: null as number | null,
+      rangM: null as number | null,
       cat: null as string | null,
     }));
     setSeeded([...memberItems, ...guestItems]);
@@ -975,8 +982,15 @@ export default function Tournament({ toast, onExpired }: Props) {
                       <span
                         className="trn-seed-clt"
                         title={
+                          // On montre le rang qui a SERVI À ORDONNER cette liste (le mixte),
+                          // avec le même vocabulaire que l'annuaire. Sinon le repli sur le rang
+                          // dans le genre, nommé pour ce qu'il est.
                           "Classement fédéral" +
-                          (s.rang ? ` · rang national ${s.rang}` : "") +
+                          (s.rangM
+                            ? ` · rang toutes catégories ${s.rangM}`
+                            : s.rang
+                              ? ` · rang dans son genre ${s.rang}`
+                              : "") +
                           (s.cat ? ` · ${s.cat}` : "")
                         }
                       >

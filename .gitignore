@@ -33,6 +33,12 @@ npm-debug.log*
 
 # revue de code (document de travail, ne pas committer)
 revue-code-yvette-squash.pdf
+
+# rapports d'audit sécurité — NE JAMAIS committer : le dépôt distant est PUBLIC et ces
+# documents dressent la carte des failles encore ouvertes (et citent en clair un secret
+# déjà fuité). Les garder hors de l'arbre suivi, pas seulement hors du dernier commit.
+Sec_Arch_analysis_Gemini.md
+yvette-squash-analyse-securite.md
 .vercel
 .env*
 

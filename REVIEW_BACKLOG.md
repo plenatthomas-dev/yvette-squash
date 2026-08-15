@@ -126,3 +126,24 @@ Reste ci-dessous : 3 MINOR + 3 INFO.
   `?token=$CRON_SECRET` se retrouve dans les logs d'accès Vercel et les referrers.
   → Privilégier l'en-tête `Authorization` ; réserver `?token=` au cron externe qui ne
   peut pas poser d'en-tête.
+
+## Blind-review 2026-08-15 — diff annuaire/classement (round 3, pass-with-backlog)
+
+Trois tours de revue indépendante. Corrigés en cours de boucle : sémantique `rang`/`rangM`
+inversée, repli qui mélangeait deux barèmes dans le tri des têtes de série, `0` accepté comme
+classement, contraste du segmenté actif, duplication CSS, type `Member` dupliqué côté tournoi,
+libellés et fixtures. Ce qui suit n'a PAS été corrigé (cap de 3 tours atteint).
+
+- [ ] **[MINOR]** Sur l'écran des têtes de série, le critère de tri n'est lisible qu'au survol.
+  `src/components/Tournament.tsx` (badge de classement, attribut `title`).
+  L'annuaire a reçu un nombre visible + une légende, parce que `title` ne se déclenche jamais
+  au tactile. Le wizard tournoi — l'écran où l'ordre a des conséquences réelles (byes,
+  appariements) et où l'organisateur doit valider ou corriger — est resté muet au doigt.
+  → Y appliquer le même traitement qu'à l'annuaire, ou assumer que l'ordre n'est qu'une
+  proposition et ne rien afficher.
+
+- [ ] **[INFO]** Les items d'audit sécurité ne vivent plus que dans deux fichiers ignorés.
+  Depuis que `Sec_Arch_analysis_Gemini.md` et `yvette-squash-analyse-securite.md` sont couverts
+  par `.gitignore` (dépôt public), le suivi des points restants ne tient qu'à des fichiers
+  locaux non versionnés. Les items 🟡 encore ouverts sont déjà listés plus haut dans ce
+  fichier ; y reporter les éventuels suivants plutôt que de compter sur les rapports.

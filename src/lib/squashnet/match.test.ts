@@ -43,6 +43,27 @@ describe("matchRanking", () => {
     expect(matchRanking(jerome, noRang)?.rang).toBeNull();
   });
 
+  it("parse AUSSI le rang mixte (rangM), distinct du rang dans le genre", () => {
+    // Deux colonnes distinctes sur squashnet : `rang` situe le joueur DANS SON GENRE,
+    // `rangM` est le rang MIXTE, toutes catégories — donc toujours >= `rang`. Valeurs
+    // relevées en live sur la fiche de PLENAT THOMAS. C'est rangM qu'affiche l'annuaire,
+    // d'où ce garde-fou contre une confusion des deux champs.
+    const rows = [row({ name: "COURTAUT JEROME", club: YVETTE_CLUB, rang: "2 219", rangM: "2 339" })];
+    expect(matchRanking(jerome, rows)).toMatchObject({ rang: 2219, rangM: 2339 });
+    const noRangM = [row({ name: "COURTAUT JEROME", club: YVETTE_CLUB, rangM: "" })];
+    expect(matchRanking(jerome, noRangM)?.rangM).toBeNull();
+  });
+
+  it("refuse un rang non entier ou nul (« 0 » n'est pas un classement)", () => {
+    // Un rang commence à 1 : « 0 » est une case vide déguisée. Le laisser passer le
+    // placerait en tête du tri « Classement » de l'annuaire, devant les mieux classés.
+    const zero = [row({ name: "COURTAUT JEROME", club: YVETTE_CLUB, rang: "0", rangM: "0" })];
+    expect(matchRanking(jerome, zero)).toMatchObject({ rang: null, rangM: null });
+    // Et on ne retient pas la partie numérique d'une valeur parasitée (parseInt le ferait).
+    const dirty = [row({ name: "COURTAUT JEROME", club: YVETTE_CLUB, rang: "3184e" })];
+    expect(matchRanking(jerome, dirty)?.rang).toBeNull();
+  });
+
   it("ignore un homonyme dans un AUTRE club (filtre club)", () => {
     const rows = [
       row({ name: "COURTAUT JEROME", club: "Squash Club de Rennes", clt: "2C" }),

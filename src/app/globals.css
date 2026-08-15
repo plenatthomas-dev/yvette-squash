@@ -44,6 +44,10 @@
   --past: #e4e7ec;
   --past-fg: #5b626e;
   --accent: #2f6fe0;
+  /* Encre à poser SUR --accent (fond plein : segment actif, pastille). Le blanc ne tient le
+     seuil que sur l'accent clair — 4,70:1 ici, mais 3,22:1 sur le bleu du thème sombre, d'où
+     un jeton apparié par thème plutôt qu'un #fff écrit en dur. */
+  --accent-fg: #ffffff;
   --notice-bg: #eef2f8;
   --error-fg: #b3261e;
   /* Avertissement (« non vérifié » dans l'admin). Décliné par thème : la valeur en dur qu'il
@@ -122,6 +126,7 @@
        encarts, sous le seuil de 4,5. Touche TOUT le texte secondaire du thème sombre. */
     --pico-muted-color: #8b94a5;
     --accent: #4f8cff;
+    --accent-fg: #0e1116; /* encre sombre sur l'accent : 5,88:1 (le blanc n'y ferait que 3,22:1) */
     --notice-bg: #1d2330;
     --error-fg: #ff9a9a;
     --warn-fg: #e0a955; /* 7,95:1 sur la carte sombre */
@@ -163,6 +168,7 @@
   /* Cf. bloc prefers-color-scheme ci-dessus : #7b8495 échouait à 4,44:1 / 4,18:1. */
   --pico-muted-color: #8b94a5;
   --accent: #4f8cff;
+  --accent-fg: #0e1116; /* encre sombre sur l'accent : 5,88:1 (le blanc n'y ferait que 3,22:1) */
   --notice-bg: #1d2330;
   --error-fg: #ff9a9a;
   --warn-fg: #e0a955; /* 7,95:1 sur la carte sombre */
@@ -247,6 +253,7 @@
   --past: #ffd9ee;
   --past-fg: #8f3563;
   --accent: #c8008f;
+  --accent-fg: #ffffff; /* 5,45:1 sur ce magenta */
   --notice-bg: #ffdcef;
   --error-fg: #9b1b1b;
   --warn-fg: #8a4a00; /* 5,73:1 sur la carte rose */
@@ -1794,13 +1801,19 @@ td.cell.past {
 
 /* Switch 3 positions (Coupée · Auto · Active) pour piloter une fonction dans /admin,
    en remplacement du menu déroulant. Segment unique : la position choisie se colore. */
-.tri-switch {
+/* Contrôle segmenté, base commune à ses deux emplois : le tri-état des feature flags
+   (.tri-switch, état porté par une classe .active) et le tri de l'annuaire (.directory-sort,
+   état porté par aria-pressed). Un seul jeu de règles de forme : un futur ajustement (taille
+   tactile, focus visible, contraste) ne peut plus n'atterrir que sur l'un des deux. */
+.tri-switch,
+.directory-sort {
   display: inline-flex;
-  border: 1px solid var(--pico-muted-border-color, rgba(128, 128, 128, 0.35));
-  border-radius: 999px;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 999px; /* rounded.pilule */
   overflow: hidden;
 }
-.tri-switch button {
+.tri-switch button,
+.directory-sort button {
   margin: 0;
   width: auto;
   border: 0;
@@ -1809,11 +1822,12 @@ td.cell.past {
   font-size: 0.8rem;
   line-height: 1.2;
   background: transparent;
-  color: var(--pico-muted-color, #8a8a8a);
+  color: var(--pico-muted-color);
   cursor: pointer;
 }
-.tri-switch button + button {
-  border-left: 1px solid var(--pico-muted-border-color, rgba(128, 128, 128, 0.35));
+.tri-switch button + button,
+.directory-sort button + button {
+  border-left: 1px solid var(--pico-muted-border-color);
 }
 .tri-switch button:disabled {
   opacity: 0.55;
@@ -1821,11 +1835,12 @@ td.cell.past {
 }
 .tri-switch button.tri-off.active {
   background: var(--danger-hover);
-  color: #fff;
+  color: #ffffff;
 }
-.tri-switch button.tri-auto.active {
+.tri-switch button.tri-auto.active,
+.directory-sort button[aria-pressed="true"] {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-fg);
 }
 .tri-switch button.tri-on.active {
   background: var(--free);
@@ -1968,6 +1983,17 @@ td.cell.past {
   margin: 0 0 10px;
 }
 
+/* Bascule d'ordre de l'annuaire (A→Z / Classement) : forme et état actif définis avec
+   .tri-switch, plus haut. Ne reste ici que son insertion dans la modale. */
+.directory-sort {
+  margin: 0 0 6px;
+}
+/* Légende du « # » : discrète, mais VISIBLE — c'est sa raison d'être (cf. DirectoryModal). */
+.directory-legend {
+  margin: 0 0 10px;
+  font-size: 0.72rem; /* même palier que le rang qu'elle légende */
+}
+
 .directory-list {
   list-style: none;
   margin: 0 0 10px;
@@ -1984,6 +2010,17 @@ td.cell.past {
   gap: 8px;
 }
 .directory-name { flex: 1; min-width: 0; }
+/* Rang national (ex. « #2339 »). Volontairement plus discret que le badge de classement :
+   c'est une précision, pas l'information principale de la ligne. */
+.directory-rang {
+  flex: 0 0 auto;
+  /* 0.72rem = exactement la taille de .directory-clt juste à côté : les deux doivent tenir sur
+     la même ligne optique. C'est hors de l'échelle DESIGN.md (0.85 / 0.62), au même titre que
+     le badge qu'il accompagne — s'aligner sur le voisin prime ici sur la pureté du barème. */
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+  font-variant-numeric: tabular-nums;
+}
 /* Badge classement fédéral (ex. « 5A ») dans l'annuaire. */
 .directory-clt {
   flex: 0 0 auto;
