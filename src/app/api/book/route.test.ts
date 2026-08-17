@@ -101,6 +101,16 @@ describe("POST /api/book (délégation)", () => {
     expect(arg.update).toMatchObject({ actingUserId: "me" });
   });
 
+  it("repasse la source à « app » sur une ligne réutilisée", async () => {
+    // Régression : la ligne peut avoir été marquée "resamania" par la réconciliation (résa
+    // faite hors appli, annulée, puis refaite ici). L'upsert doit corriger l'origine, sinon
+    // la résa reste comptée « hors appli » dans le journal et la stat admin.
+    await POST(postReq(BODY));
+    const arg = h.upsert.mock.calls[0][0];
+    expect(arg.update).toMatchObject({ source: "app" });
+    expect(arg.create).toMatchObject({ source: "app" });
+  });
+
   it("409 overlap si ResaMania signale has-overlapping-slots", async () => {
     h.bookResult = { ok: false, error: "…listAttendees: has-overlapping-slots…" };
     const res = await POST(postReq(BODY));

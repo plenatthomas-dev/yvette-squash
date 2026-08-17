@@ -9,6 +9,7 @@ import Link from "next/link";
 import { useFeatures } from "@/components/FeatureProvider";
 import FeatureFlagsPanel from "@/components/FeatureFlagsPanel";
 import { recheckBanner } from "@/components/AnnouncementBanner";
+import { bookingOriginHint } from "@/lib/booking-origin";
 
 type PendingRequest = {
   id: string;
@@ -28,6 +29,11 @@ type Dashboard = {
   activeAlerts: number;
   pendingRequests: number;
   blockedEmails: number;
+  // Origine des résas actives sur 30 j : via l'appli vs détectées directement sur ResaMania.
+  bookingsApp: number;
+  bookingsResa: number;
+  // false ⇒ la détection « hors appli » est coupée, donc bookingsResa vaut 0 par construction.
+  externalDetection: boolean;
   crons: CronRun[];
 };
 
@@ -379,6 +385,11 @@ export default function AdminPage() {
                 <Stat label="Alertes terrain" value={dash.activeAlerts} />
                 <Stat label="En attente" value={dash.pendingRequests} />
                 <Stat label="Bloqués" value={dash.blockedEmails} />
+                <Stat
+                  label="Résas (30 j)"
+                  value={dash.bookingsApp + dash.bookingsResa}
+                  hint={bookingOriginHint(dash)}
+                />
               </div>
 
               {/* Santé des crons */}

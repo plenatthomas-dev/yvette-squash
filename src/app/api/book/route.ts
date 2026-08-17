@@ -93,6 +93,11 @@ export async function POST(req: NextRequest) {
       endsAt: new Date(endsAt),
       status: "booked",
       actingUserId,
+      // Repasser la source à "app" est OBLIGATOIRE : la ligne réutilisée peut avoir été
+      // marquée "resamania" par la réconciliation (résa faite hors appli, puis annulée,
+      // puis refaite ici). Sans ça, l'upsert garderait l'ancienne origine et la résa
+      // resterait comptée « hors appli » alors qu'elle vient d'être faite dans l'appli.
+      source: "app",
     },
     create: {
       userId: bookingOwnerId,
@@ -103,6 +108,9 @@ export async function POST(req: NextRequest) {
       endsAt: new Date(endsAt),
       status: "booked",
       actingUserId,
+      // Explicite bien que le défaut du schéma suffirait : c'est ICI qu'est l'unique
+      // chemin de réservation « via l'appli », autant que ça se lise sans ouvrir le schéma.
+      source: "app",
     },
   });
   // Le créneau vient de passer « réservé » : purge le cache planning pour que la prochaine

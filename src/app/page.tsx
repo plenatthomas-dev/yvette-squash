@@ -139,6 +139,10 @@ interface JournalEntry {
   startsAt: string;
   endsAt: string;
   mine: boolean;
+  // "app" = réservé depuis l'appli ; "resamania" = réservé directement sur ResaMania et
+  // détecté par la réconciliation du planning. Absent des réponses d'avant cette fonction
+  // (et des serveurs où le flag `externalBookings` est coupé) ⇒ traité comme "app".
+  source?: "app" | "resamania";
   // Non null si je peux annuler cette résa au nom d'un délégant (= son userId à passer en
   // onBehalfOf). Permet à un délégataire — dont un compte « email seul » — de gérer la résa.
   manageableOnBehalfOf?: string | null;
@@ -1400,6 +1404,14 @@ export default function Home() {
                     {b.displayName} {b.mine && "(toi)"}
                     {!b.mine && b.manageableOnBehalfOf && (
                       <span className="muted tiny"> · via délégation</span>
+                    )}
+                    {/* Résa faite hors appli : on le DIT plutôt que de laisser croire que
+                        tout le journal vient de l'appli. Rien d'affiché pour "app", qui
+                        reste le cas normal (et le seul connu avant cette fonction). */}
+                    {b.source === "resamania" && (
+                      <span className="muted tiny" title="Réservation faite directement sur ResaMania, hors de l'appli">
+                        {" "}· sur ResaMania
+                      </span>
                     )}
                   </span>
                   {canManage && (
