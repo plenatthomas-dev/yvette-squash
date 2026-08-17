@@ -115,12 +115,12 @@ model Passkey {
   @@index([userId])
 }
 
-// Journal partagé : chaque réservation faite via l'appli (alimente « qui a réservé quoi »).
+// Journal partagé : chaque réservation connue de l'appli (alimente « qui a réservé quoi »).
 model Booking {
   id           String   @id @default(cuid())
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId       String
-  attendeeId   String? // IRI de l'attendee ResaMania (pour annuler)
+  attendeeId   String? // IRI de l'attendee ResaMania (pour annuler) — NULL tant que non retrouvé
   classEventId String // IRI du class_event réservé
   courtName    String
   startsAt     DateTime
@@ -131,6 +131,12 @@ model Booking {
   // (le propriétaire réel de la résa ResaMania reste `userId` = le délégant). NULL = résa
   // faite pour soi-même. Pas de relation Prisma formelle (comme `PlanningSnapshot.updatedById`).
   actingUserId String?
+  // "app" (réservée via /api/book, valeur historique) | "resamania" (détectée directement
+  // sur le planning ResaMania — le membre a réservé ailleurs que dans l'appli). Posée par la
+  // réconciliation planning ↔ base (cf. src/lib/booking-reconcile.ts), derrière le flag
+  // `externalBookings`. Purement informatif : n'affecte ni l'annulation ni le blocage
+  // « un terrain par horaire », qui portent déjà sur toute ligne "booked" sans distinction.
+  source       String   @default("app")
 
   // Une seule ligne par (joueur, créneau) : empêche les doublons de réservation.
   // book/route.ts fait un upsert sur cette clé (rebooking = on repasse la même ligne

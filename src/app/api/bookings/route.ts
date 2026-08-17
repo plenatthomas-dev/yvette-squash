@@ -50,6 +50,9 @@ export async function GET(req: NextRequest) {
         startsAt: b.startsAt,
         endsAt: b.endsAt,
         mine,
+        // "app" (réservé via l'appli) | "resamania" (détecté directement sur ResaMania,
+        // cf. src/lib/booking-reconcile.ts — n'existe que derrière le flag `externalBookings`).
+        source: b.source,
         // id du délégant à passer en onBehalfOf pour annuler, ou null si non gérable via délégation.
         manageableOnBehalfOf: !mine && delegatorIds.has(b.userId) ? b.userId : null,
       };

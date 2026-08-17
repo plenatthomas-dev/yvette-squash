@@ -3,6 +3,7 @@ import { getPlanning } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { annotatePlanning } from "@/lib/planning-annotate";
+import { reconcilePlanningWithBookings } from "@/lib/booking-reconcile";
 import type { PlanningDay } from "@/lib/resamania/types";
 
 export const runtime = "nodejs";
@@ -49,40 +50,10 @@ export async function GET(req: NextRequest) {
     const fresh = new URL(req.url).searchParams.get("fresh") === "1";
     const planning = await getPlanning(date, resa.accessToken, undefined, fresh);
 
-    // Réconciliation base ↔ ResaMania (nécessite l'état LIVE) : une résa dont le créneau
-    // est redevenu libre — ou pris par quelqu'un d'autre — a été annulée ailleurs → on la
-    // marque "cancelled". Prudence : créneau hors planning ou booker inconnu → on ne juge pas.
-    const bookings = await prisma.booking.findMany({
-      where: {
-        status: "booked",
-        startsAt: {
-          gte: new Date(`${date}T00:00:00`),
-          lte: new Date(`${date}T23:59:59`),
-        },
-      },
-      include: { user: true },
-    });
-    const slotById = new Map(planning.slots.map((s) => [s.id, s]));
-    const stale: string[] = [];
-    for (const b of bookings) {
-      const slot = slotById.get(b.classEventId);
-      if (!slot) continue; // hors planning courant
-      if (slot.bookable) stale.push(b.id); // redevenu libre → annulé
-      else if (slot.bookerContactId && slot.bookerContactId !== b.user.contactId) {
-        stale.push(b.id); // pris par quelqu'un d'autre → notre résa a sauté
-      }
-    }
-    if (stale.length) {
-      await prisma.booking.updateMany({
-        where: { id: { in: stale } },
-        data: { status: "cancelled" },
-      });
-    }
-    // Présences orphelines (créneau redevenu libre = résa annulée ailleurs) → purge.
-    const freeIds = planning.slots.filter((s) => s.bookable).map((s) => s.id);
-    if (freeIds.length) {
-      await prisma.attendance.deleteMany({ where: { classEventId: { in: freeIds } } });
-    }
+    // Réconciliation base ↔ ResaMania (nécessite l'état LIVE) : résas annulées ailleurs
+    // ("cancelled") et, derrière le flag `externalBookings`, résas faites directement sur
+    // ResaMania (nouvelle ligne `source: "resamania"`). Cf. src/lib/booking-reconcile.ts.
+    await reconcilePlanningWithBookings(planning, date);
 
     // Snapshot BRUT (avant annotation) → sert les comptes « email seul » sans jeton.
     // Écriture CONDITIONNELLE : on ne réécrit que si le planning a changé (une lecture,

@@ -25,6 +25,7 @@ export const FEATURE_KEYS = [
   "delegation",
   "tournament",
   "ranking",
+  "externalBookings",
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
@@ -44,6 +45,7 @@ export const FEATURE_LABELS: Record<FeatureKey, string> = {
   delegation: "Délégation de droits",
   tournament: "Tournois internes",
   ranking: "Classement fédéral",
+  externalBookings: "Détection des résas faites directement sur ResaMania",
 };
 
 function isOn(v: string | undefined): boolean {
@@ -75,6 +77,12 @@ export const ENV_FEATURES: Features = {
   // Classement fédéral (squashnet.fr, source publique) : affiché dans l'annuaire et proposé
   // comme ordre par défaut des têtes de série au tournoi.
   ranking: isOn(process.env.NEXT_PUBLIC_FEATURE_RANKING),
+  // Détection des résas faites directement sur ResaMania (hors appli) : lors de la
+  // réconciliation planning ↔ base, une résa dont le réservataire est un membre connu mais
+  // sans ligne Booking correspondante se voit créer une ligne `source: "resamania"`. Étend le
+  // journal partagé et le blocage « un terrain par horaire » à ces résas. Sensible (écrit en
+  // base une donnée déduite, pas déclarée par le membre) → testé sur Recette avant activation.
+  externalBookings: isOn(process.env.NEXT_PUBLIC_FEATURE_EXTERNAL_BOOKINGS),
 };
 
 /** État effectif = override s'il y en a un, sinon le défaut de l'environnement. */
