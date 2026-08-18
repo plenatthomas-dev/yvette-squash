@@ -20,9 +20,8 @@ vi.mock("./db", () => ({
 vi.mock("./planning-annotate", () => ({
   loadAnnotationUsers: vi.fn(async () => h.users),
 }));
-vi.mock("./features-server", () => ({
-  getFeatures: vi.fn(async () => ({ externalBookings: h.externalBookings })),
-}));
+const getFeaturesMock = vi.hoisted(() => vi.fn());
+vi.mock("./features-server", () => ({ getFeatures: getFeaturesMock }));
 
 import { reconcilePlanningWithBookings } from "./booking-reconcile";
 
@@ -54,6 +53,9 @@ beforeEach(() => {
   h.updateMany.mockReset().mockResolvedValue({});
   h.deleteMany.mockReset().mockResolvedValue({});
   h.upsert.mockReset().mockResolvedValue({});
+  getFeaturesMock.mockReset().mockImplementation(async () => ({
+    externalBookings: h.externalBookings,
+  }));
 });
 
 describe("reconcilePlanningWithBookings — marquage « annulé ailleurs »", () => {
@@ -131,5 +133,33 @@ describe("reconcilePlanningWithBookings — détection résas ResaMania (flag ex
       "2026-07-11",
     );
     expect(h.upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("reconcilePlanningWithBookings — coût sur une base Neon qui dort", () => {
+  it("journée entièrement connue ⇒ ne consulte MÊME PAS le flag (aucune requête de plus)", async () => {
+    // Cas courant : chaque créneau pris a déjà sa ligne. La détection n'a rien à faire, et
+    // ne doit donc rien demander à la base — ni le flag, ni la liste des membres.
+    h.externalBookings = true;
+    h.bookings = [{ id: "b1", classEventId: "/class_events/1", user: { contactId: "contact-alice" } }];
+    await reconcilePlanningWithBookings(planning([slot()]), "2026-07-11");
+    expect(getFeaturesMock).not.toHaveBeenCalled();
+    expect(h.upsert).not.toHaveBeenCalled();
+  });
+
+  it("journée sans créneau pris ⇒ idem, rien n'est consulté", async () => {
+    h.externalBookings = true;
+    await reconcilePlanningWithBookings(
+      planning([slot({ bookable: true, status: "free", bookerContactId: null })]),
+      "2026-07-11",
+    );
+    expect(getFeaturesMock).not.toHaveBeenCalled();
+  });
+
+  it("créneau inconnu ⇒ là seulement le flag est lu", async () => {
+    h.externalBookings = false;
+    await reconcilePlanningWithBookings(planning([slot()]), "2026-07-11");
+    expect(getFeaturesMock).toHaveBeenCalledTimes(1);
+    expect(h.upsert).not.toHaveBeenCalled(); // flag OFF → on s'arrête là
   });
 });

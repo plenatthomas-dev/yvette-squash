@@ -59,18 +59,28 @@ export async function reconcilePlanningWithBookings(
     await prisma.attendance.deleteMany({ where: { classEventId: { in: freeIds } } });
   }
 
+  // Créneaux pris dont le journal ne rend PAS compte : seuls candidats à une détection.
+  // Ce tri est purement en mémoire (aucune requête) et il est fait AVANT de consulter le
+  // flag, à dessein : sur une journée dont toutes les résas sont déjà connues — le cas
+  // courant — la réconciliation se termine ici sans une seule requête de plus qu'avant
+  // cette fonction. Inutile de demander à la base si une option est active quand on n'a
+  // rien à écrire, d'autant que la base Neon dort dès qu'on la laisse tranquille.
+  const candidates = planning.slots.filter(
+    (s) => !s.bookable && s.bookerContactId && !activeEventIds.has(s.id),
+  );
+  if (candidates.length === 0) return;
+
   if (!(await getFeatures()).externalBookings) return;
 
+  // Liste des membres : cache mémoire de 60 s, et `annotatePlanning` la relira dans la même
+  // requête → en pratique aucune lecture supplémentaire, juste avancée dans le temps.
   const users = await loadAnnotationUsers();
   const userIdByContact = new Map(
     users.filter((u) => u.contactId).map((u) => [u.contactId as string, u.id]),
   );
-  for (const s of planning.slots) {
-    if (s.bookable) continue;
-    if (!s.bookerContactId) continue; // booker non résolu par ResaMania → on ne juge pas
-    if (activeEventIds.has(s.id)) continue; // déjà une ligne active (app ou resamania connue)
-    const bookerUserId = userIdByContact.get(s.bookerContactId);
-    if (!bookerUserId) continue; // pas un membre connu → hors périmètre du journal
+  for (const s of candidates) {
+    const bookerUserId = userIdByContact.get(s.bookerContactId as string);
+    if (!bookerUserId) continue; // pas un membre connu (ou non lié) → hors périmètre du journal
 
     await prisma.booking.upsert({
       where: { userId_classEventId: { userId: bookerUserId, classEventId: s.id } },
