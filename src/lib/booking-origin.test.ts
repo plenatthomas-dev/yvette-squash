@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bookingOriginHint } from "./booking-origin";
+import { bookingOriginHint, memberOriginLabel } from "./booking-origin";
 
 describe("bookingOriginHint", () => {
   it("détection coupée ⇒ dit qu'on ne sait pas, jamais « 100 % via l'appli »", () => {
@@ -35,6 +35,45 @@ describe("bookingOriginHint", () => {
   it("aucune résa via l'appli ⇒ 0 %", () => {
     expect(bookingOriginHint({ bookingsApp: 0, bookingsResa: 5, externalDetection: true })).toBe(
       "0 % via l'appli · 5 hors appli",
+    );
+  });
+});
+
+describe("memberOriginLabel", () => {
+  const linked = { linked: true, bookingsApp: 4, bookingsResa: 2 };
+
+  it("détection coupée ⇒ ne prétend rien, même sur un compte lié", () => {
+    expect(memberOriginLabel(linked, false)).toBe("origine non détectée");
+  });
+
+  it("compte NON lié ⇒ dit que c'est indétectable, jamais « 0 sur ResaMania »", () => {
+    // Le cœur de l'indicateur : sans contactId, la réconciliation ne peut rattacher aucune
+    // résa ResaMania à ce membre. Afficher 0 le ferait passer pour un utilisateur modèle
+    // alors que c'est précisément le profil qu'on ne sait pas mesurer.
+    expect(
+      memberOriginLabel({ linked: false, bookingsApp: 0, bookingsResa: 0 }, true),
+    ).toBe("compte non lié à ResaMania");
+  });
+
+  it("compte non lié portant des résas appli ⇒ donne le chiffre certain, tait l'autre", () => {
+    expect(
+      memberOriginLabel({ linked: false, bookingsApp: 3, bookingsResa: 0 }, true),
+    ).toBe("3 via l'appli · ResaMania non détectable");
+  });
+
+  it("compte lié sans résa sur la fenêtre", () => {
+    expect(memberOriginLabel({ linked: true, bookingsApp: 0, bookingsResa: 0 }, true)).toBe(
+      "aucune résa",
+    );
+  });
+
+  it("compte lié ⇒ les deux compteurs, celui qu'on cherche en dernier", () => {
+    expect(memberOriginLabel(linked, true)).toBe("4 via l'appli · 2 sur ResaMania");
+  });
+
+  it("membre qui n'utilise QUE ResaMania ⇒ visible d'un coup d'œil", () => {
+    expect(memberOriginLabel({ linked: true, bookingsApp: 0, bookingsResa: 7 }, true)).toBe(
+      "0 via l'appli · 7 sur ResaMania",
     );
   });
 });

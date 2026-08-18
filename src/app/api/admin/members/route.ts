@@ -14,7 +14,10 @@ export async function GET(req: NextRequest) {
   if (!(await requireAdmin(req))) {
     return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
   }
-  return NextResponse.json({ members: await listMembers() });
+  // `externalDetection` accompagne la liste : sans le flag, les compteurs « sur ResaMania »
+  // valent 0 par construction et l'UI doit le dire au lieu de laisser lire « aucune ».
+  const [members, features] = await Promise.all([listMembers(), getFeatures()]);
+  return NextResponse.json({ members, externalDetection: features.externalBookings });
 }
 
 // POST /api/admin/members  { id, action }

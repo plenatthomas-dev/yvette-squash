@@ -25,10 +25,33 @@ export type MemberRow = {
   lastSeenAt: string | null; // dernière ACTIVITÉ réelle (throttlée), même sans ré-authentification
   disabledAt: string | null;
   createdAt: string;
+  // Origine des résas du membre sur 30 j glissants (cf. src/lib/booking-origin.ts pour la
+  // mise en mots, qui dépend aussi de `mode` : un compte « email seul » n'est pas mesurable).
+  bookingsApp: number;
+  bookingsResa: number;
 };
+
+/** Fenêtre des compteurs d'origine, alignée sur celle du tableau de bord. */
+export const ORIGIN_WINDOW_DAYS = 30;
 
 /** Tous les comptes, pour la page d'admin. N'expose JAMAIS le hash du mot de passe. */
 export async function listMembers(): Promise<MemberRow[]> {
+  // Origine des résas : UNE agrégation pour tous les membres (et non une requête par membre,
+  // qui ferait N allers-retours sur une base Neon souvent froide).
+  const since = new Date(Date.now() - ORIGIN_WINDOW_DAYS * 864e5);
+  const originRows = await prisma.booking.groupBy({
+    by: ["userId", "source"],
+    where: { status: "booked", startsAt: { gte: since } },
+    _count: { _all: true },
+  });
+  const originByUser = new Map<string, { app: number; resa: number }>();
+  for (const r of originRows) {
+    const cur = originByUser.get(r.userId) ?? { app: 0, resa: 0 };
+    if (r.source === "resamania") cur.resa += r._count._all;
+    else cur.app += r._count._all; // "app" et toute valeur héritée inattendue
+    originByUser.set(r.userId, cur);
+  }
+
   const users = await prisma.user.findMany({
     orderBy: { createdAt: "desc" },
     select: {
@@ -67,6 +90,8 @@ export async function listMembers(): Promise<MemberRow[]> {
     lastSeenAt: u.lastSeenAt?.toISOString() ?? null,
     disabledAt: u.disabledAt?.toISOString() ?? null,
     createdAt: u.createdAt.toISOString(),
+    bookingsApp: originByUser.get(u.id)?.app ?? 0,
+    bookingsResa: originByUser.get(u.id)?.resa ?? 0,
   }));
 }
 

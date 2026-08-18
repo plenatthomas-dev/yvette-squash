@@ -9,6 +9,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useFeatures } from "@/components/FeatureProvider";
+import { memberOriginLabel } from "@/lib/booking-origin";
 
 type MemberPasskey = {
   id: string;
@@ -30,6 +31,10 @@ type Member = {
   lastSeenAt: string | null;
   disabledAt: string | null;
   createdAt: string;
+  // Résas du membre sur 30 j, par origine. Mises en mots par memberOriginLabel, qui tient
+  // compte de `mode` : un compte « email seul » n'est pas mesurable côté ResaMania.
+  bookingsApp: number;
+  bookingsResa: number;
 };
 
 type Action = "link" | "disable" | "enable" | "revoke_passkey" | "revoke_passkeys" | "delete";
@@ -77,6 +82,8 @@ export default function MembersPage() {
   const { emailLogin } = useFeatures();
   const [state, setState] = useState<"loading" | "forbidden" | "ready" | "error">("loading");
   const [members, setMembers] = useState<Member[]>([]);
+  // Flag `externalBookings` côté serveur : pilote la mise en mots des compteurs d'origine.
+  const [externalDetection, setExternalDetection] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [links, setLinks] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState<string | null>(null);
@@ -87,8 +94,9 @@ export default function MembersPage() {
       const res = await fetch("/api/admin/members");
       if (res.status === 403) return setState("forbidden");
       if (!res.ok) return setState("error");
-      const data = (await res.json()) as { members: Member[] };
+      const data = (await res.json()) as { members: Member[]; externalDetection?: boolean };
       setMembers(data.members);
+      setExternalDetection(!!data.externalDetection);
       setState("ready");
     } catch {
       setState("error");
@@ -224,6 +232,20 @@ export default function MembersPage() {
                   <div>Inscrit&nbsp;: {fmtDate(m.createdAt)}</div>
                   <div>Dernière authentification&nbsp;: {fmtDateTime(m.lastLoginAt)}</div>
                   <div>Dernière connexion&nbsp;: {fmtDateTime(m.lastSeenAt)}</div>
+                  {/* Origine des résas (30 j). Le libellé dit explicitement quand on ne PEUT
+                      pas savoir (détection coupée, ou compte non lié à ResaMania) plutôt que
+                      d'afficher un « 0 » qui se lirait comme une mesure. */}
+                  <div title="Réservations des 30 derniers jours, par origine. Le compte « sur ResaMania » ne couvre que les jours consultés dans l'appli : c'est un minimum.">
+                    Résas (30 j)&nbsp;:{" "}
+                    {memberOriginLabel(
+                      {
+                        linked: m.mode === "resamania",
+                        bookingsApp: m.bookingsApp,
+                        bookingsResa: m.bookingsResa,
+                      },
+                      externalDetection,
+                    )}
+                  </div>
                 </div>
 
                 {/* Appareils biométriques : un « Retirer » par appareil (téléphone perdu, etc.). */}
