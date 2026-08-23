@@ -124,7 +124,11 @@ export default function UpdateBanner() {
     <div
       role="status"
       style={{
-        background: "#0f766e",
+        // Le bleu « info » DÉJÀ employé par AnnouncementBanner, et non une teinte à soi :
+        // DESIGN.md ne reconnaît qu'un accent (le vert, réservé à ce qui est actionnable),
+        // et les bandeaux de layout partagent un petit vocabulaire — bleu = information,
+        // orange = avertissement, rouge = incident. Une mise à jour disponible est une info.
+        background: "#2563eb",
         color: "#ffffff",
         padding: "12px 16px",
         display: "flex",
@@ -146,7 +150,7 @@ export default function UpdateBanner() {
         onClick={() => window.location.reload()}
         style={{
           background: "#ffffff",
-          color: "#0f766e",
+          color: "#2563eb",
           border: "none",
           borderRadius: 6,
           padding: "4px 12px",
