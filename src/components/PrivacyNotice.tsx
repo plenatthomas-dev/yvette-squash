@@ -22,6 +22,13 @@ import { MODERATION_RETENTION_LABEL, SNAPSHOT_RETENTION_LABEL } from "@/lib/rete
 const CONTROLLER = "Thomas Plenat";
 const CONTACT_EMAIL = process.env.NEXT_PUBLIC_PRIVACY_CONTACT?.trim() ?? "";
 
+// Version affichée à côté de la note, sous la forme courte « v2.0 » (MAJEUR.MINEUR, calculé
+// depuis package.json — cf. next.config.mjs). Elle sert à UNE chose : qu'un membre qui signale
+// un souci puisse dire où il en est, sans avoir à décrire son navigateur. D'où le pied de page,
+// présent sur la connexion comme sur l'appli, et le ton volontairement muet (gris, petit) —
+// c'est une information de dépannage, pas un élément d'interface.
+const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "";
+
 // Icône « information » (cercle + i) — ouvre la note de confidentialité.
 export function InfoIcon() {
   return (
@@ -51,6 +58,11 @@ export function PrivacyNotice() {
         <InfoIcon />
         <span>Confidentialité &amp; données</span>
       </button>
+      {APP_VERSION && (
+        <span className="footer-version" title={`Version ${APP_VERSION} de l'application`}>
+          v{APP_VERSION}
+        </span>
+      )}
       {open && (
         <Dialog onClose={() => setOpen(false)} label="Confidentialité et données" className="privacy">
             <h3>Confidentialité &amp; données</h3>

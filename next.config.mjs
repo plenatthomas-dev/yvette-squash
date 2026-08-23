@@ -1,10 +1,18 @@
+import { createRequire } from "node:module";
 import { withBotId } from "botid/next/config";
 
 // Identifiant de build, figé UNE FOIS à la compilation (jamais recalculé au runtime) et
 // inliné aussi bien côté client que côté serveur via `env` ci-dessous. Sert à détecter un
-// onglet resté ouvert depuis AVANT un déploiement (cf. UpdateBanner) : le commit Vercel s'il
+// onglet resté ouvert depuis AVANT un déploiement (cf. UpdateReloader) : le commit Vercel s'il
 // est connu, sinon un horodatage — dans les deux cas, une valeur différente à chaque build.
 const BUILD_ID = process.env.VERCEL_GIT_COMMIT_SHA || String(Date.now());
+
+// Version affichée en pied de page. Source UNIQUE : le champ `version` de package.json, pour
+// qu'il n'y ait jamais deux numéros à tenir à jour (et que `npm version` suffise à la publier).
+// Seuls MAJEUR.MINEUR sont montrés — « v2.0 » : un correctif ne concerne pas le lecteur, qui
+// veut seulement pouvoir dire « je suis en 2.0 » quand il signale un souci.
+const { version } = createRequire(import.meta.url)("./package.json");
+const APP_VERSION = version.split(".").slice(0, 2).join(".");
 
 // Headers de sécurité appliqués à toutes les réponses (pages + API).
 // NB : la Content-Security-Policy N'EST PLUS ICI — elle est posée par src/middleware.ts
@@ -23,7 +31,7 @@ const securityHeaders = [
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  env: { NEXT_PUBLIC_BUILD_ID: BUILD_ID },
+  env: { NEXT_PUBLIC_BUILD_ID: BUILD_ID, NEXT_PUBLIC_APP_VERSION: APP_VERSION },
   // Les appels vers ResaMania se font côté serveur (API routes), donc pas de souci CORS côté client.
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];

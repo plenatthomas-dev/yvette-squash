@@ -2044,6 +2044,10 @@ td.cell.past {
   border-top: 1px solid var(--pico-card-border-color);
   display: flex;
   justify-content: flex-start;
+  /* Centre le numéro de version sur la hauteur du bouton, plutôt que sur sa ligne de base :
+     le bouton est bien plus haut que le texte (padding 10px + bordure). */
+  align-items: center;
+  gap: 12px;
 }
 
 /* Sur l'écran de connexion : centré, sans filet (plus discret). */
@@ -2076,6 +2080,17 @@ td.cell.past {
 
 .footer-info svg {
   display: block;
+}
+
+/* Numéro de version (« v2.0 »), à côté de la note de confidentialité. Volontairement muet :
+   taille `label` du système et gris de texte secondaire, pour qu'il soit LÀ sans attirer
+   l'œil — on le cherche quand on signale un souci, on ne le remarque pas autrement.
+   `tabular-nums` évite que le chiffre saute d'un pixel entre deux versions. */
+.footer-version {
+  font-size: 0.85rem;
+  color: var(--pico-muted-color);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* Modale confidentialité : un peu plus large, corps scrollable si l'écran est court. */
