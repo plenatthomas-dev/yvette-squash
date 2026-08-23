@@ -1,5 +1,5 @@
 // Décision « peut-on recharger la page maintenant sans rien faire perdre ? », utilisée par
-// components/UpdateBanner quand un déploiement est détecté (cf. son en-tête pour le pourquoi).
+// components/UpdateReloader quand un déploiement est détecté (cf. son en-tête pour le pourquoi).
 // Logique volontairement SÉPARÉE de la lecture du DOM : elle décide à partir de descripteurs
 // simples, donc elle se teste sans navigateur ni jsdom. Le composant, lui, ne fait que traduire
 // les champs de la page en `FieldState`.

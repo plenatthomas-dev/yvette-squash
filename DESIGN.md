@@ -22,6 +22,9 @@ colors:
   page-sombre: "#0e1116"
   carte-sombre: "#191e26"
   rose-short: "#e6007e"
+  bandeau-info: "#2563eb"
+  bandeau-avertissement: "#ea580c"
+  bandeau-incident: "#dc2626"
 typography:
   display:
     fontFamily: "system-ui, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif"
@@ -46,6 +49,15 @@ typography:
     fontSize: "0.62rem"
     fontWeight: 700
     lineHeight: "16px"
+  bandeau:
+    fontFamily: "system-ui, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif"
+    fontSize: "0.95rem"
+    fontWeight: 600
+    lineHeight: 1.4
+  bandeau-icone:
+    fontFamily: "system-ui, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif"
+    fontSize: "1.15rem"
+    fontWeight: 400
 rounded:
   sm: "8px"
   md: "12px"
@@ -81,6 +93,10 @@ components:
   card:
     backgroundColor: "{colors.carte-claire}"
     rounded: "{rounded.md}"
+  bandeau-layout:
+    textColor: "#ffffff"
+    typography: "{typography.bandeau}"
+    padding: "12px 16px"
 ---
 
 # Design System: Squash de l'Yvette
@@ -196,6 +212,37 @@ couleur de texte posée seule, qui suit le fond du thème et finit par échouer 
 définit son fond ET son texte. Poser une seule des deux fait suivre l'autre au thème et
 produit un échec de contraste dans au moins un des trois — c'est exactement ce qui est arrivé
 aux libellés d'état de l'admin (2,59:1 en sombre).
+
+### Bandeaux de layout
+
+Deux bandeaux vivent tout en haut de l'appli, hors de la page : maintenance et annonce. Ils
+s'adressent à quelqu'un qui ne les a pas demandés et qui doit les comprendre **sans les lire
+en entier** — d'où un vocabulaire de couleurs pleines, texte blanc, appliqué de façon stricte :
+
+- **`bandeau-info`** (`#2563eb`) : une information, rien n'est cassé. Annonce du bureau.
+- **`bandeau-avertissement`** (`#ea580c`) : une annonce que le bureau a marquée comme
+  importante (`level: "warn"`).
+- **`bandeau-incident`** (`#dc2626`) : l'appli est dégradée maintenant — base injoignable.
+
+Ils suivent la **Règle de la Paire Complète** : fond plein + texte blanc figés ensemble, donc
+identiques dans les trois thèmes. C'est voulu — un incident ne doit pas changer d'allure selon
+le thème du lecteur.
+
+**Pourquoi une typographie à eux** (`bandeau`, 0,95rem / 600, et `bandeau-icone`, 1,15rem).
+Un bandeau n'est ni du corps de texte ni un titre : légèrement sous le corps pour ne pas
+concurrencer la page qu'il surmonte, mais en demi-gras pour rester lisible d'un coup d'œil.
+L'emoji de tête est monté à 1,15rem parce qu'à taille de texte il se perd.
+
+**La Règle du Bandeau Muet.** Un bandeau ne s'affiche que s'il apporte quelque chose que
+l'utilisateur ne peut ni déduire de l'écran, ni obtenir sans lui. Un bandeau qui demande une
+action que l'appli sait faire seule est un bandeau de trop.
+
+Cas d'application : les mises à jour. Un onglet resté ouvert pendant un déploiement tourne sur
+du code périmé, et l'évidence serait de le signaler avec un bandeau « nouvelle version, cliquez
+pour recharger ». On ne le fait pas — l'appli recharge d'elle-même dès que c'est sans danger
+(cf. `components/UpdateReloader`). Il n'y a rien à annoncer : soit la mise à jour peut se faire
+et elle se fait, soit une saisie est en cours et on attend qu'elle finisse. Dans les deux cas,
+un bandeau n'aurait fait que déplacer sur l'utilisateur un arbitrage qui ne le regarde pas.
 
 ### Named Rules
 

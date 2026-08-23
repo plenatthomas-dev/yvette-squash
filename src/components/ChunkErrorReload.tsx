@@ -4,7 +4,7 @@
 // charger un morceau JS (lazy-load — ex. la vue Tricount, chargée via next/dynamic) qui n'existe
 // plus dans le nouveau build : Next.js le sert par son ancien nom hashé, or seuls les fichiers du
 // déploiement COURANT restent servis derrière l'alias de branche → 404, `ChunkLoadError`.
-// Complète UpdateBanner (qui, lui, propose un rechargement AVANT que ça casse) : ce composant-ci
+// Complète UpdateReloader (qui, lui, recharge AVANT que ça casse) : ce composant-ci
 // couvre le cas où l'erreur survient quand même, en rechargeant tout seul plutôt que de laisser
 // planter l'appli (cf. incident du 2026-08-23 sur la recette).
 //

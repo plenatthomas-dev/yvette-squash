@@ -4,7 +4,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import MaintenanceBanner from "@/components/MaintenanceBanner";
 import AnnouncementBanner from "@/components/AnnouncementBanner";
-import UpdateBanner from "@/components/UpdateBanner";
+import UpdateReloader from "@/components/UpdateReloader";
 import ChunkErrorReload from "@/components/ChunkErrorReload";
 import AnnounceModal from "@/components/AnnounceModal";
 import FeatureProvider from "@/components/FeatureProvider";
@@ -54,7 +54,7 @@ export default async function RootLayout({
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeScript }} />
         <ChunkErrorReload />
         <MaintenanceBanner />
-        <UpdateBanner />
+        <UpdateReloader />
         <AnnouncementBanner />
         <FeatureProvider>{children}</FeatureProvider>
         <AnnounceModal />
