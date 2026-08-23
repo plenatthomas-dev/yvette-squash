@@ -350,14 +350,14 @@ export default function Home() {
       tricounts: {
         ready: boolean;
         settled: boolean;
-        balances: { userId: string; cents: number }[];
+        balances: { id: string; kind: "user" | "guest"; cents: number }[];
       }[];
     };
     const n = d.tricounts.filter(
       (t) =>
         t.ready &&
         !t.settled &&
-        (t.balances.find((b) => b.userId === d.me)?.cents ?? 0) < 0,
+        (t.balances.find((b) => b.kind === "user" && b.id === d.me)?.cents ?? 0) < 0,
     ).length;
     setTriOwed(n);
   }, []);

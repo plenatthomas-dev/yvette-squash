@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { computeBalances, settle, payersOf } from "@/lib/tricount";
+import {
+  computeBalances,
+  settle,
+  payersOf,
+  toKeyedExpense,
+  userKey,
+  guestKey,
+  parseKey,
+} from "@/lib/tricount";
 import { getFeatures } from "@/lib/features-server";
 
 export const runtime = "nodejs";
@@ -40,7 +48,9 @@ export async function GET(req: NextRequest) {
     prisma.tricount.findMany({
       include: {
         expenses: {
-          include: { shares: { select: { userId: true, amountCents: true } } },
+          include: {
+            shares: { select: { userId: true, guestId: true, amountCents: true } },
+          },
           orderBy: [{ isRefund: "asc" }, { spentAt: "asc" }],
         },
         approvals: { select: { userId: true } },
@@ -48,6 +58,7 @@ export async function GET(req: NextRequest) {
           select: { id: true, body: true, userId: true, createdAt: true },
           orderBy: { createdAt: "asc" },
         },
+        guests: { select: { id: true, name: true } },
       },
       orderBy: { date: "desc" },
       take: limit + 1, // +1 pour savoir s'il reste des tricounts plus anciens
@@ -58,9 +69,15 @@ export async function GET(req: NextRequest) {
   const tricounts = hasMore ? rows.slice(0, limit) : rows;
 
   // Tricount : on affiche TOUJOURS le prénom/nom réel (displayName), jamais le pseudo —
-  // pour savoir sans ambiguïté qui a payé quoi et à qui rendre l'argent.
-  const nameOf = new Map(users.map((u) => [u.id, u.displayName]));
-  const name = (id: string) => nameOf.get(id) ?? "?";
+  // pour savoir sans ambiguïté qui a payé quoi et à qui rendre l'argent. Membres et
+  // invités hors asso partagent le même Map, sous des clés préfixées (u:/g:) pour ne
+  // jamais les confondre ; le nom d'un invité porte le suffixe "(ext)" (jamais stocké).
+  const nameOf = new Map<string, string>();
+  for (const u of users) nameOf.set(userKey(u.id), u.displayName);
+  for (const t of tricounts) {
+    for (const g of t.guests) nameOf.set(guestKey(g.id), `${g.name} (ext)`);
+  }
+  const name = (key: string) => nameOf.get(key) ?? "?";
 
   return NextResponse.json({
     me: session.userId,
@@ -70,12 +87,15 @@ export async function GET(req: NextRequest) {
     emailOnly: session.resa === null,
     // Reste-t-il des tricounts plus anciens à charger ? (bouton « Charger plus »)
     hasMore,
-    members: users.map((u) => ({ id: u.id, name: name(u.id), fullName: u.displayName })),
+    members: users.map((u) => ({ id: u.id, name: u.displayName, fullName: u.displayName })),
     tricounts: tricounts
       .map((t) => {
-      const balances = computeBalances(t.expenses);
+      const keyedExpenses = t.expenses.map(toKeyedExpense);
+      const balances = computeBalances(keyedExpenses);
       const transfers = settle(balances);
-      const payers = payersOf(t.expenses);
+      // Un invité n'est jamais payeur d'une vraie dépense : payersOf ne renvoie que
+      // des clés membre ("u:xxx").
+      const payers = payersOf(keyedExpenses).map((k) => parseKey(k).id);
       const approved = new Set(t.approvals.map((a) => a.userId));
       const ready = payers.length > 0 && payers.every((p) => approved.has(p));
       const settled = ready && transfers.length === 0;
@@ -90,41 +110,58 @@ export async function GET(req: NextRequest) {
         settled,
         payers: payers.map((p) => ({
           id: p,
-          name: name(p),
+          name: name(userKey(p)),
           approved: approved.has(p),
         })),
+        guests: t.guests.map((g) => ({ id: g.id, name: `${g.name} (ext)` })),
         expenses: t.expenses.map((e) => {
           const mine = e.creatorId === session.userId || e.payerId === session.userId;
+          const payerKey = e.payerId ? userKey(e.payerId) : guestKey(e.payerGuestId as string);
           return {
             id: e.id,
             label: e.label,
             amountCents: e.amountCents,
             isRefund: e.isRefund,
             spentAt: e.spentAt.toISOString(),
-            payerId: e.payerId,
-            payerName: name(e.payerId),
-            participantIds: e.shares.map((s) => s.userId),
-            participantNames: e.shares.map((s) => name(s.userId)),
+            payerId: e.payerId ?? e.payerGuestId,
+            payerKind: e.payerId ? "user" : "guest",
+            payerName: name(payerKey),
+            participants: e.shares.map((s) => {
+              const key = s.userId ? userKey(s.userId) : guestKey(s.guestId as string);
+              const p = parseKey(key);
+              return { id: p.id, kind: p.kind, name: name(key) };
+            }),
             canDelete: mine,
             // Édition réservée aux vraies dépenses (un remboursement se supprime/refait).
             canEdit: mine && !e.isRefund,
           };
         }),
         balances: [...balances]
-          .map(([userId, cents]) => ({ userId, name: name(userId), cents }))
+          .map(([key, cents]) => {
+            const p = parseKey(key);
+            return { id: p.id, kind: p.kind, name: name(key), cents };
+          })
           .sort((a, b) => b.cents - a.cents),
-        transfers: transfers.map((tr) => ({
-          ...tr,
-          fromName: name(tr.fromId),
-          toName: name(tr.toId),
-        })),
+        transfers: transfers.map((tr) => {
+          const from = parseKey(tr.fromId);
+          const to = parseKey(tr.toId);
+          return {
+            fromId: from.id,
+            fromKind: from.kind,
+            fromName: name(tr.fromId),
+            toId: to.id,
+            toKind: to.kind,
+            toName: name(tr.toId),
+            amountCents: tr.amountCents,
+          };
+        }),
         // Fil de commentaires (idée 5a). On affiche le nom réel (comme le reste du tricount),
         // jamais le pseudo ; chacun ne peut supprimer que ses propres messages.
         comments: t.comments.map((c) => ({
           id: c.id,
           body: c.body,
           userId: c.userId,
-          userName: name(c.userId),
+          userName: name(userKey(c.userId)),
           createdAt: c.createdAt.toISOString(),
           canDelete: c.userId === session.userId,
         })),

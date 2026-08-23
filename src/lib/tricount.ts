@@ -10,6 +10,45 @@ export const MAX_TITLE_LEN = 40;
 export const MAX_COMMENT_LEN = 500;
 // Mode « par parts » : nombre de parts max qu'un participant peut prendre sur une dépense.
 export const MAX_PARTS = 99;
+// Nom d'un invité hors asso (TricountGuest.name) : même borne que le titre, largement assez
+// pour un prénom. Le suffixe "(ext)" n'est JAMAIS stocké : ajouté à l'affichage seulement.
+export const MAX_GUEST_NAME_LEN = 40;
+
+/**
+ * Un membre et un invité hors asso peuvent tous deux porter une part ou (pour un
+ * remboursement) être « payeur ». `computeBalances`/`payersOf`/`settle` restent
+ * génériques sur des chaînes : ces deux helpers préfixent l'id réel (User ou
+ * TricountGuest) pour obtenir une clé unique dans le même Map, sans jamais les
+ * confondre. `toKeyedExpense` fait la conversion une fois pour toutes à partir
+ * d'une ligne Prisma (payerId/payerGuestId, shares avec userId/guestId).
+ */
+export const userKey = (id: string): string => `u:${id}`;
+export const guestKey = (id: string): string => `g:${id}`;
+
+export function parseKey(key: string): { kind: "user" | "guest"; id: string } {
+  return key.startsWith("g:")
+    ? { kind: "guest", id: key.slice(2) }
+    : { kind: "user", id: key.slice(2) };
+}
+
+export interface ExpenseRowForBalance {
+  payerId: string | null;
+  payerGuestId: string | null;
+  isRefund?: boolean;
+  shares: { userId: string | null; guestId: string | null; amountCents: number }[];
+}
+
+/** Convertit une ligne Prisma (Expense + shares) en clés unifiées membre/invité. */
+export function toKeyedExpense(e: ExpenseRowForBalance): ExpenseForBalance {
+  return {
+    payerId: e.payerId ? userKey(e.payerId) : guestKey(e.payerGuestId as string),
+    isRefund: e.isRefund,
+    shares: e.shares.map((s) => ({
+      userId: s.userId ? userKey(s.userId) : guestKey(s.guestId as string),
+      amountCents: s.amountCents,
+    })),
+  };
+}
 
 /**
  * Répartition égale de `amountCents` entre `n` participants, ajustée au centime :

@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db";
 import {
   splitWithCredits,
   splitByWeights,
+  userKey,
+  guestKey,
   MAX_AMOUNT_CENTS,
   MAX_LABEL_LEN,
   MAX_TITLE_LEN,
@@ -16,10 +18,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // POST /api/tricount/expenses -> ajoute une dépense au tricount du jour choisi.
-// { date: "YYYY-MM-DD", label, amountCents, payerId, participantIds, title? }
-// Le tricount de cette date est créé s'il n'existe pas (title optionnel, pris en
-// compte uniquement à la création). Toute modification des dépenses remet à zéro
-// les validations « OK pour rembourser » du tricount.
+// { date: "YYYY-MM-DD", label, amountCents, payerId, participantIds, guestIds?, title? }
+// guestIds référence des TricountGuest déjà créés sur CE tricount (invités hors
+// asso, cf. POST /api/tricount/guests) : ils peuvent porter une part, jamais être
+// payeur. Le tricount de cette date est créé s'il n'existe pas (title optionnel,
+// pris en compte uniquement à la création). Toute modification des dépenses remet
+// à zéro les validations « OK pour rembourser » du tricount.
 export async function POST(req: NextRequest) {
   if (!(await getFeatures()).tricount) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
@@ -32,15 +36,17 @@ export async function POST(req: NextRequest) {
   if (blocked) return blocked;
 
   const body = await req.json().catch(() => ({}));
-  const { date, title, label, amountCents, payerId, participantIds, weights } = body as {
-    date?: unknown;
-    title?: unknown;
-    label?: unknown;
-    amountCents?: unknown;
-    payerId?: unknown;
-    participantIds?: unknown;
-    weights?: unknown;
-  };
+  const { date, title, label, amountCents, payerId, participantIds, guestIds, weights } =
+    body as {
+      date?: unknown;
+      title?: unknown;
+      label?: unknown;
+      amountCents?: unknown;
+      payerId?: unknown;
+      participantIds?: unknown;
+      guestIds?: unknown;
+      weights?: unknown;
+    };
 
   if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return NextResponse.json({ error: "Date invalide" }, { status: 400 });
@@ -65,28 +71,43 @@ export async function POST(req: NextRequest) {
   ) {
     return NextResponse.json({ error: "Montant invalide" }, { status: 400 });
   }
+  const participantsRaw = participantIds === undefined ? [] : participantIds;
+  const guestsRaw = guestIds === undefined ? [] : guestIds;
   if (
-    !Array.isArray(participantIds) ||
-    participantIds.length === 0 ||
-    !participantIds.every((p) => typeof p === "string")
+    !Array.isArray(participantsRaw) ||
+    !participantsRaw.every((p) => typeof p === "string") ||
+    !Array.isArray(guestsRaw) ||
+    !guestsRaw.every((g) => typeof g === "string")
   ) {
     return NextResponse.json({ error: "Participants invalides" }, { status: 400 });
   }
-  const uniqueIds = [...new Set(participantIds as string[])];
+  const uniqueIds = [...new Set(participantsRaw as string[])];
+  // Invités hors asso (TricountGuest.id) : jamais payeur, seulement une part (cf. guestIds).
+  const uniqueGuestIds = [...new Set(guestsRaw as string[])];
+  if (uniqueIds.length + uniqueGuestIds.length === 0) {
+    return NextResponse.json({ error: "Participants invalides" }, { status: 400 });
+  }
   if (typeof payerId !== "string" || payerId.length === 0) {
     return NextResponse.json({ error: "Payeur invalide" }, { status: 400 });
   }
 
-  // Parts optionnelles (mode « par parts ») : un poids entier ≥ 1 par participant.
-  // Absent → partage égal (comportement historique). Présent → chaque participant doit
-  // avoir un poids valide, sinon on refuse (pas de partage silencieusement faux).
+  // Ordre commun membres puis invités, chacun préfixé (u:/g:) pour ne jamais les
+  // confondre dans la répartition/la mémoire des arrondis (toutes deux génériques
+  // sur des clés string).
+  const rawIdsInOrder = [...uniqueIds, ...uniqueGuestIds];
+  const allKeys = [...uniqueIds.map(userKey), ...uniqueGuestIds.map(guestKey)];
+
+  // Parts optionnelles (mode « par parts ») : un poids entier ≥ 1 par participant
+  // (membre ou invité, keyé par son id brut côté payload). Absent → partage égal
+  // (comportement historique). Présent → chaque participant doit avoir un poids
+  // valide, sinon on refuse (pas de partage silencieusement faux).
   let weightArr: number[] | null = null;
   if (weights !== undefined && weights !== null) {
     if (typeof weights !== "object" || Array.isArray(weights)) {
       return NextResponse.json({ error: "Parts invalides" }, { status: 400 });
     }
     const w = weights as Record<string, unknown>;
-    weightArr = uniqueIds.map((id) => (typeof w[id] === "number" ? (w[id] as number) : NaN));
+    weightArr = rawIdsInOrder.map((id) => (typeof w[id] === "number" ? (w[id] as number) : NaN));
     if (
       weightArr.some(
         (n) => !Number.isInteger(n) || n < 1 || n > MAX_PARTS,
@@ -108,6 +129,18 @@ export async function POST(req: NextRequest) {
   if (!knownIds.has(payerId) || uniqueIds.some((p) => !knownIds.has(p))) {
     return NextResponse.json({ error: "Membre inconnu" }, { status: 400 });
   }
+  // Les invités doivent déjà exister sur LE TRICOUNT de cette date (créés via
+  // POST /api/tricount/guests) — un invité n'est jamais deviné à la volée ici.
+  if (uniqueGuestIds.length > 0) {
+    const knownGuests = await prisma.tricountGuest.findMany({
+      where: { id: { in: uniqueGuestIds }, tricount: { date } },
+      select: { id: true },
+    });
+    const knownGuestIds = new Set(knownGuests.map((g) => g.id));
+    if (uniqueGuestIds.some((g) => !knownGuestIds.has(g))) {
+      return NextResponse.json({ error: "Invité inconnu" }, { status: 400 });
+    }
+  }
 
   const tricount = await prisma.tricount.upsert({
     where: { date },
@@ -118,19 +151,23 @@ export async function POST(req: NextRequest) {
   // (part attribuée − part exacte, sommée sur les dépenses existantes)
   const existing = await prisma.expense.findMany({
     where: { tricountId: tricount.id, isRefund: false },
-    select: { amountCents: true, shares: { select: { userId: true, amountCents: true } } },
+    select: {
+      amountCents: true,
+      shares: { select: { userId: true, guestId: true, amountCents: true } },
+    },
   });
   const credit = new Map<string, number>();
   for (const e of existing) {
     const exact = e.amountCents / e.shares.length;
     for (const s of e.shares) {
-      credit.set(s.userId, (credit.get(s.userId) ?? 0) + (s.amountCents - exact));
+      const key = s.userId ? userKey(s.userId) : guestKey(s.guestId as string);
+      credit.set(key, (credit.get(key) ?? 0) + (s.amountCents - exact));
     }
   }
   // Mode « parts » → répartition pondérée ; sinon partage égal avec mémoire des arrondis.
   const parts = weightArr
-    ? splitByWeights(amountCents, uniqueIds, weightArr)
-    : splitWithCredits(amountCents, uniqueIds, credit);
+    ? splitByWeights(amountCents, allKeys, weightArr)
+    : splitWithCredits(amountCents, allKeys, credit);
   const [expense] = await prisma.$transaction([
     prisma.expense.create({
       data: {
@@ -141,7 +178,11 @@ export async function POST(req: NextRequest) {
         amountCents,
         spentAt: new Date(`${date}T12:00:00`),
         shares: {
-          create: uniqueIds.map((userId, i) => ({ userId, amountCents: parts[i] })),
+          create: rawIdsInOrder.map((id, i) =>
+            i < uniqueIds.length
+              ? { userId: id, amountCents: parts[i] }
+              : { guestId: id, amountCents: parts[i] },
+          ),
         },
       },
     }),

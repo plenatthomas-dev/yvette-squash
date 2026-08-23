@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db";
 import {
   splitWithCredits,
   splitByWeights,
+  userKey,
+  guestKey,
   MAX_AMOUNT_CENTS,
   MAX_LABEL_LEN,
   MAX_PARTS,
@@ -60,7 +62,7 @@ export async function DELETE(
 }
 
 // PATCH /api/tricount/expenses/{id} -> modifie une VRAIE dépense (jamais un
-// remboursement). { label, amountCents, payerId, participantIds, weights? }.
+// remboursement). { label, amountCents, payerId, participantIds, guestIds?, weights? }.
 // Même droit que la suppression (celui qui a saisi la ligne ou le payeur). La date
 // (donc le tricount) ne change pas ici. Les parts sont recalculées et les
 // validations « OK pour rembourser » remises à zéro (les montants ont bougé).
@@ -98,11 +100,12 @@ export async function PATCH(
   }
 
   const body = await req.json().catch(() => ({}));
-  const { label, amountCents, payerId, participantIds, weights } = body as {
+  const { label, amountCents, payerId, participantIds, guestIds, weights } = body as {
     label?: unknown;
     amountCents?: unknown;
     payerId?: unknown;
     participantIds?: unknown;
+    guestIds?: unknown;
     weights?: unknown;
   };
 
@@ -118,17 +121,29 @@ export async function PATCH(
   ) {
     return NextResponse.json({ error: "Montant invalide" }, { status: 400 });
   }
+  const participantsRaw = participantIds === undefined ? [] : participantIds;
+  const guestsRaw = guestIds === undefined ? [] : guestIds;
   if (
-    !Array.isArray(participantIds) ||
-    participantIds.length === 0 ||
-    !participantIds.every((p) => typeof p === "string")
+    !Array.isArray(participantsRaw) ||
+    !participantsRaw.every((p) => typeof p === "string") ||
+    !Array.isArray(guestsRaw) ||
+    !guestsRaw.every((g) => typeof g === "string")
   ) {
     return NextResponse.json({ error: "Participants invalides" }, { status: 400 });
   }
-  const uniqueIds = [...new Set(participantIds as string[])];
+  const uniqueIds = [...new Set(participantsRaw as string[])];
+  // Invités hors asso (TricountGuest.id) : jamais payeur, seulement une part.
+  const uniqueGuestIds = [...new Set(guestsRaw as string[])];
+  if (uniqueIds.length + uniqueGuestIds.length === 0) {
+    return NextResponse.json({ error: "Participants invalides" }, { status: 400 });
+  }
   if (typeof payerId !== "string" || payerId.length === 0) {
     return NextResponse.json({ error: "Payeur invalide" }, { status: 400 });
   }
+
+  // Ordre commun membres puis invités, chacun préfixé (u:/g:) — comme à la création.
+  const rawIdsInOrder = [...uniqueIds, ...uniqueGuestIds];
+  const allKeys = [...uniqueIds.map(userKey), ...uniqueGuestIds.map(guestKey)];
 
   // Parts optionnelles (mode « par parts ») : identique à la création.
   let weightArr: number[] | null = null;
@@ -137,7 +152,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Parts invalides" }, { status: 400 });
     }
     const w = weights as Record<string, unknown>;
-    weightArr = uniqueIds.map((uid) => (typeof w[uid] === "number" ? (w[uid] as number) : NaN));
+    weightArr = rawIdsInOrder.map((uid) => (typeof w[uid] === "number" ? (w[uid] as number) : NaN));
     if (weightArr.some((n) => !Number.isInteger(n) || n < 1 || n > MAX_PARTS)) {
       return NextResponse.json(
         { error: `Parts invalides (entier de 1 à ${MAX_PARTS} par participant)` },
@@ -155,23 +170,38 @@ export async function PATCH(
   if (!knownIds.has(payerId) || uniqueIds.some((p) => !knownIds.has(p))) {
     return NextResponse.json({ error: "Membre inconnu" }, { status: 400 });
   }
+  // Les invités doivent appartenir à CE tricount (comme à la création).
+  if (uniqueGuestIds.length > 0) {
+    const knownGuests = await prisma.tricountGuest.findMany({
+      where: { id: { in: uniqueGuestIds }, tricountId: existingExpense.tricountId },
+      select: { id: true },
+    });
+    const knownGuestIds = new Set(knownGuests.map((g) => g.id));
+    if (uniqueGuestIds.some((g) => !knownGuestIds.has(g))) {
+      return NextResponse.json({ error: "Invité inconnu" }, { status: 400 });
+    }
+  }
 
   // Mémoire des arrondis : calculée sur les AUTRES vraies dépenses du tricount
   // (on exclut la ligne éditée pour ne pas se compenser avec son ancienne valeur).
   const others = await prisma.expense.findMany({
     where: { tricountId: existingExpense.tricountId, isRefund: false, id: { not: id } },
-    select: { amountCents: true, shares: { select: { userId: true, amountCents: true } } },
+    select: {
+      amountCents: true,
+      shares: { select: { userId: true, guestId: true, amountCents: true } },
+    },
   });
   const credit = new Map<string, number>();
   for (const e of others) {
     const exact = e.amountCents / e.shares.length;
     for (const s of e.shares) {
-      credit.set(s.userId, (credit.get(s.userId) ?? 0) + (s.amountCents - exact));
+      const key = s.userId ? userKey(s.userId) : guestKey(s.guestId as string);
+      credit.set(key, (credit.get(key) ?? 0) + (s.amountCents - exact));
     }
   }
   const parts = weightArr
-    ? splitByWeights(amountCents, uniqueIds, weightArr)
-    : splitWithCredits(amountCents, uniqueIds, credit);
+    ? splitByWeights(amountCents, allKeys, weightArr)
+    : splitWithCredits(amountCents, allKeys, credit);
 
   await prisma.$transaction([
     // Remplace intégralement les parts (participants et montants peuvent changer).
@@ -182,7 +212,13 @@ export async function PATCH(
         label: cleanLabel,
         amountCents,
         payerId,
-        shares: { create: uniqueIds.map((userId, i) => ({ userId, amountCents: parts[i] })) },
+        shares: {
+          create: rawIdsInOrder.map((pid, i) =>
+            i < uniqueIds.length
+              ? { userId: pid, amountCents: parts[i] }
+              : { guestId: pid, amountCents: parts[i] },
+          ),
+        },
       },
     }),
     // Montants modifiés : chaque payeur devra re-valider avant remboursements.

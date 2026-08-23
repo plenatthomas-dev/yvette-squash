@@ -14,23 +14,23 @@ datasource db {
 
 // Un joueur de l'appli, identifié par son compte ResaMania (contactId).
 model User {
-  id          String       @id @default(cuid())
-  contactId   String?      @unique // ResaMania (nullable : un compte « email seul » n'en a pas encore)
-  displayName String
-  nickname    String? // pseudonyme choisi par le joueur (affiché à la place du prénom)
-  email       String?      @unique // normalisé (trim+lowercase) — CLÉ D'IDENTITÉ commune ResaMania/email
+  id                     String             @id @default(cuid())
+  contactId              String?            @unique // ResaMania (nullable : un compte « email seul » n'en a pas encore)
+  displayName            String
+  nickname               String? // pseudonyme choisi par le joueur (affiché à la place du prénom)
+  email                  String?            @unique // normalisé (trim+lowercase) — CLÉ D'IDENTITÉ commune ResaMania/email
   // Connexion « email seul » par mot de passe (remplace l'OTP). Haché avec scrypt
   // (cf. crypto.hashPassword) — JAMAIS en clair. NULL = compte sans mot de passe (un membre
   // qui n'utilise que ResaMania, ou un compte email pas encore activé).
-  passwordHash    String?
+  passwordHash           String?
   // Date où la possession de l'email a été prouvée : lien d'inscription/réinitialisation
   // cliqué, OU connexion ResaMania (qui fait autorité sur l'email). NULL = non vérifié →
   // la connexion par mot de passe est refusée tant que c'est NULL.
-  emailVerifiedAt DateTime?
+  emailVerifiedAt        DateTime?
   // Annuaire (idée 6) : visibilité OPT-OUT — visible par défaut, le joueur peut se retirer
   // depuis ses paramètres. Base légale = intérêt légitime (entraide asso) + retrait facile.
   // Seuls `id` + nom/pseudo sont exposés par /api/directory (jamais email ni contactId).
-  listed      Boolean      @default(true)
+  listed                 Boolean            @default(true)
   // Gestion des membres (espace admin, étape 1) :
   //  - lastLoginAt : horodaté à chaque AUTHENTIFICATION réussie (login ResaMania, lien email ou
   //    biométrie) — repère les comptes inactifs. NULL = jamais authentifié depuis l'ajout de la
@@ -42,9 +42,9 @@ model User {
   //    sessions en cours révoquées. Alternative NON destructive à la suppression, seule option
   //    pour un membre ResaMania (qui se recréerait à la prochaine connexion) ou porteur d'un
   //    historique financier (dépenses Tricount `Restrict`).
-  lastLoginAt DateTime?
-  lastSeenAt  DateTime?
-  disabledAt  DateTime?
+  lastLoginAt            DateTime?
+  lastSeenAt             DateTime?
+  disabledAt             DateTime?
   // Annonce (bannière + modale, étape 2) : la `version` de l'annonce que ce membre a masquée /
   // dont il a déjà vu la modale. Rattaché au COMPTE et non au navigateur : `localStorage` est
   // lié à l'appareil, donc il fuitait d'un membre à l'autre sur un téléphone partagé, et
@@ -53,33 +53,33 @@ model User {
   // Les deux sont indépendants : on peut fermer la modale et garder le bandeau.
   bannerDismissedVersion String?
   bannerModalSeenVersion String?
-  createdAt   DateTime     @default(now())
-  sessions    Session[]
-  passkeys    Passkey[] // connexion biométrique (WebAuthn / passkeys) — comptes « email seul »
-  bookings    Booking[]
-  attendances Attendance[]
-  pushSubs    PushSubscription[]
-  slotAlerts  SlotAlert[]
-  expensesPaid    Expense[]      @relation("ExpensePayer")
-  expensesCreated Expense[]      @relation("ExpenseCreator")
-  expenseShares   ExpenseShare[]
-  tricountApprovals TricountApproval[]
-  tricountComments  TricountComment[]
+  createdAt              DateTime           @default(now())
+  sessions               Session[]
+  passkeys               Passkey[] // connexion biométrique (WebAuthn / passkeys) — comptes « email seul »
+  bookings               Booking[]
+  attendances            Attendance[]
+  pushSubs               PushSubscription[]
+  slotAlerts             SlotAlert[]
+  expensesPaid           Expense[]          @relation("ExpensePayer")
+  expensesCreated        Expense[]          @relation("ExpenseCreator")
+  expenseShares          ExpenseShare[]
+  tricountApprovals      TricountApproval[]
+  tricountComments       TricountComment[]
   // Délégation temporaire de droits (idée 4) : ce que je donne / ce qu'on me donne.
-  delegationsGiven    Delegation[] @relation("DelegationGiven")
-  delegationsReceived Delegation[] @relation("DelegationReceived")
+  delegationsGiven       Delegation[]       @relation("DelegationGiven")
+  delegationsReceived    Delegation[]       @relation("DelegationReceived")
   // Tournois (idée 3) : ceux que j'ai créés + les participations où je suis membre.
-  tournamentsCreated  Tournament[]       @relation("TournamentCreator")
-  tournamentPlayers   TournamentPlayer[]
+  tournamentsCreated     Tournament[]       @relation("TournamentCreator")
+  tournamentPlayers      TournamentPlayer[]
   // Classement fédéral (idée squashnet) : dernier classement rapproché, source publique.
-  squashnetRanking    SquashnetRanking?
+  squashnetRanking       SquashnetRanking?
 }
 
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
 // des access tokens sans redemander le mot de passe tant que la session est valide.
 model Session {
-  id              String   @id // jeton aléatoire (valeur du cookie)
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id              String    @id // jeton aléatoire (valeur du cookie)
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId          String
   // Champs ResaMania : NULL pour une session « email seul » (aucun jeton).
   accessToken     String? // token Bearer chiffré (AES-256-GCM, court ~1h)
@@ -87,7 +87,7 @@ model Session {
   tokenExpiresAt  DateTime?
   identityJson    String? // ResaIdentity sérialisée (contactId, clubId, nom…)
   expiresAt       DateTime // expiration de la session applicative
-  createdAt       DateTime @default(now())
+  createdAt       DateTime  @default(now())
 
   @@index([userId])
 }
@@ -97,19 +97,19 @@ model Session {
 // donc l'attacher à un compte ResaMania le rétrograderait en lecture seule. La biométrie ne
 // quitte jamais l'appareil ; on ne stocke qu'une clé PUBLIQUE et un compteur anti-rejeu.
 model Passkey {
-  id           String   @id @default(cuid())
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String    @id @default(cuid())
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId       String
-  credentialId String   @unique // identifiant du credential (base64url), renvoyé à l'auth
+  credentialId String    @unique // identifiant du credential (base64url), renvoyé à l'auth
   publicKey    Bytes // clé publique COSE (jamais de secret : la clé privée reste dans l'enclave)
-  counter      Int      @default(0) // compteur d'usage de l'authenticator (détection de rejeu/clonage)
+  counter      Int       @default(0) // compteur d'usage de l'authenticator (détection de rejeu/clonage)
   transports   String? // CSV des transports (ex. "internal,hybrid"), pour un meilleur prompt
   deviceLabel  String? // libellé lisible saisi à l'enrôlement (ex. « iPhone de Tom »)
   // État de sauvegarde du passkey, renvoyé par WebAuthn à l'enrôlement (null pour les passkeys
   // créés avant l'ajout de ces colonnes) :
   backedUp     Boolean? // true = synchronisé (iCloud/Google) → survit à la perte de l'appareil
   deviceType   String? // "singleDevice" (lié à l'appareil) | "multiDevice" (synchronisable)
-  createdAt    DateTime @default(now())
+  createdAt    DateTime  @default(now())
   lastUsedAt   DateTime?
 
   @@index([userId])
@@ -182,7 +182,7 @@ model FeedbackMessage {
 // rate-limité PAR EMAIL (anti-spam d'une boîte) et PAR IP (anti-abus d'envoi : empêche une
 // source d'arroser des centaines d'adresses et de brûler le quota d'envoi Gmail).
 model EmailToken {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   email        String // normalisé (trim+lowercase)
   tokenHash    String // HMAC-SHA256 du jeton (jamais en clair)
   purpose      String // "signup" | "reset"
@@ -190,12 +190,12 @@ model EmailToken {
   displayName  String? // signup : nom d'affichage choisi à l'inscription
   ip           String? // IP demandeuse (rate limiting par IP)
   expiresAt    DateTime
-  attempts     Int      @default(0)
+  attempts     Int       @default(0)
   // Validation par un admin (inscription sur invitation) : tant que NULL, la demande est
   // « en attente » et le jeton NE PEUT PAS activer/réinitialiser (cf. findEmailToken). À
   // l'approbation, un jeton frais est régénéré et ce champ est daté. Voir src/lib/admin.ts.
   approvedAt   DateTime?
-  createdAt    DateTime @default(now())
+  createdAt    DateTime  @default(now())
 
   @@index([email, createdAt])
   @@index([ip, createdAt])
@@ -308,18 +308,18 @@ model SlotAlert {
 // délégué actif à la fois » (v1) est imposé en application, pas en base (pas de contrainte
 // unique praticable sur une condition dépendant de l'heure courante).
 model Delegation {
-  id          String    @id @default(cuid())
-  delegator   User      @relation("DelegationGiven", fields: [delegatorId], references: [id], onDelete: Cascade)
-  delegatorId String
-  delegate    User      @relation("DelegationReceived", fields: [delegateId], references: [id], onDelete: Cascade)
-  delegateId  String
-  scope       String    @default("book_cancel") // v1 : "book_cancel" uniquement (pas plus large)
-  expiresAt   DateTime // borne dure (24h à 5j côté UI) — limite le rayon si compromis
-  revokedAt   DateTime? // révocation manuelle par le délégant, avant expiresAt
+  id            String    @id @default(cuid())
+  delegator     User      @relation("DelegationGiven", fields: [delegatorId], references: [id], onDelete: Cascade)
+  delegatorId   String
+  delegate      User      @relation("DelegationReceived", fields: [delegateId], references: [id], onDelete: Cascade)
+  delegateId    String
+  scope         String    @default("book_cancel") // v1 : "book_cancel" uniquement (pas plus large)
+  expiresAt     DateTime // borne dure (24h à 5j côté UI) — limite le rayon si compromis
+  revokedAt     DateTime? // révocation manuelle par le délégant, avant expiresAt
   // Push « délégation terminée » envoyé au délégataire (révocation OU fin naturelle) :
   // marqueur d'idempotence pour ne notifier la fin qu'UNE seule fois.
   endNotifiedAt DateTime?
-  createdAt   DateTime  @default(now())
+  createdAt     DateTime  @default(now())
 
   @@index([delegateId, expiresAt])
   @@index([delegatorId])
@@ -331,13 +331,35 @@ model Delegation {
 // Workflow : dépenses ajoutées librement, puis chaque payeur valide (approval) ;
 // quand TOUS les payeurs ont validé, les remboursements deviennent possibles.
 model Tricount {
-  id        String   @id @default(cuid())
-  date      String   @unique // "YYYY-MM-DD" : un tricount par jour
+  id        String             @id @default(cuid())
+  date      String             @unique // "YYYY-MM-DD" : un tricount par jour
   title     String? // libellé optionnel ("Repas d'après-match"…), fixé à la création
-  createdAt DateTime @default(now())
+  createdAt DateTime           @default(now())
   expenses  Expense[]
   approvals TricountApproval[]
   comments  TricountComment[]
+  guests    TricountGuest[]
+}
+
+// Invité hors asso sur UN tricount précis (nom libre, aucun compte, aucune
+// connexion). Scope volontairement limité à ce tricount — comme le tricount
+// lui-même est scopé à un jour, pas d'identité d'invité persistante entre
+// deux dates. Ne peut JAMAIS être payeur d'une vraie dépense (seulement porter
+// une part, ou "payer" un remboursement — cf. Expense.payerGuestId) : il
+// n'entre donc jamais dans le circuit d'approbation des payeurs, qui suppose
+// un compte connecté. Supprimé uniquement via la suppression admin du
+// tricount entier (cascade), jamais isolément.
+model TricountGuest {
+  id          String         @id @default(cuid())
+  tricount    Tricount       @relation(fields: [tricountId], references: [id], onDelete: Cascade)
+  tricountId  String
+  name        String // prénom libre ; le suffixe "(ext)" est ajouté à l'affichage, jamais stocké
+  createdAt   DateTime       @default(now())
+  shares      ExpenseShare[]
+  refundsPaid Expense[]      @relation("ExpenseGuestPayer")
+
+  @@unique([tricountId, name])
+  @@index([tricountId])
 }
 
 // Fil de commentaires attaché à UN tricount (idée 5a) : entraide sur le partage de frais
@@ -373,22 +395,27 @@ model TricountApproval {
 // Un remboursement (A rend de l'argent à B) est une Expense `isRefund` payée par A
 // avec UNE seule part portée par B : les soldes se recalculent naturellement.
 model Expense {
-  id          String   @id @default(cuid())
-  tricount    Tricount @relation(fields: [tricountId], references: [id], onDelete: Cascade)
-  tricountId  String
+  id           String         @id @default(cuid())
+  tricount     Tricount       @relation(fields: [tricountId], references: [id], onDelete: Cascade)
+  tricountId   String
   // Restrict (et pas Cascade) : supprimer un membre ne doit JAMAIS effacer en
   // douce des dépenses et rééquilibrer l'historique d'argent. On bloque plutôt la
   // suppression tant que le membre a des dépenses/parts (filet de sécurité DB).
-  payer       User     @relation("ExpensePayer", fields: [payerId], references: [id], onDelete: Restrict)
-  payerId     String
-  creator     User     @relation("ExpenseCreator", fields: [creatorId], references: [id], onDelete: Restrict)
-  creatorId   String // qui a saisi la ligne (peut différer du payeur) : droit de suppression
-  label       String
-  amountCents Int
-  isRefund    Boolean  @default(false)
-  spentAt     DateTime @default(now()) // horodatage précis (affiché sur les remboursements)
-  createdAt   DateTime @default(now())
-  shares      ExpenseShare[]
+  // Un des deux (payer OU payerGuest) est renseigné, jamais les deux — CHECK en
+  // base (migration 33_tricount_guests). Un invité ne peut être payeur QUE d'un
+  // remboursement (isRefund: true) : jamais d'une vraie dépense (enforcé côté appli).
+  payer        User?          @relation("ExpensePayer", fields: [payerId], references: [id], onDelete: Restrict)
+  payerId      String?
+  payerGuest   TricountGuest? @relation("ExpenseGuestPayer", fields: [payerGuestId], references: [id], onDelete: Cascade)
+  payerGuestId String?
+  creator      User           @relation("ExpenseCreator", fields: [creatorId], references: [id], onDelete: Restrict)
+  creatorId    String // qui a saisi la ligne (peut différer du payeur) : droit de suppression
+  label        String
+  amountCents  Int
+  isRefund     Boolean        @default(false)
+  spentAt      DateTime       @default(now()) // horodatage précis (affiché sur les remboursements)
+  createdAt    DateTime       @default(now())
+  shares       ExpenseShare[]
 
   @@index([tricountId])
   @@index([spentAt])
@@ -397,34 +424,41 @@ model Expense {
 // Part d'un participant dans une dépense (répartition égale, ajustée au centime :
 // la somme des parts vaut exactement amountCents).
 model ExpenseShare {
-  id          String  @id @default(cuid())
-  expense     Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  id          String         @id @default(cuid())
+  expense     Expense        @relation(fields: [expenseId], references: [id], onDelete: Cascade)
   expenseId   String
   // Restrict : une part porte un solde ; supprimer un membre ne doit pas la faire
-  // disparaître silencieusement (cf. Expense.payer/creator).
-  user        User    @relation(fields: [userId], references: [id], onDelete: Restrict)
-  userId      String
+  // disparaître silencieusement (cf. Expense.payer/creator). Un des deux (user OU
+  // guest) est renseigné, jamais les deux — CHECK en base (migration
+  // 33_tricount_guests). @@unique([expenseId, userId]) ne protège pas les lignes
+  // invité (Postgres traite NULL comme distinct) : un index partiel dédié
+  // (migration) empêche un même invité en double sur une dépense.
+  user        User?          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  userId      String?
+  guest       TricountGuest? @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  guestId     String?
   amountCents Int
 
   @@unique([expenseId, userId])
   @@index([userId])
+  @@index([guestId])
 }
 
 // --- Tournois (idée 3) -----------------------------------------------------
 // Un tournoi = un roster (membres + invités hors asso), un format calculé (poules,
 // tableau à repêchage, ou poules + phase finale) et ses matchs. Scores en JEUX gagnés.
 model Tournament {
-  id            String   @id @default(cuid())
+  id            String             @id @default(cuid())
   name          String?
   date          String // "YYYY-MM-DD" (comme Tricount)
   createdById   String
-  createdBy     User     @relation("TournamentCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  status        String   @default("draft") // draft | running | done
+  createdBy     User               @relation("TournamentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  status        String             @default("draft") // draft | running | done
   format        String // pools | bracket | pools_bracket
   targetMatches Int // nombre de matchs visé par joueur (2, 3 ou 4)
-  bestOf        Int      @default(3) // 3 => 2 jeux gagnants ; 5 => 3 jeux gagnants
-  courts        Int      @default(2)
-  createdAt     DateTime @default(now())
+  bestOf        Int                @default(3) // 3 => 2 jeux gagnants ; 5 => 3 jeux gagnants
+  courts        Int                @default(2)
+  createdAt     DateTime           @default(now())
   players       TournamentPlayer[]
   groups        TournamentGroup[]
   matches       Match[]
@@ -436,10 +470,10 @@ model Tournament {
 // libre). displayName est FIGÉ à la création — supprimer un membre (userId -> null) ne
 // casse pas l'historique.
 model TournamentPlayer {
-  id           String     @id @default(cuid())
-  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  id           String           @id @default(cuid())
+  tournament   Tournament       @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
   tournamentId String
-  user         User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user         User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
   userId       String?
   guestName    String? // invité hors asso (null pour un membre)
   displayName  String // figé : nom du membre ou prénom de l'invité
@@ -453,8 +487,8 @@ model TournamentPlayer {
 
 // Une poule (round-robin). Absente pour un tournoi 100 % tableau.
 model TournamentGroup {
-  id           String     @id @default(cuid())
-  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  id           String             @id @default(cuid())
+  tournament   Tournament         @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
   tournamentId String
   label        String // "A", "B"...
   players      TournamentPlayer[]
@@ -466,29 +500,29 @@ model TournamentGroup {
 // Un match. En poule : rattaché à un group. En tableau : round/slot/branch + liens
 // nextWin/nextLose (le vainqueur monte, le perdant bascule dans la branche de classement).
 model Match {
-  id           String     @id @default(cuid())
-  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
-  tournamentId String
-  phase        String // pool | winners | classification
-  group        TournamentGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  groupId      String?
+  id              String           @id @default(cuid())
+  tournament      Tournament       @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  tournamentId    String
+  phase           String // pool | winners | classification
+  group           TournamentGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  groupId         String?
   // Format « poules + tableau final » : n° du tableau final (1 = 1ers de poule, 2 = 2es…).
   // NULL pour les matchs de poule et les tableaux autonomes. Sépare les brackets par rang.
-  tier         Int?
-  round        Int? // tableau : 0 = 1er tour
-  slot         Int?
-  branch       String? // "main" | "cons-5-8" ... (branche du tableau)
-  placeLabel   String? // "Finale", "3e place", "Finale perdants"...
+  tier            Int?
+  round           Int? // tableau : 0 = 1er tour
+  slot            Int?
+  branch          String? // "main" | "cons-5-8" ... (branche du tableau)
+  placeLabel      String? // "Finale", "3e place", "Finale perdants"...
   // Participants (nullables : un slot de tableau se remplit quand le match amont est joué).
-  player1Id    String?
-  player2Id    String?
+  player1Id       String?
+  player2Id       String?
   // Résultat en JEUX gagnés.
-  score1       Int?
-  score2       Int?
-  winnerId     String?
-  status       String   @default("pending") // pending | bye | done
-  courtName    String?
-  order        Int? // ordre de passage global
+  score1          Int?
+  score2          Int?
+  winnerId        String?
+  status          String           @default("pending") // pending | bye | done
+  courtName       String?
+  order           Int? // ordre de passage global
   // Aiguillage tableau : où vont le vainqueur / le perdant.
   nextWinMatchId  String?
   nextWinSlot     Int?

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { payersOf, computeBalances } from "@/lib/tricount";
+import { payersOf, computeBalances, toKeyedExpense, parseKey } from "@/lib/tricount";
 import { pushToUser } from "@/lib/push";
 import { getFeatures } from "@/lib/features-server";
 
@@ -47,7 +47,9 @@ export async function POST(
     where: { id },
     include: {
       expenses: {
-        include: { shares: { select: { userId: true, amountCents: true } } },
+        include: {
+          shares: { select: { userId: true, guestId: true, amountCents: true } },
+        },
       },
       approvals: { select: { userId: true } },
     },
@@ -55,7 +57,10 @@ export async function POST(
   if (!tricount) {
     return NextResponse.json({ error: "Tricount introuvable" }, { status: 404 });
   }
-  const payers = payersOf(tricount.expenses);
+  const keyedExpenses = tricount.expenses.map(toKeyedExpense);
+  // Un invité n'est jamais payeur d'une vraie dépense : payersOf ne renvoie que des
+  // clés membre ("u:xxx"), qu'on dépréfixe pour matcher TricountApproval.userId.
+  const payers = payersOf(keyedExpenses).map((k) => parseKey(k).id);
   if (!payers.includes(session.userId)) {
     return NextResponse.json(
       { error: "Seuls les payeurs de ce tricount valident" },
@@ -77,12 +82,14 @@ export async function POST(
 
   if (!wasReady && nowReady) {
     // Débiteurs = solde négatif ; on prévient chacun (sauf soi) du montant à rendre.
-    const balances = computeBalances(tricount.expenses);
-    const debtors = [...balances].filter(
-      ([userId, cents]) => cents < 0 && userId !== session.userId,
-    );
+    // Un invité peut être débiteur mais n'a pas de souscription push (pas de
+    // compte) : on ne notifie que les clés membre.
+    const balances = computeBalances(keyedExpenses);
+    const debtors = [...balances]
+      .map(([key, cents]) => ({ ...parseKey(key), cents }))
+      .filter((d) => d.kind === "user" && d.cents < 0 && d.id !== session.userId);
     await Promise.all(
-      debtors.map(([userId, cents]) =>
+      debtors.map(({ id: userId, cents }) =>
         pushToUser(userId, {
           title: "Remboursements ouverts 💸",
           body: `Tricount du ${prettyDate(tricount.date)} : tu dois ${fmtEuros(-cents)}.`,

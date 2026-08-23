@@ -4,6 +4,7 @@
 // dépenses/parts/approbations/commentaires (toutes en `onDelete: Cascade`).
 
 import { prisma } from "./db";
+import { userKey, guestKey } from "./tricount";
 
 export type TricountRow = {
   id: string;
@@ -11,7 +12,7 @@ export type TricountRow = {
   title: string | null;
   expenseCount: number; // dépenses « réelles » (hors remboursements)
   totalCents: number; // somme des dépenses réelles
-  participantCount: number; // membres impliqués (payeurs + porteurs de parts)
+  participantCount: number; // membres + invités hors asso impliqués (payeurs + porteurs de parts)
   createdAt: string;
 };
 
@@ -29,7 +30,8 @@ export async function listTricountsAdmin(): Promise<TricountRow[]> {
           amountCents: true,
           isRefund: true,
           payerId: true,
-          shares: { select: { userId: true } },
+          payerGuestId: true,
+          shares: { select: { userId: true, guestId: true } },
         },
       },
     },
@@ -37,10 +39,14 @@ export async function listTricountsAdmin(): Promise<TricountRow[]> {
   return rows.map((t) => {
     const real = t.expenses.filter((e) => !e.isRefund);
     const totalCents = real.reduce((sum, e) => sum + e.amountCents, 0);
+    // Clés préfixées (u:/g:) : payerId/userId sont désormais nullable (invité hors
+    // asso porté par payerGuestId/guestId) — un Set brut planterait/compterait faux.
     const participants = new Set<string>();
     for (const e of t.expenses) {
-      participants.add(e.payerId);
-      for (const s of e.shares) participants.add(s.userId);
+      participants.add(e.payerId ? userKey(e.payerId) : guestKey(e.payerGuestId as string));
+      for (const s of e.shares) {
+        participants.add(s.userId ? userKey(s.userId) : guestKey(s.guestId as string));
+      }
     }
     return {
       id: t.id,

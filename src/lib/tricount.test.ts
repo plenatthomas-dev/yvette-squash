@@ -6,6 +6,10 @@ import {
   payersOf,
   computeBalances,
   settle,
+  userKey,
+  guestKey,
+  parseKey,
+  toKeyedExpense,
   type ExpenseForBalance,
 } from "./tricount";
 
@@ -178,5 +182,79 @@ describe("settle", () => {
 
   it("solde déjà nul => aucun virement", () => {
     expect(settle(new Map([["a", 0], ["b", 0]]))).toEqual([]);
+  });
+});
+
+describe("userKey/guestKey/parseKey", () => {
+  it("préfixe puis retrouve le type et l'id d'origine", () => {
+    expect(parseKey(userKey("abc"))).toEqual({ kind: "user", id: "abc" });
+    expect(parseKey(guestKey("abc"))).toEqual({ kind: "guest", id: "abc" });
+  });
+
+  it("un membre et un invité de même id brut ne collisionnent jamais", () => {
+    expect(userKey("x")).not.toBe(guestKey("x"));
+  });
+});
+
+describe("toKeyedExpense", () => {
+  it("garde un payeur/participant membre inchangé (préfixé u:)", () => {
+    const keyed = toKeyedExpense({
+      payerId: "a",
+      payerGuestId: null,
+      isRefund: false,
+      shares: [{ userId: "b", guestId: null, amountCents: 100 }],
+    });
+    expect(keyed).toEqual({
+      payerId: "u:a",
+      isRefund: false,
+      shares: [{ userId: "u:b", amountCents: 100 }],
+    });
+  });
+
+  it("bascule sur payerGuestId/guestId (préfixé g:) quand userId/payerId sont null", () => {
+    const keyed = toKeyedExpense({
+      payerId: null,
+      payerGuestId: "guest1",
+      isRefund: true,
+      shares: [{ userId: "creditor", guestId: null, amountCents: 500 }],
+    });
+    expect(keyed.payerId).toBe("g:guest1");
+    expect(keyed.shares).toEqual([{ userId: "u:creditor", amountCents: 500 }]);
+  });
+
+  it("un invité participant (part) est keyé g: même sur une vraie dépense", () => {
+    const keyed = toKeyedExpense({
+      payerId: "payer",
+      payerGuestId: null,
+      isRefund: false,
+      shares: [
+        { userId: "member", guestId: null, amountCents: 500 },
+        { userId: null, guestId: "guest1", amountCents: 500 },
+      ],
+    });
+    expect(keyed.shares).toEqual([
+      { userId: "u:member", amountCents: 500 },
+      { userId: "g:guest1", amountCents: 500 },
+    ]);
+  });
+
+  it("computeBalances/payersOf traitent un invité comme n'importe quelle clé", () => {
+    const expenses = [
+      toKeyedExpense({
+        payerId: "payer",
+        payerGuestId: null,
+        isRefund: false,
+        shares: [
+          { userId: "payer", guestId: null, amountCents: 0 },
+          { userId: null, guestId: "guest1", amountCents: 1000 },
+        ],
+      }),
+    ];
+    const bal = computeBalances(expenses);
+    expect(bal.get(userKey("payer"))).toBe(1000);
+    expect(bal.get(guestKey("guest1"))).toBe(-1000);
+    // Un invité n'est jamais payeur d'une vraie dépense : payersOf ne renvoie que
+    // des clés membre.
+    expect(payersOf(expenses)).toEqual([userKey("payer")]);
   });
 });

@@ -47,6 +47,41 @@ describe("listTricountsAdmin (agrégats)", () => {
     const [t] = await listTricountsAdmin();
     expect(t).toMatchObject({ totalCents: 0, expenseCount: 0, participantCount: 0 });
   });
+
+  it("compte un invité hors asso (payerId/userId null) sans planter", async () => {
+    h.rows = [
+      {
+        id: "t3",
+        date: "2026-07-12",
+        title: null,
+        createdAt: new Date("2026-07-12T20:00:00Z"),
+        expenses: [
+          {
+            amountCents: 2000,
+            isRefund: false,
+            payerId: "a",
+            payerGuestId: null,
+            shares: [
+              { userId: "a", guestId: null },
+              { userId: null, guestId: "guest1" },
+            ],
+          },
+          // Remboursement déclaré par le créancier "a" pour le compte de l'invité :
+          // payeur = l'invité (payerId null), bénéficiaire = "a".
+          {
+            amountCents: 1000,
+            isRefund: true,
+            payerId: null,
+            payerGuestId: "guest1",
+            shares: [{ userId: "a", guestId: null }],
+          },
+        ],
+      },
+    ];
+    const [t] = await listTricountsAdmin();
+    // Participants distincts : a (payeur + part remboursement) + guest1 (part + payeur remboursement) = 2
+    expect(t.participantCount).toBe(2);
+  });
 });
 
 describe("deleteTricount", () => {

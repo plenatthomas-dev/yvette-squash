@@ -2753,6 +2753,19 @@ body[data-bottombar] .install-banner {
   flex: 1;
   min-width: 0;
 }
+/* Ligne « + Invité » : un champ texte libre au lieu d'une case à cocher. */
+.tri-add-guest {
+  margin-top: 4px;
+}
+.tri-add-guest input {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.tri-add-guest button {
+  flex: none;
+  margin: 0;
+}
 .tri-parts {
   display: inline-flex;
   align-items: center;

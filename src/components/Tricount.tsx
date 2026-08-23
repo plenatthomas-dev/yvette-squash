@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import {
   MAX_COMMENT_LEN,
   MAX_PARTS,
+  MAX_GUEST_NAME_LEN,
   splitEqually,
   splitByWeights,
 } from "@/lib/tricount";
@@ -19,6 +20,17 @@ interface Member {
   name: string; // prénom + nom réels — le Tricount n'utilise JAMAIS le pseudo
   fullName: string; // idem (conservé pour compat) : prénom + nom réels
 }
+// Invité hors asso sur UN tricount (nom déjà suffixé "(ext)" par le serveur) :
+// aucun compte, aucune connexion, jamais payeur d'une vraie dépense.
+interface Guest {
+  id: string;
+  name: string;
+}
+interface Participant {
+  id: string;
+  kind: "user" | "guest";
+  name: string;
+}
 interface ExpenseItem {
   id: string;
   label: string;
@@ -26,9 +38,9 @@ interface ExpenseItem {
   isRefund: boolean;
   spentAt: string;
   payerId: string;
+  payerKind: "user" | "guest";
   payerName: string;
-  participantIds: string[];
-  participantNames: string[];
+  participants: Participant[];
   canDelete: boolean;
   canEdit: boolean;
 }
@@ -38,13 +50,16 @@ interface PayerStatus {
   approved: boolean;
 }
 interface BalanceItem {
-  userId: string;
+  id: string;
+  kind: "user" | "guest";
   name: string;
   cents: number;
 }
 interface TransferItem {
   fromId: string;
+  fromKind: "user" | "guest";
   toId: string;
+  toKind: "user" | "guest";
   amountCents: number;
   fromName: string;
   toName: string;
@@ -65,6 +80,7 @@ interface TricountItem {
   ready: boolean; // tous les payeurs ont validé -> remboursements ouverts
   settled: boolean; // tout le monde est à zéro
   payers: PayerStatus[];
+  guests: Guest[]; // invités hors asso déjà créés sur ce tricount (cette date)
   expenses: ExpenseItem[];
   balances: BalanceItem[];
   transfers: TransferItem[];
@@ -176,6 +192,10 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
   const [amount, setAmount] = useState("");
   const [payerId, setPayerId] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Invités hors asso cochés (TricountGuest.id) — jamais payeur, cf. selectedGuestIds
+  // séparé de `selected` (membres) car ils vivent dans deux tables distinctes.
+  const [selectedGuestIds, setSelectedGuestIds] = useState<Set<string>>(new Set());
+  const [guestDraft, setGuestDraft] = useState("");
   // Répartition : « equal » = à parts égales ; « shares » = pondérée (nb de parts/pers.).
   const [splitMode, setSplitMode] = useState<"equal" | "shares">("equal");
   const [weights, setWeights] = useState<Record<string, number>>({});
@@ -186,9 +206,20 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
   const [refundTo, setRefundTo] = useState("");
   const [refundAmount, setRefundAmount] = useState("");
 
+  // Formulaire « j'ai reçu d'un invité » (le créancier connecté confirme à la place
+  // de l'invité, qui n'a ni compte ni connexion pour le déclarer lui-même).
+  const [receiveFor, setReceiveFor] = useState<TricountItem | null>(null);
+  const [receiveFromGuestId, setReceiveFromGuestId] = useState("");
+  const [receiveAmount, setReceiveAmount] = useState("");
+
   const [confirmDelete, setConfirmDelete] = useState<ExpenseItem | null>(null);
   // Brouillons du fil de commentaires (idée 5a), un par tricount déplié.
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+
+  // Date ciblée par le formulaire « nouvelle dépense » en cours (tricount existant
+  // choisi, ou nouvelle date saisie) — sert aussi à savoir quels invités sont déjà
+  // créés sur CE jour (guestsForDate ci-dessous).
+  const targetDate = tcChoice === "new" ? date : tcChoice;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -231,6 +262,8 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     setAmount("");
     setPayerId(data.me);
     setSelected(new Set(data.members.map((m) => m.id)));
+    setSelectedGuestIds(new Set());
+    setGuestDraft("");
     setSplitMode("equal");
     setWeights(Object.fromEntries(data.members.map((m) => [m.id, 1])));
     setEditingId(null);
@@ -248,7 +281,11 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     setLabel(e.label);
     setAmount((e.amountCents / 100).toFixed(2).replace(".", ","));
     setPayerId(e.payerId);
-    setSelected(new Set(e.participantIds));
+    setSelected(new Set(e.participants.filter((p) => p.kind === "user").map((p) => p.id)));
+    setSelectedGuestIds(
+      new Set(e.participants.filter((p) => p.kind === "guest").map((p) => p.id)),
+    );
+    setGuestDraft("");
     setSplitMode("equal");
     setWeights(Object.fromEntries(data.members.map((m) => [m.id, 1])));
     setEditingId(e.id);
@@ -269,12 +306,48 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     });
   };
 
-  // Ajuste le nombre de parts d'un participant (boutons +/−), borné à [1, MAX_PARTS].
+  const toggleGuest = (id: string) => {
+    setSelectedGuestIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Ajuste le nombre de parts d'un participant — membre ou invité, tous deux keyés
+  // par leur id brut (boutons +/−), borné à [1, MAX_PARTS].
   const adjustPart = (id: string, delta: number) =>
     setWeights((prev) => ({
       ...prev,
       [id]: Math.max(1, Math.min(MAX_PARTS, (prev[id] ?? 1) + delta)),
     }));
+
+  // Ajoute (ou retrouve) un invité hors asso sur le tricount de `targetDate`, puis le
+  // coche aussitôt — sans attendre le rechargement complet (`load()` le confirmera).
+  const addGuest = async () => {
+    if (busy) return;
+    const name = guestDraft.trim();
+    if (!name) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/tricount/guests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: targetDate, name }),
+      });
+      if (onExpired(res.status)) return;
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error ?? `Erreur ${res.status}`);
+      setSelectedGuestIds((prev) => new Set(prev).add(j.id));
+      setGuestDraft("");
+      await load();
+    } catch (e) {
+      toast("err", "Invité impossible à ajouter : " + (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submitExpense = async (e: FormEvent) => {
     e.preventDefault();
@@ -288,18 +361,20 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
       toast("err", "Donne un libellé à la dépense.");
       return;
     }
-    if (selected.size === 0) {
+    if (selected.size + selectedGuestIds.size === 0) {
       toast("err", "Choisis au moins un participant.");
       return;
     }
-    // Date cible : celle du tricount existant choisi, ou la nouvelle date saisie.
-    const targetDate = tcChoice === "new" ? date : tcChoice;
     const participantIds = [...selected];
-    // En mode « parts », on transmet le poids de chaque participant coché ; le serveur
-    // fait la répartition pondérée. En mode « équitable », rien (partage égal côté serveur).
+    const guestIds = [...selectedGuestIds];
+    // En mode « parts », on transmet le poids de chaque participant coché (membre ou
+    // invité) ; le serveur fait la répartition pondérée. En mode « équitable », rien
+    // (partage égal côté serveur).
     const weightsPayload =
       splitMode === "shares"
-        ? Object.fromEntries(participantIds.map((id) => [id, weights[id] ?? 1]))
+        ? Object.fromEntries(
+            [...participantIds, ...guestIds].map((id) => [id, weights[id] ?? 1]),
+          )
         : undefined;
     setBusy(true);
     try {
@@ -313,6 +388,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
               amountCents: cents,
               payerId,
               participantIds,
+              guestIds,
               ...(weightsPayload ? { weights: weightsPayload } : {}),
             }),
           })
@@ -325,6 +401,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
               amountCents: cents,
               payerId,
               participantIds,
+              guestIds,
               ...(weightsPayload ? { weights: weightsPayload } : {}),
             }),
           });
@@ -358,16 +435,17 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     }
   };
 
-  // Bénéficiaires possibles : MES créanciers dans CE tricount (issus des
-  // virements suggérés), avec le montant conseillé.
+  // Bénéficiaires possibles : MES créanciers (membres) dans CE tricount (issus des
+  // virements suggérés), avec le montant conseillé. Jamais un invité : un invité n'a
+  // jamais de solde positif (il ne fait jamais l'avance d'argent pour le groupe).
   const refundOptions = useMemo(() => {
     if (!refundFor || !data) return [];
-    return refundFor.transfers.filter((t) => t.fromId === data.me);
+    return refundFor.transfers.filter((t) => t.fromKind === "user" && t.fromId === data.me);
   }, [refundFor, data]);
 
   const openRefund = (t: TricountItem) => {
     if (!data) return;
-    const first = t.transfers.find((tr) => tr.fromId === data.me);
+    const first = t.transfers.find((tr) => tr.fromKind === "user" && tr.fromId === data.me);
     setRefundTo(first?.toId ?? "");
     setRefundAmount(first ? (first.amountCents / 100).toFixed(2).replace(".", ",") : "");
     setRefundFor(t);
@@ -404,6 +482,61 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
       toast("ok", "Remboursement enregistré 💸");
       playPaymentJingle(); // son « cha-ching » quand on déclare avoir remboursé
       setRefundFor(null);
+      load();
+    } catch (e) {
+      toast("err", "Remboursement impossible : " + (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Invités qui ME doivent de l'argent sur CE tricount (issus des virements suggérés) —
+  // c'est MOI, créancier connecté, qui confirme avoir reçu, l'invité ne pouvant pas se
+  // connecter pour le déclarer lui-même.
+  const receiveOptions = useMemo(() => {
+    if (!receiveFor || !data) return [];
+    return receiveFor.transfers.filter((t) => t.fromKind === "guest" && t.toId === data.me);
+  }, [receiveFor, data]);
+
+  const openReceive = (t: TricountItem) => {
+    if (!data) return;
+    const first = t.transfers.find((tr) => tr.fromKind === "guest" && tr.toId === data.me);
+    setReceiveFromGuestId(first?.fromId ?? "");
+    setReceiveAmount(first ? (first.amountCents / 100).toFixed(2).replace(".", ",") : "");
+    setReceiveFor(t);
+  };
+
+  const pickReceiveFrom = (fromId: string) => {
+    setReceiveFromGuestId(fromId);
+    const tr = receiveOptions.find((o) => o.fromId === fromId);
+    if (tr) setReceiveAmount((tr.amountCents / 100).toFixed(2).replace(".", ","));
+  };
+
+  const submitReceive = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy || !receiveFor) return;
+    const cents = parseEuros(receiveAmount);
+    if (cents === null || cents === 0) {
+      toast("err", "Montant invalide — ex. 12,50");
+      return;
+    }
+    if (!receiveFromGuestId) {
+      toast("err", "Choisis de quel invité tu as reçu.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/tricount/${receiveFor.id}/refunds`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromGuestId: receiveFromGuestId, amountCents: cents }),
+      });
+      if (onExpired(res.status)) return;
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error ?? `Erreur ${res.status}`);
+      toast("ok", "Remboursement enregistré 💸");
+      playPaymentJingle();
+      setReceiveFor(null);
       load();
     } catch (e) {
       toast("err", "Remboursement impossible : " + (e as Error).message);
@@ -483,7 +616,8 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
   const myGlobal = useMemo(() => {
     if (!data) return 0;
     return data.tricounts.reduce(
-      (s, t) => s + (t.balances.find((b) => b.userId === data.me)?.cents ?? 0),
+      (s, t) =>
+        s + (t.balances.find((b) => b.kind === "user" && b.id === data.me)?.cents ?? 0),
       0,
     );
   }, [data]);
@@ -496,19 +630,28 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
       (t) =>
         t.ready &&
         !t.settled &&
-        (t.balances.find((b) => b.userId === data.me)?.cents ?? 0) < 0,
+        (t.balances.find((b) => b.kind === "user" && b.id === data.me)?.cents ?? 0) < 0,
     ).length;
     onOwedChange(n);
   }, [data, onOwedChange]);
 
+  // Invités déjà créés sur LE TRICOUNT de `targetDate` (existant ou pas encore créé,
+  // auquel cas aucun) — proposés comme lignes cochables, comme les membres.
+  const guestsForDate = useMemo(
+    () => data?.tricounts.find((t) => t.date === targetDate)?.guests ?? [],
+    [data, targetDate],
+  );
+
   // Répartition affichée en direct dans le formulaire : montant dû par chaque participant
-  // coché, recalculé à chaque frappe (montant, sélection, mode, parts). Purement indicatif —
-  // le serveur reste la source de vérité au moment de l'enregistrement.
+  // coché (membre ou invité), recalculé à chaque frappe (montant, sélection, mode, parts).
+  // Purement indicatif — le serveur reste la source de vérité au moment de l'enregistrement.
   const shareByMember = useMemo(() => {
     const map = new Map<string, number>();
     const previewCents = parseEuros(amount);
     if (previewCents === null || previewCents === 0 || !data) return map;
-    const selectedIds = data.members.filter((m) => selected.has(m.id)).map((m) => m.id);
+    const memberIds = data.members.filter((m) => selected.has(m.id)).map((m) => m.id);
+    const guestIds = guestsForDate.filter((g) => selectedGuestIds.has(g.id)).map((g) => g.id);
+    const selectedIds = [...memberIds, ...guestIds];
     if (selectedIds.length === 0) return map;
     const parts =
       splitMode === "shares"
@@ -516,7 +659,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
         : splitEqually(previewCents, selectedIds.length);
     selectedIds.forEach((id, i) => map.set(id, parts[i]));
     return map;
-  }, [amount, splitMode, weights, data, selected]);
+  }, [amount, splitMode, weights, data, selected, selectedGuestIds, guestsForDate]);
 
   if (loading && !data) return <p className="muted">Chargement des frais…</p>;
   if (error) return <div className="notice error" role="alert">⚠️ {error}</div>;
@@ -554,7 +697,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
       {/* Historique : un tricount par jour, le plus récent d'abord */}
       {data.tricounts.map((t) => {
         const open = openId === t.id;
-        const myBal = t.balances.find((b) => b.userId === data.me)?.cents ?? 0;
+        const myBal = t.balances.find((b) => b.kind === "user" && b.id === data.me)?.cents ?? 0;
         const iAmPayer = t.payers.find((p) => p.id === data.me);
         const pending = t.payers.filter((p) => !p.approved);
         return (
@@ -600,8 +743,8 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                           <strong>{e.label}</strong>
                           <small>
                             {e.isRefund
-                              ? `${e.payerName} → ${e.participantNames.join(", ")} · le ${fmtStamp(e.spentAt)}`
-                              : `${e.payerName} a payé pour ${e.participantNames.length} pers.`}
+                              ? `${e.payerName} → ${e.participants.map((p) => p.name).join(", ")} · le ${fmtStamp(e.spentAt)}`
+                              : `${e.payerName} a payé pour ${e.participants.length} pers.`}
                           </small>
                         </span>
                         <span className="tri-amount">
@@ -636,15 +779,18 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                   <>
                     <h3>⚖️ Soldes</h3>
                     <ul className="tri-balances">
-                      {t.balances.map((b) => (
-                        <li key={b.userId} className={b.userId === data.me ? "mine" : ""}>
-                          <span>{b.name}{b.userId === data.me && " (toi)"}</span>
-                          <strong className={b.cents > 0 ? "pos" : b.cents < 0 ? "neg" : ""}>
-                            {b.cents > 0 ? "+" : ""}
-                            {fmtEuros(b.cents)}
-                          </strong>
-                        </li>
-                      ))}
+                      {t.balances.map((b) => {
+                        const mine = b.kind === "user" && b.id === data.me;
+                        return (
+                          <li key={`${b.kind}-${b.id}`} className={mine ? "mine" : ""}>
+                            <span>{b.name}{mine && " (toi)"}</span>
+                            <strong className={b.cents > 0 ? "pos" : b.cents < 0 ? "neg" : ""}>
+                              {b.cents > 0 ? "+" : ""}
+                              {fmtEuros(b.cents)}
+                            </strong>
+                          </li>
+                        );
+                      })}
                     </ul>
                   </>
                 )}
@@ -679,22 +825,33 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                   <div className="tri-settle">
                     <h3>🔁 Pour tout équilibrer</h3>
                     <ul className="tri-transfers">
-                      {t.transfers.map((tr, i) => (
-                        <li
-                          key={i}
-                          className={tr.fromId === data.me || tr.toId === data.me ? "mine" : ""}
-                        >
-                          <span>
-                            <strong>{tr.fromName}</strong> rembourse{" "}
-                            <strong>{tr.toName}</strong> :
-                          </span>
-                          <strong>{fmtEuros(tr.amountCents)}</strong>
-                        </li>
-                      ))}
+                      {t.transfers.map((tr, i) => {
+                        const mine =
+                          (tr.fromKind === "user" && tr.fromId === data.me) ||
+                          (tr.toKind === "user" && tr.toId === data.me);
+                        return (
+                          <li key={i} className={mine ? "mine" : ""}>
+                            <span>
+                              <strong>{tr.fromName}</strong> rembourse{" "}
+                              <strong>{tr.toName}</strong> :
+                            </span>
+                            <strong>{fmtEuros(tr.amountCents)}</strong>
+                          </li>
+                        );
+                      })}
                     </ul>
-                    {t.transfers.some((tr) => tr.fromId === data.me) && (
+                    {t.transfers.some((tr) => tr.fromKind === "user" && tr.fromId === data.me) && (
                       <button className="secondary" onClick={() => openRefund(t)} disabled={busy}>
                         💸 J'ai remboursé
+                      </button>
+                    )}
+                    {/* Un invité hors asso ne peut pas se connecter pour déclarer son propre
+                        remboursement : c'est le créancier (moi) qui confirme avoir reçu. */}
+                    {t.transfers.some(
+                      (tr) => tr.fromKind === "guest" && tr.toKind === "user" && tr.toId === data.me,
+                    ) && (
+                      <button className="secondary" onClick={() => openReceive(t)} disabled={busy}>
+                        💸 J'ai reçu d'un invité
                       </button>
                     )}
                   </div>
@@ -850,7 +1007,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                 </select>
               </label>
               <fieldset className="tri-participants">
-                <legend>Pour qui ? ({selected.size})</legend>
+                <legend>Pour qui ? ({selected.size + selectedGuestIds.size})</legend>
                 <div className="tri-splitmode" role="group" aria-label="Mode de répartition">
                   <button
                     type="button"
@@ -921,6 +1078,77 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                     </div>
                   );
                 })}
+                {guestsForDate.map((g) => {
+                  const checked = selectedGuestIds.has(g.id);
+                  const share = shareByMember.get(g.id);
+                  const w = weights[g.id] ?? 1;
+                  return (
+                    <div key={g.id} className={"tri-check-row" + (checked ? " on" : "")}>
+                      <label className="tri-check">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleGuest(g.id)}
+                        />
+                        <span className="tri-check-name">{g.name}</span>
+                      </label>
+                      {checked && splitMode === "shares" && (
+                        <span className="tri-parts">
+                          <button
+                            type="button"
+                            className="tri-parts-btn"
+                            onClick={() => adjustPart(g.id, -1)}
+                            disabled={w <= 1}
+                            aria-label={`Moins de parts pour ${g.name}`}
+                          >
+                            −
+                          </button>
+                          <span
+                            className="tri-parts-value"
+                            role="spinbutton"
+                            aria-valuenow={w}
+                            aria-valuemin={1}
+                            aria-valuemax={MAX_PARTS}
+                            aria-label={`Parts de ${g.name}`}
+                          >
+                            {w}
+                          </span>
+                          <button
+                            type="button"
+                            className="tri-parts-btn"
+                            onClick={() => adjustPart(g.id, 1)}
+                            disabled={w >= MAX_PARTS}
+                            aria-label={`Plus de parts pour ${g.name}`}
+                          >
+                            +
+                          </button>
+                          <span className="tri-parts-unit">{w > 1 ? "parts" : "part"}</span>
+                        </span>
+                      )}
+                      {checked && share !== undefined && (
+                        <span className="tri-share">{fmtEuros(share)}</span>
+                      )}
+                    </div>
+                  );
+                })}
+                <div className="tri-check-row tri-add-guest">
+                  <input
+                    type="text"
+                    value={guestDraft}
+                    onChange={(e) => setGuestDraft(e.target.value)}
+                    placeholder="+ Invité (hors asso) — « (ext) » ajouté automatiquement"
+                    maxLength={MAX_GUEST_NAME_LEN}
+                    disabled={busy}
+                  />
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={addGuest}
+                    disabled={busy || !guestDraft.trim()}
+                  >
+                    Ajouter
+                  </button>
+                </div>
               </fieldset>
               <div className="modal-actions">
                 <button
@@ -991,6 +1219,69 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                   type="button"
                   className="secondary"
                   onClick={() => setRefundFor(null)}
+                  disabled={busy}
+                >
+                  Annuler
+                </button>
+                <button type="submit" disabled={busy}>
+                  {busy ? "Enregistrement…" : "Enregistrer"}
+                </button>
+              </div>
+            </form>
+        </Dialog>
+      )}
+
+      {/* Modale « j'ai reçu d'un invité » — l'invité n'a ni compte ni connexion pour
+          déclarer lui-même : c'est le créancier (moi) qui confirme avoir reçu. */}
+      {receiveFor && (
+        <Dialog
+          onClose={() => !busy && setReceiveFor(null)}
+          closeOnOverlay={!busy}
+          label="Enregistrer un remboursement reçu d'un invité"
+        >
+            <h3>💸 Reçu d'un invité</h3>
+            <p className="muted tiny">
+              Tricount du {prettyDate(receiveFor.date)}. Un invité hors asso ne peut
+              pas se connecter : c'est toi, créancier, qui confirmes avoir reçu.
+            </p>
+            <form onSubmit={submitReceive} className="tri-form">
+              <label className="tri-field">
+                Qui a reçu ?
+                <input
+                  type="text"
+                  value={data.members.find((m) => m.id === data.me)?.fullName ?? ""}
+                  disabled
+                  readOnly
+                />
+              </label>
+              <label className="tri-field">
+                Reçu de
+                <select
+                  value={receiveFromGuestId}
+                  onChange={(e) => pickReceiveFrom(e.target.value)}
+                >
+                  {receiveOptions.map((o) => (
+                    <option key={o.fromId} value={o.fromId}>
+                      {o.fromName} — {fmtEuros(o.amountCents)} suggérés
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="tri-field">
+                Montant reçu
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Montant en € — ex. 12,50"
+                  value={receiveAmount}
+                  onChange={(e) => setReceiveAmount(e.target.value)}
+                />
+              </label>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setReceiveFor(null)}
                   disabled={busy}
                 >
                   Annuler

@@ -2,7 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { computeBalances, payersOf, MAX_AMOUNT_CENTS } from "@/lib/tricount";
+import {
+  computeBalances,
+  payersOf,
+  toKeyedExpense,
+  userKey,
+  guestKey,
+  parseKey,
+  MAX_AMOUNT_CENTS,
+} from "@/lib/tricount";
 import { getFeatures } from "@/lib/features-server";
 
 export const runtime = "nodejs";
@@ -15,12 +23,17 @@ class HttpError extends Error {
   }
 }
 
-// POST /api/tricount/{id}/refunds { toId, amountCents }
-// Enregistre « JE (l'utilisateur connecté) ai remboursé amountCents à toId ».
-// Seul l'intéressé déclare ses propres remboursements. Règles : tous les payeurs
-// du tricount doivent avoir validé ; je dois de l'argent (solde négatif) et toId
-// en attend (solde positif) ; montant plafonné à ce qui reste dû de part et
-// d'autre (les soldes convergent vers zéro).
+// POST /api/tricount/{id}/refunds — deux façons de déclarer un remboursement :
+//  - { toId, amountCents } : JE (débiteur connecté) ai remboursé toId. Auto-
+//    déclaration classique, seul l'intéressé déclare ses propres remboursements.
+//  - { fromGuestId, amountCents } : JE (créancier connecté) ai reçu de cet invité
+//    hors asso. Un invité n'a ni compte ni connexion : il ne peut pas déclarer
+//    lui-même — c'est donc le créancier (à qui l'argent revient) qui confirme,
+//    symétrique à l'auto-déclaration mais inversé.
+// Règles communes : tous les payeurs du tricount doivent avoir validé ; le débiteur
+// (membre ou invité) doit de l'argent (solde négatif) et le créancier connecté en
+// attend (solde positif) ; montant plafonné à ce qui reste dû de part et d'autre
+// (les soldes convergent vers zéro).
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -35,14 +48,11 @@ export async function POST(
   const { id } = await params;
 
   const body = await req.json().catch(() => ({}));
-  const { toId, amountCents } = body as {
+  const { toId, fromGuestId, amountCents } = body as {
     toId?: unknown;
+    fromGuestId?: unknown;
     amountCents?: unknown;
   };
-  const fromId = session.userId; // le rembourseur est TOUJOURS l'utilisateur connecté
-  if (typeof toId !== "string" || fromId === toId) {
-    return NextResponse.json({ error: "Bénéficiaire invalide" }, { status: 400 });
-  }
   if (
     typeof amountCents !== "number" ||
     !Number.isInteger(amountCents) ||
@@ -50,6 +60,36 @@ export async function POST(
     amountCents > MAX_AMOUNT_CENTS
   ) {
     return NextResponse.json({ error: "Montant invalide" }, { status: 400 });
+  }
+
+  // Résout QUI rembourse QUI, indépendamment de la branche : `fromKey`/`toKey` sont
+  // les clés unifiées membre/invité utilisées par computeBalances ; `expensePayer`
+  // et `recipientUserId` décrivent la ligne Expense à créer (le bénéficiaire d'un
+  // remboursement est TOUJOURS un membre réel : un invité n'a jamais de solde
+  // positif, il ne peut donc jamais être `toId`).
+  let fromKey: string;
+  let toKey: string;
+  let expensePayer: { payerId: string } | { payerGuestId: string };
+  let recipientUserId: string;
+  if (typeof fromGuestId === "string" && fromGuestId.length > 0) {
+    const guest = await prisma.tricountGuest.findUnique({
+      where: { id: fromGuestId },
+      select: { tricountId: true },
+    });
+    if (!guest || guest.tricountId !== id) {
+      return NextResponse.json({ error: "Invité introuvable" }, { status: 400 });
+    }
+    fromKey = guestKey(fromGuestId);
+    toKey = userKey(session.userId);
+    expensePayer = { payerGuestId: fromGuestId };
+    recipientUserId = session.userId;
+  } else if (typeof toId === "string" && toId.length > 0 && toId !== session.userId) {
+    fromKey = userKey(session.userId);
+    toKey = userKey(toId);
+    expensePayer = { payerId: session.userId };
+    recipientUserId = toId;
+  } else {
+    return NextResponse.json({ error: "Bénéficiaire invalide" }, { status: 400 });
   }
 
   // Tout ce qui touche au solde (relecture des dépenses → vérif du plafond →
@@ -64,23 +104,29 @@ export async function POST(
           where: { id },
           include: {
             expenses: {
-              include: { shares: { select: { userId: true, amountCents: true } } },
+              include: {
+                shares: { select: { userId: true, guestId: true, amountCents: true } },
+              },
             },
             approvals: { select: { userId: true } },
           },
         });
         if (!tricount) throw new HttpError(404, "Tricount introuvable");
 
-        const payers = payersOf(tricount.expenses);
+        const keyedExpenses = tricount.expenses.map(toKeyedExpense);
+        // Les invités ne sont jamais payeurs d'une vraie dépense : payersOf ne
+        // renvoie donc que des clés membre ("u:xxx"), qu'on dépréfixe pour matcher
+        // TricountApproval.userId (toujours un id membre brut).
+        const payers = payersOf(keyedExpenses).map((k) => parseKey(k).id);
         const approved = new Set(tricount.approvals.map((a) => a.userId));
         if (payers.length === 0 || !payers.every((p) => approved.has(p))) {
           throw new HttpError(409, "Tous les payeurs doivent d'abord valider ce tricount");
         }
 
-        const balances = computeBalances(tricount.expenses);
-        const fromBal = balances.get(fromId) ?? 0;
-        const toBal = balances.get(toId) ?? 0;
-        if (fromBal >= 0) throw new HttpError(400, "Tu ne dois rien sur ce tricount");
+        const balances = computeBalances(keyedExpenses);
+        const fromBal = balances.get(fromKey) ?? 0;
+        const toBal = balances.get(toKey) ?? 0;
+        if (fromBal >= 0) throw new HttpError(400, "Ce débiteur ne doit rien sur ce tricount");
         if (toBal <= 0) {
           throw new HttpError(400, "Ce membre n'a rien à récupérer sur ce tricount");
         }
@@ -95,13 +141,13 @@ export async function POST(
         return tx.expense.create({
           data: {
             tricountId: id,
-            payerId: fromId,
+            ...expensePayer,
             creatorId: session.userId,
             label: "Remboursement",
             amountCents,
             isRefund: true,
             spentAt: new Date(), // horodatage précis, affiché dans la liste
-            shares: { create: [{ userId: toId, amountCents }] },
+            shares: { create: [{ userId: recipientUserId, amountCents }] },
           },
         });
       },
