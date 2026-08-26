@@ -45,47 +45,64 @@ ${rows}
 </div></div></div>
 <div class='div-pages'><a href='#'>1</a></div>`;
 
-describe("parseLatestMonth", () => {
-  it("renvoie la 1re option du select mois (période la plus récente)", () => {
-    expect(parseLatestMonth(wrap(ROW_JEROME))).toBe("2026-07-07");
-  });
-  it("null si aucun select mois", () => {
-    expect(parseLatestMonth("<div>rien</div>")).toBeNull();
-  });
-});
+/**
+ * Passe une fixture du rendu « guillemets simples » au rendu « guillemets doubles ». Le
+ * 2026-08-26 squashnet a basculé TOUT son HTML d'attributs (`id='month'` → `id="month"`)
+ * sans toucher à la structure : le parsing a cassé net, et l'admin ne voyait plus que
+ * « Période de classement introuvable (squashnet indisponible ?) » alors que le site était
+ * debout et le classement d'août publié. Dans ces fixtures, tout `'` est un délimiteur
+ * d'attribut — aucun n'apparaît dans le texte —, la substitution reproduit donc fidèlement
+ * la capture réelle de ce jour-là. Les deux rendus doivent passer : on ne sait pas lequel
+ * squashnet servira demain, et ce détail ne mérite pas une seconde panne.
+ */
+const dq = (html: string) => html.replace(/'/g, '"');
 
-describe("parseRankingFragment", () => {
-  it("extrait tous les champs d'une ligne réelle (spans imbriqués, title)", () => {
-    const rows = parseRankingFragment(wrap(ROW_JEROME));
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toEqual({
-      name: "COURTAUT JEROME",
-      clt: "5A", // <span><span>5A</span></span> → texte seul
-      club: "Squash de l yvette", // title + texte → texte
-      licence: "0124215",
-      ligue: "IDF",
-      cat: "+55",
-      gender: "male",
-      rang: "3184", // ne capte pas rangM (3603)
-      rangM: "3603",
-      mean: "3 832.17", // espace insécable normalisé
+describe.each([
+  ["guillemets simples (rendu <= 2026-07)", (h: string) => h],
+  ["guillemets doubles (rendu 2026-08)", dq],
+])("%s", (_label, q) => {
+  describe("parseLatestMonth", () => {
+    it("renvoie la 1re option du select mois (période la plus récente)", () => {
+      expect(parseLatestMonth(q(wrap(ROW_JEROME)))).toBe("2026-07-07");
+    });
+    it("null si aucun select mois", () => {
+      expect(parseLatestMonth(q("<div>rien</div>"))).toBeNull();
     });
   });
 
-  it("gère plusieurs lignes (homonymes) en conservant leurs clubs respectifs", () => {
-    const rows = parseRankingFragment(wrap(`${ROW_JEROME}\n${ROW_MARIE}`));
-    expect(rows.map((r) => [r.name, r.club, r.clt])).toEqual([
-      ["COURTAUT JEROME", "Squash de l yvette", "5A"],
-      ["COURTAUT MARIE", "Squash Club de Rennes", "2C"],
-    ]);
-  });
+  describe("parseRankingFragment", () => {
+    it("extrait tous les champs d'une ligne réelle (spans imbriqués, title)", () => {
+      const rows = parseRankingFragment(q(wrap(ROW_JEROME)));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toEqual({
+        name: "COURTAUT JEROME",
+        clt: "5A", // <span><span>5A</span></span> → texte seul
+        club: "Squash de l yvette", // title + texte → texte
+        licence: "0124215",
+        ligue: "IDF",
+        cat: "+55",
+        gender: "male",
+        rang: "3184", // ne capte pas rangM (3603)
+        rangM: "3603",
+        mean: "3 832.17", // espace insécable normalisé
+      });
+    });
 
-  it("aucun résultat → tableau vide", () => {
-    expect(parseRankingFragment(wrap(""))).toEqual([]);
-  });
+    it("gère plusieurs lignes (homonymes) en conservant leurs clubs respectifs", () => {
+      const rows = parseRankingFragment(q(wrap(`${ROW_JEROME}\n${ROW_MARIE}`)));
+      expect(rows.map((r) => [r.name, r.club, r.clt])).toEqual([
+        ["COURTAUT JEROME", "Squash de l yvette", "5A"],
+        ["COURTAUT MARIE", "Squash Club de Rennes", "2C"],
+      ]);
+    });
 
-  it("n'invente rien hors de la zone résultats", () => {
-    // Le select mois contient des <option> mais aucune ligne 'row ranking'.
-    expect(parseRankingFragment(MONTH_SELECT)).toEqual([]);
+    it("aucun résultat → tableau vide", () => {
+      expect(parseRankingFragment(q(wrap("")))).toEqual([]);
+    });
+
+    it("n'invente rien hors de la zone résultats", () => {
+      // Le select mois contient des <option> mais aucune ligne 'row ranking'.
+      expect(parseRankingFragment(q(MONTH_SELECT))).toEqual([]);
+    });
   });
 });

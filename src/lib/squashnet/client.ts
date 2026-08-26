@@ -48,10 +48,11 @@ function stripTags(s: string): string {
 /**
  * Texte d'un champ `div-rank-<cls>` dans le HTML d'une ligne. Un div de champ ne contient
  * que des `<span>` (jamais de div imbriqué) → on capture jusqu'au premier `</div>`.
- * Le nom de classe est suivi de `'>` : « rang » ne matche donc pas « rangM ».
+ * Le nom de classe est suivi du guillemet FERMANT de l'attribut puis de `>` : « rang » ne
+ * matche donc pas « rangM ».
  */
 function fieldText(rowHtml: string, cls: string): string {
-  const m = rowHtml.match(new RegExp(`div-rank-${cls}'>([\\s\\S]*?)</div>`));
+  const m = rowHtml.match(new RegExp(`div-rank-${cls}['"]>([\\s\\S]*?)</div>`));
   return m ? stripTags(m[1]) : "";
 }
 
@@ -61,14 +62,14 @@ function fieldText(rowHtml: string, cls: string): string {
  * lignes (homonymes).
  */
 export function parseRankingFragment(html: string): RankingRow[] {
-  const resultsAt = html.indexOf("id='results'");
+  const resultsAt = html.search(/id=['"]results['"]/);
   const scope = resultsAt >= 0 ? html.slice(resultsAt) : html;
   // Découpe aux ouvertures de lignes de données ; le 1er segment (avant la 1re ligne) est ignoré.
-  const segments = scope.split("<div class='row ranking'>").slice(1);
+  const segments = scope.split(/<div class=['"]row ranking['"]>/).slice(1);
   const rows: RankingRow[] = [];
   for (const seg of segments) {
     // Coupe le segment à la pagination (queue de la dernière ligne) le cas échéant.
-    const cut = seg.indexOf("<div class='div-pages'>");
+    const cut = seg.search(/<div class=['"]div-pages['"]>/);
     const rowHtml = cut >= 0 ? seg.slice(0, cut) : seg;
     const name = fieldText(rowHtml, "name");
     if (!name) continue;
@@ -93,7 +94,7 @@ export function parseRankingFragment(html: string): RankingRow[] {
  * Le select est présent dans toute réponse, même sans résultat. Null si introuvable.
  */
 export function parseLatestMonth(html: string): string | null {
-  const m = html.match(/id='month'[\s\S]*?<option value='(\d{4}-\d{2}-\d{2})'/);
+  const m = html.match(/id=['"]month['"][\s\S]*?<option value=['"](\d{4}-\d{2}-\d{2})['"]/);
   return m ? m[1] : null;
 }
 
