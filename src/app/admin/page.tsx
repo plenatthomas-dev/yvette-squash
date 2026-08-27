@@ -55,7 +55,7 @@ const card: CSSProperties = {
 const masonryCard: CSSProperties = { ...card, breakInside: "avoid", marginBottom: 16 };
 
 export default function AdminPage() {
-  const { emailLogin, ranking } = useFeatures();
+  const { emailLogin, ranking, interclub } = useFeatures();
   const [state, setState] = useState<"loading" | "forbidden" | "ready" | "error">("loading");
   const [requests, setRequests] = useState<PendingRequest[]>([]);
   // Lien généré à l'approbation, à transmettre à la personne (par id de demande).
@@ -94,6 +94,8 @@ export default function AdminPage() {
   // Rafraîchissement à la demande du classement squashnet (rattrape les nouveaux inscrits).
   const [rkBusy, setRkBusy] = useState(false);
   const [rkResult, setRkResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [icBusy, setIcBusy] = useState(false);
+  const [icResult, setIcResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     if (!emailLogin) return;
@@ -274,6 +276,40 @@ export default function AdminPage() {
       setBlkResult({ ok: false, text: "Enregistrement impossible." });
     } finally {
       setBlkBusy(false);
+    }
+  };
+
+  const seedTeams = async (mode: "fill" | "clear") => {
+    setIcBusy(true);
+    setIcResult(null);
+    try {
+      const res = await fetch("/api/admin/interclub-teams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        assigned?: number;
+        cleared?: number;
+        teams?: number;
+        error?: string;
+      };
+      if (!res.ok) {
+        setIcResult({ ok: false, text: data.error ?? "Répartition impossible." });
+        return;
+      }
+      setIcResult({
+        ok: true,
+        text:
+          mode === "clear"
+            ? `${data.cleared ?? 0} membre(s) retiré(s) de leur équipe.`
+            : `${data.assigned ?? 0} membre(s) réparti(s) sur ${data.teams ?? 0} équipe(s). Les affectations existantes n'ont pas bougé.`,
+      });
+    } catch {
+      setIcResult({ ok: false, text: "Répartition impossible." });
+    } finally {
+      setIcBusy(false);
     }
   };
 
@@ -658,6 +694,39 @@ export default function AdminPage() {
                 </div>
               )}
             </section>
+
+            {/* Interclub : outil de mise en place, pas une fonction du produit. Sert à peupler
+                les équipes en recette pour éprouver le sélecteur de composition. */}
+            {interclub && (
+              <section style={masonryCard}>
+                <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Équipes interclub</h2>
+                <p className="muted tiny">
+                  Répartit les membres <strong>sans équipe</strong> entre les équipes, en
+                  alternant. Les affectations déjà faites à la main sont préservées. Outil de
+                  mise en place pour la recette — en production, les membres choisissent leur
+                  équipe dans leurs paramètres.
+                </p>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button type="button" disabled={icBusy} onClick={() => seedTeams("fill")}>
+                    {icBusy ? "Répartition…" : "Répartir les membres"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={icBusy}
+                    onClick={() => seedTeams("clear")}
+                  >
+                    Tout retirer
+                  </button>
+                </div>
+                {icResult && (
+                  <div className={`notice ${icResult.ok ? "info" : "error"}`} style={{ marginTop: 8 }}>
+                    {icResult.ok ? "✓ " : "⚠️ "}
+                    {icResult.text}
+                  </div>
+                )}
+              </section>
+            )}
 
             {/* Classement squashnet : rafraîchissement manuel (rattrape les nouveaux inscrits
                 sans attendre le cron mensuel du 8). */}

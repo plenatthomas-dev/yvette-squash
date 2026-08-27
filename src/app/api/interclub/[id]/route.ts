@@ -23,7 +23,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "Rencontre introuvable" }, { status: 404 });
   }
 
-  const view = serializeInterclub(f, session.userId);
+  // Membres alignés dans une équipe, pour le sélecteur de composition. On renvoie TOUTES les
+  // équipes et pas seulement celle de la rencontre : un joueur de l'équipe 1 dépanne
+  // régulièrement l'équipe 2. Le client met l'équipe de la rencontre en tête.
+  const rosterRows = await prisma.user.findMany({
+    where: { teamId: { not: null }, disabledAt: null },
+    select: { id: true, displayName: true, nickname: true, team: { select: { id: true, name: true } } },
+  });
+  const roster = rosterRows
+    .map((u) => ({
+      id: u.id,
+      name: u.nickname ?? u.displayName,
+      teamId: u.team?.id ?? null,
+      teamName: u.team?.name ?? null,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
+
+  const view = { ...serializeInterclub(f, session.userId), roster };
   // Auto-cicatrisation : le statut DÉDUIT fait foi. Si la colonne a divergé (dernier score
   // saisi ailleurs, rencontre laissée « en cours »), on la recale pour que la LISTE soit juste.
   if (view.status !== f.status) {

@@ -103,12 +103,69 @@ export function validGameSequence(games: readonly GameScore[], bestOf: number): 
   let away = 0;
   for (const g of games) {
     if (home >= needed || away >= needed) return false; // le match était déjà fini
-    const w = gameWinner(g);
-    if (!w) return false;
-    if (w === "home") home += 1;
+    // `checkGame` plutôt que `gameWinner` : lui seul écarte un 12-0, qui satisfait pourtant
+    // « 11 points et 2 d'écart ». Le serveur applique ainsi exactement la règle que l'écran
+    // de saisie affiche.
+    if (checkGame(g) !== "finished") return false;
+    if (gameWinner(g) === "home") home += 1;
     else away += 1;
   }
   return true;
+}
+
+/**
+ * État d'un jeu en cours de SAISIE. Distinguer « pas encore fini » d'« impossible » est
+ * essentiel : une ligne fraîchement ajoutée vaut 0-0, ce qui n'est pas une erreur mais un
+ * jeu qu'on n'a pas encore renseigné. Crier à l'erreur dès l'ouverture apprend à l'utilisateur
+ * à ignorer les messages.
+ */
+export type GameCheck = "empty" | "in-progress" | "finished" | "impossible";
+
+export function checkGame(g: GameScore): GameCheck {
+  const { home, away } = g;
+  if (!Number.isInteger(home) || !Number.isInteger(away) || home < 0 || away < 0) return "impossible";
+  if (home === 0 && away === 0) return "empty";
+  // L'impossible se teste AVANT le terminé : un 12-0 satisfait « 11 points et 2 d'écart »,
+  // mais au-delà de 11 on ne marque que pour prendre 2 points d'écart — il n'a pas pu exister.
+  if (Math.max(home, away) > POINTS_TO_WIN && Math.abs(home - away) > MIN_LEAD) return "impossible";
+  if (gameWinner(g)) return "finished";
+  return "in-progress";
+}
+
+/**
+ * Décrit le premier problème d'une suite de jeux en cours de saisie, ou `null` si tout va bien.
+ * Les jeux vides (0-0) sont ignorés : ce sont des lignes qu'on vient d'ouvrir. Le message est
+ * volontairement précis — « le jeu 2 n'est pas terminé » vaut mieux qu'un rappel du règlement.
+ */
+export function describeSequenceProblem(games: readonly GameScore[], bestOf: number): string | null {
+  if (games.length > bestOf) return `Un match au meilleur des ${bestOf} jeux n'en compte pas plus de ${bestOf}.`;
+
+  const needed = winGamesFor(bestOf);
+  let home = 0;
+  let away = 0;
+
+  for (let i = 0; i < games.length; i++) {
+    const state = checkGame(games[i]);
+    if (state === "empty") continue;
+    if (state === "impossible") {
+      return `Jeu ${i + 1} : score impossible. Un jeu se gagne à 11 points, et au-delà seul un écart de 2 points le conclut.`;
+    }
+    if (state === "in-progress") {
+      return `Jeu ${i + 1} : pas encore terminé (11 points, avec 2 points d'écart).`;
+    }
+    if (home >= needed || away >= needed) {
+      return `Le match était déjà gagné avant le jeu ${i + 1}.`;
+    }
+    if (gameWinner(games[i]) === "home") home += 1;
+    else away += 1;
+  }
+
+  return null;
+}
+
+/** Les jeux réellement joués, dans l'ordre — les lignes vides sont écartées. */
+export function playedGames(games: readonly GameScore[]): GameScore[] {
+  return games.filter((g) => checkGame(g) === "finished");
 }
 
 /** La suite de jeux désigne-t-elle un vainqueur du match ? */

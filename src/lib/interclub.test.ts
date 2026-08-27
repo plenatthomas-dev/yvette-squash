@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   applyPoint,
   applyServe,
+  checkGame,
   contrastRatio,
+  describeSequenceProblem,
   gameWinner,
   isValidBestOf,
   isValidMatchCount,
@@ -10,6 +12,7 @@ import {
   parseFollowLevel,
   isPlayerColor,
   playerColor,
+  playedGames,
   PLAYER_COLORS,
   replay,
   sequenceWinner,
@@ -265,6 +268,85 @@ describe("validGameSequence — saisie a posteriori", () => {
     expect(sequenceWinner([g(11, 5), g(11, 8), g(11, 9)], 5)).toBe("home");
     expect(sequenceWinner([g(11, 5), g(6, 11)], 5)).toBeNull();
     expect(sequenceWinner([g(5, 11), g(6, 11)], 3)).toBe("away");
+  });
+});
+
+describe("checkGame — saisie en cours", () => {
+  const g = (home: number, away: number) => ({ home, away });
+
+  it("une ligne fraîchement ouverte (0-0) est vide, pas fausse", () => {
+    expect(checkGame(g(0, 0))).toBe("empty");
+  });
+
+  it("un jeu commencé est « en cours »", () => {
+    expect(checkGame(g(7, 4))).toBe("in-progress");
+    expect(checkGame(g(0, 3))).toBe("in-progress");
+  });
+
+  it("une prolongation en cours reste « en cours », pas impossible", () => {
+    expect(checkGame(g(11, 10))).toBe("in-progress");
+    expect(checkGame(g(13, 12))).toBe("in-progress");
+  });
+
+  it("reconnaît un jeu terminé, y compris 11-0", () => {
+    expect(checkGame(g(11, 9))).toBe("finished");
+    expect(checkGame(g(11, 0))).toBe("finished");
+    expect(checkGame(g(12, 10))).toBe("finished");
+  });
+
+  it("refuse un score qui n'a pas pu exister : au-delà de 11, l'écart ne dépasse jamais 2", () => {
+    expect(checkGame(g(12, 0))).toBe("impossible");
+    expect(checkGame(g(15, 3))).toBe("impossible");
+  });
+
+  it("refuse un score négatif ou décimal", () => {
+    expect(checkGame(g(-1, 5))).toBe("impossible");
+    expect(checkGame(g(2.5, 5))).toBe("impossible");
+  });
+});
+
+describe("describeSequenceProblem — messages de saisie", () => {
+  const g = (home: number, away: number) => ({ home, away });
+
+  it("ne signale RIEN sur une ligne qu'on vient d'ouvrir", () => {
+    expect(describeSequenceProblem([g(0, 0)], 5)).toBeNull();
+    expect(describeSequenceProblem([g(11, 5), g(0, 0)], 5)).toBeNull();
+  });
+
+  it("ne signale rien sur une suite valide", () => {
+    expect(describeSequenceProblem([g(11, 5), g(9, 11), g(11, 8)], 5)).toBeNull();
+  });
+
+  it("nomme le jeu non terminé plutôt que de réciter le règlement", () => {
+    expect(describeSequenceProblem([g(11, 5), g(7, 4)], 5)).toMatch(/Jeu 2/);
+    expect(describeSequenceProblem([g(11, 5), g(7, 4)], 5)).toMatch(/pas encore terminé/);
+  });
+
+  it("nomme le jeu impossible", () => {
+    expect(describeSequenceProblem([g(15, 3)], 5)).toMatch(/Jeu 1/);
+    expect(describeSequenceProblem([g(15, 3)], 5)).toMatch(/impossible/);
+  });
+
+  it("signale un jeu joué après la fin du match", () => {
+    const p = describeSequenceProblem([g(11, 1), g(11, 2), g(11, 3), g(11, 4)], 5);
+    expect(p).toMatch(/déjà gagné avant le jeu 4/);
+  });
+
+  it("signale un dépassement du format", () => {
+    const six = [g(11, 1), g(1, 11), g(11, 1), g(1, 11), g(11, 1), g(1, 11)];
+    expect(describeSequenceProblem(six, 5)).toMatch(/pas plus de 5/);
+  });
+});
+
+describe("playedGames", () => {
+  const g = (home: number, away: number) => ({ home, away });
+
+  it("écarte les lignes vides et ne garde que les jeux terminés", () => {
+    expect(playedGames([g(11, 5), g(0, 0), g(9, 11), g(0, 0)])).toEqual([g(11, 5), g(9, 11)]);
+  });
+
+  it("écarte aussi un jeu commencé mais pas fini", () => {
+    expect(playedGames([g(11, 5), g(7, 4)])).toEqual([g(11, 5)]);
   });
 });
 

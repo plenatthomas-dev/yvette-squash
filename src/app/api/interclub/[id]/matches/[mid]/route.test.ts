@@ -220,4 +220,22 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
     h.user = null;
     expect((await PATCH(patch({ homeUserId: "fantome" }), ctx)).status).toBe(400);
   });
+
+  it("nomme un remplaçant hors appli tout en détachant le membre précédent", async () => {
+    await PATCH(patch({ homeUserId: null, homeDisplayName: "Jean-Mi" }), ctx);
+    expect(h.updated).toMatchObject({ homeDisplayName: "Jean-Mi" });
+    expect(h.updated?.homeUser).toEqual({ disconnect: true });
+  });
+
+  it("le nom d'un membre rattaché prime sur un nom libre envoyé en même temps", async () => {
+    h.user = { id: "u9", displayName: "Jérôme Blanc", nickname: "Jéjé" };
+    await PATCH(patch({ homeUserId: "u9", homeDisplayName: "Truc" }), ctx);
+    expect(h.updated).toMatchObject({ homeDisplayName: "Jéjé" });
+  });
+
+  it("refuse un score impossible que « 11 points et 2 d'écart » laisserait passer", async () => {
+    // 12-0 satisfait la règle naïve mais n'a pas pu exister : au-delà de 11 on ne marque
+    // que pour prendre 2 points d'écart.
+    expect((await PATCH(patch({ games: [{ home: 12, away: 0 }] }), ctx)).status).toBe(400);
+  });
 });

@@ -3533,8 +3533,15 @@ body[data-bottombar] .install-banner {
 }
 
 /* Ligne de rencontre / de match : un bouton pleine largeur, pas un lien — la cible doit
-   rester confortable au pouce, l'appli se tient debout entre deux portes. */
+   rester confortable au pouce, l'appli se tient debout entre deux portes.
+
+   ⚠️ Pico redéfinit --pico-color À L'INTÉRIEUR des <button> (texte clair sur fond plein).
+   Ces lignes-ci sont des boutons à fond de CARTE : sans rétablir la variable, tout texte
+   nu qu'elles contiennent — le nom des joueurs, le score en jeux — sortait blanc sur blanc,
+   seuls survivant les spans portant .muted (autre variable). --pico-contrast, lui, n'est
+   pas détourné par les boutons et suit les trois thèmes. */
 .ic-row, .ic-match {
+  --pico-color: var(--pico-contrast);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -3545,7 +3552,7 @@ body[data-bottombar] .install-banner {
   background: var(--pico-card-background-color);
   border: 1px solid var(--pico-card-border-color);
   border-radius: var(--radius);
-  color: var(--pico-color);
+  color: var(--pico-contrast);
   font-size: 0.85rem;
 }
 .ic-row:hover, .ic-match:hover { border-color: var(--grid-line); }
@@ -3560,10 +3567,10 @@ body[data-bottombar] .install-banner {
 .ic-opponent { flex: 1; min-width: 0; }
 .ic-score, .ic-games {
   flex: 0 0 auto;
-  font-weight: 700;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.ic-score, .ic-gamescore { font-weight: 700; }
 
 .ic-status {
   flex: 0 0 auto;
@@ -3594,35 +3601,116 @@ body[data-bottombar] .install-banner {
   color: var(--pico-muted-color);
   font-variant-numeric: tabular-nums;
 }
-.ic-players { flex: 1; min-width: 0; }
-.ic-player { display: inline-flex; align-items: center; gap: 4px; }
+.ic-players {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.ic-player {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ic-versus {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+}
 
-/* Pastille de maillot : un point, jamais un aplat. Une couleur de maillot ne doit pas
-   pouvoir se lire comme un état ni comme une zone actionnable. */
+/* Pastille de maillot : un disque, jamais un aplat. La taille « lg » sert dans les listes,
+   où la couleur est justement ce qu'on cherche du regard depuis le bord du terrain ; une
+   couleur de maillot ne doit pour autant jamais se lire comme un état ni comme une zone
+   actionnable. */
 .ic-dot {
   display: inline-block;
-  width: 10px;
-  height: 10px;
   flex: 0 0 auto;
   border-radius: 999px;
   border: 1px solid;
 }
+.ic-dot-md { width: 10px; height: 10px; }
+.ic-dot-lg { width: 16px; height: 16px; }
 
+/* --- Saisie d'un match --- */
 .ic-editor {
-  padding: 10px 14px;
+  padding: 12px 14px;
   border: 1px solid var(--grid-line);
   border-radius: var(--radius);
   background: var(--pico-card-background-color);
 }
 .ic-editor label { font-size: 0.85rem; }
+.ic-field { display: block; margin-bottom: 10px; }
+/* Le nom prend la largeur, la couleur se contente d'une pastille à sa droite : c'est une
+   information secondaire, elle ne mérite pas une ligne entière. */
+.ic-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ic-field-row > select,
+.ic-field-row > input {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
 .ic-form-row { display: flex; gap: 10px; }
 .ic-form-row > label { flex: 1; min-width: 0; }
+
+/* Sélecteur de couleur : pastille cliquable + grille dépliante. */
+.ic-picker { position: relative; flex: 0 0 auto; display: inline-flex; }
+.ic-swatch-btn {
+  width: 38px;
+  height: 38px;
+  margin: 0;
+  padding: 0;
+  border-radius: 999px;
+  border: 2px solid var(--grid-line);
+  background: transparent;
+  color: var(--pico-muted-color);
+  font-weight: 700;
+  line-height: 1;
+}
+.ic-swatches {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--grid-line);
+  background: var(--pico-card-background-color);
+  box-shadow: var(--elev-1);
+}
+.ic-swatch {
+  width: 34px;
+  height: 34px;
+  margin: 0;
+  padding: 0;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  line-height: 1;
+}
+.ic-swatch.is-on { outline: 2px solid var(--pico-contrast); outline-offset: 2px; }
+.ic-swatch-none {
+  background: transparent;
+  border-color: var(--grid-line);
+  color: var(--pico-muted-color);
+}
+
+.ic-games-hint { margin: 14px 0 8px; }
 
 .ic-game-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 .ic-game-row > span:first-child { flex: 0 0 48px; }
 .ic-game-row input {
@@ -3632,14 +3720,27 @@ body[data-bottombar] .install-banner {
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
-.ic-game-row button { flex: 0 0 auto; margin: 0; width: auto; padding: 4px 10px; }
+.ic-game-del {
+  flex: 0 0 auto;
+  margin: 0;
+  width: auto;
+  padding: 6px 12px;
+}
 
-/* Unique point de rupture du projet. En dessous, la ligne de rencontre passe sur deux
-   niveaux plutôt que de comprimer le nom de l'adversaire jusqu'à l'illisible. */
+/* Les actions ne doivent pas coller au dernier champ ni les unes aux autres : « Ajouter un
+   jeu » agit sur la liste au-dessus, « Annuler / Enregistrer » ferment la saisie — deux
+   portées différentes, donc un vrai intervalle entre elles. */
+.ic-add-game { margin: 4px 0 0; width: auto; }
+.ic-problem { margin: 14px 0 0; }
+.ic-editor-actions { margin-top: 18px; }
+
+/* Unique point de rupture du projet. En dessous, la ligne passe sur deux niveaux plutôt que
+   de comprimer les noms jusqu'à l'illisible. */
 @media (max-width: 560px) {
   .ic-row, .ic-match { flex-wrap: wrap; gap: 6px 10px; }
-  .ic-opponent { flex: 1 0 100%; order: 2; }
+  .ic-opponent, .ic-players { flex: 1 0 100%; order: 2; }
   .ic-score, .ic-games { order: 3; }
   .ic-status { order: 4; margin-left: auto; }
   .ic-form-row { flex-direction: column; gap: 0; }
+  .ic-swatches { grid-template-columns: repeat(3, auto); }
 }

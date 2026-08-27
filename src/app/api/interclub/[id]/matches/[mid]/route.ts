@@ -133,9 +133,12 @@ export async function PATCH(
             throw new HttpError(400, "Membre invalide");
           }
         }
-        // Nom libre : ne s'applique que si aucun membre n'est explicitement rattaché dans la
-        // même requête, sinon le nom du membre (figé juste au-dessus) primerait à tort.
-        if (typeof homeDisplayName === "string" && homeDisplayName.trim() && homeUserId === undefined) {
+        // Nom libre (remplaçant hors appli, ou remise à « à désigner »). On ne l'applique que
+        // si aucun MEMBRE n'est rattaché dans la même requête, sinon il écraserait le nom figé
+        // juste au-dessus. `homeUserId: null` accompagne au contraire un nom libre : c'est
+        // ainsi que le client détache un membre tout en nommant son remplaçant.
+        const memberAttached = typeof homeUserId === "string" && homeUserId.length > 0;
+        if (typeof homeDisplayName === "string" && homeDisplayName.trim() && !memberAttached) {
           data.homeDisplayName = homeDisplayName.trim().slice(0, MAX_PLAYER_NAME_LEN);
         }
         if (typeof awayName === "string" && awayName.trim()) {

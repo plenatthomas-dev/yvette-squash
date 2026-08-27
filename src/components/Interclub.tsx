@@ -5,10 +5,11 @@ import { Dialog } from "@/components/Dialog";
 import { readJson } from "@/lib/apiFetch";
 import { EmptyState, Skeleton } from "@/components/Placeholders";
 import {
+  describeSequenceProblem,
   isValidBestOf,
+  playedGames,
   PLAYER_COLORS,
   playerColor,
-  validGameSequence,
   winGamesFor,
   type GameScore,
 } from "@/lib/interclub";
@@ -19,6 +20,8 @@ import {
 // saisie a posteriori reste le mode de repli les soirs où personne ne marque.
 
 type Team = { id: string; name: string };
+
+type RosterEntry = { id: string; name: string; teamId: string | null; teamName: string | null };
 
 type FixtureRow = {
   id: string;
@@ -52,6 +55,7 @@ type Fixture = FixtureRow & {
   winGames: number;
   isCreator: boolean;
   matches: MatchRow[];
+  roster: RosterEntry[];
 };
 
 const STATUS_LABEL: Record<FixtureRow["status"], string> = {
@@ -59,6 +63,9 @@ const STATUS_LABEL: Record<FixtureRow["status"], string> = {
   live: "En cours",
   done: "Terminée",
 };
+
+/** Placeholder posé à la création d'une rencontre dont la composition n'est pas connue. */
+const UNSET = "À désigner";
 
 /** "2026-09-03" → "jeu. 3 sept." — les rencontres se repèrent au jour de la semaine. */
 function shortDate(iso: string): string {
@@ -73,12 +80,20 @@ function todayISO(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-/** Pastille de couleur de maillot. Jamais un aplat sur toute la ligne (cf. DESIGN.md). */
-function ColorDot({ color }: { color: string | null }) {
+/**
+ * Pastille de couleur de maillot. Assez grosse pour se lire d'un coup d'œil depuis le bord du
+ * terrain — c'est tout son intérêt — mais jamais un aplat sur la ligne : DESIGN.md réserve les
+ * grandes surfaces colorées à ce qui est actionnable.
+ */
+function ColorDot({ color, size = "md" }: { color: string | null; size?: "md" | "lg" }) {
   const c = playerColor(color);
   if (!c) return null;
   return (
-    <span className="ic-dot" style={{ background: c.bg, borderColor: c.fg }} title={`Maillot ${c.label}`}>
+    <span
+      className={`ic-dot ic-dot-${size}`}
+      style={{ background: c.bg, borderColor: c.fg }}
+      title={`Maillot ${c.label}`}
+    >
       <span className="sr-only">Maillot {c.label}</span>
     </span>
   );
@@ -408,6 +423,8 @@ function FixtureDialog({
               <MatchEditor
                 match={m}
                 bestOf={fixture.bestOf}
+                roster={fixture.roster}
+                fixtureTeamId={fixture.team.id}
                 busy={busy}
                 onCancel={() => setEditing(null)}
                 onSave={(body) => {
@@ -420,13 +437,15 @@ function FixtureDialog({
                 <span className="ic-order">#{m.order}</span>
                 <span className="ic-players">
                   <span className="ic-player">
-                    <ColorDot color={m.homeColor} />
-                    {m.homeDisplayName}
+                    <ColorDot color={m.homeColor} size="lg" />
+                    <span className={m.homeDisplayName === UNSET ? "muted" : undefined}>
+                      {m.homeDisplayName}
+                    </span>
                   </span>
-                  <span className="muted tiny"> c. </span>
+                  <span className="ic-versus">c.</span>
                   <span className="ic-player">
-                    <ColorDot color={m.awayColor} />
-                    {m.awayName}
+                    <ColorDot color={m.awayColor} size="lg" />
+                    <span className={m.awayName === UNSET ? "muted" : undefined}>{m.awayName}</span>
                   </span>
                 </span>
                 <span className="ic-games">
@@ -434,7 +453,9 @@ function FixtureDialog({
                     <span className="muted tiny">à saisir</span>
                   ) : (
                     <>
-                      {m.gamesHome}–{m.gamesAway}
+                      <span className="ic-gamescore">
+                        {m.gamesHome}–{m.gamesAway}
+                      </span>
                       {m.games.length > 0 && (
                         <span className="muted tiny">
                           {" "}
@@ -459,23 +480,102 @@ function FixtureDialog({
   );
 }
 
+// --- Choix de la couleur de maillot ----------------------------------------
+
+/**
+ * Sélecteur compact : une pastille posée à droite du nom, qui déplie une grille de couleurs.
+ * Un `<select>` pleine largeur mangeait un tiers de l'écran pour une information secondaire,
+ * et n'affichait la couleur que par son nom — alors que c'est justement le repère visuel.
+ */
+function ColorPicker({
+  value,
+  onChange,
+  label,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  label: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = playerColor(value);
+
+  return (
+    <span className="ic-picker">
+      <button
+        type="button"
+        className="ic-swatch-btn"
+        aria-label={current ? `${label} : ${current.label}. Changer` : `${label} : choisir une couleur`}
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        style={current ? { background: current.bg, borderColor: current.fg } : undefined}
+      >
+        {!current && <span aria-hidden="true">?</span>}
+      </button>
+
+      {open && (
+        <span className="ic-swatches" role="listbox" aria-label={label}>
+          {PLAYER_COLORS.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              role="option"
+              aria-selected={value === c.key}
+              className={`ic-swatch${value === c.key ? " is-on" : ""}`}
+              style={{ background: c.bg, borderColor: c.fg }}
+              title={c.label}
+              onClick={() => {
+                onChange(c.key);
+                setOpen(false);
+              }}
+            >
+              <span className="sr-only">{c.label}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            role="option"
+            aria-selected={value === ""}
+            className={`ic-swatch ic-swatch-none${value === "" ? " is-on" : ""}`}
+            title="Aucune couleur"
+            onClick={() => {
+              onChange("");
+              setOpen(false);
+            }}
+          >
+            <span aria-hidden="true">✕</span>
+            <span className="sr-only">Aucune couleur</span>
+          </button>
+        </span>
+      )}
+    </span>
+  );
+}
+
 // --- Saisie d'un match -----------------------------------------------------
 
 function MatchEditor({
   match,
   bestOf,
+  roster,
+  fixtureTeamId,
   busy,
   onCancel,
   onSave,
 }: {
   match: MatchRow;
   bestOf: number;
+  roster: RosterEntry[];
+  fixtureTeamId: string;
   busy: boolean;
   onCancel: () => void;
   onSave: (body: Record<string, unknown>) => void;
 }) {
-  const [homeName, setHomeName] = useState(match.homeDisplayName);
-  const [awayName, setAwayName] = useState(match.awayName);
+  // "" = non renseigné, "__free__" = nom libre (remplaçant hors appli), sinon l'id du membre.
+  const FREE = "__free__";
+  const initialPick = match.homeUserId ?? (match.homeDisplayName === UNSET ? "" : FREE);
+  const [pick, setPick] = useState(initialPick);
+  const [freeName, setFreeName] = useState(match.homeUserId ? "" : match.homeDisplayName === UNSET ? "" : match.homeDisplayName);
+  const [awayName, setAwayName] = useState(match.awayName === UNSET ? "" : match.awayName);
   const [homeColor, setHomeColor] = useState(match.homeColor ?? "");
   const [awayColor, setAwayColor] = useState(match.awayColor ?? "");
   const [games, setGames] = useState<GameScore[]>(
@@ -488,49 +588,73 @@ function MatchEditor({
     setGames((prev) => prev.map((g, k) => (k === i ? { ...g, [side]: n } : g)));
   };
 
-  // On ne laisse pas enregistrer un score que le serveur refusera : le moteur pur est le
-  // MÊME des deux côtés, donc le message arrive avant l'aller-retour réseau.
-  const sequenceOk = validGameSequence(games, bestOf);
-  const maxGames = bestOf;
+  // Le moteur pur est le MÊME des deux côtés : ce que l'écran refuse, le serveur le refuse
+  // aussi, et réciproquement. Un jeu qu'on vient d'ouvrir (0-0) n'est pas une erreur — il est
+  // simplement vide, et ne remonte donc aucun message.
+  const problem = describeSequenceProblem(games, bestOf);
+
+  // L'équipe de la rencontre d'abord : c'est là qu'on cherche 9 fois sur 10. Les autres
+  // équipes restent accessibles, un joueur dépannant régulièrement l'équipe voisine.
+  const ownTeam = roster.filter((r) => r.teamId === fixtureTeamId);
+  const otherTeams = roster.filter((r) => r.teamId !== fixtureTeamId);
 
   return (
     <div className="ic-editor">
-      <div className="ic-form-row">
-        <label>
-          Joueur
-          <input value={homeName} onChange={(e) => setHomeName(e.target.value)} maxLength={40} />
-        </label>
-        <label>
-          Adversaire
-          <input value={awayName} onChange={(e) => setAwayName(e.target.value)} maxLength={40} />
-        </label>
-      </div>
-      <div className="ic-form-row">
-        <label>
-          Maillot
-          <select value={homeColor} onChange={(e) => setHomeColor(e.target.value)}>
-            <option value="">—</option>
-            {PLAYER_COLORS.map((c) => (
-              <option key={c.key} value={c.key}>
-                {c.label}
-              </option>
-            ))}
+      <label className="ic-field">
+        Joueur
+        <span className="ic-field-row">
+          <select value={pick} onChange={(e) => setPick(e.target.value)}>
+            <option value="">— à désigner —</option>
+            {ownTeam.length > 0 && (
+              <optgroup label={ownTeam[0].teamName ?? "Équipe"}>
+                {ownTeam.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {otherTeams.length > 0 && (
+              <optgroup label="Autres équipes">
+                {otherTeams.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name} {r.teamName ? `(${r.teamName})` : ""}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <option value={FREE}>Autre (nom libre)…</option>
           </select>
-        </label>
-        <label>
-          Maillot adverse
-          <select value={awayColor} onChange={(e) => setAwayColor(e.target.value)}>
-            <option value="">—</option>
-            {PLAYER_COLORS.map((c) => (
-              <option key={c.key} value={c.key}>
-                {c.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+          <ColorPicker value={homeColor} onChange={setHomeColor} label="Maillot du joueur" />
+        </span>
+      </label>
 
-      <p className="tiny muted">
+      {pick === FREE && (
+        <label className="ic-field">
+          <span className="sr-only">Nom du remplaçant</span>
+          <input
+            value={freeName}
+            onChange={(e) => setFreeName(e.target.value)}
+            placeholder="Nom du remplaçant"
+            maxLength={40}
+          />
+        </label>
+      )}
+
+      <label className="ic-field">
+        Adversaire
+        <span className="ic-field-row">
+          <input
+            value={awayName}
+            onChange={(e) => setAwayName(e.target.value)}
+            placeholder="Nom de l'adversaire"
+            maxLength={40}
+          />
+          <ColorPicker value={awayColor} onChange={setAwayColor} label="Maillot de l'adversaire" />
+        </span>
+      </label>
+
+      <p className="tiny muted ic-games-hint">
         Jeux, dans l&apos;ordre. {winGamesFor(bestOf)} jeux gagnants.
       </p>
       {games.map((g, i) => (
@@ -539,20 +663,23 @@ function MatchEditor({
           <input
             type="number"
             min={0}
+            inputMode="numeric"
             value={g.home}
-            aria-label={`Jeu ${i + 1}, points de ${homeName}`}
+            aria-label={`Jeu ${i + 1}, points du joueur`}
             onChange={(e) => setGame(i, "home", e.target.value)}
           />
           <span aria-hidden="true">–</span>
           <input
             type="number"
             min={0}
+            inputMode="numeric"
             value={g.away}
-            aria-label={`Jeu ${i + 1}, points de ${awayName}`}
+            aria-label={`Jeu ${i + 1}, points de l'adversaire`}
             onChange={(e) => setGame(i, "away", e.target.value)}
           />
           <button
-            className="secondary tiny"
+            type="button"
+            className="secondary ic-game-del"
             onClick={() => setGames((prev) => prev.filter((_, k) => k !== i))}
             aria-label={`Supprimer le jeu ${i + 1}`}
           >
@@ -560,35 +687,48 @@ function MatchEditor({
           </button>
         </div>
       ))}
-      {games.length < maxGames && (
+
+      {games.length < bestOf && (
         <button
-          className="secondary"
+          type="button"
+          className="secondary ic-add-game"
           onClick={() => setGames((prev) => [...prev, { home: 0, away: 0 }])}
         >
           + Ajouter un jeu
         </button>
       )}
 
-      {!sequenceOk && (
-        <p className="notice error tiny" role="alert">
-          Ce score est impossible : chaque jeu se gagne à 11 points avec 2 d&apos;écart, et aucun
-          jeu ne se joue après la fin du match.
+      {problem && (
+        <p className="notice error tiny ic-problem" role="alert">
+          {problem}
         </p>
       )}
 
-      <div className="modal-actions">
-        <button className="secondary" onClick={onCancel}>
+      <div className="modal-actions ic-editor-actions">
+        <button type="button" className="secondary" onClick={onCancel}>
           Annuler
         </button>
         <button
-          disabled={busy || !sequenceOk}
+          type="button"
+          disabled={busy || !!problem}
           onClick={() =>
             onSave({
-              homeDisplayName: homeName,
-              awayName,
+              // Un membre choisi prime : le serveur fige alors son nom d'affichage. Le nom
+              // libre s'accompagne de `homeUserId: null` pour détacher le membre précédent.
+              // Revenir sur « à désigner » doit aussi être possible : on remet le placeholder.
+              ...(pick && pick !== FREE
+                ? { homeUserId: pick }
+                : pick === FREE && freeName.trim()
+                  ? { homeUserId: null, homeDisplayName: freeName.trim() }
+                  : pick === ""
+                    ? { homeUserId: null, homeDisplayName: UNSET }
+                    : {}),
+              awayName: awayName.trim() || UNSET,
               homeColor: homeColor || null,
               awayColor: awayColor || null,
-              games,
+              // Les lignes vides ou inachevées ne partent pas : `problem` a déjà bloqué les
+              // secondes, les premières sont juste des lignes qu'on a ouvertes sans s'en servir.
+              games: playedGames(games),
             })
           }
         >
