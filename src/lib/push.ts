@@ -78,3 +78,32 @@ export async function pushToUser(userId: string, payload: PushPayload): Promise<
   );
   return sent;
 }
+
+/**
+ * Envoie une notif à une LISTE de membres. Sert au suivi interclub, où l'on ne touche que les
+ * abonnés d'une équipe et d'un niveau donnés — `pushToAll` arroserait tout le club.
+ *
+ * Dédoublonne les ids reçus (un même membre peut remonter de plusieurs abonnements) et
+ * s'appuie sur `pushToUser`, qui gère déjà les appareils multiples et purge les abonnements
+ * morts. Best-effort, comme le reste du module : un envoi en échec n'interrompt pas les autres
+ * et ne jette jamais.
+ */
+export async function pushToUsers(
+  userIds: readonly string[],
+  payload: PushPayload,
+): Promise<{ recipients: number; sent: number }> {
+  if (!ensureConfigured()) return { recipients: 0, sent: 0 };
+  const unique = [...new Set(userIds)];
+  let recipients = 0;
+  let sent = 0;
+  await Promise.all(
+    unique.map(async (userId) => {
+      const n = await pushToUser(userId, payload);
+      if (n > 0) {
+        recipients += 1;
+        sent += n;
+      }
+    }),
+  );
+  return { recipients, sent };
+}

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { getFeatures } from "@/lib/features-server";
 import { isAdminEmail } from "@/lib/admin";
 import { interclubInclude, serializeInterclub } from "@/lib/interclub-db";
+import { interclubChanged } from "@/lib/interclub-gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -67,5 +68,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   }
 
   await prisma.interclub.delete({ where: { id } });
+  interclubChanged();
   return NextResponse.json({ ok: true });
 }

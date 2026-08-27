@@ -11,7 +11,9 @@ import {
   validGameSequence,
   type GameScore,
 } from "@/lib/interclub";
-import { derivedStatus, MAX_PLAYER_NAME_LEN } from "@/lib/interclub-db";
+import { derivedStatus, fixtureScore, MAX_PLAYER_NAME_LEN } from "@/lib/interclub-db";
+import { interclubChanged } from "@/lib/interclub-gate";
+import { notifyFixtureDone } from "@/lib/interclub-notify";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -90,14 +92,41 @@ export async function PATCH(
     return isAdminEmail(me?.email);
   };
 
+  // Rempli DANS la transaction, consommé après : notifier depuis l'intérieur enverrait la
+  // notification même si la transaction était finalement annulée.
+  //
+  // Porté par un objet et non par une variable simple : TypeScript ne suit pas les
+  // affectations faites dans une fermeture, et rétrécirait le type à `null`.
+  const finished: {
+    value: {
+      fixtureId: string;
+      teamId: string;
+      teamName: string;
+      opponent: string;
+      score: { home: number; away: number };
+    } | null;
+  } = { value: null };
+
   const runOnce = () =>
     prisma.$transaction(
       async (tx) => {
+        // Remis à zéro DANS la transaction : un rejeu après conflit de sérialisation repart
+        // ainsi d'un état propre et ne peut pas notifier deux fois.
+        finished.value = null;
         const m = await tx.interclubMatch.findUnique({
           where: { id: mid },
           include: {
             interclub: {
-              select: { id: true, bestOf: true, matchCount: true, createdById: true, teamId: true },
+              select: {
+                id: true,
+                bestOf: true,
+                matchCount: true,
+                createdById: true,
+                teamId: true,
+                status: true,
+                opponent: true,
+                team: { select: { name: true } },
+              },
             },
           },
         });
@@ -196,10 +225,23 @@ export async function PATCH(
         // afficher « en cours » alors que le dernier match vient d'être saisi.
         const siblings = await tx.interclubMatch.findMany({
           where: { interclubId: id },
-          select: { gamesHome: true, status: true },
+          select: { gamesHome: true, gamesAway: true, status: true },
         });
         const eff = derivedStatus(m.interclub.matchCount, siblings);
         await tx.interclub.update({ where: { id }, data: { status: eff } });
+
+        // Une saisie a posteriori ne notifie PAS chaque match : c'est une correction, pas un
+        // direct. Seul le passage de la rencontre à « terminée » fait événement — c'est
+        // exactement ce que demandent les abonnés au niveau « résultat ».
+        if (m.interclub.status !== "done" && eff === "done") {
+          finished.value = {
+            fixtureId: id,
+            teamId: m.interclub.teamId,
+            teamName: m.interclub.team.name,
+            opponent: m.interclub.opponent,
+            score: fixtureScore(siblings),
+          };
+        }
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
@@ -211,6 +253,11 @@ export async function PATCH(
   for (let attempt = 0; ; attempt++) {
     try {
       await runOnce();
+      interclubChanged();
+      if (finished.value) {
+        const { score, ...ctx } = finished.value;
+        await notifyFixtureDone(ctx, score);
+      }
       return NextResponse.json({ ok: true });
     } catch (e) {
       if (e instanceof HttpError) {

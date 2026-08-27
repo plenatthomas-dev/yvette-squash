@@ -3,7 +3,14 @@ import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { getFeatures } from "@/lib/features-server";
 import { sequenceWinner, validGameSequence, type GameScore } from "@/lib/interclub";
-import { derivedStatus, scorerIsStale, type LiveSnapshot } from "@/lib/interclub-db";
+import { derivedStatus, fixtureScore, scorerIsStale, type LiveSnapshot } from "@/lib/interclub-db";
+import { interclubChanged } from "@/lib/interclub-gate";
+import {
+  notifyFixtureDone,
+  notifyFixtureStart,
+  notifyGameDone,
+  notifyMatchDone,
+} from "@/lib/interclub-notify";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,7 +60,17 @@ export async function PUT(
     where: { id: mid },
     include: {
       games: { orderBy: { number: "asc" } },
-      interclub: { select: { id: true, bestOf: true, matchCount: true } },
+      interclub: {
+        select: {
+          id: true,
+          bestOf: true,
+          matchCount: true,
+          status: true,
+          opponent: true,
+          teamId: true,
+          team: { select: { name: true } },
+        },
+      },
     },
   });
   if (!m || m.interclubId !== id) {
@@ -121,12 +138,45 @@ export async function PUT(
   // est en cours sous les yeux de tout le monde.
   const siblings = await prisma.interclubMatch.findMany({
     where: { interclubId: id },
-    select: { gamesHome: true, status: true },
+    select: { gamesHome: true, gamesAway: true, status: true },
   });
-  await prisma.interclub.update({
-    where: { id },
-    data: { status: derivedStatus(m.interclub.matchCount, siblings) },
-  });
+  const nextStatus = derivedStatus(m.interclub.matchCount, siblings);
+  await prisma.interclub.update({ where: { id }, data: { status: nextStatus } });
+
+  // Les spectateurs lisent un instantané mis en cache : sans cette invalidation, ils
+  // resteraient sur le score précédent jusqu'à l'expiration du TTL.
+  interclubChanged();
+
+  // --- notifications, sur les TRANSITIONS seulement ---------------------------
+  // On ne notifie jamais « au fil de l'eau » : c'est le passage d'un état à un autre qui fait
+  // événement. Tout est best-effort et n'engage pas la réponse — un envoi raté ne doit pas
+  // faire échouer la saisie d'un point.
+  const ctx = {
+    fixtureId: id,
+    teamId: m.interclub.teamId,
+    teamName: m.interclub.team.name,
+    opponent: m.interclub.opponent,
+  };
+  const gamesGrew = parsed.length > m.games.length;
+
+  if (m.interclub.status !== "live" && nextStatus === "live") {
+    await notifyFixtureStart(ctx);
+  }
+  if (winner) {
+    await notifyMatchDone(
+      ctx,
+      m.homeDisplayName,
+      m.awayName,
+      home,
+      away,
+      fixtureScore(siblings),
+    );
+  } else if (gamesGrew) {
+    await notifyGameDone(ctx, m.homeDisplayName, m.awayName, parsed);
+  }
+  if (m.interclub.status !== "done" && nextStatus === "done") {
+    await notifyFixtureDone(ctx, fixtureScore(siblings));
+  }
 
   return NextResponse.json({ ok: true, done: !!winner });
 }

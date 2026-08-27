@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
 vi.mock("@/lib/features-server", () => ({
   getFeatures: async () => ({ interclub: h.interclub }),
 }));
+vi.mock("@/lib/interclub-gate", () => ({ interclubChanged: vi.fn() }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -57,7 +58,17 @@ const freshMatch = (over: Record<string, unknown> = {}) => ({
   scorerClaimedAt: RECENT,
   updatedAt: RECENT,
   games: [] as Array<{ pointsHome: number; pointsAway: number }>,
-  interclub: { id: "f1", bestOf: 5, matchCount: 4 },
+  homeDisplayName: "Tom",
+  awayName: "Gégé",
+  interclub: {
+    id: "f1",
+    bestOf: 5,
+    matchCount: 4,
+    status: "live",
+    opponent: "Massy",
+    teamId: "team-1",
+    team: { name: "Équipe 1" },
+  },
   ...over,
 });
 

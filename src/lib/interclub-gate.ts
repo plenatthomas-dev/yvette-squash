@@ -1,0 +1,148 @@
+// Porte d'entrée BON MARCHÉ du suivi en direct : « où en sont les rencontres du jour ? »
+//
+// POURQUOI CE MODULE EXISTE
+// Un soir de rencontre, plusieurs membres gardent la page ouverte et l'interrogent toutes les
+// dix secondes pendant deux heures. Sans précaution, chaque interrogation de chaque spectateur
+// serait une lecture Postgres — Neon resterait éveillé et la facture croîtrait avec l'audience,
+// ce que `PRODUCT.md` proscrit explicitement (« pas de polling agressif, pas de requête DB
+// supplémentaire sur un chemin chaud »).
+//
+// La réponse vit donc dans le Data Cache de Vercel, invalidé par tag à chaque écriture du
+// marqueur. Le nombre de lectures Postgres est ainsi borné par la CADENCE DU MARQUEUR (une
+// écriture toutes les 5 s au plus), et non par le nombre de spectateurs : dix personnes qui
+// regardent coûtent autant qu'une seule.
+//
+// ⚠️ POURQUOI PAS LE CACHE CDN, contrairement à ce que prévoyait l'étude initiale.
+// Mettre `Cache-Control: public, s-maxage=…` sur cette route aurait effondré les spectateurs en
+// un seul appel origine — mais un cache PARTAGÉ indexe sur l'URL, pas sur le cookie de session.
+// La première réponse servie à un membre connecté aurait ensuite été rendue à N'IMPORTE QUELLE
+// requête, y compris non authentifiée : les noms des joueurs seraient devenus publics. Ajouter
+// `Vary: Cookie` ferait une entrée de cache par session, donc supprimerait tout le bénéfice.
+// Le Data Cache, lui, vit CÔTÉ SERVEUR, derrière le contrôle de session : on garde l'économie
+// sur Postgres — la ressource réellement rare — sans ouvrir la donnée.
+
+import { unstable_cache, revalidateTag } from "next/cache";
+import { prisma } from "./db";
+import { CLUB_TZ } from "./time";
+import { normalizeColor } from "./interclub";
+import { fixtureScore, parseLive } from "./interclub-db";
+
+const TAG = "interclub-live";
+
+/**
+ * Filet de sécurité court : une invalidation manquée ne fige l'affichage que 30 secondes.
+ * On reste très en dessous de la cadence d'une soirée, tout en évitant de relire Postgres
+ * quand rien ne bouge (entre deux matchs, à la pause).
+ */
+const TTL_S = 30;
+
+/** Date du jour en heure MURALE du club (règle unique du projet, cf. lib/time.ts). */
+export function todayISO(now: Date = new Date()): string {
+  return now.toLocaleDateString("en-CA", { timeZone: CLUB_TZ });
+}
+
+export interface LiveMatch {
+  id: string;
+  order: number;
+  home: string;
+  away: string;
+  homeColor: string | null;
+  awayColor: string | null;
+  status: string;
+  gamesHome: number | null;
+  gamesAway: number | null;
+  games: { home: number; away: number }[];
+  live: { current: { home: number; away: number }; serving: "home" | "away" | null } | null;
+}
+
+export interface LiveFixture {
+  id: string;
+  date: string;
+  teamId: string;
+  teamName: string;
+  opponent: string;
+  home: boolean;
+  division: string | null;
+  status: string;
+  score: { home: number; away: number };
+  matches: LiveMatch[];
+}
+
+async function readLive(): Promise<LiveFixture[]> {
+  const rows = await prisma.interclub.findMany({
+    // Les rencontres du jour ET celles restées en direct : une soirée qui déborde après
+    // minuit ne doit pas disparaître de l'écran de ceux qui la suivent.
+    where: { OR: [{ date: todayISO() }, { status: "live" }] },
+    orderBy: [{ date: "desc" }],
+    include: {
+      team: { select: { id: true, name: true } },
+      matches: {
+        orderBy: { order: "asc" },
+        include: { games: { orderBy: { number: "asc" } } },
+      },
+    },
+  });
+
+  return rows.map((f) => ({
+    id: f.id,
+    date: f.date,
+    teamId: f.teamId,
+    teamName: f.team.name,
+    opponent: f.opponent,
+    home: f.home,
+    division: f.division,
+    status: f.status,
+    score: fixtureScore(f.matches),
+    matches: f.matches.map((m) => {
+      const snap = m.status === "live" ? parseLive(m.liveJson) : null;
+      return {
+        id: m.id,
+        order: m.order,
+        home: m.homeDisplayName,
+        away: m.awayName,
+        homeColor: normalizeColor(m.homeColor),
+        awayColor: normalizeColor(m.awayColor),
+        status: m.status,
+        gamesHome: m.gamesHome,
+        gamesAway: m.gamesAway,
+        games: m.games.map((g) => ({ home: g.pointsHome, away: g.pointsAway })),
+        // On ne publie du direct que le score et le serveur. Le carré de service intéresse
+        // le marqueur, pas le spectateur : autant ne pas l'exposer.
+        live: snap ? { current: snap.current, serving: snap.serving } : null,
+      };
+    }),
+  }));
+}
+
+const liveCached = unstable_cache(readLive, ["interclub-live"], { tags: [TAG], revalidate: TTL_S });
+
+/**
+ * État des rencontres en cours, servi par le Data Cache. Ne touche Postgres qu'en cas de miss
+ * (invalidation par le marqueur, TTL écoulé) — ou de panne du cache, auquel cas on lit
+ * directement la base : dégradé en coût, jamais en exactitude.
+ */
+export async function getLiveFixtures(): Promise<LiveFixture[]> {
+  try {
+    return await liveCached();
+  } catch {
+    return readLive();
+  }
+}
+
+/**
+ * À appeler dès qu'un score a pu changer : point marqué, jeu terminé, saisie a posteriori,
+ * suppression d'une rencontre.
+ *
+ * ⚠️ Même portée que `alertsChanged` : `revalidateTag` n'invalide pas sur-le-champ, Next purge
+ * le tag APRÈS la réponse. Inutile de vouloir forcer un recalcul dans la même requête.
+ */
+export function interclubChanged(): void {
+  try {
+    revalidateTag(TAG);
+  } catch (e) {
+    // Ne JAMAIS faire échouer une écriture de score pour un problème de cache : au pire les
+    // spectateurs voient l'ancien état pendant le TTL (30 s). `revalidateTag` lève hors
+    // contexte de requête, et laisse remonter les erreurs de son magasin.
+    console.warn("[interclub] invalidation du cache impossible", e);
+  }
+}

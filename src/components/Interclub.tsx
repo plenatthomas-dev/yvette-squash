@@ -5,6 +5,7 @@ import { Dialog } from "@/components/Dialog";
 import { readJson } from "@/lib/apiFetch";
 import { EmptyState, Skeleton } from "@/components/Placeholders";
 import InterclubScorer from "@/components/InterclubScorer";
+import InterclubLive from "@/components/InterclubLive";
 import {
   COLOR_PRESETS,
   describeSequenceProblem,
@@ -292,6 +293,8 @@ export default function Interclub({
           Nouvelle rencontre
         </button>
       </div>
+
+      <InterclubLive teams={teams} toast={toast} onExpired={onExpired} />
 
       {rows.length === 0 ? (
         <EmptyState icon="🏸" text="Aucune rencontre pour le moment." />

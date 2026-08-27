@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
 vi.mock("@/lib/features-server", () => ({
   getFeatures: async () => ({ interclub: h.interclub }),
 }));
+vi.mock("@/lib/interclub-gate", () => ({ interclubChanged: vi.fn() }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
 vi.mock("@/lib/admin", () => ({ isAdminEmail: vi.fn(() => h.admin) }));
 vi.mock("@/lib/db", () => {
@@ -70,7 +71,18 @@ const freshMatch = () => ({
   scorerId: null,
   gamesHome: null,
   gamesAway: null,
-  interclub: { id: "f1", bestOf: 5, matchCount: 4, createdById: "u1", teamId: "team-1" },
+  homeDisplayName: "Tom",
+  awayName: "Gégé",
+  interclub: {
+    id: "f1",
+    bestOf: 5,
+    matchCount: 4,
+    createdById: "u1",
+    teamId: "team-1",
+    status: "live",
+    opponent: "Massy",
+    team: { name: "Équipe 1" },
+  },
 });
 
 beforeEach(() => {
