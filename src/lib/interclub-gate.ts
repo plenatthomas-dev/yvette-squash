@@ -25,7 +25,7 @@ import { unstable_cache, revalidateTag } from "next/cache";
 import { prisma } from "./db";
 import { CLUB_TZ } from "./time";
 import { normalizeColor } from "./interclub";
-import { fixtureScore, parseLive } from "./interclub-db";
+import { derivedStatus, fixtureScore, parseLive } from "./interclub-db";
 
 const TAG = "interclub-live";
 
@@ -91,7 +91,12 @@ async function readLive(): Promise<LiveFixture[]> {
     opponent: f.opponent,
     home: f.home,
     division: f.division,
-    status: f.status,
+    // Statut DÉDUIT des matchs, pas la colonne stockée. Deux marqueurs qui écrivent en même
+    // temps sur deux matchs de la même rencontre peuvent laisser cette colonne en retard
+    // (chacun relit les matchs voisins avant que l'autre n'ait écrit). La colonne se
+    // recale d'elle-même au prochain affichage du détail, mais le direct, lui, doit être
+    // juste TOUT DE SUITE — c'est son seul intérêt.
+    status: derivedStatus(f.matchCount, f.matches),
     score: fixtureScore(f.matches),
     matches: f.matches.map((m) => {
       const snap = m.status === "live" ? parseLive(m.liveJson) : null;

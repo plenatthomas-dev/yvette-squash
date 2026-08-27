@@ -71,6 +71,49 @@ describe("derivedStatus", () => {
   });
 });
 
+describe("matchs simultanés", () => {
+  // Cas réel : 4 matchs sur 2 terrains, donc deux marqueurs en parallèle sur deux
+  // téléphones. Rien dans le modèle ne suppose un match en cours à la fois — ces tests
+  // le figent, parce que c'est une garantie facile à casser par inadvertance.
+
+  it("deux matchs en cours en même temps laissent la rencontre « en cours »", () => {
+    expect(
+      derivedStatus(4, [
+        { gamesHome: null, status: "live" },
+        { gamesHome: null, status: "live" },
+        { gamesHome: null, status: "pending" },
+        { gamesHome: null, status: "pending" },
+      ]),
+    ).toBe("live");
+  });
+
+  it("le score de la rencontre ne compte que les matchs finis, les autres tournant encore", () => {
+    expect(
+      fixtureScore([
+        { gamesHome: 3, gamesAway: 1 },
+        { gamesHome: 0, gamesAway: 3 },
+        { gamesHome: null, gamesAway: null }, // en cours sur le terrain 1
+        { gamesHome: null, gamesAway: null }, // en cours sur le terrain 2
+      ]),
+    ).toEqual({ home: 1, away: 1 });
+  });
+
+  it("deux instantanés de direct coexistent sans se mélanger", () => {
+    const a = parseLive(JSON.stringify({ current: { home: 7, away: 4 }, serving: "home" }));
+    const b = parseLive(JSON.stringify({ current: { home: 2, away: 9 }, serving: "away" }));
+    expect(a?.current).toEqual({ home: 7, away: 4 });
+    expect(b?.current).toEqual({ home: 2, away: 9 });
+  });
+
+  it("deux prises de marquage distinctes s'évaluent indépendamment", () => {
+    const now = new Date("2026-09-03T21:00:00Z");
+    const frais = new Date(now.getTime() - 10_000);
+    const abandonne = new Date(now.getTime() - SCORER_STALE_MS - 1000);
+    expect(scorerIsStale(frais, frais, now)).toBe(false);
+    expect(scorerIsStale(abandonne, abandonne, now)).toBe(true);
+  });
+});
+
 describe("scorerIsStale", () => {
   const now = new Date("2026-09-03T21:00:00Z");
 
