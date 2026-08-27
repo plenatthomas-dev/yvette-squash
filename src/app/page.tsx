@@ -322,23 +322,6 @@ export default function Home() {
     unlockAudio();
   }, []);
 
-  // Alerte « terrain libéré » quand l'appli est OUVERTE : le service worker relaie la notification
-  // push par postMessage (cf. public/sw.js), on joue alors le son d'alerte. Appli fermée : c'est
-  // la notification système qui sonne (le navigateur ne nous laisse pas jouer notre son).
-  useEffect(() => {
-    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
-    const onMessage = (e: MessageEvent) => {
-      if (e.data && e.data.type === "slot-free") playAlert();
-    };
-    navigator.serviceWorker.addEventListener("message", onMessage);
-    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
-  }, []);
-
-  const loadAlerts = useCallback(async () => {
-    const r = await fetch("/api/alerts");
-    if (r.ok) setAlerts(await r.json());
-  }, []);
-
   // Une seule requête sert la liste ET la pastille. Chargée pour TOUT membre connecté, sans
   // condition sur le push : la cloche doit précisément renseigner ceux qui ne le reçoivent pas.
   const loadNotifs = useCallback(async () => {
@@ -354,8 +337,50 @@ export default function Home() {
     // `notifs` n'est pas une dépendance : il n'est ici qu'un type, jamais lu.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Alerte « terrain libéré » quand l'appli est OUVERTE : le service worker relaie la notification
+  // push par postMessage (cf. public/sw.js), on joue alors le son d'alerte. Appli fermée : c'est
+  // la notification système qui sonne (le navigateur ne nous laisse pas jouer notre son).
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    const onMessage = (e: MessageEvent) => {
+      if (!e.data) return;
+      if (e.data.type === "slot-free") playAlert();
+      // Un push vient d'arriver : la cloche se met à jour sur-le-champ, sans attendre que
+      // l'utilisateur recharge la page.
+      if (e.data.type === "push-received") loadNotifs();
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
+  }, [loadNotifs]);
+
+  const loadAlerts = useCallback(async () => {
+    const r = await fetch("/api/alerts");
+    if (r.ok) setAlerts(await r.json());
+  }, []);
+
   useEffect(() => {
     if (me) loadNotifs();
+  }, [me, loadNotifs]);
+
+  // Rafraîchissement au retour sur l'onglet, throttlé 15 s comme partout ailleurs dans
+  // l'appli. Le message du service worker couvre l'onglet resté ouvert ; ceci couvre le
+  // téléphone qu'on déverrouille, où le worker a pu tourner sans qu'aucun onglet n'écoute.
+  const lastNotifRef = useRef(0);
+  useEffect(() => {
+    if (!me) return;
+    const onFocus = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastNotifRef.current < 15_000) return;
+      lastNotifRef.current = Date.now();
+      loadNotifs();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
   }, [me, loadNotifs]);
 
   useEffect(() => {

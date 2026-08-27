@@ -43,15 +43,22 @@ self.addEventListener("push", (event) => {
     data: { url: data.url || "/" },
   };
 
-  // Si l'appli est OUVERTE, on prévient les onglets pour qu'ils jouent le son d'alerte
-  // « terrain libéré » (tag `alert-…`). Appli fermée : seule la notification système sonne.
+  // Deux messages distincts aux onglets ouverts :
+  //  * « slot-free » (tag `alert-…`) déclenche le son d'alerte — appli fermée, c'est la
+  //    notification système qui sonne, le navigateur ne nous laisse pas jouer le nôtre ;
+  //  * « push-received » est envoyé pour TOUT push, afin que la cloche se mette à jour sans
+  //    attendre un rechargement. Il sert aussi de témoin : s'il arrive alors qu'aucune
+  //    notification ne s'affiche, c'est que le push atteint bien le navigateur et que le
+  //    blocage est dans l'affichage système.
   const isSlotFree = typeof data.tag === "string" && data.tag.startsWith("alert-");
   event.waitUntil(
     (async () => {
-      await self.registration.showNotification(title, options);
-      if (!isSlotFree) return;
+      // Le signal aux onglets part AVANT l'affichage : si `showNotification` échoue — option
+      // refusée, permission révoquée entre-temps —, la cloche doit quand même se rafraîchir.
       const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      for (const client of list) client.postMessage({ type: "slot-free" });
+      for (const client of list) client.postMessage({ type: "push-received", tag: data.tag });
+      if (isSlotFree) for (const client of list) client.postMessage({ type: "slot-free" });
+      await self.registration.showNotification(title, options);
     })(),
   );
 });
