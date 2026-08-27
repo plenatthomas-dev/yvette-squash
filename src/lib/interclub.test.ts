@@ -10,10 +10,12 @@ import {
   isValidMatchCount,
   notifiesAt,
   parseFollowLevel,
-  isPlayerColor,
-  playerColor,
+  COLOR_PRESETS,
+  inkFor,
+  isColorValue,
+  normalizeColor,
   playedGames,
-  PLAYER_COLORS,
+  resolveColor,
   replay,
   sequenceWinner,
   undo,
@@ -366,32 +368,80 @@ describe("formats de rencontre", () => {
   });
 });
 
-describe("couleurs de joueur", () => {
-  it("chaque couleur respecte le contraste AA (4.5:1) entre son fond et son encre", () => {
-    for (const c of PLAYER_COLORS) {
-      expect(contrastRatio(c.bg, c.fg), `${c.key} (${c.bg} sur ${c.fg})`).toBeGreaterThanOrEqual(4.5);
+describe("couleurs de joueur — choix libre, encre calculée", () => {
+  it("garantit le contraste AA sur TOUT le cube RGB, pas seulement sur une palette curée", () => {
+    // C'est la propriété qui autorise le choix libre : en n'utilisant que du blanc ou du noir
+    // PUR comme encre, le pire cas possible atteint 4.58:1, au-dessus des 4.5 exigés. On
+    // balaie le cube par pas de 17 (16^3 = 4096 couleurs) plutôt que de faire confiance.
+    let worst = Infinity;
+    let worstHex = "";
+    const hx = (n: number) => n.toString(16).padStart(2, "0");
+    for (let r = 0; r < 256; r += 17) {
+      for (let g = 0; g < 256; g += 17) {
+        for (let b = 0; b < 256; b += 17) {
+          const bg = `#${hx(r)}${hx(g)}${hx(b)}`;
+          const ratio = contrastRatio(bg, inkFor(bg));
+          if (ratio < worst) {
+            worst = ratio;
+            worstHex = bg;
+          }
+        }
+      }
     }
+    expect(worst, `pire cas sur ${worstHex}`).toBeGreaterThanOrEqual(4.5);
   });
 
-  it("les clés sont uniques", () => {
-    const keys = PLAYER_COLORS.map((c) => c.key);
-    expect(new Set(keys).size).toBe(keys.length);
+  it("pose de l'encre claire sur un fond sombre, et l'inverse", () => {
+    expect(inkFor("#000000")).toBe("#ffffff");
+    expect(inkFor("#ffffff")).toBe("#000000");
+    expect(inkFor("#1a237e")).toBe("#ffffff");
+    expect(inkFor("#fdd835")).toBe("#000000");
   });
 
-  it("l'absence de couleur est valide — elle est facultative", () => {
-    expect(isPlayerColor(null)).toBe(true);
-    expect(isPlayerColor(undefined)).toBe(true);
-    expect(playerColor(null)).toBeNull();
+  it("accepte n'importe quel #rrggbb, avec ou sans dièse, quelle que soit la casse", () => {
+    expect(normalizeColor("#A1B2C3")).toBe("#a1b2c3");
+    expect(normalizeColor("a1b2c3")).toBe("#a1b2c3");
+    expect(normalizeColor("  #FFF000  ")).toBe("#fff000");
   });
 
-  it("refuse une couleur hors palette : le contraste ne serait plus garanti", () => {
-    expect(isPlayerColor("#ff00ff")).toBe(false);
-    expect(isPlayerColor("turquoise")).toBe(false);
-    expect(playerColor("turquoise")).toBeNull();
+  it("comprend encore les clés de l'ancienne palette fermée", () => {
+    // Des lignes saisies avant le passage au choix libre les portent toujours en base.
+    expect(normalizeColor("rouge")).toBe("#c62828");
+    expect(normalizeColor("BLEU")).toBe("#1565c0");
   });
 
-  it("retrouve une couleur de la palette", () => {
-    expect(playerColor("rouge")?.bg).toBe("#c62828");
+  it("refuse ce qui n'est pas une couleur", () => {
+    expect(normalizeColor("bleu-ciel")).toBeNull();
+    expect(normalizeColor("#12345")).toBeNull();
+    expect(normalizeColor("rgb(1,2,3)")).toBeNull();
+    expect(normalizeColor(42)).toBeNull();
+    expect(normalizeColor(null)).toBeNull();
+  });
+
+  it("l'absence de couleur reste valide — elle est facultative", () => {
+    expect(isColorValue(null)).toBe(true);
+    expect(isColorValue(undefined)).toBe(true);
+    expect(isColorValue("")).toBe(true);
+    expect(isColorValue("#a1b2c3")).toBe(true);
+    expect(isColorValue("turquoise-fluo")).toBe(false);
+  });
+
+  it("résout une couleur en paire fond/encre cohérente", () => {
+    const c = resolveColor("#c62828");
+    expect(c?.bg).toBe("#c62828");
+    expect(c?.fg).toBe(inkFor("#c62828"));
+    expect(c?.label).toBe("Rouge"); // un raccourci connu garde son nom
+    expect(resolveColor("#123456")?.label).toBe("#123456"); // sinon on affiche le code
+    expect(resolveColor(null)).toBeNull();
+  });
+
+  it("les raccourcis proposés sont des couleurs valides et distinctes", () => {
+    const hexes = COLOR_PRESETS.map((c) => c.hex);
+    expect(new Set(hexes).size).toBe(hexes.length);
+    for (const c of COLOR_PRESETS) {
+      expect(normalizeColor(c.hex), c.key).toBe(c.hex);
+      expect(contrastRatio(c.hex, inkFor(c.hex)), c.key).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });
 

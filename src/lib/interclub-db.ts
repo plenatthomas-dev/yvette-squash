@@ -2,7 +2,7 @@
 // ce module connaît Prisma — il ne doit donc JAMAIS être importé depuis un composant client.
 
 import { Prisma } from "@prisma/client";
-import { gameWinner, playerColor, winGamesFor, type MatchState, type Side } from "./interclub";
+import { gameWinner, normalizeColor, winGamesFor, type MatchState, type Side } from "./interclub";
 
 export const interclubInclude = {
   team: true,
@@ -126,8 +126,10 @@ export function serializeInterclub(f: FullInterclub, userId: string | null) {
       homeUserId: m.homeUserId,
       homeDisplayName: m.homeDisplayName,
       awayName: m.awayName,
-      homeColor: playerColor(m.homeColor)?.key ?? null,
-      awayColor: playerColor(m.awayColor)?.key ?? null,
+      // Normalisé à la sortie : les lignes saisies avant le passage au choix libre portent
+      // encore une clé de l'ancienne palette, le client n'a pas à connaître les deux formes.
+      homeColor: normalizeColor(m.homeColor),
+      awayColor: normalizeColor(m.awayColor),
       status: m.status,
       gamesHome: m.gamesHome,
       gamesAway: m.gamesAway,

@@ -5,11 +5,11 @@ import { Dialog } from "@/components/Dialog";
 import { readJson } from "@/lib/apiFetch";
 import { EmptyState, Skeleton } from "@/components/Placeholders";
 import {
+  COLOR_PRESETS,
   describeSequenceProblem,
   isValidBestOf,
   playedGames,
-  PLAYER_COLORS,
-  playerColor,
+  resolveColor,
   winGamesFor,
   type GameScore,
 } from "@/lib/interclub";
@@ -21,7 +21,9 @@ import {
 
 type Team = { id: string; name: string };
 
-type RosterEntry = { id: string; name: string; teamId: string | null; teamName: string | null };
+// Le serveur ne renvoie QUE les membres de l'équipe qui dispute la rencontre : la
+// restriction est appliquée là-bas, pas ici.
+type RosterEntry = { id: string; name: string };
 
 type FixtureRow = {
   id: string;
@@ -86,7 +88,7 @@ function todayISO(): string {
  * grandes surfaces colorées à ce qui est actionnable.
  */
 function ColorDot({ color, size = "md" }: { color: string | null; size?: "md" | "lg" }) {
-  const c = playerColor(color);
+  const c = resolveColor(color);
   if (!c) return null;
   return (
     <span
@@ -198,6 +200,22 @@ export default function Interclub({
     }
   }
 
+  async function deleteFixture(id: string) {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/interclub/${id}`, { method: "DELETE" });
+      if (onExpired(res.status)) return;
+      await readJson(res);
+      toast("ok", "Rencontre supprimee");
+      setOpenId(null);
+      await loadList();
+    } catch (e) {
+      toast("err", (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveMatch(matchId: string, body: Record<string, unknown>) {
     if (!fixture) return;
     setBusy(true);
@@ -261,6 +279,7 @@ export default function Interclub({
           busy={busy}
           onClose={() => setOpenId(null)}
           onSaveMatch={saveMatch}
+          onDelete={() => deleteFixture(fixture.id)}
         />
       )}
     </section>
@@ -393,13 +412,18 @@ function FixtureDialog({
   busy,
   onClose,
   onSaveMatch,
+  onDelete,
 }: {
   fixture: Fixture;
   busy: boolean;
   onClose: () => void;
   onSaveMatch: (matchId: string, body: Record<string, unknown>) => void;
+  onDelete: () => void;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
+  // Confirmation en deux temps plutot qu'un confirm() natif : la suppression emporte tous les
+  // matchs et leurs jeux, et une boîte de dialogue bloquante fige l'onglet.
+  const [confirmDel, setConfirmDel] = useState(false);
 
   return (
     <Dialog onClose={onClose} label="Rencontre" className="ic-detail">
@@ -424,7 +448,7 @@ function FixtureDialog({
                 match={m}
                 bestOf={fixture.bestOf}
                 roster={fixture.roster}
-                fixtureTeamId={fixture.team.id}
+                teamName={fixture.team.name}
                 busy={busy}
                 onCancel={() => setEditing(null)}
                 onSave={(body) => {
@@ -471,10 +495,27 @@ function FixtureDialog({
         ))}
       </ul>
 
-      <div className="modal-actions">
-        <button className="secondary" onClick={onClose}>
-          Fermer
-        </button>
+      <div className="modal-actions ic-detail-actions">
+        {fixture.isCreator &&
+          (confirmDel ? (
+            <>
+              <button className="secondary" onClick={() => setConfirmDel(false)}>
+                Non, garder
+              </button>
+              <button className="danger" disabled={busy} onClick={onDelete}>
+                Supprimer définitivement
+              </button>
+            </>
+          ) : (
+            <button className="secondary ic-delete" disabled={busy} onClick={() => setConfirmDel(true)}>
+              Supprimer
+            </button>
+          ))}
+        {!confirmDel && (
+          <button className="secondary" onClick={onClose}>
+            Fermer
+          </button>
+        )}
       </div>
     </Dialog>
   );
@@ -497,7 +538,7 @@ function ColorPicker({
   label: string;
 }) {
   const [open, setOpen] = useState(false);
-  const current = playerColor(value);
+  const current = resolveColor(value);
 
   return (
     <span className="ic-picker">
@@ -513,28 +554,37 @@ function ColorPicker({
       </button>
 
       {open && (
-        <span className="ic-swatches" role="listbox" aria-label={label}>
-          {PLAYER_COLORS.map((c) => (
+        <span className="ic-swatches">
+          {COLOR_PRESETS.map((c) => (
             <button
               key={c.key}
               type="button"
-              role="option"
-              aria-selected={value === c.key}
-              className={`ic-swatch${value === c.key ? " is-on" : ""}`}
-              style={{ background: c.bg, borderColor: c.fg }}
+              aria-label={c.label}
+              className={`ic-swatch${value.toLowerCase() === c.hex ? " is-on" : ""}`}
+              style={{ background: c.hex }}
               title={c.label}
               onClick={() => {
-                onChange(c.key);
+                onChange(c.hex);
                 setOpen(false);
               }}
-            >
-              <span className="sr-only">{c.label}</span>
-            </button>
+            />
           ))}
+
+          {/* Choix libre : le sélecteur natif du système, donc tout le spectre RGB et un
+              rendu que l'utilisateur connaît déjà. L'encre posée dessus est CALCULÉE
+              (cf. inkFor), si bien qu'aucune couleur ne peut casser le contraste. */}
+          <label className="ic-swatch ic-swatch-free" title="Autre couleur">
+            <span className="sr-only">Autre couleur</span>
+            <input
+              type="color"
+              value={current?.bg ?? "#888888"}
+              onChange={(e) => onChange(e.target.value.toLowerCase())}
+            />
+          </label>
+
           <button
             type="button"
-            role="option"
-            aria-selected={value === ""}
+            aria-label="Aucune couleur"
             className={`ic-swatch ic-swatch-none${value === "" ? " is-on" : ""}`}
             title="Aucune couleur"
             onClick={() => {
@@ -543,7 +593,6 @@ function ColorPicker({
             }}
           >
             <span aria-hidden="true">✕</span>
-            <span className="sr-only">Aucune couleur</span>
           </button>
         </span>
       )}
@@ -557,7 +606,7 @@ function MatchEditor({
   match,
   bestOf,
   roster,
-  fixtureTeamId,
+  teamName,
   busy,
   onCancel,
   onSave,
@@ -565,16 +614,14 @@ function MatchEditor({
   match: MatchRow;
   bestOf: number;
   roster: RosterEntry[];
-  fixtureTeamId: string;
+  teamName: string;
   busy: boolean;
   onCancel: () => void;
   onSave: (body: Record<string, unknown>) => void;
 }) {
-  // "" = non renseigné, "__free__" = nom libre (remplaçant hors appli), sinon l'id du membre.
-  const FREE = "__free__";
-  const initialPick = match.homeUserId ?? (match.homeDisplayName === UNSET ? "" : FREE);
-  const [pick, setPick] = useState(initialPick);
-  const [freeName, setFreeName] = useState(match.homeUserId ? "" : match.homeDisplayName === UNSET ? "" : match.homeDisplayName);
+  // "" = non renseigné, sinon l'id d'un membre de l'équipe. Pas de nom libre : la règle du
+  // club veut que seuls les membres de l'équipe désignée soient alignés.
+  const [pick, setPick] = useState(match.homeUserId ?? "");
   const [awayName, setAwayName] = useState(match.awayName === UNSET ? "" : match.awayName);
   const [homeColor, setHomeColor] = useState(match.homeColor ?? "");
   const [awayColor, setAwayColor] = useState(match.awayColor ?? "");
@@ -593,11 +640,6 @@ function MatchEditor({
   // simplement vide, et ne remonte donc aucun message.
   const problem = describeSequenceProblem(games, bestOf);
 
-  // L'équipe de la rencontre d'abord : c'est là qu'on cherche 9 fois sur 10. Les autres
-  // équipes restent accessibles, un joueur dépannant régulièrement l'équipe voisine.
-  const ownTeam = roster.filter((r) => r.teamId === fixtureTeamId);
-  const otherTeams = roster.filter((r) => r.teamId !== fixtureTeamId);
-
   return (
     <div className="ic-editor">
       <label className="ic-field">
@@ -605,40 +647,21 @@ function MatchEditor({
         <span className="ic-field-row">
           <select value={pick} onChange={(e) => setPick(e.target.value)}>
             <option value="">— à désigner —</option>
-            {ownTeam.length > 0 && (
-              <optgroup label={ownTeam[0].teamName ?? "Équipe"}>
-                {ownTeam.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            {otherTeams.length > 0 && (
-              <optgroup label="Autres équipes">
-                {otherTeams.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name} {r.teamName ? `(${r.teamName})` : ""}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            <option value={FREE}>Autre (nom libre)…</option>
+            {roster.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
           </select>
           <ColorPicker value={homeColor} onChange={setHomeColor} label="Maillot du joueur" />
         </span>
       </label>
 
-      {pick === FREE && (
-        <label className="ic-field">
-          <span className="sr-only">Nom du remplaçant</span>
-          <input
-            value={freeName}
-            onChange={(e) => setFreeName(e.target.value)}
-            placeholder="Nom du remplaçant"
-            maxLength={40}
-          />
-        </label>
+      {roster.length === 0 && (
+        <p className="notice tiny" role="status">
+          Aucun membre n&apos;est rattaché à {teamName}. Rattache-les depuis leurs paramètres,
+          ou depuis l&apos;espace admin, pour pouvoir composer l&apos;équipe.
+        </p>
       )}
 
       <label className="ic-field">
@@ -713,16 +736,9 @@ function MatchEditor({
           disabled={busy || !!problem}
           onClick={() =>
             onSave({
-              // Un membre choisi prime : le serveur fige alors son nom d'affichage. Le nom
-              // libre s'accompagne de `homeUserId: null` pour détacher le membre précédent.
-              // Revenir sur « à désigner » doit aussi être possible : on remet le placeholder.
-              ...(pick && pick !== FREE
-                ? { homeUserId: pick }
-                : pick === FREE && freeName.trim()
-                  ? { homeUserId: null, homeDisplayName: freeName.trim() }
-                  : pick === ""
-                    ? { homeUserId: null, homeDisplayName: UNSET }
-                    : {}),
+              // Un membre choisi : le serveur fige son nom d'affichage et vérifie au passage
+              // qu'il est bien de l'équipe. Revenir sur « à désigner » remet le placeholder.
+              ...(pick ? { homeUserId: pick } : { homeUserId: null, homeDisplayName: UNSET }),
               awayName: awayName.trim() || UNSET,
               homeColor: homeColor || null,
               awayColor: awayColor || null,

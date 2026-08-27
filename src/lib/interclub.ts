@@ -302,48 +302,39 @@ export function isMatchOver(state: MatchState): boolean {
 }
 
 // --- Couleurs de joueur ----------------------------------------------------
-// Pour reconnaître les joueurs depuis le bord du terrain (« Jérôme joue en rouge »).
+// Pour reconnaître les joueurs depuis le bord du terrain (« Jérôme joue en rouge »). La
+// couleur est LIBRE (n'importe quel #rrggbb) : un maillot ne rentre pas dans huit cases.
 //
-// Palette FERMÉE, jamais un sélecteur libre : DESIGN.md impose la « Règle de la Paire
-// Complète » — une couleur hors thème n'est acceptable que si elle fixe le fond ET l'encre
-// ensemble. Chaque entrée porte donc les deux, en valeurs absolues valables dans les trois
-// thèmes (clair, sombre, rose). Le contraste de chaque paire est vérifié par le test.
+// DESIGN.md impose pourtant la « Règle de la Paire Complète » — une couleur hors thème n'est
+// acceptable que si elle fixe le fond ET l'encre. On ne stocke donc que le fond, et l'encre
+// est CALCULÉE : blanc ou noir, celui des deux qui contraste le mieux.
 //
-// ⚠️ La couleur s'applique en PASTILLE, jamais en aplat sur la zone tactile : DESIGN.md
+// Ce choix garantit le seuil AA sur TOUTE couleur possible : le pire cas du cube RGB atteint
+// 4.58:1, au-dessus des 4.5 requis (le test le vérifie en balayant le cube). La règle est ainsi
+// tenue par construction, là où une palette figée ne la tenait que par curation.
+//
+// ⚠️ La couleur s'applique en PASTILLE, jamais en aplat sur une zone tactile : DESIGN.md
 // réserve le vert à ce qui est actionnable, et un joueur en vert transformerait sinon sa
 // moitié d'écran en faux bouton.
 
-export interface PlayerColor {
-  key: string;
-  label: string;
-  /** Fond de la pastille. */
-  bg: string;
-  /** Encre posée dessus. */
-  fg: string;
-}
+export const INK_LIGHT = "#ffffff";
+export const INK_DARK = "#000000";
 
-export const PLAYER_COLORS: readonly PlayerColor[] = [
-  { key: "rouge", label: "Rouge", bg: "#c62828", fg: "#ffffff" },
-  { key: "bleu", label: "Bleu", bg: "#1565c0", fg: "#ffffff" },
-  { key: "vert", label: "Vert", bg: "#2e7d32", fg: "#ffffff" },
-  { key: "jaune", label: "Jaune", bg: "#fdd835", fg: "#3e2723" },
-  // Orange vif + encre foncée : sur fond orange, le blanc plafonne à ~3.8:1 (sous AA).
-  { key: "orange", label: "Orange", bg: "#f57c00", fg: "#3e2723" },
-  { key: "violet", label: "Violet", bg: "#6a1b9a", fg: "#ffffff" },
-  { key: "noir", label: "Noir", bg: "#212121", fg: "#ffffff" },
-  { key: "blanc", label: "Blanc", bg: "#f5f5f5", fg: "#212121" },
+/** Raccourcis proposés avant d'ouvrir le sélecteur libre — les maillots les plus courants. */
+export const COLOR_PRESETS: readonly { key: string; label: string; hex: string }[] = [
+  { key: "rouge", label: "Rouge", hex: "#c62828" },
+  { key: "bleu", label: "Bleu", hex: "#1565c0" },
+  { key: "vert", label: "Vert", hex: "#2e7d32" },
+  { key: "jaune", label: "Jaune", hex: "#fdd835" },
+  { key: "orange", label: "Orange", hex: "#f57c00" },
+  { key: "violet", label: "Violet", hex: "#6a1b9a" },
+  { key: "rose", label: "Rose", hex: "#d81b60" },
+  { key: "turquoise", label: "Turquoise", hex: "#00897b" },
+  { key: "gris", label: "Gris", hex: "#616161" },
+  { key: "noir", label: "Noir", hex: "#212121" },
+  { key: "blanc", label: "Blanc", hex: "#f5f5f5" },
+  { key: "marine", label: "Marine", hex: "#1a237e" },
 ] as const;
-
-/** Garde de type pour une couleur reçue d'un client. `null` = pas de couleur, c'est valide. */
-export function isPlayerColor(v: unknown): boolean {
-  if (v === null || v === undefined) return true;
-  return typeof v === "string" && PLAYER_COLORS.some((c) => c.key === v);
-}
-
-export function playerColor(key: string | null | undefined): PlayerColor | null {
-  if (!key) return null;
-  return PLAYER_COLORS.find((c) => c.key === key) ?? null;
-}
 
 /** Luminance relative WCAG d'une couleur `#rrggbb`. */
 export function relativeLuminance(hex: string): number {
@@ -363,6 +354,48 @@ export function contrastRatio(a: string, b: string): number {
   const lb = relativeLuminance(b);
   const [hi, lo] = la > lb ? [la, lb] : [lb, la];
   return (hi + 0.05) / (lo + 0.05);
+}
+
+/** L'encre à poser sur `bg` : blanc ou noir, le plus lisible des deux. */
+export function inkFor(bg: string): string {
+  return contrastRatio(bg, INK_LIGHT) >= contrastRatio(bg, INK_DARK) ? INK_LIGHT : INK_DARK;
+}
+
+/**
+ * Ramène une valeur reçue (client ou base) à un `#rrggbb` minuscule, ou `null`.
+ * Accepte aussi les clés de l'ancienne palette fermée (« rouge », « bleu »…) : des lignes
+ * saisies avant le passage au choix libre les portent encore.
+ */
+export function normalizeColor(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const raw = v.trim();
+  if (!raw) return null;
+  const hex = /^#?([0-9a-f]{6})$/i.exec(raw);
+  if (hex) return `#${hex[1].toLowerCase()}`;
+  const preset = COLOR_PRESETS.find((c) => c.key === raw.toLowerCase());
+  return preset ? preset.hex : null;
+}
+
+/** Garde de type pour une couleur reçue d'un client. `null` = pas de couleur, c'est valide. */
+export function isColorValue(v: unknown): boolean {
+  if (v === null || v === undefined || v === "") return true;
+  return normalizeColor(v) !== null;
+}
+
+export interface ResolvedColor {
+  /** Fond de la pastille. */
+  bg: string;
+  /** Encre calculée, jamais stockée : la paire reste cohérente quoi qu'il arrive en base. */
+  fg: string;
+  label: string;
+}
+
+/** Résout une couleur en paire fond/encre prête à peindre, ou `null` si absente. */
+export function resolveColor(v: unknown): ResolvedColor | null {
+  const bg = normalizeColor(v);
+  if (!bg) return null;
+  const preset = COLOR_PRESETS.find((c) => c.hex === bg);
+  return { bg, fg: inkFor(bg), label: preset ? preset.label : bg };
 }
 
 // --- Abonnements -----------------------------------------------------------

@@ -3680,7 +3680,7 @@ body[data-bottombar] .install-banner {
   right: 0;
   z-index: 5;
   display: grid;
-  grid-template-columns: repeat(3, auto);
+  grid-template-columns: repeat(4, auto);
   gap: 8px;
   padding: 10px;
   border-radius: var(--radius);
@@ -3696,12 +3696,44 @@ body[data-bottombar] .install-banner {
   border-radius: 999px;
   border: 2px solid transparent;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: pointer;
 }
 .ic-swatch.is-on { outline: 2px solid var(--pico-contrast); outline-offset: 2px; }
 .ic-swatch-none {
   background: transparent;
   border-color: var(--grid-line);
   color: var(--pico-muted-color);
+}
+
+/* Choix libre : on s'appuie sur le sélecteur natif du système (tout le spectre RGB, et une
+   interface que l'utilisateur connaît déjà). L'input lui-même est étiré sous la pastille pour
+   rester cliquable partout, ses bordures internes effacées. Le damier signale « autre couleur »
+   sans mentir sur une teinte particulière. */
+.ic-swatch-free {
+  position: relative;
+  border-color: var(--grid-line);
+  background:
+    linear-gradient(45deg, rgba(127, 127, 127, 0.35) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(127, 127, 127, 0.35) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(127, 127, 127, 0.35) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(127, 127, 127, 0.35) 75%);
+  background-size: 10px 10px;
+  background-position: 0 0, 0 5px, 5px -5px, -5px 0;
+}
+.ic-swatch-free input[type="color"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 
 .ic-games-hint { margin: 14px 0 8px; }
@@ -3731,6 +3763,11 @@ body[data-bottombar] .install-banner {
    jeu » agit sur la liste au-dessus, « Annuler / Enregistrer » ferment la saisie — deux
    portées différentes, donc un vrai intervalle entre elles. */
 .ic-add-game { margin: 4px 0 0; width: auto; }
+
+/* Supprimer se tient à l'opposé de Fermer : deux gestes sans rapport ne doivent pas se
+   toucher, surtout quand l'un est irréversible. */
+.ic-detail-actions { flex-wrap: wrap; }
+.ic-delete { margin-right: auto; }
 .ic-problem { margin: 14px 0 0; }
 .ic-editor-actions { margin-top: 18px; }
 

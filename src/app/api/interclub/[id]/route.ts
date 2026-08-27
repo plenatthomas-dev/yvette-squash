@@ -23,20 +23,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "Rencontre introuvable" }, { status: 404 });
   }
 
-  // Membres alignés dans une équipe, pour le sélecteur de composition. On renvoie TOUTES les
-  // équipes et pas seulement celle de la rencontre : un joueur de l'équipe 1 dépanne
-  // régulièrement l'équipe 2. Le client met l'équipe de la rencontre en tête.
+  // Composition possible : STRICTEMENT les membres de l'équipe qui dispute la rencontre.
+  // Règle voulue du club, appliquée ici et non pas seulement à l'écran — c'est la seule
+  // façon qu'elle tienne. Conséquence assumée : aligner quelqu'un suppose de l'avoir
+  // d'abord rattaché à l'équipe (paramètres du membre, ou espace admin).
   const rosterRows = await prisma.user.findMany({
-    where: { teamId: { not: null }, disabledAt: null },
-    select: { id: true, displayName: true, nickname: true, team: { select: { id: true, name: true } } },
+    where: { teamId: f.teamId, disabledAt: null },
+    select: { id: true, displayName: true, nickname: true },
   });
   const roster = rosterRows
-    .map((u) => ({
-      id: u.id,
-      name: u.nickname ?? u.displayName,
-      teamId: u.team?.id ?? null,
-      teamName: u.team?.name ?? null,
-    }))
+    .map((u) => ({ id: u.id, name: u.nickname ?? u.displayName }))
     .sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
 
   const view = { ...serializeInterclub(f, session.userId), roster };

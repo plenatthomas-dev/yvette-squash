@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { getFeatures } from "@/lib/features-server";
-import { isPlayerColor, isValidBestOf, isValidMatchCount } from "@/lib/interclub";
+import { isColorValue, isValidBestOf, isValidMatchCount, normalizeColor } from "@/lib/interclub";
 import {
   fixtureScore,
   derivedStatus,
@@ -132,7 +132,7 @@ export async function POST(req: NextRequest) {
     const l = raw as Record<string, unknown>;
     const uid = l.userId;
     const name = l.name;
-    if (!isPlayerColor(l.homeColor) || !isPlayerColor(l.awayColor)) {
+    if (!isColorValue(l.homeColor) || !isColorValue(l.awayColor)) {
       return NextResponse.json({ error: "Couleur inconnue" }, { status: 400 });
     }
     const awayName =
@@ -149,16 +149,16 @@ export async function POST(req: NextRequest) {
         userId: uid,
         name: null,
         awayName,
-        homeColor: (l.homeColor as string) ?? null,
-        awayColor: (l.awayColor as string) ?? null,
+        homeColor: normalizeColor(l.homeColor),
+        awayColor: normalizeColor(l.awayColor),
       });
     } else if (typeof name === "string" && name.trim()) {
       roster.push({
         userId: null,
         name: name.trim().slice(0, MAX_PLAYER_NAME_LEN),
         awayName,
-        homeColor: (l.homeColor as string) ?? null,
-        awayColor: (l.awayColor as string) ?? null,
+        homeColor: normalizeColor(l.homeColor),
+        awayColor: normalizeColor(l.awayColor),
       });
     } else {
       return NextResponse.json({ error: "Joueur invalide" }, { status: 400 });

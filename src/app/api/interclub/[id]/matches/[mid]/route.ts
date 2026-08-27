@@ -5,7 +5,8 @@ import { prisma } from "@/lib/db";
 import { getFeatures } from "@/lib/features-server";
 import { isAdminEmail } from "@/lib/admin";
 import {
-  isPlayerColor,
+  isColorValue,
+  normalizeColor,
   sequenceWinner,
   validGameSequence,
   type GameScore,
@@ -57,7 +58,7 @@ export async function PATCH(
     games?: unknown;
   };
 
-  if (!isPlayerColor(homeColor) || !isPlayerColor(awayColor)) {
+  if (!isColorValue(homeColor) || !isColorValue(awayColor)) {
     return NextResponse.json({ error: "Couleur inconnue" }, { status: 400 });
   }
 
@@ -94,7 +95,11 @@ export async function PATCH(
       async (tx) => {
         const m = await tx.interclubMatch.findUnique({
           where: { id: mid },
-          include: { interclub: { select: { id: true, bestOf: true, matchCount: true, createdById: true } } },
+          include: {
+            interclub: {
+              select: { id: true, bestOf: true, matchCount: true, createdById: true, teamId: true },
+            },
+          },
         });
         if (!m || m.interclubId !== id) {
           throw new HttpError(404, "Match introuvable");
@@ -124,9 +129,15 @@ export async function PATCH(
           } else if (typeof homeUserId === "string" && homeUserId) {
             const u = await tx.user.findUnique({
               where: { id: homeUserId },
-              select: { id: true, displayName: true, nickname: true },
+              select: { id: true, displayName: true, nickname: true, teamId: true },
             });
             if (!u) throw new HttpError(400, "Membre inconnu");
+            // Restriction voulue du club : seuls les membres de l'ÉQUIPE qui dispute la
+            // rencontre peuvent être alignés. Vérifié côté serveur et pas seulement à
+            // l'écran, sinon la règle ne tiendrait pas.
+            if (u.teamId !== m.interclub.teamId) {
+              throw new HttpError(400, "Ce membre n'est pas dans l'équipe qui dispute la rencontre");
+            }
             data.homeUser = { connect: { id: u.id } };
             data.homeDisplayName = u.nickname ?? u.displayName;
           } else {
@@ -144,8 +155,8 @@ export async function PATCH(
         if (typeof awayName === "string" && awayName.trim()) {
           data.awayName = awayName.trim().slice(0, MAX_PLAYER_NAME_LEN);
         }
-        if (homeColor !== undefined) data.homeColor = (homeColor as string) ?? null;
-        if (awayColor !== undefined) data.awayColor = (awayColor as string) ?? null;
+        if (homeColor !== undefined) data.homeColor = normalizeColor(homeColor);
+        if (awayColor !== undefined) data.awayColor = normalizeColor(awayColor);
 
         if (parsedGames) {
           const winner = sequenceWinner(parsedGames, m.interclub.bestOf);

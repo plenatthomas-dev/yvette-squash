@@ -70,7 +70,7 @@ const freshMatch = () => ({
   scorerId: null,
   gamesHome: null,
   gamesAway: null,
-  interclub: { id: "f1", bestOf: 5, matchCount: 4, createdById: "u1" },
+  interclub: { id: "f1", bestOf: 5, matchCount: 4, createdById: "u1", teamId: "team-1" },
 });
 
 beforeEach(() => {
@@ -78,7 +78,7 @@ beforeEach(() => {
   h.session = { userId: "u1" };
   h.match = freshMatch();
   h.siblings = [{ gamesHome: null, status: "pending" }];
-  h.user = { email: "someone@example.com" };
+  h.user = { email: "someone@example.com", teamId: "team-1" };
   h.admin = false;
   h.updated = null;
   h.createdGames = null;
@@ -169,8 +169,9 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
     expect(res.status).toBe(400);
   });
 
-  it("refuse une couleur hors palette", async () => {
-    expect((await PATCH(patch({ homeColor: "turquoise" }), ctx)).status).toBe(400);
+  it("refuse ce qui n'est pas une couleur", async () => {
+    expect((await PATCH(patch({ homeColor: "bleu-ciel" }), ctx)).status).toBe(400);
+    expect((await PATCH(patch({ homeColor: "#12345" }), ctx)).status).toBe(400);
   });
 
   it("recale le statut de la rencontre dans la même transaction", async () => {
@@ -211,7 +212,7 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
   });
 
   it("rattacher un membre fige son nom d'affichage", async () => {
-    h.user = { id: "u9", displayName: "Jérôme Blanc", nickname: "Jéjé" };
+    h.user = { id: "u9", displayName: "Jérôme Blanc", nickname: "Jéjé", teamId: "team-1" };
     await PATCH(patch({ homeUserId: "u9" }), ctx);
     expect(h.updated).toMatchObject({ homeDisplayName: "Jéjé" });
   });
@@ -221,16 +222,33 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
     expect((await PATCH(patch({ homeUserId: "fantome" }), ctx)).status).toBe(400);
   });
 
-  it("nomme un remplaçant hors appli tout en détachant le membre précédent", async () => {
-    await PATCH(patch({ homeUserId: null, homeDisplayName: "Jean-Mi" }), ctx);
-    expect(h.updated).toMatchObject({ homeDisplayName: "Jean-Mi" });
+  it("refuse un membre d'une AUTRE équipe : la règle tient côté serveur, pas seulement à l'écran", async () => {
+    h.user = { id: "u9", displayName: "Jérôme", nickname: null, teamId: "team-2" };
+    const res = await PATCH(patch({ homeUserId: "u9" }), ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/équipe qui dispute/);
+  });
+
+  it("refuse un membre sans équipe", async () => {
+    h.user = { id: "u9", displayName: "Jérôme", nickname: null, teamId: null };
+    expect((await PATCH(patch({ homeUserId: "u9" }), ctx)).status).toBe(400);
+  });
+
+  it("détache le joueur et remet le placeholder", async () => {
+    await PATCH(patch({ homeUserId: null, homeDisplayName: "À désigner" }), ctx);
+    expect(h.updated).toMatchObject({ homeDisplayName: "À désigner" });
     expect(h.updated?.homeUser).toEqual({ disconnect: true });
   });
 
-  it("le nom d'un membre rattaché prime sur un nom libre envoyé en même temps", async () => {
-    h.user = { id: "u9", displayName: "Jérôme Blanc", nickname: "Jéjé" };
+  it("le nom d'un membre rattaché prime sur un nom envoyé en même temps", async () => {
+    h.user = { id: "u9", displayName: "Jérôme Blanc", nickname: "Jéjé", teamId: "team-1" };
     await PATCH(patch({ homeUserId: "u9", homeDisplayName: "Truc" }), ctx);
     expect(h.updated).toMatchObject({ homeDisplayName: "Jéjé" });
+  });
+
+  it("accepte une couleur libre et la normalise", async () => {
+    await PATCH(patch({ homeColor: "#A1B2C3" }), ctx);
+    expect(h.updated).toMatchObject({ homeColor: "#a1b2c3" });
   });
 
   it("refuse un score impossible que « 11 points et 2 d'écart » laisserait passer", async () => {

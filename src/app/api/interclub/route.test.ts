@@ -168,9 +168,15 @@ describe("POST /api/interclub", () => {
     expect(res.status).toBe(400);
   });
 
-  it("refuse une couleur hors palette : le contraste ne serait plus garanti", async () => {
-    const res = await POST(post({ ...validBody, matches: [{ name: "Tom", homeColor: "turquoise" }] }));
+  it("refuse ce qui n'est pas une couleur", async () => {
+    const res = await POST(post({ ...validBody, matches: [{ name: "Tom", homeColor: "bleu-ciel" }] }));
     expect(res.status).toBe(400);
+  });
+
+  it("accepte une couleur libre et la normalise", async () => {
+    await POST(post({ ...validBody, matches: [{ name: "Tom", homeColor: "#A1B2C3" }] }));
+    const create = (h.created?.matches as { create: Array<Record<string, unknown>> }).create;
+    expect(create[0].homeColor).toBe("#a1b2c3");
   });
 
   it("refuse plus de joueurs que de matchs", async () => {
