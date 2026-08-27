@@ -8,7 +8,12 @@ export const interclubInclude = {
   team: true,
   matches: {
     orderBy: { order: "asc" },
-    include: { games: { orderBy: { number: "asc" } } },
+    include: {
+      games: { orderBy: { number: "asc" } },
+      // Qui tient le marquage : l'écran doit pouvoir dire « Thomas marque ce match »
+      // plutôt que de laisser croire que la prise est libre.
+      scorer: { select: { id: true, displayName: true, nickname: true } },
+    },
   },
 } satisfies Prisma.InterclubInclude;
 
@@ -136,6 +141,7 @@ export function serializeInterclub(f: FullInterclub, userId: string | null) {
       games: m.games.map((g) => ({ number: g.number, home: g.pointsHome, away: g.pointsAway })),
       live,
       scorerId: m.scorerId,
+      scorerName: m.scorer ? (m.scorer.nickname ?? m.scorer.displayName) : null,
       isMine: !!userId && m.scorerId === userId,
       scorerStale: scorerIsStale(m.scorerClaimedAt, m.updatedAt),
       updatedAt: m.updatedAt.toISOString(),

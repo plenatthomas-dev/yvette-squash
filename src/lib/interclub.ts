@@ -301,6 +301,40 @@ export function isMatchOver(state: MatchState): boolean {
   return state.status === "done";
 }
 
+/**
+ * Fabrique un journal d'événements qui REPRODUIT une suite de jeux déjà connue. Sert à
+ * reprendre au bord du terrain un match dont les premiers jeux ont été saisis à la main, ou
+ * dont le journal local a été perdu (autre téléphone, cache vidé).
+ *
+ * ⚠️ Le déroulé des échanges est INVENTÉ — seul le score de chaque jeu est fidèle. C'est
+ * assumé : on ne stocke pas les points un par un, donc il n'y a rien à restituer. Les points
+ * sont émis en alternance jusqu'au score du perdant, puis d'affilée pour le vainqueur, de
+ * sorte que chaque jeu se termine exactement sur son dernier point et pas avant.
+ */
+export function seedEvents(games: readonly GameScore[], bestOf: number): ScoreEvent[] {
+  let ev: ScoreEvent[] = applyServe([], bestOf, "home", "right");
+
+  const point = (side: Side) => {
+    const st = replay(ev, bestOf);
+    if (st.awaitingServeBox && st.serving) ev = applyServe(ev, bestOf, st.serving, "right");
+    ev = applyPoint(ev, bestOf, side);
+  };
+
+  for (const g of games) {
+    if (checkGame(g) !== "finished") continue;
+    const lo = Math.min(g.home, g.away);
+    const winner: Side = g.home > g.away ? "home" : "away";
+    for (let i = 0; i < lo; i++) {
+      point(winner);
+      point(other(winner));
+    }
+    const remaining = Math.max(g.home, g.away) - lo;
+    for (let i = 0; i < remaining; i++) point(winner);
+  }
+
+  return ev;
+}
+
 // --- Couleurs de joueur ----------------------------------------------------
 // Pour reconnaître les joueurs depuis le bord du terrain (« Jérôme joue en rouge »). La
 // couleur est LIBRE (n'importe quel #rrggbb) : un maillot ne rentre pas dans huit cases.

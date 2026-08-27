@@ -3781,3 +3781,151 @@ body[data-bottombar] .install-banner {
   .ic-form-row { flex-direction: column; gap: 0; }
   .ic-swatches { grid-template-columns: repeat(3, auto); }
 }
+
+/* ===================== Interclub — écran de marquage =====================
+   Utilisé debout, au bord du terrain, souvent d'une main et sans regarder. D'où deux
+   cibles qui prennent toute la hauteur disponible : on tape le côté qui marque, rien
+   d'autre.
+
+   Ces deux zones sont peintes à la couleur du maillot, ce qui est ici cohérent avec
+   DESIGN.md : la règle réserve les grands aplats colorés à ce qui est ACTIONNABLE, et ce
+   sont précisément deux boutons géants. L'encre posée dessus est calculée (cf. inkFor),
+   donc lisible quelle que soit la couleur choisie. */
+.ics {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: var(--pico-background-color);
+  padding: 10px;
+  gap: 8px;
+}
+
+.ics-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.ics-head button { margin: 0; width: auto; padding: 8px 14px; }
+.ics-meta {
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+  text-align: center;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Signal d'état, pas une alerte : les points sont en sécurité sur l'appareil, il n'y a
+   rien à faire. Le ton ambre du reste de l'appli suffit. */
+.ics-offline {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-weight: 600;
+  color: #78350f;
+  background: #fcd34d;
+}
+
+.ics-history {
+  margin: 0;
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+  font-variant-numeric: tabular-nums;
+}
+
+.ics-board {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.ics-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 100%;
+  margin: 0;
+  padding: 10px;
+  border-radius: var(--radius-lg);
+  border: 2px solid var(--grid-line);
+  background: var(--pico-card-background-color);
+  color: var(--pico-contrast);
+  --pico-color: var(--pico-contrast);
+}
+.ics-side:disabled { opacity: 1; } /* désactivé = « pas maintenant », pas « indisponible » */
+
+.ics-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+/* Le score doit se lire à bout de bras : c'est la seule information vraiment lue pendant
+   l'échange. Hors échelle typographique du système, et c'est voulu. */
+.ics-points {
+  font-size: 4.5rem;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.ics-won, .ics-serve { font-size: 0.72rem; opacity: 0.85; }
+.ics-serve { font-weight: 700; }
+
+/* Panneau de question (engagement, carré de service, pause, fin). Il occupe le bas de
+   l'écran, à portée du pouce. */
+.ics-ask {
+  flex: 0 0 auto;
+  padding: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--grid-line);
+  background: var(--pico-card-background-color);
+  text-align: center;
+}
+.ics-ask p { margin: 0 0 8px; }
+.ics-ask-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.ics-ask-row button { margin: 0; width: auto; flex: 1; min-width: 130px; }
+
+.ics-timer {
+  font-size: 2.4rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
+.ics-done { font-size: 1.1rem; font-weight: 700; }
+
+/* Ligne de match : accès au marquage, et score en direct s'il y en a un. */
+.ic-match-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px 0;
+  flex-wrap: wrap;
+}
+.ic-score-btn { margin: 0; width: auto; padding: 6px 12px; font-size: 0.8rem; }
+.ic-inplay {
+  margin-right: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-weight: 700;
+  color: #78350f;
+  background: #fcd34d;
+}
+
+/* Deux colonnes restent tenables sur un téléphone étroit : c'est tout l'intérêt du
+   dispositif. On ne réduit que les marges et la taille du score. */
+@media (max-width: 560px) {
+  .ics { padding: 8px; }
+  .ics-points { font-size: 3.6rem; }
+  .ics-ask-row button { min-width: 0; }
+}

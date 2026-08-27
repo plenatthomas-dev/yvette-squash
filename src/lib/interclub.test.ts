@@ -16,6 +16,7 @@ import {
   normalizeColor,
   playedGames,
   resolveColor,
+  seedEvents,
   replay,
   sequenceWinner,
   undo,
@@ -235,6 +236,39 @@ describe("validGameScore", () => {
     expect(validGameScore(9, 7)).toBe(false);
     expect(validGameScore(-1, 11)).toBe(false);
     expect(validGameScore(11.5, 2)).toBe(false);
+  });
+});
+
+describe("seedEvents — reprendre un match déjà entamé", () => {
+  const g = (home: number, away: number) => ({ home, away });
+
+  it("reproduit fidèlement le score de chaque jeu", () => {
+    const games = [g(11, 9), g(6, 11), g(12, 10)];
+    const st = replay(seedEvents(games, 5), 5);
+    expect(st.games).toEqual(games);
+    expect(st.gamesWon).toEqual({ home: 2, away: 1 });
+  });
+
+  it("ne clôt pas un jeu avant son dernier point (11-0 compris)", () => {
+    expect(replay(seedEvents([g(11, 0)], 5), 5).games).toEqual([g(11, 0)]);
+    expect(replay(seedEvents([g(0, 11)], 5), 5).games).toEqual([g(0, 11)]);
+  });
+
+  it("reconstitue un match terminé, et le laisse terminé", () => {
+    const st = replay(seedEvents([g(11, 5), g(11, 8), g(11, 9)], 5), 5);
+    expect(st.status).toBe("done");
+    expect(st.winner).toBe("home");
+  });
+
+  it("ignore les jeux non terminés plutôt que d'inventer un score", () => {
+    expect(replay(seedEvents([g(11, 5), g(7, 4)], 5), 5).games).toEqual([g(11, 5)]);
+  });
+
+  it("laisse un match en cours dans un état où l'on peut reprendre le marquage", () => {
+    const st = replay(seedEvents([g(11, 5)], 5), 5);
+    expect(st.status).toBe("live");
+    // Le vainqueur du jeu sert au suivant et doit choisir son carré.
+    expect(st.awaitingServeBox).toBe(true);
   });
 });
 

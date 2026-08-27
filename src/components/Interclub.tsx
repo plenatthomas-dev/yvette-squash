@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog } from "@/components/Dialog";
 import { readJson } from "@/lib/apiFetch";
 import { EmptyState, Skeleton } from "@/components/Placeholders";
+import InterclubScorer from "@/components/InterclubScorer";
 import {
   COLOR_PRESETS,
   describeSequenceProblem,
@@ -49,6 +50,17 @@ type MatchRow = {
   gamesHome: number | null;
   gamesAway: number | null;
   games: { number: number; home: number; away: number }[];
+  scorerId: string | null;
+  scorerName: string | null;
+  isMine: boolean;
+  scorerStale: boolean;
+  /** Instantané du jeu en cours, publié par le marqueur. `null` hors direct. */
+  live: {
+    current: { home: number; away: number };
+    serving: "home" | "away" | null;
+    servingBox: "right" | "left" | null;
+    awaitingServeBox: boolean;
+  } | null;
 };
 
 type Fixture = FixtureRow & {
@@ -113,6 +125,7 @@ export default function Interclub({
   const [openId, setOpenId] = useState<string | null>(null);
   const [fixture, setFixture] = useState<Fixture | null>(null);
   const [creating, setCreating] = useState(false);
+  const [scoring, setScoring] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Garde-fou multi-utilisateur : on ne rafraîchit pas pendant qu'une saisie est en vol,
   // sinon on écraserait l'écran de celui qui est en train de taper (cf. Tournament.tsx).
@@ -200,6 +213,37 @@ export default function Interclub({
     }
   }
 
+  /** Prend le marquage puis ouvre l'écran. Sans la prise, deux personnes compteraient en
+      parallèle et produiraient deux scores qu'on ne saurait pas départager. */
+  async function startScoring(matchId: string) {
+    if (!fixture) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/interclub/${fixture.id}/matches/${matchId}/claim`, {
+        method: "POST",
+      });
+      if (onExpired(res.status)) return;
+      await readJson(res);
+      setScoring(matchId);
+    } catch (e) {
+      toast("err", (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function stopScoring(matchId: string) {
+    setScoring(null);
+    if (!fixture) return;
+    // Relâcher est un confort, pas une obligation : la prise se périme d'elle-même. On
+    // n'affiche donc aucune erreur si l'appel échoue.
+    await fetch(`/api/interclub/${fixture.id}/matches/${matchId}/claim`, {
+      method: "DELETE",
+    }).catch(() => {});
+    await loadFixture(fixture.id);
+    await loadList();
+  }
+
   async function deleteFixture(id: string) {
     setBusy(true);
     try {
@@ -235,6 +279,8 @@ export default function Interclub({
       setBusy(false);
     }
   }
+
+  const scoringMatch = scoring ? (fixture?.matches.find((m) => m.id === scoring) ?? null) : null;
 
   if (rows === null) return <Skeleton />;
 
@@ -273,13 +319,25 @@ export default function Interclub({
         <CreateDialog teams={teams} busy={busy} onClose={() => setCreating(false)} onSubmit={createFixture} />
       )}
 
-      {openId && fixture && (
+      {scoringMatch && fixture && (
+        <InterclubScorer
+          fixtureId={fixture.id}
+          match={scoringMatch}
+          bestOf={fixture.bestOf}
+          onClose={() => stopScoring(scoringMatch.id)}
+          onExpired={onExpired}
+          toast={toast}
+        />
+      )}
+
+      {openId && fixture && !scoringMatch && (
         <FixtureDialog
           fixture={fixture}
           busy={busy}
           onClose={() => setOpenId(null)}
           onSaveMatch={saveMatch}
           onDelete={() => deleteFixture(fixture.id)}
+          onScore={startScoring}
         />
       )}
     </section>
@@ -413,12 +471,14 @@ function FixtureDialog({
   onClose,
   onSaveMatch,
   onDelete,
+  onScore,
 }: {
   fixture: Fixture;
   busy: boolean;
   onClose: () => void;
   onSaveMatch: (matchId: string, body: Record<string, unknown>) => void;
   onDelete: () => void;
+  onScore: (matchId: string) => void;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   // Confirmation en deux temps plutot qu'un confirm() natif : la suppression emporte tous les
@@ -473,6 +533,11 @@ function FixtureDialog({
                   </span>
                 </span>
                 <span className="ic-games">
+                  {m.live && (
+                    <span className="ic-inplay" title="Marquage en cours">
+                      {m.live.current.home}–{m.live.current.away}
+                    </span>
+                  )}
                   {m.gamesHome === null ? (
                     <span className="muted tiny">à saisir</span>
                   ) : (
@@ -490,6 +555,18 @@ function FixtureDialog({
                   )}
                 </span>
               </button>
+            )}
+            {editing !== m.id && m.status !== "done" && (
+              <div className="ic-match-actions">
+                <button className="secondary ic-score-btn" onClick={() => onScore(m.id)}>
+                  {m.isMine ? "Reprendre le marquage" : "Marquer en direct"}
+                </button>
+                {m.scorerName && !m.isMine && (
+                  <span className="muted tiny">
+                    {m.scorerStale ? `${m.scorerName} a laissé le marquage` : `${m.scorerName} marque`}
+                  </span>
+                )}
+              </div>
             )}
           </li>
         ))}
