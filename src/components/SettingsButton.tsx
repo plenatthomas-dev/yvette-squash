@@ -14,6 +14,13 @@ import {
   type DirectoryMember,
 } from "@/lib/directoryCache";
 import {
+  ensurePushSubscribed,
+  pushEnabledOnServer,
+  pushSubscriptionState,
+  pushSupported,
+  unsubscribePush,
+} from "@/lib/pushClient";
+import {
   enrollPasskey,
   passkeySupported,
   forgetPasskeyOnDevice,
@@ -184,8 +191,27 @@ export function SettingsButton({
   const [sending, setSending] = useState(false);
   // Son de confirmation de réservation (activé par défaut). Lu depuis localStorage à l'ouverture.
   const [soundOn, setSoundOn] = useState(true);
+  // Notifications de cet APPAREIL. L'abonnement est propre au navigateur (et à l'origine :
+  // celui de la recette ne vaut pas pour la production), d'où un état lu à l'ouverture plutôt
+  // qu'un simple interrupteur qui mentirait d'un téléphone à l'autre.
+  const [pushState, setPushState] = useState<{
+    permission: NotificationPermission | "unsupported";
+    subscribed: boolean;
+  } | null>(null);
+  const [pushBusy, setPushBusy] = useState(false);
   // Doit rester synchronisé avec MAX_LEN côté serveur (api/feedback/route.ts).
   const COMMENT_MAX = 1000;
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    pushSubscriptionState().then((st) => {
+      if (!cancelled) setPushState(st);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   // Délégation (idée 4) : liste des membres (pour choisir des délégués) + délégations
   // sortantes actives (une par délégué). Chargées à l'ouverture du panneau (peuvent avoir bougé).
@@ -934,6 +960,74 @@ export function SettingsButton({
                 )}
               </section>
             )}
+
+            {/* Notifications — cette section MANQUAIT. On ne pouvait s'abonner qu'en effet de
+                bord, en rejoignant la liste d'attente d'un créneau, et on ne pouvait pas se
+                désabonner du tout. Personne ne pouvait donc savoir où il en était. */}
+            <section className="setting">
+              <SettingInfo title="Notifications">
+                Terrain libéré, annonces du club, suivi des rencontres. L&apos;autorisation est
+                propre à CET appareil et à ce navigateur — l&apos;activer sur le téléphone ne
+                l&apos;active pas sur l&apos;ordinateur.
+              </SettingInfo>
+
+              {!pushSupported() ? (
+                <p className="muted tiny">
+                  Ce navigateur ne gère pas les notifications. Sur iPhone, il faut d&apos;abord
+                  ajouter l&apos;appli à l&apos;écran d&apos;accueil : Safari seul ne les reçoit
+                  pas.
+                </p>
+              ) : !pushEnabledOnServer() ? (
+                <p className="muted tiny">
+                  Les notifications ne sont pas configurées sur cet environnement.
+                </p>
+              ) : pushState === null ? (
+                <p className="muted tiny">Vérification…</p>
+              ) : pushState.permission === "denied" ? (
+                <p className="muted tiny">
+                  Elles sont bloquées pour ce site dans les réglages du navigateur. Il faut les
+                  y réautoriser — l&apos;appli ne peut plus le demander elle-même une fois le
+                  refus enregistré.
+                </p>
+              ) : pushState.subscribed ? (
+                <>
+                  <p className="muted tiny">✓ Cet appareil est abonné.</p>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={pushBusy}
+                    onClick={async () => {
+                      setPushBusy(true);
+                      const ok = await unsubscribePush();
+                      setPushState(await pushSubscriptionState());
+                      setPushBusy(false);
+                      toast(ok ? "ok" : "err", ok ? "Notifications coupées." : "Échec du désabonnement.");
+                    }}
+                  >
+                    {pushBusy ? "…" : "Ne plus recevoir de notifications"}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  disabled={pushBusy}
+                  onClick={async () => {
+                    setPushBusy(true);
+                    const ok = await ensurePushSubscribed();
+                    setPushState(await pushSubscriptionState());
+                    setPushBusy(false);
+                    toast(
+                      ok ? "ok" : "err",
+                      ok
+                        ? "Notifications activées sur cet appareil."
+                        : "Autorisation refusée — rien ne sera envoyé.",
+                    );
+                  }}
+                >
+                  {pushBusy ? "…" : "Activer les notifications"}
+                </button>
+              )}
+            </section>
 
             <section className="setting">
               <SettingInfo title="Son de confirmation">

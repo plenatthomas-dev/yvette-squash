@@ -63,3 +63,52 @@ export async function ensurePushSubscribed(): Promise<boolean> {
   });
   return res.ok;
 }
+
+/**
+ * L'appareil est-il DÉJÀ abonné ? Lit l'abonnement existant du service worker sans rien
+ * demander à l'utilisateur — indispensable pour afficher un état plutôt qu'un bouton qui ne
+ * dit pas s'il a déjà été pressé.
+ */
+export async function pushSubscriptionState(): Promise<{
+  permission: NotificationPermission | "unsupported";
+  subscribed: boolean;
+}> {
+  if (!pushSupported()) return { permission: "unsupported", subscribed: false };
+  const permission = Notification.permission;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    return { permission, subscribed: !!sub };
+  } catch {
+    // Service worker indisponible (contexte non sécurisé, navigation privée) : on sait au
+    // moins dire où en est la permission.
+    return { permission, subscribed: false };
+  }
+}
+
+/**
+ * Coupe les notifications pour ce membre : on retire l'abonnement du navigateur ET les lignes
+ * côté serveur. Retirer l'un sans l'autre laisserait soit des envois dans le vide, soit un
+ * abonnement fantôme que rien ne viendrait purger avant sa première erreur 410.
+ */
+export async function unsubscribePush(): Promise<boolean> {
+  let endpoint: string | undefined;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    endpoint = sub?.endpoint;
+    if (sub) await sub.unsubscribe();
+  } catch {
+    /* on tente quand même le retrait côté serveur */
+  }
+  try {
+    const res = await fetch("/api/push/unsubscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(endpoint ? { endpoint } : {}),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
