@@ -253,6 +253,14 @@ export async function PATCH(
         // niveau « détaillé ». Ce qui doit décider, ce n'est pas la route employée, c'est
         // qu'il y ait une information NOUVELLE — d'où les gardes de transition, qui taisent
         // au passage les vraies corrections (rien n'avance, rien ne part).
+        // Les noms EFFECTIFS, c'est-à-dire ceux que cette requête vient d'écrire — et non
+        // ceux lus en début de transaction. Composer l'équipe et saisir le score d'un même
+        // geste est le cas ordinaire : la notification annonçait alors « à désigner c. à
+        // désigner » alors que les joueurs venaient d'être choisis.
+        const effHome =
+          typeof data.homeDisplayName === "string" ? data.homeDisplayName : m.homeDisplayName;
+        const effAway = typeof data.awayName === "string" ? data.awayName : m.awayName;
+
         const gamesGrew = !!parsedGames && parsedGames.length > m.games.length;
         const winner = parsedGames ? sequenceWinner(parsedGames, m.interclub.bestOf) : null;
         const matchNewlyDone = !!winner && m.status !== "done";
@@ -265,7 +273,7 @@ export async function PATCH(
               teamName: m.interclub.team.name,
               opponent: m.interclub.opponent,
             },
-            players: { player: m.homeDisplayName, opponent: m.awayName },
+            players: { player: effHome, opponent: effAway },
             gameDone: !winner && gamesGrew && parsedGames ? parsedGames : null,
             matchDone:
               matchNewlyDone && parsedGames

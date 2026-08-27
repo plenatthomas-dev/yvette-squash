@@ -35,7 +35,12 @@ export async function ensurePushSubscribed(): Promise<boolean> {
   const key = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   if (!key) return false;
 
-  const reg = await navigator.serviceWorker.register("/sw.js");
+  // `updateViaCache: "none"` : sans cela le navigateur peut resservir un sw.js mis en cache
+  // lorsqu'il vérifie les mises à jour, et une correction du service worker — l'ajout de
+  // `renotify`, par exemple — mettrait un jour à prendre effet. `update()` force la
+  // vérification tout de suite plutôt qu'à la prochaine navigation.
+  const reg = await navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" });
+  reg.update().catch(() => {});
   await navigator.serviceWorker.ready;
 
   if (Notification.permission === "denied") return false;

@@ -71,21 +71,21 @@ export function toInstant(iso: string): string {
 }
 
 /**
- * « il y a 5 min », « hier », « le 3 sept. » — pour horodater une notification sans obliger
- * le lecteur à faire la soustraction. Au-delà d'une semaine, la date absolue est plus utile
- * qu'un « il y a 12 jours » que personne ne convertit.
+ * « 27/08/26 23:30 » — horodatage absolu, en heure MURALE DU CLUB.
+ *
+ * Un « il y a 5 min » oblige à reconstituer l'heure de tête dès qu'on relit la liste plus
+ * tard, et devient franchement inutile au-delà de la journée. Une date se compare d'un coup
+ * d'œil avec l'heure d'un match.
  */
-export function relativeTime(iso: string, now: Date = new Date()): string {
+export function stampFR(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  const s = Math.round((now.getTime() - d.getTime()) / 1000);
-  if (s < 60) return "à l'instant";
-  const min = Math.round(s / 60);
-  if (min < 60) return `il y a ${min} min`;
-  const h = Math.round(min / 60);
-  if (h < 24) return `il y a ${h} h`;
-  const j = Math.round(h / 24);
-  if (j === 1) return "hier";
-  if (j < 7) return `il y a ${j} jours`;
-  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short", timeZone: CLUB_TZ });
+  return d.toLocaleString("fr-FR", {
+    timeZone: CLUB_TZ,
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

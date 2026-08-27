@@ -35,7 +35,7 @@ const Tricount = dynamic(() => import("@/components/Tricount"), { ssr: false });
 // Idem pour le module Tournoi (vue « Tournoi ») : chargé seulement à l'ouverture.
 const Tournament = dynamic(() => import("@/components/Tournament"), { ssr: false });
 const Interclub = dynamic(() => import("@/components/Interclub"), { ssr: false });
-import { fmtTime, slotMinutes, relativeTime } from "@/lib/time";
+import { fmtTime, slotMinutes, stampFR } from "@/lib/time";
 import { downloadIcs } from "@/lib/ics";
 import {
   ensurePushSubscribed,
@@ -1501,9 +1501,7 @@ export default function Home() {
                   <li key={n.id} className={n.read ? undefined : "is-unread"}>
                     <span className="notif-title">{n.title}</span>
                     <span className="notif-body">{n.body}</span>
-                    <span className="notif-at" title={new Date(n.at).toLocaleString("fr-FR")}>
-                      {relativeTime(n.at)}
-                    </span>
+                    <span className="notif-at">{stampFR(n.at)}</span>
                   </li>
                 ))}
               </ul>

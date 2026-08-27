@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   deletedGames: 0,
   fixtureStatus: null as null | string,
   notified: [] as string[],
+  lastPlayers: null as null | { player: string; opponent: string },
 }));
 
 vi.mock("@/lib/features-server", () => ({
@@ -21,8 +22,9 @@ vi.mock("@/lib/features-server", () => ({
 }));
 vi.mock("@/lib/interclub-gate", () => ({ interclubChanged: vi.fn() }));
 vi.mock("@/lib/interclub-notify", () => ({
-  notifyGameDone: vi.fn(async () => {
+  notifyGameDone: vi.fn(async (_ctx: unknown, player: string, opponent: string) => {
     h.notified.push("gameDone");
+    h.lastPlayers = { player, opponent };
   }),
   notifyMatchDone: vi.fn(async () => {
     h.notified.push("matchDone");
@@ -110,6 +112,7 @@ beforeEach(() => {
   h.deletedGames = 0;
   h.fixtureStatus = null;
   h.notified = [];
+  h.lastPlayers = null;
 });
 
 describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
@@ -286,6 +289,25 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
     );
     expect(h.notified).toContain("matchDone");
     expect(h.notified).not.toContain("gameDone");
+  });
+
+  it("annonce les noms QU'ON VIENT DE CHOISIR, pas « à désigner »", async () => {
+    // Composer l'équipe et saisir le score d'un même geste est le cas ordinaire. La
+    // notification lisait les noms d'AVANT la mise à jour et annonçait donc
+    // « à désigner c. à désigner » alors que les joueurs venaient d'être renseignés.
+    h.match = { ...freshMatch(), homeDisplayName: "À désigner", awayName: "À désigner" };
+    h.user = { id: "u9", displayName: "Laurent Petit", nickname: null, teamId: "team-1" };
+    await PATCH(
+      patch({ homeUserId: "u9", awayName: "Gégé", games: [{ home: 11, away: 5 }] }),
+      ctx,
+    );
+    expect(h.notified).toEqual(["gameDone"]);
+    expect(h.lastPlayers).toEqual({ player: "Laurent Petit", opponent: "Gégé" });
+  });
+
+  it("garde les noms déjà en base quand la requête n'en fournit pas", async () => {
+    await PATCH(patch({ games: [{ home: 11, away: 5 }] }), ctx);
+    expect(h.lastPlayers).toEqual({ player: "Tom", opponent: "Gégé" });
   });
 
   it("une CORRECTION qui n'avance rien ne notifie personne", async () => {
