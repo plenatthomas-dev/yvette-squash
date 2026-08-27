@@ -52,6 +52,9 @@ type LiveFixture = {
 type Team = { id: string; name: string };
 type Follow = { teamId: string; level: FollowLevel };
 
+/** Pourquoi les notifications ne peuvent pas arriver, le cas échéant. */
+type PushBlock = null | "unsupported" | "server" | "denied";
+
 function Dot({ color }: { color: string | null }) {
   const c = resolveColor(color);
   if (!c) return null;
@@ -69,6 +72,8 @@ export default function InterclubLive({
 }) {
   const [fixtures, setFixtures] = useState<LiveFixture[] | null>(null);
   const [follows, setFollows] = useState<Follow[]>([]);
+  const [pushReady, setPushReady] = useState<boolean | null>(null);
+  const [denied, setDenied] = useState(false);
   const anyLive = (fixtures ?? []).some((f) => f.status === "live");
   const anyLiveRef = useRef(false);
   anyLiveRef.current = anyLive;
@@ -90,8 +95,9 @@ export default function InterclubLive({
     try {
       const res = await fetch("/api/interclub/follows", { cache: "no-store" });
       if (onExpired(res.status)) return;
-      const data = await readOk<{ follows: Follow[] }>(res);
+      const data = await readOk<{ follows: Follow[]; pushReady: boolean }>(res);
       setFollows(data.follows);
+      setPushReady(data.pushReady);
     } catch {
       /* les abonnements ne sont pas critiques à l'affichage */
     }
@@ -132,6 +138,7 @@ export default function InterclubLive({
     // permission au moment où le geste a du sens, pas au chargement de la page.
     if (level && pushSupported() && pushEnabledOnServer()) {
       const ok = await ensurePushSubscribed();
+      setDenied(!ok);
       if (!ok) {
         toast("info", "Notifications refusées par le navigateur — l'abonnement reste sans effet.");
       }
@@ -148,13 +155,37 @@ export default function InterclubLive({
         const rest = prev.filter((f) => f.teamId !== teamId);
         return level ? [...rest, { teamId, level }] : rest;
       });
-      toast("ok", level ? "Abonnement enregistré" : "Abonnement retiré");
+      // On ne dit « enregistré » que si la notification peut RÉELLEMENT partir. L'abonnement
+      // est bien stocké dans les deux cas — il servira dès que l'obstacle sera levé — mais le
+      // dire sans réserve laissait attendre des notifications qui ne viendraient jamais.
+      if (!level) toast("ok", "Abonnement retiré");
+      else if (block) toast("info", "Abonnement enregistré, mais les notifications ne peuvent pas encore arriver.");
+      else toast("ok", "Abonnement enregistré");
     } catch (e) {
       toast("err", (e as Error).message);
     }
   }
 
   const levelOf = (teamId: string) => follows.find((f) => f.teamId === teamId)?.level ?? "";
+
+  // Un seul obstacle est signalé à la fois, du plus général au plus personnel : inutile de
+  // parler de permission navigateur si le serveur n'a de toute façon pas de quoi envoyer.
+  const block: PushBlock = !pushSupported()
+    ? "unsupported"
+    : pushReady === false
+      ? "server"
+      : denied
+        ? "denied"
+        : null;
+
+  const BLOCK_TEXT: Record<NonNullable<PushBlock>, string> = {
+    unsupported:
+      "Ce navigateur ne gère pas les notifications — sur iPhone, il faut d'abord ajouter l'appli à l'écran d'accueil. Le suivi reste consultable ici.",
+    server:
+      "Les notifications ne sont pas configurées sur cet environnement (clés VAPID absentes). L'abonnement est enregistré et servira dès qu'elles le seront.",
+    denied:
+      "Les notifications sont bloquées pour ce site dans les réglages du navigateur. L'abonnement est enregistré et servira une fois l'autorisation donnée.",
+  };
 
   return (
     <section className="ic-live">
@@ -232,9 +263,9 @@ export default function InterclubLive({
             </select>
           </label>
         ))}
-        {!pushSupported() && (
-          <p className="muted tiny">
-            Ce navigateur ne gère pas les notifications : le suivi reste consultable ici.
+        {block && (
+          <p className="notice tiny" role="status">
+            {BLOCK_TEXT[block]}
           </p>
         )}
       </div>

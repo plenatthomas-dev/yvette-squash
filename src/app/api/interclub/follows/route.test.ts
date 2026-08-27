@@ -6,6 +6,7 @@ const h = vi.hoisted(() => ({
   session: null as null | { userId: string },
   team: null as null | { id: string },
   rows: [] as Array<{ teamId: string; level: string }>,
+  pushReady: true,
   upserted: null as null | Record<string, unknown>,
   deleted: null as null | Record<string, unknown>,
 }));
@@ -13,6 +14,7 @@ const h = vi.hoisted(() => ({
 vi.mock("@/lib/features-server", () => ({
   getFeatures: async () => ({ interclub: h.interclub }),
 }));
+vi.mock("@/lib/push", () => ({ pushConfigured: vi.fn(() => h.pushReady) }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -42,6 +44,7 @@ beforeEach(() => {
   h.session = { userId: "u1" };
   h.team = { id: "t1" };
   h.rows = [];
+  h.pushReady = true;
   h.upserted = null;
   h.deleted = null;
 });
@@ -66,6 +69,14 @@ describe("GET /api/interclub/follows", () => {
   it("aucun abonnement par défaut : c'est un opt-in franc", async () => {
     const body = await (await GET(req())).json();
     expect(body.follows).toEqual([]);
+  });
+
+  it("dit si le serveur a de quoi notifier — le client ne peut pas le savoir seul", async () => {
+    // NEXT_PUBLIC_VAPID_PUBLIC_KEY est inlinée au build : elle dit si la clé PUBLIQUE existait
+    // à la compilation, pas si la clé privée est là à l'exécution. Seul le serveur le sait.
+    expect((await (await GET(req())).json()).pushReady).toBe(true);
+    h.pushReady = false;
+    expect((await (await GET(req())).json()).pushReady).toBe(false);
   });
 });
 

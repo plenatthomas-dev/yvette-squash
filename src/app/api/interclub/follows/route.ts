@@ -3,11 +3,19 @@ import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { getFeatures } from "@/lib/features-server";
 import { isFollowLevel } from "@/lib/interclub";
+import { pushConfigured } from "@/lib/push";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// GET /api/interclub/follows : mes abonnements, une ligne par équipe suivie.
+// GET /api/interclub/follows : mes abonnements, une ligne par équipe suivie, et surtout
+// `pushReady` — le serveur A-T-IL de quoi envoyer une notification (clés VAPID) ?
+//
+// C'est la SEULE source fiable sur ce point. Le client ne peut que consulter
+// NEXT_PUBLIC_VAPID_PUBLIC_KEY, inlinée au build : elle dit si la clé publique existait au
+// moment de compiler, pas si la clé PRIVÉE est présente à l'exécution. Sans cette réponse,
+// s'abonner sur un environnement où les clés manquent affichait « Abonnement enregistré » et
+// ne produisait jamais rien.
 export async function GET(req: NextRequest) {
   if (!(await getFeatures()).interclub) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
@@ -21,7 +29,7 @@ export async function GET(req: NextRequest) {
     where: { userId: session.userId },
     select: { teamId: true, level: true },
   });
-  return NextResponse.json({ follows: rows });
+  return NextResponse.json({ follows: rows, pushReady: pushConfigured() });
 }
 
 // PUT /api/interclub/follows { teamId, level: "result"|"highlights"|"detailed"|null }
