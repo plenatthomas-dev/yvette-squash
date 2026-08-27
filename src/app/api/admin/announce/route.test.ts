@@ -71,6 +71,9 @@ describe("POST /api/admin/announce", () => {
       body: "samedi",
       url: expectedUrl,
       tag: "admin-announce",
+      // Une annonce doit SONNER même quand elle en remplace une non lue : sans `renotify`,
+      // la spec impose un remplacement silencieux et seule la première d'une série alertait.
+      renotify: true,
     });
   });
 });

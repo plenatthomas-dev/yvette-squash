@@ -38,6 +38,15 @@ export async function POST(req: NextRequest) {
   // ré-affiche le message dans une modale (cf. AnnounceModal). Stateless : rien à stocker.
   const url = `/?${new URLSearchParams({ announce: "1", t: title, b: body }).toString()}`;
   // tag fixe : une nouvelle annonce remplace la précédente non lue plutôt que d'empiler.
-  const { recipients, sent } = await pushToAll({ title, body, url, tag: "admin-announce" });
+  const { recipients, sent } = await pushToAll({
+    title,
+    body,
+    url,
+    // Tag fixe : une nouvelle annonce remplace la précédente non lue plutôt que d'empiler.
+    tag: "admin-announce",
+    // …mais elle doit SONNER. Sans `renotify`, la spec impose un remplacement silencieux :
+    // seule la première annonce d'une série alertait, les suivantes glissaient sans bruit.
+    renotify: true,
+  });
   return NextResponse.json({ ok: true, recipients, sent });
 }

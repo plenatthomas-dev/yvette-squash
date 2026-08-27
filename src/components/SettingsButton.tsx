@@ -992,20 +992,55 @@ export function SettingsButton({
               ) : pushState.subscribed ? (
                 <>
                   <p className="muted tiny">✓ Cet appareil est abonné.</p>
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={pushBusy}
-                    onClick={async () => {
-                      setPushBusy(true);
-                      const ok = await unsubscribePush();
-                      setPushState(await pushSubscriptionState());
-                      setPushBusy(false);
-                      toast(ok ? "ok" : "err", ok ? "Notifications coupées." : "Échec du désabonnement.");
-                    }}
-                  >
-                    {pushBusy ? "…" : "Ne plus recevoir de notifications"}
-                  </button>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {/* Le seul contrôle qui tranche : la chaîne compte cinq maillons, et un
+                        envoi collectif ne dit pas lequel a lâché. Ici on vise cet appareil-ci. */}
+                    <button
+                      type="button"
+                      disabled={pushBusy}
+                      onClick={async () => {
+                        setPushBusy(true);
+                        try {
+                          const res = await fetch("/api/push/test", { method: "POST" });
+                          const d = (await res.json().catch(() => ({}))) as {
+                            devices?: number;
+                            sent?: number;
+                            error?: string;
+                          };
+                          if (!res.ok) toast("err", d.error ?? "Envoi impossible.");
+                          else if ((d.devices ?? 0) === 0)
+                            toast("err", "Aucun appareil enregistré pour ton compte.");
+                          else if ((d.sent ?? 0) === 0)
+                            toast("err", "Le service de notifications a refusé l'envoi.");
+                          else
+                            toast(
+                              "info",
+                              `Envoyée à ${d.sent} appareil${(d.sent ?? 0) > 1 ? "s" : ""}. Rien ne s'affiche ? Regarde les réglages de notification du téléphone.`,
+                            );
+                        } catch {
+                          toast("err", "Envoi impossible.");
+                        } finally {
+                          setPushBusy(false);
+                        }
+                      }}
+                    >
+                      {pushBusy ? "…" : "Tester"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={pushBusy}
+                      onClick={async () => {
+                        setPushBusy(true);
+                        const ok = await unsubscribePush();
+                        setPushState(await pushSubscriptionState());
+                        setPushBusy(false);
+                        toast(ok ? "ok" : "err", ok ? "Notifications coupées." : "Échec du désabonnement.");
+                      }}
+                    >
+                      Ne plus recevoir
+                    </button>
+                  </div>
                 </>
               ) : (
                 <button

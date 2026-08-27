@@ -195,6 +195,7 @@ export default function AdminPage() {
       });
       const data = (await res.json().catch(() => ({}))) as {
         recipients?: number;
+        sent?: number;
         error?: string;
       };
       if (!res.ok) {
@@ -204,7 +205,12 @@ export default function AdminPage() {
       const n = data.recipients ?? 0;
       setAnnResult({
         ok: true,
-        text: n === 0 ? "Aucun membre abonné aux notifications." : `Envoyée à ${n} membre${n > 1 ? "s" : ""}.`,
+        // On distingue membres et APPAREILS : « 2 membres » ne dit pas si le téléphone visé
+        // était du lot, et c'est justement la question qu'on se pose quand rien n'arrive.
+        text:
+          n === 0
+            ? "Aucun membre abonné aux notifications."
+            : `Envoyée à ${n} membre${n > 1 ? "s" : ""} (${data.sent ?? n} appareil${(data.sent ?? n) > 1 ? "s" : ""}).`,
       });
       setAnnTitle("");
       setAnnBody("");
