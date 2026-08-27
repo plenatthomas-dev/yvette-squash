@@ -6,6 +6,7 @@ const h = vi.hoisted(() => ({
   rows: [] as Array<Record<string, unknown>>,
   updated: null as null | Record<string, unknown>,
   take: 0,
+  deleted: null as null | Record<string, unknown>,
 }));
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
@@ -20,13 +21,21 @@ vi.mock("@/lib/db", () => ({
         h.updated = args;
         return { count: 3 };
       }),
+      deleteMany: vi.fn(async (args: { where: Record<string, unknown> }) => {
+        h.deleted = args.where;
+        return { count: 7 };
+      }),
     },
   },
 }));
 
-import { GET, POST } from "./route";
+import { GET, POST, DELETE } from "./route";
 
-const req = () => ({ cookies: { get: () => undefined } }) as unknown as NextRequest;
+const req = (scope?: string) =>
+  ({
+    cookies: { get: () => undefined },
+    nextUrl: { searchParams: new URLSearchParams(scope ? { scope } : {}) },
+  }) as unknown as NextRequest;
 const row = (over: Record<string, unknown> = {}) => ({
   id: "n1",
   title: "Équipe 1 – Massy",
@@ -42,6 +51,7 @@ beforeEach(() => {
   h.rows = [];
   h.updated = null;
   h.take = 0;
+  h.deleted = null;
 });
 
 describe("GET /api/notifications", () => {
@@ -80,5 +90,28 @@ describe("POST /api/notifications", () => {
   it("ne marque comme lues que MES notifications non lues", async () => {
     await POST(req());
     expect(h.updated).toMatchObject({ where: { userId: "u1", readAt: null } });
+  });
+});
+
+describe("DELETE /api/notifications", () => {
+  it("401 si non authentifié", async () => {
+    h.session = null;
+    expect((await DELETE(req())).status).toBe(401);
+  });
+
+  it("sans portée, vide tout — y compris le non lu", async () => {
+    const body = await (await DELETE(req())).json();
+    expect(h.deleted).toEqual({ userId: "u1" });
+    expect(body.removed).toBe(7);
+  });
+
+  it("avec scope=read, ne touche qu'à ce qui a déjà été vu", async () => {
+    await DELETE(req("read"));
+    expect(h.deleted).toEqual({ userId: "u1", readAt: { not: null } });
+  });
+
+  it("n'efface jamais les notifications d'un autre membre", async () => {
+    await DELETE(req("read"));
+    expect((h.deleted as { userId: string }).userId).toBe("u1");
   });
 });

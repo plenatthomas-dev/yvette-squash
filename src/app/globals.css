@@ -4023,3 +4023,14 @@ body[data-bottombar] .install-banner {
   color: var(--pico-muted-color);
   white-space: nowrap;
 }
+
+/* Ligne d'action du journal : rappel du délai à gauche, purge à droite. La purge est
+   discrète — c'est un geste de ménage, pas la raison d'ouvrir la cloche. */
+.notif-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.notif-actions > span:first-child { flex: 1; min-width: 0; }
+.notif-actions button { margin: 0; width: auto; padding: 3px 10px; font-size: 0.72rem; }

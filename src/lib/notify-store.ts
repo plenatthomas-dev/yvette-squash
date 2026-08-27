@@ -11,12 +11,10 @@
 // notification ne peut être oubliée au journal, y compris celles ajoutées plus tard.
 
 import { prisma } from "./db";
+import { NOTIFICATION_RETENTION_DAYS } from "./notifications-shared";
 
-/** Au-delà, une notification n'intéresse plus personne et ne fait qu'alourdir la table. */
-export const NOTIFICATION_RETENTION_DAYS = 60;
-
-/** Nombre de lignes rendues à la cloche. Au-delà, c'est un historique, pas une cloche. */
-export const NOTIFICATION_PAGE = 30;
+// Réexporté par commodité pour le code serveur ; la définition vit dans le module partagé.
+export { NOTIFICATION_RETENTION_DAYS, NOTIFICATION_PAGE } from "./notifications-shared";
 
 export interface RecordedNotification {
   title: string;
@@ -49,8 +47,14 @@ export async function recordNotifications(
         tag: n.tag ?? null,
       })),
     });
+    // Purge limitée aux membres qu'on vient d'écrire : la clause porte alors sur l'index
+    // ([userId, createdAt]), là où un balayage global de `createdAt` — non indexé seul —
+    // aurait parcouru toute la table à CHAQUE notification, sur le chemin chaud d'une soirée.
+    // Tout membre actif finit purgé de lui-même.
     const cutoff = new Date(Date.now() - NOTIFICATION_RETENTION_DAYS * 86_400_000);
-    await prisma.appNotification.deleteMany({ where: { createdAt: { lt: cutoff } } });
+    await prisma.appNotification.deleteMany({
+      where: { userId: { in: unique }, createdAt: { lt: cutoff } },
+    });
   } catch {
     /* le journal ne doit jamais faire échouer l'envoi */
   }

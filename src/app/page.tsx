@@ -36,6 +36,7 @@ const Tricount = dynamic(() => import("@/components/Tricount"), { ssr: false });
 const Tournament = dynamic(() => import("@/components/Tournament"), { ssr: false });
 const Interclub = dynamic(() => import("@/components/Interclub"), { ssr: false });
 import { fmtTime, slotMinutes, stampFR } from "@/lib/time";
+import { NOTIFICATION_RETENTION_DAYS } from "@/lib/notifications-shared";
 import { downloadIcs } from "@/lib/ics";
 import {
   ensurePushSubscribed,
@@ -220,6 +221,7 @@ export default function Home() {
     { id: string; title: string; body: string; url: string | null; at: string; read: boolean }[]
   >([]);
   const [unread, setUnread] = useState(0);
+  const [confirmWipe, setConfirmWipe] = useState(false);
   // Liste d'attente (idée D) : nombre d'inscrits par créneau ("YYYY-MM-DD|HH:MM" -> n),
   // pour la plage affichée. Alimenté par /api/alerts/counts, montré à tous.
   const [waitCounts, setWaitCounts] = useState<Record<string, number>>({});
@@ -363,23 +365,24 @@ export default function Home() {
     if (me) loadNotifs();
   }, [me, loadNotifs]);
 
-  // Rafraîchissement au retour sur l'onglet, throttlé 15 s comme partout ailleurs dans
-  // l'appli. Le message du service worker couvre l'onglet resté ouvert ; ceci couvre le
-  // téléphone qu'on déverrouille, où le worker a pu tourner sans qu'aucun onglet n'écoute.
-  const lastNotifRef = useRef(0);
+  // Rafraîchissement au retour sur l'appli. SANS throttle et avec `pageshow`, exactement
+  // comme la pastille « Admin — demandes » plus bas : une première version throttlée à 15 s
+  // et sourde au bfcache rendait l'arrivée des notifications imprévisible — un aller-retour
+  // rapide laissait la cloche périmée, et un retour par le bouton « précédent » ne
+  // déclenchait rien du tout. C'est une requête minuscule sur un index, elle ne mérite pas
+  // qu'on la rationne.
   useEffect(() => {
     if (!me) return;
-    const onFocus = () => {
-      if (document.visibilityState !== "visible") return;
-      if (Date.now() - lastNotifRef.current < 15_000) return;
-      lastNotifRef.current = Date.now();
-      loadNotifs();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") loadNotifs();
     };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onFocus);
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", loadNotifs);
     return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onFocus);
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", loadNotifs);
     };
   }, [me, loadNotifs]);
 
@@ -1521,6 +1524,34 @@ export default function Home() {
             {notifs.length === 0 ? (
               <p className="muted tiny">Aucune notification pour le moment.</p>
             ) : (
+              <>
+              <div className="notif-actions">
+                <span className="muted tiny">
+                  Effacées automatiquement au bout de {NOTIFICATION_RETENTION_DAYS} jours.
+                </span>
+                {confirmWipe ? (
+                  <>
+                    <button className="secondary tiny" onClick={() => setConfirmWipe(false)}>
+                      Annuler
+                    </button>
+                    <button
+                      className="danger tiny"
+                      onClick={async () => {
+                        setConfirmWipe(false);
+                        setNotifs([]);
+                        setUnread(0);
+                        await fetch("/api/notifications", { method: "DELETE" }).catch(() => {});
+                      }}
+                    >
+                      Tout effacer
+                    </button>
+                  </>
+                ) : (
+                  <button className="secondary tiny" onClick={() => setConfirmWipe(true)}>
+                    Vider
+                  </button>
+                )}
+              </div>
               <ul className="notif-list">
                 {notifs.map((n) => (
                   <li key={n.id} className={n.read ? undefined : "is-unread"}>
@@ -1530,6 +1561,7 @@ export default function Home() {
                   </li>
                 ))}
               </ul>
+              </>
             )}
 
             <h3>🕒 Ma liste d'attente</h3>
