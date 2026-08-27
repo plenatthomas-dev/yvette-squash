@@ -26,15 +26,26 @@ export const MAX_SEASON_LEN = 12;
 export const MAX_DIVISION_LEN = 30;
 
 /**
- * Une prise de marquage est PÉRIMÉE au-delà de ce délai sans écriture : sinon un téléphone
- * à plat gèlerait le match pour toute la soirée, personne d'autre ne pouvant reprendre.
+ * Une prise de marquage est PÉRIMÉE au-delà de ce délai sans activité DU MARQUEUR : sinon un
+ * téléphone à plat gèlerait le match pour toute la soirée, personne d'autre ne pouvant
+ * reprendre.
  */
 export const SCORER_STALE_MS = 30 * 60_000;
 
-export function scorerIsStale(claimedAt: Date | null, updatedAt: Date, now: Date = new Date()): boolean {
+/**
+ * ⚠️ On se fie à `scorerClaimedAt` SEUL, et surtout pas à `updatedAt`.
+ *
+ * `updatedAt` est un `@updatedAt` : n'importe quelle écriture sur la ligne le rafraîchit, y
+ * compris celle d'un tiers — un capitaine qui corrige le nom de l'adversaire, par exemple. La
+ * borne de 30 minutes n'en était alors plus une : chaque correction reconduisait indéfiniment
+ * une prise morte, et le match restait inaccessible.
+ *
+ * `scorerClaimedAt` n'est écrit que par la prise et par les écritures du marqueur lui-même
+ * (cf. `PUT …/live`), c'est donc bien l'horodatage de sa dernière activité.
+ */
+export function scorerIsStale(claimedAt: Date | null, now: Date = new Date()): boolean {
   if (!claimedAt) return true;
-  const last = Math.max(claimedAt.getTime(), updatedAt.getTime());
-  return now.getTime() - last > SCORER_STALE_MS;
+  return now.getTime() - claimedAt.getTime() > SCORER_STALE_MS;
 }
 
 /** Instantané du match en cours, tel que le marqueur l'envoie. Toléré partiel : il vient du client. */
@@ -155,7 +166,7 @@ export function serializeInterclub(f: FullInterclub, userId: string | null, isAd
       scorerId: m.scorerId,
       scorerName: m.scorer ? (m.scorer.nickname ?? m.scorer.displayName) : null,
       isMine: !!userId && m.scorerId === userId,
-      scorerStale: scorerIsStale(m.scorerClaimedAt, m.updatedAt),
+      scorerStale: scorerIsStale(m.scorerClaimedAt),
       updatedAt: m.updatedAt.toISOString(),
     };
   });

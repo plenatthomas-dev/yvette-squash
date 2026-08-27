@@ -11,6 +11,9 @@ import {
   notifiesAt,
   parseFollowLevel,
   COLOR_PRESETS,
+  colorDistance,
+  colorsTooClose,
+  MIN_DISTINCT_DELTA_E,
   inkFor,
   isColorValue,
   normalizeColor,
@@ -476,6 +479,46 @@ describe("couleurs de joueur — choix libre, encre calculée", () => {
       expect(normalizeColor(c.hex), c.key).toBe(c.hex);
       expect(contrastRatio(c.hex, inkFor(c.hex)), c.key).toBeGreaterThanOrEqual(4.5);
     }
+  });
+});
+
+describe("distinguer deux maillots", () => {
+  it("sépare largement deux couleurs franches", () => {
+    expect(colorDistance("#c62828", "#1565c0")).toBeGreaterThan(80);
+    expect(colorsTooClose("#c62828", "#1565c0")).toBe(false);
+  });
+
+  it("repère deux nuances voisines, que le choix libre rend possibles", () => {
+    // C'est le coût du choix libre : deux joueurs peuvent prendre deux bleus qui ne
+    // distinguent plus rien. La palette fermée l'empêchait par construction.
+    expect(colorsTooClose("#1565c0", "#1976d2")).toBe(true);
+    expect(colorsTooClose("#c62828", "#d32f2f")).toBe(true);
+  });
+
+  it("laisse passer toutes les paires des raccourcis proposés", () => {
+    // Le seuil est calibré sur eux : si l'un d'eux déclenchait l'avertissement, c'est le
+    // seuil ou la palette qu'il faudrait revoir.
+    for (const a of COLOR_PRESETS) {
+      for (const b of COLOR_PRESETS) {
+        if (a.key === b.key) continue;
+        expect(colorsTooClose(a.hex, b.hex), `${a.key} / ${b.key}`).toBe(false);
+      }
+    }
+  });
+
+  it("ne dit rien quand une couleur manque : ne pas choisir est un choix valide", () => {
+    expect(colorsTooClose("#c62828", null)).toBe(false);
+    expect(colorsTooClose(null, null)).toBe(false);
+    expect(colorsTooClose("#c62828", "")).toBe(false);
+  });
+
+  it("comprend les clés de l'ancienne palette comme le reste du module", () => {
+    expect(colorsTooClose("rouge", "#c62828")).toBe(true);
+  });
+
+  it("une couleur est à distance nulle d'elle-même", () => {
+    expect(colorDistance("#123456", "#123456")).toBeCloseTo(0, 6);
+    expect(MIN_DISTINCT_DELTA_E).toBeGreaterThan(0);
   });
 });
 

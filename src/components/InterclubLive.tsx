@@ -183,7 +183,10 @@ export default function InterclubLive({
                     <Dot color={m.homeColor} />
                     {m.home}
                   </span>
-                  <span className="ic-versus">c.</span>
+                  <span className="ic-versus" title="contre">
+                    <span className="sr-only">contre</span>
+                    <span aria-hidden="true">c.</span>
+                  </span>
                   <span className="ic-player">
                     <Dot color={m.awayColor} />
                     {m.away}

@@ -140,7 +140,7 @@ export async function PUT(
           if (m.status === "done") {
             throw new HttpError(409, "Ce match est terminé — passe par la correction du score");
           }
-          if (m.scorerId !== null && !scorerIsStale(m.scorerClaimedAt, m.updatedAt)) {
+          if (m.scorerId !== null && !scorerIsStale(m.scorerClaimedAt)) {
             throw new HttpError(409, "Quelqu'un d'autre marque ce match");
           }
         }

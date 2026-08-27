@@ -3979,3 +3979,10 @@ body[data-bottombar] .install-banner {
 }
 .ic-follow-row > span { flex: 0 0 auto; }
 .ic-follow-row select { flex: 1; min-width: 0; margin: 0; }
+
+/* Pastille de choix libre : damier tant qu'aucune couleur personnalisée n'est retenue, la
+   couleur elle-même sinon — sans quoi rien n'indiquait qu'un choix hors raccourcis était actif. */
+.ic-swatch-free.is-custom {
+  background-image: none;
+  border-color: var(--pico-contrast);
+}

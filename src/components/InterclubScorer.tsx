@@ -91,6 +91,10 @@ export default function InterclubScorer({
   toast: (type: "ok" | "err" | "info", msg: string) => void;
 }) {
   const [events, setEvents] = useState<ScoreEvent[]>([]);
+  // Miroir toujours à jour du journal. Deux appuis très rapprochés — deux échanges gagnés coup
+  // sur coup — ne doivent pas dépendre du fait que React ait rendu entre les deux : `commit`
+  // part de cette référence, jamais de la valeur capturée par la fermeture de rendu.
+  const eventsRef = useRef<ScoreEvent[]>([]);
   const [ready, setReady] = useState(false);
   const [offline, setOffline] = useState(false);
   const [breakUntil, setBreakUntil] = useState<number | null>(null);
@@ -102,11 +106,21 @@ export default function InterclubScorer({
   const awayC = resolveColor(match.awayColor);
 
   // --- journal local ---------------------------------------------------------
+  // Amorcé UNE SEULE FOIS par match. `match.games` est une référence de tableau reconstruite à
+  // chaque rechargement du parent — donc à chaque retour au premier plan. Sans ce verrou,
+  // l'amorçage se rejouait, et lorsque `localStorage` est indisponible (mode privé, quota) il
+  // repartait des jeux connus du serveur : les points du jeu en cours étaient effacés, alors
+  // que `saveLog` promet précisément de « continuer en mémoire ».
+  const seededFor = useRef<string | null>(null);
   useEffect(() => {
+    if (seededFor.current === match.id) return;
+    seededFor.current = match.id;
     const local = loadLog(match.id);
     // Pas de journal ici ? Le match a pu être entamé sur un autre téléphone, ou saisi à la
     // main. On repart des jeux connus du serveur (score fidèle, déroulé reconstitué).
-    setEvents(local ?? seedEvents(match.games.map((g) => ({ home: g.home, away: g.away })), bestOf));
+    const seed = local ?? seedEvents(match.games.map((g) => ({ home: g.home, away: g.away })), bestOf);
+    eventsRef.current = seed;
+    setEvents(seed);
     setReady(true);
   }, [match.id, match.games, bestOf]);
 
@@ -189,9 +203,12 @@ export default function InterclubScorer({
   }, [breakUntil, remaining]);
 
   // --- actions ---------------------------------------------------------------
-  function commit(next: ScoreEvent[], opts: { immediate?: boolean } = {}) {
-    const before = replay(events, bestOf);
+  function commit(build: (prev: ScoreEvent[]) => ScoreEvent[], opts: { immediate?: boolean } = {}) {
+    const prev = eventsRef.current;
+    const next = build(prev);
+    const before = replay(prev, bestOf);
     const after = replay(next, bestOf);
+    eventsRef.current = next;
     setEvents(next);
 
     const gameEnded = after.games.length > before.games.length;
@@ -204,19 +221,21 @@ export default function InterclubScorer({
 
   const scorePoint = (side: Side) => {
     if (state.awaitingServeBox || state.status === "done" || remaining > 0) return;
-    commit(applyPoint(events, bestOf, side));
+    commit((prev) => applyPoint(prev, bestOf, side));
   };
 
   const chooseBox = (box: Box) => {
     if (!state.serving) return;
-    commit(applyServe(events, bestOf, state.serving, box));
+    const who = state.serving;
+    commit((prev) => applyServe(prev, bestOf, who, box));
   };
 
-  const chooseFirstServer = (side: Side, box: Box) => commit(applyServe(events, bestOf, side, box));
+  const chooseFirstServer = (side: Side, box: Box) =>
+    commit((prev) => applyServe(prev, bestOf, side, box));
 
   const doUndo = () => {
     setBreakUntil(null);
-    commit(undoEvent(events), { immediate: true });
+    commit((prev) => undoEvent(prev), { immediate: true });
   };
 
   async function finish() {
@@ -228,8 +247,9 @@ export default function InterclubScorer({
       timerRef.current = null;
     }
     pendingRef.current = null;
-    await push(events);
-    if (replay(events, bestOf).status === "done") clearLog(match.id);
+    const latest = eventsRef.current;
+    await push(latest);
+    if (replay(latest, bestOf).status === "done") clearLog(match.id);
     onClose();
   }
 
@@ -253,10 +273,11 @@ export default function InterclubScorer({
         <span className="ics-name">{name}</span>
         <span className="ics-points">{pts}</span>
         <span className="ics-won">
+          <span className="sr-only">Jeux gagnés : </span>
           {won} jeu{won > 1 ? "x" : ""}
         </span>
         {serving && (
-          <span className="ics-serve">
+          <span className="ics-serve" title={`${name} sert`}>
             sert {state.servingBox === "left" ? "à gauche" : state.servingBox === "right" ? "à droite" : ""}
           </span>
         )}
@@ -270,7 +291,7 @@ export default function InterclubScorer({
         <button className="secondary" onClick={() => void finish()}>
           ← Retour
         </button>
-        <span className="ics-meta">
+        <span className="ics-meta" title={`Match numéro ${match.order}, ${needed} jeux gagnants`}>
           Match #{match.order} · {needed} jeux gagnants
           {offline && (
             <span className="ics-offline" title="Les points sont gardés sur cet appareil">

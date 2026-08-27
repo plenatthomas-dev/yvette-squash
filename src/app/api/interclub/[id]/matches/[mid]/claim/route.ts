@@ -56,7 +56,7 @@ export async function POST(
         if (m.status === "done") throw new HttpError(409, "Ce match est terminé");
 
         const heldByOther = m.scorerId !== null && m.scorerId !== session.userId;
-        if (heldByOther && !scorerIsStale(m.scorerClaimedAt, m.updatedAt)) {
+        if (heldByOther && !scorerIsStale(m.scorerClaimedAt)) {
           throw new HttpError(409, "Quelqu'un marque déjà ce match");
         }
 

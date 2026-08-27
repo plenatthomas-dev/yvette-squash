@@ -432,6 +432,60 @@ export function resolveColor(v: unknown): ResolvedColor | null {
   return { bg, fg: inkFor(bg), label: preset ? preset.label : bg };
 }
 
+/**
+ * Distance PERCEPTUELLE entre deux couleurs (CIE76, ΔE sur L*a*b*).
+ *
+ * Le choix libre a un coût que la palette fermée n'avait pas : deux joueurs peuvent choisir
+ * deux bleus voisins, et les pastilles cessent alors de distinguer quoi que ce soit — ce pour
+ * quoi elles existent. Une distance euclidienne en RGB ne dirait rien d'utile ici (elle traite
+ * un écart dans le bleu comme un écart dans le vert, alors que l'œil ne le fait pas) ; L*a*b*
+ * est conçu pour que la distance corresponde à peu près à la différence perçue.
+ */
+function labOf(hex: string): [number, number, number] {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return [0, 0, 0];
+  const n = parseInt(m[1], 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+    const c = v / 255;
+    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  // sRGB → XYZ (D65), normalisé par le blanc de référence.
+  const x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+  const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+  const f = (t: number) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+  const [fx, fy, fz] = [f(x), f(y), f(z)];
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+}
+
+export function colorDistance(a: string, b: string): number {
+  const [l1, a1, b1] = labOf(a);
+  const [l2, a2, b2] = labOf(b);
+  return Math.sqrt((l1 - l2) ** 2 + (a1 - a2) ** 2 + (b1 - b2) ** 2);
+}
+
+/**
+ * Seuil en deçà duquel deux maillots se confondent d'un coup d'œil.
+ *
+ * Calibré sur les raccourcis : la paire la plus proche de la palette curée — violet et marine —
+ * est à ΔE ≈ 25,8, et elle a été jugée distinguable. Deux bleus voisins (#1565c0 / #1976d2)
+ * tombent à 7,1. Le seuil sépare donc bien les deux familles, sans prétendre à plus de
+ * précision qu'un repère : c'est un avertissement, pas une science.
+ */
+export const MIN_DISTINCT_DELTA_E = 25;
+
+/**
+ * Les deux maillots d'un match risquent-ils d'être confondus ? Une couleur absente ne déclenche
+ * rien : ne pas choisir est un choix valide, et deux pastilles dont une seule existe se
+ * distinguent très bien.
+ */
+export function colorsTooClose(a: unknown, b: unknown): boolean {
+  const ca = normalizeColor(a);
+  const cb = normalizeColor(b);
+  if (!ca || !cb) return false;
+  return colorDistance(ca, cb) < MIN_DISTINCT_DELTA_E;
+}
+
 // --- Abonnements -----------------------------------------------------------
 // Niveau d'abonnement au suivi d'une équipe. Le dosage est le vrai sujet : une notification
 // par échange, c'est ~200 par match et ~800 par soirée — personne ne garde ça activé une

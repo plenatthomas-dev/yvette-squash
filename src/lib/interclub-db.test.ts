@@ -96,23 +96,24 @@ describe("scorerIsStale", () => {
   const now = new Date("2026-09-03T21:00:00Z");
 
   it("une prise sans horodatage est périmée", () => {
-    expect(scorerIsStale(null, new Date(0), now)).toBe(true);
+    expect(scorerIsStale(null, now)).toBe(true);
   });
 
   it("une prise récente tient", () => {
-    const recent = new Date(now.getTime() - 60_000);
-    expect(scorerIsStale(recent, recent, now)).toBe(false);
+    expect(scorerIsStale(new Date(now.getTime() - 60_000), now)).toBe(false);
   });
 
   it("une prise abandonnée se libère, sinon un téléphone à plat gèlerait le match", () => {
-    const vieux = new Date(now.getTime() - SCORER_STALE_MS - 1000);
-    expect(scorerIsStale(vieux, vieux, now)).toBe(true);
+    expect(scorerIsStale(new Date(now.getTime() - SCORER_STALE_MS - 1000), now)).toBe(true);
   });
 
-  it("une écriture récente rafraîchit la prise même si elle a été prise il y a longtemps", () => {
-    const vieux = new Date(now.getTime() - SCORER_STALE_MS - 1000);
-    const frais = new Date(now.getTime() - 5_000);
-    expect(scorerIsStale(vieux, frais, now)).toBe(false);
+  it("les 30 minutes sont une VRAIE borne, qu'un tiers ne peut pas repousser", () => {
+    // On se fie à `scorerClaimedAt`, écrit par la seule activité du marqueur, et jamais à
+    // `updatedAt` : ce dernier est rafraîchi par n'importe quelle écriture sur la ligne — un
+    // capitaine qui corrige le nom de l'adversaire reconduisait alors une prise morte, et
+    // chaque nouvelle correction la reconduisait encore.
+    const prisAbandonnee = new Date(now.getTime() - SCORER_STALE_MS - 1000);
+    expect(scorerIsStale(prisAbandonnee, now)).toBe(true);
   });
 });
 

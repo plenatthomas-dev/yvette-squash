@@ -9,6 +9,7 @@ import InterclubLive from "@/components/InterclubLive";
 import { CLUB_TZ } from "@/lib/time";
 import {
   COLOR_PRESETS,
+  colorsTooClose,
   describeSequenceProblem,
   isValidBestOf,
   playedGames,
@@ -312,7 +313,9 @@ export default function Interclub({
           {rows.map((f) => (
             <li key={f.id}>
               <button className="ic-row" onClick={() => setOpenId(f.id)}>
-                <span className="ic-date">{shortDate(f.date)}</span>
+                <span className="ic-date" title={`Date de la rencontre : ${shortDate(f.date)}`}>
+                  {shortDate(f.date)}
+                </span>
                 <span className="ic-opponent">
                   {f.team.name} {f.home ? "reçoit" : "se déplace à"} {f.opponent}
                   {f.division && <span className="muted tiny"> · {f.division}</span>}
@@ -320,7 +323,10 @@ export default function Interclub({
                 <span className="ic-score" aria-label={`Score ${f.score.home} à ${f.score.away}`}>
                   {f.score.home}–{f.score.away}
                 </span>
-                <span className={`ic-status ic-${f.status}`}>{STATUS_LABEL[f.status]}</span>
+                <span className={`ic-status ic-${f.status}`}>
+                  <span className="sr-only">État : </span>
+                  {STATUS_LABEL[f.status]}
+                </span>
               </button>
             </li>
           ))}
@@ -538,7 +544,10 @@ function FixtureDialog({
                       {m.homeDisplayName}
                     </span>
                   </span>
-                  <span className="ic-versus">c.</span>
+                  <span className="ic-versus" title="contre">
+                    <span className="sr-only">contre</span>
+                    <span aria-hidden="true">c.</span>
+                  </span>
                   <span className="ic-player">
                     <ColorDot color={m.awayColor} size="lg" />
                     <span className={m.awayName === UNSET ? "muted" : undefined}>{m.awayName}</span>
@@ -628,6 +637,7 @@ function ColorPicker({
 }) {
   const [open, setOpen] = useState(false);
   const current = resolveColor(value);
+  const isCustom = !!current && !COLOR_PRESETS.some((c) => c.hex === current.bg);
 
   return (
     <span className="ic-picker">
@@ -662,8 +672,17 @@ function ColorPicker({
           {/* Choix libre : le sélecteur natif du système, donc tout le spectre RGB et un
               rendu que l'utilisateur connaît déjà. L'encre posée dessus est CALCULÉE
               (cf. inkFor), si bien qu'aucune couleur ne peut casser le contraste. */}
-          <label className="ic-swatch ic-swatch-free" title="Autre couleur">
-            <span className="sr-only">Autre couleur</span>
+          {/* Choix libre : le sélecteur natif du système, donc tout le spectre (teinte,
+              saturation, luminosité, ou saisie hexadécimale selon la plateforme) et une
+              interface que l'utilisateur connaît déjà. Il AFFICHE la couleur retenue quand
+              elle ne vient pas des raccourcis, sinon un damier — sans quoi rien n'indiquait
+              qu'une couleur personnalisée était active. */}
+          <label
+            className={`ic-swatch ic-swatch-free${isCustom ? " is-custom" : ""}`}
+            title={isCustom ? `Couleur personnalisée ${current?.bg}` : "Autre couleur…"}
+            style={isCustom && current ? { background: current.bg } : undefined}
+          >
+            <span className="sr-only">Choisir une autre couleur</span>
             <input
               type="color"
               value={current?.bg ?? "#888888"}
@@ -808,6 +827,15 @@ function MatchEditor({
         >
           + Ajouter un jeu
         </button>
+      )}
+
+      {colorsTooClose(homeColor, awayColor) && (
+        // Avertissement, jamais un blocage : peut-être que les deux équipes jouent VRAIMENT
+        // dans des maillots voisins ce soir-là, et l'appli n'a pas à mentir sur le réel.
+        <p className="notice tiny ic-problem" role="status">
+          Ces deux maillots se ressemblent trop pour se distinguer d&apos;un coup d&apos;œil
+          depuis le bord du terrain.
+        </p>
       )}
 
       {problem && (

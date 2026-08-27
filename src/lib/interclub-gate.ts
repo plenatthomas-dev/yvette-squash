@@ -42,6 +42,23 @@ const TAG = "interclub-live";
  */
 const TTL_S = 30;
 
+/**
+ * Bornes de la charge utile du direct. Sans elles, une rencontre restée « en cours » par
+ * accident s'ajouterait DÉFINITIVEMENT à une réponse relue et resérialisée toutes les dix
+ * secondes par chaque spectateur — la sélection `status = "live"` n'ayant, elle, aucun plancher
+ * de date. Deux jours couvrent une soirée qui déborde après minuit ; six rencontres, le cas où
+ * les deux équipes jouent le même soir avec de la marge.
+ */
+const LIVE_MAX_DAYS_BACK = 2;
+const LIVE_MAX_FIXTURES = 6;
+
+/** Date plancher du direct, en heure murale du club. */
+function floorISO(now: Date = new Date()): string {
+  const d = new Date(`${todayISO(now)}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - LIVE_MAX_DAYS_BACK);
+  return d.toISOString().slice(0, 10);
+}
+
 /** Date du jour en heure MURALE du club (règle unique du projet, cf. lib/time.ts). */
 export function todayISO(now: Date = new Date()): string {
   return now.toLocaleDateString("en-CA", { timeZone: CLUB_TZ });
@@ -78,8 +95,12 @@ async function readLive(): Promise<LiveFixture[]> {
   const rows = await prisma.interclub.findMany({
     // Les rencontres du jour ET celles restées en direct : une soirée qui déborde après
     // minuit ne doit pas disparaître de l'écran de ceux qui la suivent.
-    where: { OR: [{ date: todayISO() }, { status: "live" }] },
+    where: {
+      date: { gte: floorISO() },
+      OR: [{ date: todayISO() }, { status: "live" }],
+    },
     orderBy: [{ date: "desc" }],
+    take: LIVE_MAX_FIXTURES,
     include: {
       team: { select: { id: true, name: true } },
       matches: {
