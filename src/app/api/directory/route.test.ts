@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 
 // État mutable partagé, hoisté pour être visible des factories vi.mock (hoistées en tête).
 const h = vi.hoisted(() => ({
-  flags: { directory: true, ranking: true },
+  flags: { directory: true, ranking: true, interclub: true },
   session: null as null | { userId: string },
   users: [] as Array<Record<string, unknown>>,
 }));
@@ -17,6 +17,7 @@ vi.mock("@/lib/features-server", () => ({
     delegation: false,
     tournament: false,
     ranking: h.flags.ranking,
+    interclub: h.flags.interclub,
   }),
 }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
@@ -30,7 +31,7 @@ import { GET } from "./route";
 const req = () => ({ cookies: { get: () => undefined } }) as unknown as NextRequest;
 
 beforeEach(() => {
-  h.flags = { directory: true, ranking: true };
+  h.flags = { directory: true, ranking: true, interclub: true };
   h.session = { userId: "u1" };
   h.users = [];
 });
@@ -126,5 +127,24 @@ describe("GET /api/directory", () => {
     const { groupUrl } = await res.json();
     expect(groupUrl).toBeNull();
     delete process.env.WHATSAPP_GROUP_URL;
+  });
+
+  it("expose l'équipe interclub d'un membre aligné", async () => {
+    h.users = [{ id: "a", displayName: "Alice", nickname: null, team: { id: "t1", name: "Équipe 1" } }];
+    const { members } = await (await GET(req())).json();
+    expect(members[0].team).toBe("Équipe 1");
+  });
+
+  it("n'expose aucune équipe pour un membre non aligné", async () => {
+    h.users = [{ id: "a", displayName: "Alice", nickname: null, team: null }];
+    const { members } = await (await GET(req())).json();
+    expect(members[0].team).toBeUndefined();
+  });
+
+  it("tait l'équipe quand l'interclub est désactivé, même si la donnée existe", async () => {
+    h.flags.interclub = false;
+    h.users = [{ id: "a", displayName: "Alice", nickname: null, team: { id: "t1", name: "Équipe 1" } }];
+    const { members } = await (await GET(req())).json();
+    expect(members[0].team).toBeUndefined();
   });
 });

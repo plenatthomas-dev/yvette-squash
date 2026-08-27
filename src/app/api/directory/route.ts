@@ -19,8 +19,8 @@ function whatsappGroupUrl(): string | null {
 // et pour chacun seulement { id, name } — JAMAIS l'email ni le contactId (l'email
 // reste une clé d'identité interne). Réservé aux membres connectés + gated par flag.
 export async function GET(req: NextRequest) {
-  // Un seul appel : `ranking` sert plus bas à décider de la jointure classement.
-  const { directory, ranking } = await getFeatures();
+  // Un seul appel : `ranking` et `interclub` servent plus bas à décider des jointures.
+  const { directory, ranking, interclub } = await getFeatures();
   if (!directory) {
     return NextResponse.json({ error: "Annuaire désactivé" }, { status: 404 });
   }
@@ -39,6 +39,8 @@ export async function GET(req: NextRequest) {
       squashnetRanking: ranking
         ? { select: { clt: true, rang: true, rangM: true, cat: true } }
         : false,
+      // Équipe interclub où le membre est aligné : jointure seulement si la fonction est active.
+      team: interclub ? { select: { id: true, name: true } } : false,
     },
   });
 
@@ -60,6 +62,9 @@ export async function GET(req: NextRequest) {
             cat: u.squashnetRanking.cat,
           }
         : {}),
+      // `team` reste absent quand la fonction est coupée ou le membre non aligné : le client
+      // n'affiche la colonne que si au moins un membre en porte une.
+      ...(interclub && u.team ? { team: u.team.name } : {}),
     }))
     .sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
 

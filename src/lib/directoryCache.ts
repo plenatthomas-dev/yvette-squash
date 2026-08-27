@@ -12,6 +12,7 @@ export interface DirectoryMember {
   rang?: number | null; // rang dans son genre — sert au tri des têtes de série (tournoi)
   rangM?: number | null; // rang MIXTE toutes catégories — le nombre affiché/trié dans l'annuaire
   cat?: string | null;
+  team?: string; // équipe interclub ("Équipe 1"…) — absent si non aligné ou fonction coupée
 }
 
 const TTL_MS = 60_000; // 1 min : suffisant pour dédupliquer, sans figer l'annuaire.

@@ -2021,6 +2021,20 @@ td.cell.past {
   color: var(--pico-muted-color);
   font-variant-numeric: tabular-nums;
 }
+/* Équipe interclub (« Équipe 1 ») dans l'annuaire. Contour plutôt que fond plein : la ligne
+   porte déjà jusqu'à deux pastilles (rang + classement), une troisième en aplat la
+   surchargerait. Aucune couleur de marque — l'appartenance n'est pas une action. */
+.directory-team {
+  flex: 0 0 auto;
+  padding: 0 7px;
+  border-radius: 999px;
+  /* 0.72rem : même ligne optique que .directory-rang et .directory-clt (cf. leur commentaire). */
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--pico-muted-color);
+  border: 1px solid var(--grid-line);
+  white-space: nowrap;
+}
 /* Badge classement fédéral (ex. « 5A ») dans l'annuaire. */
 .directory-clt {
   flex: 0 0 auto;
@@ -3489,4 +3503,143 @@ body[data-bottombar] .install-banner {
 }
 .passkey-item + .passkey-item {
   border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+
+/* ============================ Interclub ============================
+   Rencontres de championnat par équipes. Aucune couleur de marque sur les états :
+   DESIGN.md réserve le vert à ce qui est ACTIONNABLE, or « terminée » ou « à venir »
+   sont des états, pas des boutons. Seul « en cours » est peint, avec la paire ambre
+   déjà utilisée par .tri-chip.pending — une paire fond/encre complète, lisible dans
+   les trois thèmes. */
+.interclub { margin-top: 10px; }
+
+.ic-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.ic-head h3 { margin: 0; }
+.ic-head button { margin: 0; width: auto; }
+
+.ic-list, .ic-matches {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Ligne de rencontre / de match : un bouton pleine largeur, pas un lien — la cible doit
+   rester confortable au pouce, l'appli se tient debout entre deux portes. */
+.ic-row, .ic-match {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 10px 14px;
+  text-align: left;
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: var(--radius);
+  color: var(--pico-color);
+  font-size: 0.85rem;
+}
+.ic-row:hover, .ic-match:hover { border-color: var(--grid-line); }
+
+.ic-date {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ic-opponent { flex: 1; min-width: 0; }
+.ic-score, .ic-games {
+  flex: 0 0 auto;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ic-status {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--pico-muted-color);
+  border: 1px solid var(--pico-card-border-color);
+}
+.ic-status.ic-live {
+  color: #78350f;
+  background: #fcd34d;
+  border-color: #f59e0b;
+}
+
+.ic-total {
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin: 6px 0 14px;
+}
+
+.ic-order {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+  font-variant-numeric: tabular-nums;
+}
+.ic-players { flex: 1; min-width: 0; }
+.ic-player { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Pastille de maillot : un point, jamais un aplat. Une couleur de maillot ne doit pas
+   pouvoir se lire comme un état ni comme une zone actionnable. */
+.ic-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid;
+}
+
+.ic-editor {
+  padding: 10px 14px;
+  border: 1px solid var(--grid-line);
+  border-radius: var(--radius);
+  background: var(--pico-card-background-color);
+}
+.ic-editor label { font-size: 0.85rem; }
+.ic-form-row { display: flex; gap: 10px; }
+.ic-form-row > label { flex: 1; min-width: 0; }
+
+.ic-game-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.ic-game-row > span:first-child { flex: 0 0 48px; }
+.ic-game-row input {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.ic-game-row button { flex: 0 0 auto; margin: 0; width: auto; padding: 4px 10px; }
+
+/* Unique point de rupture du projet. En dessous, la ligne de rencontre passe sur deux
+   niveaux plutôt que de comprimer le nom de l'adversaire jusqu'à l'illisible. */
+@media (max-width: 560px) {
+  .ic-row, .ic-match { flex-wrap: wrap; gap: 6px 10px; }
+  .ic-opponent { flex: 1 0 100%; order: 2; }
+  .ic-score, .ic-games { order: 3; }
+  .ic-status { order: 4; margin-left: auto; }
+  .ic-form-row { flex-direction: column; gap: 0; }
 }

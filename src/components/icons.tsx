@@ -109,3 +109,16 @@ export function MultiSelectIcon() {
     </svg>
   );
 }
+
+// Icône « rencontre par équipes » (deux fanions qui se font face) pour l'interclub.
+// Volontairement distincte du trophée du tournoi : un interclub n'est pas une compétition
+// interne, et les deux entrées de menu se lisent côte à côte.
+export function TeamsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 21V4l7 2.5V13" />
+      <path d="M20 21V4l-7 2.5V13" />
+      <path d="M4 13h16" />
+    </svg>
+  );
+}

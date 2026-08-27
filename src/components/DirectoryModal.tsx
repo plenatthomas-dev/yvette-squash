@@ -121,6 +121,14 @@ export function DirectoryModal({
                 {shown.map((m) => (
                   <li key={m.id}>
                     <span className="directory-name">{m.name}</span>
+                    {m.team && (
+                      // Pastille sobre : l'équipe est une information d'appartenance, pas une
+                      // action — donc ni vert ni couleur de marque (cf. DESIGN.md).
+                      <span className="directory-team" title="Équipe interclub">
+                        <span className="sr-only">Équipe interclub : </span>
+                        {m.team}
+                      </span>
+                    )}
                     {m.rangM != null && (
                       <span className="directory-rang" title="Rang national, toutes catégories">
                         {/* Texte pour lecteur d'écran plutôt qu'un aria-label : ARIA ne garantit
