@@ -624,9 +624,11 @@ model InterclubMatch {
   homeUserId      String?
   homeDisplayName String // figé : nom du membre ou du remplaçant
   awayName        String // adversaire (texte libre)
-  // Couleur de maillot, pour reconnaître les joueurs depuis le bord du terrain. Clé d'une
-  // palette FERMÉE (cf. PLAYER_COLORS dans src/lib/interclub.ts) : une couleur libre ne
-  // garantirait pas le contraste exigé par DESIGN.md. NULL = pas de couleur choisie.
+  // Couleur de maillot, pour reconnaître les joueurs depuis le bord du terrain. Un « #rrggbb »
+  // LIBRE : l'encre posée dessus est calculée (cf. inkFor dans src/lib/interclub.ts), ce qui
+  // tient le contraste exigé par DESIGN.md sur n'importe quelle couleur. Des lignes antérieures
+  // au choix libre portent encore une clé de l'ancienne palette, que normalizeColor comprend.
+  // NULL = pas de couleur choisie.
   homeColor       String?
   awayColor       String?
   status          String          @default("pending") // pending | live | done

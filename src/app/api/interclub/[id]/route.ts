@@ -36,7 +36,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .map((u) => ({ id: u.id, name: u.nickname ?? u.displayName }))
     .sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
 
-  const view = { ...serializeInterclub(f, session.userId), roster };
+  const me = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: { email: true },
+  });
+  const view = { ...serializeInterclub(f, session.userId, isAdminEmail(me?.email)), roster };
   // Auto-cicatrisation : le statut DÉDUIT fait foi. Si la colonne a divergé (dernier score
   // saisi ailleurs, rencontre laissée « en cours »), on la recale pour que la LISTE soit juste.
   if (view.status !== f.status) {

@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog } from "@/components/Dialog";
-import { readJson } from "@/lib/apiFetch";
+import { readOk } from "@/lib/apiFetch";
 import { EmptyState, Skeleton } from "@/components/Placeholders";
 import InterclubScorer from "@/components/InterclubScorer";
 import InterclubLive from "@/components/InterclubLive";
+import { CLUB_TZ } from "@/lib/time";
 import {
   COLOR_PRESETS,
   describeSequenceProblem,
@@ -69,6 +70,8 @@ type Fixture = FixtureRow & {
   bestOf: number;
   winGames: number;
   isCreator: boolean;
+  /** Le serveur autorise aussi les admins : l'écran doit suivre, pas deviner. */
+  canDelete: boolean;
   matches: MatchRow[];
   roster: RosterEntry[];
 };
@@ -89,10 +92,13 @@ function shortDate(iso: string): string {
   return d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
 }
 
+/**
+ * Date du jour en heure MURALE DU CLUB. Le dépôt a une règle unique sur ce point (lib/time.ts) :
+ * ni le fuseau du serveur ni celui du navigateur ne doivent décider. Un membre en déplacement
+ * hors Europe/Paris voyait sinon une date de rencontre décalée d'un jour.
+ */
 function todayISO(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return new Date().toLocaleDateString("en-CA", { timeZone: CLUB_TZ });
 }
 
 /**
@@ -137,7 +143,7 @@ export default function Interclub({
     try {
       const res = await fetch("/api/interclub", { cache: "no-store" });
       if (onExpired(res.status)) return;
-      const data = await readJson<{ teams: Team[]; fixtures: FixtureRow[] }>(res);
+      const data = await readOk<{ teams: Team[]; fixtures: FixtureRow[] }>(res);
       setTeams(data.teams);
       setRows(data.fixtures);
     } catch (e) {
@@ -151,10 +157,13 @@ export default function Interclub({
       try {
         const res = await fetch(`/api/interclub/${id}`, { cache: "no-store" });
         if (onExpired(res.status)) return;
-        setFixture(await readJson<Fixture>(res));
+        setFixture(await readOk<Fixture>(res));
       } catch (e) {
+        // On NE ferme PAS le détail : ce rechargement se déclenche à chaque retour au premier
+        // plan, donc à chaque déverrouillage du téléphone au bord du terrain. Le fermer sur un
+        // échec réseau démontait l'écran de marquage EN PLEIN MATCH, sans relâcher la prise ni
+        // laisser partir la synchro en attente.
         toast("err", (e as Error).message);
-        setOpenId(null);
       }
     },
     [toast, onExpired],
@@ -202,7 +211,7 @@ export default function Interclub({
         body: JSON.stringify(form),
       });
       if (onExpired(res.status)) return;
-      const data = await readJson<{ id: string }>(res);
+      const data = await readOk<{ id: string }>(res);
       toast("ok", "Rencontre créée");
       setCreating(false);
       await loadList();
@@ -224,7 +233,7 @@ export default function Interclub({
         method: "POST",
       });
       if (onExpired(res.status)) return;
-      await readJson(res);
+      await readOk(res);
       setScoring(matchId);
     } catch (e) {
       toast("err", (e as Error).message);
@@ -250,7 +259,7 @@ export default function Interclub({
     try {
       const res = await fetch(`/api/interclub/${id}`, { method: "DELETE" });
       if (onExpired(res.status)) return;
-      await readJson(res);
+      await readOk(res);
       toast("ok", "Rencontre supprimee");
       setOpenId(null);
       await loadList();
@@ -271,7 +280,7 @@ export default function Interclub({
         body: JSON.stringify(body),
       });
       if (onExpired(res.status)) return;
-      await readJson(res);
+      await readOk(res);
       await loadFixture(fixture.id);
       await loadList();
     } catch (e) {
@@ -576,7 +585,7 @@ function FixtureDialog({
       </ul>
 
       <div className="modal-actions ic-detail-actions">
-        {fixture.isCreator &&
+        {fixture.canDelete &&
           (confirmDel ? (
             <>
               <button className="secondary" onClick={() => setConfirmDel(false)}>

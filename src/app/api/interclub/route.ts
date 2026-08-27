@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { getFeatures } from "@/lib/features-server";
+import { interclubChanged } from "@/lib/interclub-gate";
 import { isColorValue, isValidBestOf, isValidMatchCount, normalizeColor } from "@/lib/interclub";
 import {
   fixtureScore,
@@ -210,5 +211,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  // Une rencontre du jour de plus change ce que voit le bandeau « En direct ».
+  interclubChanged();
   return NextResponse.json({ id: created.id }, { status: 201 });
 }

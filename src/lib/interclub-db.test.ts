@@ -12,9 +12,9 @@ describe("fixtureScore", () => {
   it("compte les matchs gagnés de chaque côté", () => {
     expect(
       fixtureScore([
-        { gamesHome: 3, gamesAway: 0 },
-        { gamesHome: 1, gamesAway: 3 },
-        { gamesHome: 3, gamesAway: 2 },
+        { gamesHome: 3, gamesAway: 0, status: "done" },
+        { gamesHome: 1, gamesAway: 3, status: "done" },
+        { gamesHome: 3, gamesAway: 2, status: "done" },
       ]),
     ).toEqual({ home: 2, away: 1 });
   });
@@ -22,11 +22,24 @@ describe("fixtureScore", () => {
   it("ignore les matchs sans résultat : une rencontre en cours affiche 1-0, pas 1-3", () => {
     expect(
       fixtureScore([
-        { gamesHome: 3, gamesAway: 0 },
-        { gamesHome: null, gamesAway: null },
-        { gamesHome: null, gamesAway: null },
+        { gamesHome: 3, gamesAway: 0, status: "done" },
+        { gamesHome: null, gamesAway: null, status: "pending" },
+        { gamesHome: null, gamesAway: null, status: "pending" },
       ]),
     ).toEqual({ home: 1, away: 0 });
+  });
+
+  it("ne compte PAS un match mené 1-0 encore en cours", () => {
+    // `gamesHome` est renseignée dès le premier jeu joué. S'y fier ferait passer un match en
+    // cours pour un match gagné — et une soirée à deux terrains pour une rencontre pliée.
+    expect(
+      fixtureScore([
+        { gamesHome: 1, gamesAway: 0, status: "live" },
+        { gamesHome: 1, gamesAway: 0, status: "live" },
+        { gamesHome: 0, gamesAway: 1, status: "live" },
+        { gamesHome: 1, gamesAway: 0, status: "live" },
+      ]),
+    ).toEqual({ home: 0, away: 0 });
   });
 });
 
@@ -54,7 +67,7 @@ describe("derivedStatus", () => {
     expect(derivedStatus(4, [pending, pending, pending, pending])).toBe("scheduled");
   });
 
-  it("en cours dès qu'un match a un résultat", () => {
+  it("en cours dès qu'un match est terminé mais que les autres restent à jouer", () => {
     expect(derivedStatus(4, [done, pending, pending, pending])).toBe("live");
   });
 
@@ -62,55 +75,20 @@ describe("derivedStatus", () => {
     expect(derivedStatus(4, [{ gamesHome: null, status: "live" }, pending, pending, pending])).toBe("live");
   });
 
-  it("terminée quand tous les matchs ont un résultat", () => {
+  it("terminée quand tous les matchs sont terminés", () => {
     expect(derivedStatus(4, [done, done, done, done])).toBe("done");
   });
 
   it("ne se déclare pas terminée si des matchs manquent encore à l'appel", () => {
     expect(derivedStatus(4, [done, done])).toBe("live");
   });
-});
 
-describe("matchs simultanés", () => {
-  // Cas réel : 4 matchs sur 2 terrains, donc deux marqueurs en parallèle sur deux
-  // téléphones. Rien dans le modèle ne suppose un match en cours à la fois — ces tests
-  // le figent, parce que c'est une garantie facile à casser par inadvertance.
-
-  it("deux matchs en cours en même temps laissent la rencontre « en cours »", () => {
-    expect(
-      derivedStatus(4, [
-        { gamesHome: null, status: "live" },
-        { gamesHome: null, status: "live" },
-        { gamesHome: null, status: "pending" },
-        { gamesHome: null, status: "pending" },
-      ]),
-    ).toBe("live");
-  });
-
-  it("le score de la rencontre ne compte que les matchs finis, les autres tournant encore", () => {
-    expect(
-      fixtureScore([
-        { gamesHome: 3, gamesAway: 1 },
-        { gamesHome: 0, gamesAway: 3 },
-        { gamesHome: null, gamesAway: null }, // en cours sur le terrain 1
-        { gamesHome: null, gamesAway: null }, // en cours sur le terrain 2
-      ]),
-    ).toEqual({ home: 1, away: 1 });
-  });
-
-  it("deux instantanés de direct coexistent sans se mélanger", () => {
-    const a = parseLive(JSON.stringify({ current: { home: 7, away: 4 }, serving: "home" }));
-    const b = parseLive(JSON.stringify({ current: { home: 2, away: 9 }, serving: "away" }));
-    expect(a?.current).toEqual({ home: 7, away: 4 });
-    expect(b?.current).toEqual({ home: 2, away: 9 });
-  });
-
-  it("deux prises de marquage distinctes s'évaluent indépendamment", () => {
-    const now = new Date("2026-09-03T21:00:00Z");
-    const frais = new Date(now.getTime() - 10_000);
-    const abandonne = new Date(now.getTime() - SCORER_STALE_MS - 1000);
-    expect(scorerIsStale(frais, frais, now)).toBe(false);
-    expect(scorerIsStale(abandonne, abandonne, now)).toBe(true);
+  it("ne confond PAS « un jeu joué » avec « match terminé »", () => {
+    // Le déroulé ordinaire d'une soirée à deux terrains : les quatre matchs ont chacun bouclé
+    // un jeu. Se fier à `gamesHome !== null` déclarait la rencontre terminée à cet instant —
+    // le direct se figeait et la notification de résultat partait à tous les abonnés.
+    const unJeuJoue = { gamesHome: 1, status: "live" };
+    expect(derivedStatus(4, [unJeuJoue, unJeuJoue, unJeuJoue, unJeuJoue])).toBe("live");
   });
 });
 

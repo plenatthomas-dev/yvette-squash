@@ -219,9 +219,17 @@ export default function InterclubScorer({
     commit(undoEvent(events), { immediate: true });
   };
 
-  function finish() {
-    scheduleSync(events, true);
-    if (state.status === "done") clearLog(match.id);
+  async function finish() {
+    // On ATTEND l'envoi avant de fermer. `scheduleSync` pose un `setTimeout`, que le nettoyage
+    // de l'effet annule au démontage : la dernière synchro reposait donc sur une course, et
+    // les derniers points pouvaient ne jamais partir.
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    pendingRef.current = null;
+    await push(events);
+    if (replay(events, bestOf).status === "done") clearLog(match.id);
     onClose();
   }
 
@@ -259,7 +267,7 @@ export default function InterclubScorer({
   return (
     <div className="ics" role="dialog" aria-label="Marquage du match">
       <header className="ics-head">
-        <button className="secondary" onClick={finish}>
+        <button className="secondary" onClick={() => void finish()}>
           ← Retour
         </button>
         <span className="ics-meta">
@@ -347,7 +355,7 @@ export default function InterclubScorer({
             {state.gamesWon.home}–{state.gamesWon.away}
           </p>
           <div className="ics-ask-row">
-            <button onClick={finish}>Terminer</button>
+            <button onClick={() => void finish()}>Terminer</button>
           </div>
         </div>
       )}

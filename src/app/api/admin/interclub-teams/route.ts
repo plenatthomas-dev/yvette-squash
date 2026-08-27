@@ -54,13 +54,20 @@ export async function POST(req: NextRequest) {
 
   // Alternance plutôt que tirage au sort : le résultat est équilibré et reproductible, alors
   // qu'un vrai hasard peut mettre tout le monde dans la même équipe et ne rien démontrer.
+  //
+  // Un `updateMany` par ÉQUIPE, et non un `update` par membre : sur un club entier, la boucle
+  // séquentielle tenait la base éveillée pour rien.
+  const buckets = teams.map<string[]>(() => []);
+  orphans.forEach((o, i) => buckets[i % teams.length].push(o.id));
+
   let assigned = 0;
-  for (let i = 0; i < orphans.length; i++) {
-    await prisma.user.update({
-      where: { id: orphans[i].id },
-      data: { teamId: teams[i % teams.length].id },
+  for (let t = 0; t < teams.length; t++) {
+    if (buckets[t].length === 0) continue;
+    const { count } = await prisma.user.updateMany({
+      where: { id: { in: buckets[t] } },
+      data: { teamId: teams[t].id },
     });
-    assigned += 1;
+    assigned += count;
   }
 
   return NextResponse.json({ ok: true, assigned, teams: teams.length });

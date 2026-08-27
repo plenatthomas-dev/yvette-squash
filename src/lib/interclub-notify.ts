@@ -7,7 +7,7 @@
 
 import { prisma } from "./db";
 import { pushToUsers } from "./push";
-import { FOLLOW_LEVELS, type FollowLevel } from "./interclub";
+import { FOLLOW_LEVELS, notifiesAt, type FollowLevel } from "./interclub";
 
 /**
  * Les abonnés d'une équipe dont le niveau couvre `want`.
@@ -16,7 +16,10 @@ import { FOLLOW_LEVELS, type FollowLevel } from "./interclub";
  * ([teamId, level]) qui porte cette requête, et c'est la raison d'être de la table.
  */
 async function followersFor(teamId: string, want: FollowLevel): Promise<string[]> {
-  const covering = FOLLOW_LEVELS.slice(FOLLOW_LEVELS.indexOf(want));
+  // On s'appuie sur `notifiesAt`, la définition unique du recouvrement des paliers. La
+  // recalculer ici en dupliquait la logique : une réorganisation de FOLLOW_LEVELS aurait
+  // silencieusement désaccordé les deux, et seule l'autre version est testée directement.
+  const covering = FOLLOW_LEVELS.filter((l) => notifiesAt(l, want));
   const rows = await prisma.interclubFollow.findMany({
     where: { teamId, level: { in: [...covering] } },
     select: { userId: true },

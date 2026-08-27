@@ -2,7 +2,7 @@
 // ce module connaît Prisma — il ne doit donc JAMAIS être importé depuis un composant client.
 
 import { Prisma } from "@prisma/client";
-import { gameWinner, normalizeColor, winGamesFor, type MatchState, type Side } from "./interclub";
+import { gameWinner, normalizeColor, winGamesFor, type Side } from "./interclub";
 
 export const interclubInclude = {
   team: true,
@@ -66,14 +66,18 @@ export function parseLive(raw: string | null): LiveSnapshot | null {
   }
 }
 
-export function serializeLive(state: MatchState): string {
-  const snap: LiveSnapshot = {
-    current: state.current,
-    serving: state.serving,
-    servingBox: state.servingBox,
-    awaitingServeBox: state.awaitingServeBox,
-  };
-  return JSON.stringify(snap);
+/**
+ * Sérialise un instantané pour la colonne `liveJson`. Prend un `LiveSnapshot` et non un
+ * `MatchState` complet : un `MatchState` le satisfait structurellement, et n'accepter que les
+ * quatre champs réellement stockés évite qu'un jour on y sérialise tout l'état du moteur.
+ */
+export function serializeLive(snap: LiveSnapshot): string {
+  return JSON.stringify({
+    current: snap.current,
+    serving: snap.serving,
+    servingBox: snap.servingBox,
+    awaitingServeBox: snap.awaitingServeBox,
+  } satisfies LiveSnapshot);
 }
 
 /** Jeux gagnés déduits des jeux TERMINÉS enregistrés (source de vérité du résultat). */
@@ -89,17 +93,20 @@ export function gamesWonFrom(games: { pointsHome: number; pointsAway: number }[]
 }
 
 /**
- * Score de la RENCONTRE = nombre de matchs gagnés de chaque côté. Un match sans résultat ne
- * compte pour personne : une rencontre en cours affiche donc 1-0 et non 1-3.
+ * Score de la RENCONTRE = nombre de matchs gagnés de chaque côté.
+ *
+ * ⚠️ Un match ne compte que s'il est TERMINÉ (`status === "done"`). Se fier à
+ * `gamesHome !== null` serait faux : cette colonne est renseignée dès le PREMIER jeu joué, si
+ * bien qu'un match mené 1-0 en plein milieu serait compté comme gagné. Une rencontre où les
+ * quatre matchs ont joué un jeu afficherait 3-1 alors que rien n'est joué.
  */
-export function fixtureScore(matches: { gamesHome: number | null; gamesAway: number | null }[]): {
-  home: number;
-  away: number;
-} {
+export function fixtureScore(
+  matches: { gamesHome: number | null; gamesAway: number | null; status: string }[],
+): { home: number; away: number } {
   let home = 0;
   let away = 0;
   for (const m of matches) {
-    if (m.gamesHome === null || m.gamesAway === null) continue;
+    if (m.status !== "done" || m.gamesHome === null || m.gamesAway === null) continue;
     if (m.gamesHome > m.gamesAway) home += 1;
     else if (m.gamesAway > m.gamesHome) away += 1;
   }
@@ -107,22 +114,27 @@ export function fixtureScore(matches: { gamesHome: number | null; gamesAway: num
 }
 
 /**
- * Statut DÉDUIT de la rencontre, indépendamment de la colonne `status` : tous les matchs ont
- * un résultat ⇒ terminée ; au moins un match commencé ⇒ en cours. La colonne reste la valeur
- * affichée, mais l'API peut la recaler (auto-cicatrisation, comme le tournoi).
+ * Statut DÉDUIT de la rencontre, indépendamment de la colonne `status` : tous les matchs sont
+ * terminés ⇒ terminée ; au moins un match entamé ⇒ en cours. La colonne reste la valeur
+ * stockée, mais l'API la recale (auto-cicatrisation, comme le tournoi).
+ *
+ * ⚠️ « Terminé » se lit sur `status`, JAMAIS sur `gamesHome !== null` : cette colonne est
+ * écrite dès le premier jeu. Un soir à deux terrains où les quatre matchs ont joué un jeu, la
+ * rencontre aurait été déclarée terminée — le direct se serait figé et la notification de
+ * résultat serait partie à tous les abonnés, en plein milieu de la soirée.
  */
 export function derivedStatus(
   matchCount: number,
   matches: { gamesHome: number | null; status: string }[],
 ): "scheduled" | "live" | "done" {
-  const done = matches.filter((m) => m.gamesHome !== null).length;
+  const done = matches.filter((m) => m.status === "done").length;
   if (done >= matchCount && matchCount > 0) return "done";
-  if (done > 0 || matches.some((m) => m.status === "live")) return "live";
-  return "scheduled";
+  const started = matches.some((m) => m.status === "live" || m.status === "done" || m.gamesHome !== null);
+  return started ? "live" : "scheduled";
 }
 
 /** Vue envoyée au client. Ne contient que du déjà-public : noms d'affichage, scores, couleurs. */
-export function serializeInterclub(f: FullInterclub, userId: string | null) {
+export function serializeInterclub(f: FullInterclub, userId: string | null, isAdmin = false) {
   const matches = f.matches.map((m) => {
     const live = m.status === "live" ? parseLive(m.liveJson) : null;
     return {
@@ -163,6 +175,9 @@ export function serializeInterclub(f: FullInterclub, userId: string | null) {
     score: fixtureScore(f.matches),
     createdById: f.createdById,
     isCreator: !!userId && f.createdById === userId,
+    // Le serveur autorise le créateur OU un admin : l'écran affiche donc le bouton dans les
+    // mêmes cas, plutôt que de le cacher à un admin qui a pourtant le droit.
+    canDelete: (!!userId && f.createdById === userId) || isAdmin,
     matches,
   };
 }

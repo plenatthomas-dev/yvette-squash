@@ -7,6 +7,7 @@ const h = vi.hoisted(() => ({
   teams: [] as Array<{ id: string }>,
   orphans: [] as Array<{ id: string }>,
   updates: [] as Array<{ id: string; teamId: string | null }>,
+  writeCalls: 0,
   cleared: 0,
 }));
 
@@ -19,11 +20,15 @@ vi.mock("@/lib/db", () => ({
     interclubTeam: { findMany: vi.fn(async () => h.teams) },
     user: {
       findMany: vi.fn(async () => h.orphans),
-      update: vi.fn(async (args: { where: { id: string }; data: { teamId: string | null } }) => {
-        h.updates.push({ id: args.where.id, teamId: args.data.teamId });
-        return {};
-      }),
-      updateMany: vi.fn(async () => ({ count: h.cleared })),
+      updateMany: vi.fn(
+        async (args: { where: Record<string, unknown>; data: { teamId: string | null } }) => {
+          h.writeCalls += 1;
+          const ids = (args.where.id as { in?: string[] } | undefined)?.in;
+          if (!ids) return { count: h.cleared }; // remise à zéro
+          for (const id of ids) h.updates.push({ id, teamId: args.data.teamId });
+          return { count: ids.length };
+        },
+      ),
     },
   },
 }));
@@ -39,6 +44,7 @@ beforeEach(() => {
   h.teams = [{ id: "t1" }, { id: "t2" }];
   h.orphans = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }, { id: "e" }];
   h.updates = [];
+  h.writeCalls = 0;
   h.cleared = 0;
 });
 
@@ -56,7 +62,17 @@ describe("POST /api/admin/interclub-teams", () => {
   it("répartit en alternant, pour un résultat équilibré et reproductible", async () => {
     const res = await POST(post({ mode: "fill" }));
     expect(res.status).toBe(200);
-    expect(h.updates.map((u) => u.teamId)).toEqual(["t1", "t2", "t1", "t2", "t1"]);
+    expect((await res.json()).assigned).toBe(5);
+    // Trois d'un côté, deux de l'autre — et l'affectation de chacun est stable.
+    const byTeam = (t: string) => h.updates.filter((u) => u.teamId === t).map((u) => u.id);
+    expect(byTeam("t1")).toEqual(["a", "c", "e"]);
+    expect(byTeam("t2")).toEqual(["b", "d"]);
+  });
+
+  it("écrit une fois par ÉQUIPE et non une fois par membre", async () => {
+    await POST(post({ mode: "fill" }));
+    // Cinq membres, deux équipes : deux écritures, pas cinq.
+    expect(h.writeCalls).toBe(2);
   });
 
   it("ne touche qu'aux membres sans équipe — la requête les filtre déjà", async () => {

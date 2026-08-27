@@ -90,3 +90,20 @@ export async function readJson<T = unknown>(res: Response): Promise<T> {
   }
   return data;
 }
+
+/**
+ * Comme `readJson`, mais LÈVE aussi sur un statut d'erreur.
+ *
+ * `readJson` rend le corps tel quel sur un 4xx — c'est voulu, certaines routes s'en servent —,
+ * à charge pour l'appelant d'écrire `if (!res.ok) throw`. Oublier cette ligne fait passer un
+ * refus du serveur pour un succès : un 409 « quelqu'un marque déjà » ouvre quand même l'écran,
+ * un 403 affiche « supprimé ». Ce raccourci existe pour que l'oubli ne soit plus possible.
+ */
+export async function readOk<T = unknown>(res: Response): Promise<T> {
+  const data = await readJson<T>(res);
+  if (!res.ok) {
+    const msg = (data as { error?: string } | null)?.error;
+    throw new Error(msg ?? `Erreur ${res.status}`);
+  }
+  return data;
+}

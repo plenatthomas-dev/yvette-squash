@@ -4,6 +4,7 @@ import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { getFeatures } from "@/lib/features-server";
 import { scorerIsStale } from "@/lib/interclub-db";
+import { interclubChanged } from "@/lib/interclub-gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,15 +60,19 @@ export async function POST(
           throw new HttpError(409, "Quelqu'un marque déjà ce match");
         }
 
+        // On prend la MAIN, on ne déclare pas la rencontre commencée : c'est le premier point
+        // qui la fait basculer en direct (cf. PUT …/live).
+        //
+        // Écrire `status: "live"` ici avait deux conséquences fâcheuses. La notification de
+        // début n'était jamais envoyée — la rencontre était déjà « live » quand le premier
+        // point arrivait, donc la transition ne se produisait plus. Et un membre qui touchait
+        // « Marquer » par erreur puis « Retour » laissait la rencontre « En cours » à vie :
+        // rien ne redescend un match de `live` à `pending`, donc le bandeau direct et son
+        // sondage tournaient indéfiniment.
         await tx.interclubMatch.update({
           where: { id: mid },
-          data: {
-            scorerId: session.userId,
-            scorerClaimedAt: new Date(),
-            status: m.status === "pending" ? "live" : m.status,
-          },
+          data: { scorerId: session.userId, scorerClaimedAt: new Date() },
         });
-        await tx.interclub.update({ where: { id }, data: { status: "live" } });
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
@@ -78,6 +83,7 @@ export async function POST(
   for (let attempt = 0; ; attempt++) {
     try {
       await runOnce();
+      interclubChanged();
       return NextResponse.json({ ok: true });
     } catch (e) {
       if (e instanceof HttpError) {
@@ -111,5 +117,6 @@ export async function DELETE(
     where: { id: mid, interclubId: id, scorerId: session.userId },
     data: { scorerId: null, scorerClaimedAt: null },
   });
+  interclubChanged();
   return NextResponse.json({ ok: true });
 }

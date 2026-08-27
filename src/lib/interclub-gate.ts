@@ -8,9 +8,15 @@
 // supplémentaire sur un chemin chaud »).
 //
 // La réponse vit donc dans le Data Cache de Vercel, invalidé par tag à chaque écriture du
-// marqueur. Le nombre de lectures Postgres est ainsi borné par la CADENCE DU MARQUEUR (une
-// écriture toutes les 5 s au plus), et non par le nombre de spectateurs : dix personnes qui
-// regardent coûtent autant qu'une seule.
+// marqueur. La requête de rencontres — la plus lourde, avec ses jointures sur les matchs et les
+// jeux — est ainsi bornée par la CADENCE DU MARQUEUR (une écriture toutes les 5 s au plus) et
+// non par le nombre de spectateurs.
+//
+// ⚠️ Ce que ce cache n'épargne PAS : `getSession` lit la table `Session` à chaque appel, sans
+// cache. Le coût par sondage n'est donc pas nul, il est réduit à cette seule lecture par clé
+// primaire. Dire que « dix spectateurs coûtent une seule lecture Postgres » serait faux — ils
+// en coûtent dix légères au lieu de dix lourdes, et le compute Neon reste éveillé pendant la
+// soirée de toute façon, puisque le marqueur écrit.
 //
 // ⚠️ POURQUOI PAS LE CACHE CDN, contrairement à ce que prévoyait l'étude initiale.
 // Mettre `Cache-Control: public, s-maxage=…` sur cette route aurait effondré les spectateurs en

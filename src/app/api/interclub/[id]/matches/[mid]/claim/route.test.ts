@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({
 vi.mock("@/lib/features-server", () => ({
   getFeatures: async () => ({ interclub: h.interclub }),
 }));
+vi.mock("@/lib/interclub-gate", () => ({ interclubChanged: vi.fn() }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
 vi.mock("@/lib/db", () => {
   const tx = {
@@ -78,9 +79,13 @@ describe("POST .../claim", () => {
     expect((await POST(req(), ctx)).status).toBe(404);
   });
 
-  it("prend un match libre et le passe en direct", async () => {
+  it("prend la main sans déclarer la rencontre commencée", async () => {
+    // Prendre le marquage n'est pas jouer. Écrire `status: "live"` ici empêchait la
+    // notification de début de partir (la transition n'avait plus lieu au premier point) et
+    // laissait la rencontre « En cours » à vie si l'on relâchait aussitôt.
     expect((await POST(req(), ctx)).status).toBe(200);
-    expect(h.updated).toMatchObject({ scorerId: "u1", status: "live" });
+    expect(h.updated).toMatchObject({ scorerId: "u1" });
+    expect(h.updated).not.toHaveProperty("status");
   });
 
   it("refuse un match que quelqu'un d'autre marque activement", async () => {
@@ -106,10 +111,10 @@ describe("POST .../claim", () => {
     expect((await POST(req(), ctx)).status).toBe(409);
   });
 
-  it("ne rétrograde pas le statut d'un match déjà en direct", async () => {
+  it("ne touche pas au statut du match, quel qu'il soit", async () => {
     h.match = { ...freshMatch(), status: "live" };
     await POST(req(), ctx);
-    expect(h.updated).toMatchObject({ status: "live" });
+    expect(h.updated).not.toHaveProperty("status");
   });
 });
 

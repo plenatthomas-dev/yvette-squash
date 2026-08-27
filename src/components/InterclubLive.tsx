@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readJson } from "@/lib/apiFetch";
+import { readOk } from "@/lib/apiFetch";
 import { resolveColor, FOLLOW_LABELS, FOLLOW_LEVELS, type FollowLevel } from "@/lib/interclub";
 import { ensurePushSubscribed, pushEnabledOnServer, pushSupported } from "@/lib/pushClient";
 
@@ -11,9 +11,16 @@ import { ensurePushSubscribed, pushEnabledOnServer, pushSupported } from "@/lib/
 // dure deux heures. Trois garde-fous, dans cet ordre d'importance :
 //   1. on n'interroge QUE si une rencontre est réellement en cours ;
 //   2. on n'interroge QUE si l'onglet est visible — un téléphone en poche ne coûte rien ;
-//   3. côté serveur, la réponse vient du Data Cache (cf. interclub-gate), si bien que dix
-//      spectateurs coûtent une seule lecture Postgres.
+//   3. côté serveur, la requête lourde vient du Data Cache (cf. interclub-gate) : seule la
+//      lecture de session subsiste par sondage.
 const POLL_MS = 10_000;
+/**
+ * Cadence de veille, quand rien n'est en cours. Une cadence NULLE serait un piège : `anyLive`
+ * se déduit du dernier chargement, donc ne peut devenir vrai que par un chargement. Un membre
+ * qui ouvre l'onglet avant le premier point ne verrait jamais la rencontre démarrer sans
+ * changer d'onglet et revenir.
+ */
+const IDLE_POLL_MS = 60_000;
 
 type LiveMatch = {
   id: string;
@@ -70,7 +77,7 @@ export default function InterclubLive({
     try {
       const res = await fetch("/api/interclub/live", { cache: "no-store" });
       if (onExpired(res.status)) return;
-      const data = await readJson<{ fixtures: LiveFixture[] }>(res);
+      const data = await readOk<{ fixtures: LiveFixture[] }>(res);
       setFixtures(data.fixtures);
     } catch {
       // Silencieux : un direct qui ne se rafraîchit pas ne mérite pas d'interrompre la
@@ -83,7 +90,7 @@ export default function InterclubLive({
     try {
       const res = await fetch("/api/interclub/follows", { cache: "no-store" });
       if (onExpired(res.status)) return;
-      const data = await readJson<{ follows: Follow[] }>(res);
+      const data = await readOk<{ follows: Follow[] }>(res);
       setFollows(data.follows);
     } catch {
       /* les abonnements ne sont pas critiques à l'affichage */
@@ -96,9 +103,13 @@ export default function InterclubLive({
   }, [load, loadFollows]);
 
   useEffect(() => {
+    // On sonde toujours quand l'onglet est visible, mais six fois moins vite tant que rien
+    // n'est en cours — assez pour voir la rencontre démarrer, sans peser hors soirée.
+    let ticks = 0;
     const tick = () => {
       if (document.visibilityState !== "visible") return;
-      if (!anyLiveRef.current) return;
+      ticks += 1;
+      if (!anyLiveRef.current && ticks % (IDLE_POLL_MS / POLL_MS) !== 0) return;
       load();
     };
     const t = window.setInterval(tick, POLL_MS);
@@ -132,7 +143,7 @@ export default function InterclubLive({
         body: JSON.stringify({ teamId, level }),
       });
       if (onExpired(res.status)) return;
-      await readJson(res);
+      await readOk(res);
       setFollows((prev) => {
         const rest = prev.filter((f) => f.teamId !== teamId);
         return level ? [...rest, { teamId, level }] : rest;
