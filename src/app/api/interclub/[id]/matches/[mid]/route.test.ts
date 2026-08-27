@@ -13,12 +13,24 @@ const h = vi.hoisted(() => ({
   createdGames: null as null | Array<Record<string, unknown>>,
   deletedGames: 0,
   fixtureStatus: null as null | string,
+  notified: [] as string[],
 }));
 
 vi.mock("@/lib/features-server", () => ({
   getFeatures: async () => ({ interclub: h.interclub }),
 }));
 vi.mock("@/lib/interclub-gate", () => ({ interclubChanged: vi.fn() }));
+vi.mock("@/lib/interclub-notify", () => ({
+  notifyGameDone: vi.fn(async () => {
+    h.notified.push("gameDone");
+  }),
+  notifyMatchDone: vi.fn(async () => {
+    h.notified.push("matchDone");
+  }),
+  notifyFixtureDone: vi.fn(async () => {
+    h.notified.push("fixtureDone");
+  }),
+}));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
 vi.mock("@/lib/admin", () => ({ isAdminEmail: vi.fn(() => h.admin) }));
 vi.mock("@/lib/db", () => {
@@ -73,6 +85,7 @@ const freshMatch = () => ({
   gamesAway: null,
   homeDisplayName: "Tom",
   awayName: "Gégé",
+  games: [] as Array<{ number: number }>,
   interclub: {
     id: "f1",
     bestOf: 5,
@@ -96,6 +109,7 @@ beforeEach(() => {
   h.createdGames = null;
   h.deletedGames = 0;
   h.fixtureStatus = null;
+  h.notified = [];
 });
 
 describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
@@ -256,6 +270,45 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
     h.user = { id: "u9", displayName: "Jérôme Blanc", nickname: "Jéjé", teamId: "team-1" };
     await PATCH(patch({ homeUserId: "u9", homeDisplayName: "Truc" }), ctx);
     expect(h.updated).toMatchObject({ homeDisplayName: "Jéjé" });
+  });
+
+  it("une saisie a posteriori annonce un jeu terminé, comme le direct", async () => {
+    // Un club qui n'utilise jamais l'écran de marquage ne recevait RIEN avant le tout
+    // dernier match, même abonné au niveau « détaillé ».
+    await PATCH(patch({ games: [{ home: 11, away: 5 }] }), ctx);
+    expect(h.notified).toEqual(["gameDone"]);
+  });
+
+  it("annonce le match gagné plutôt que le jeu, quand les deux surviennent", async () => {
+    await PATCH(
+      patch({ games: [{ home: 11, away: 5 }, { home: 11, away: 8 }, { home: 11, away: 9 }] }),
+      ctx,
+    );
+    expect(h.notified).toContain("matchDone");
+    expect(h.notified).not.toContain("gameDone");
+  });
+
+  it("une CORRECTION qui n'avance rien ne notifie personne", async () => {
+    // C'est tout l'intérêt des gardes de transition : corriger un 11-5 en 11-7 est une
+    // rectification, pas un événement.
+    h.match = { ...freshMatch(), games: [{ number: 1 }], gamesHome: 1, gamesAway: 0 };
+    await PATCH(patch({ games: [{ home: 11, away: 7 }] }), ctx);
+    expect(h.notified).toEqual([]);
+  });
+
+  it("ne réannonce pas un match déjà terminé", async () => {
+    h.match = {
+      ...freshMatch(),
+      status: "done",
+      gamesHome: 3,
+      gamesAway: 0,
+      games: [{ number: 1 }, { number: 2 }, { number: 3 }],
+    };
+    await PATCH(
+      patch({ games: [{ home: 11, away: 5 }, { home: 11, away: 8 }, { home: 11, away: 9 }] }),
+      ctx,
+    );
+    expect(h.notified).not.toContain("matchDone");
   });
 
   it("accepte une couleur libre et la normalise", async () => {

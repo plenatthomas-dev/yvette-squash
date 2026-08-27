@@ -13,7 +13,12 @@ import {
 } from "@/lib/interclub";
 import { derivedStatus, fixtureScore, MAX_PLAYER_NAME_LEN } from "@/lib/interclub-db";
 import { interclubChanged } from "@/lib/interclub-gate";
-import { notifyFixtureDone } from "@/lib/interclub-notify";
+import {
+  notifyFixtureDone,
+  notifyGameDone,
+  notifyMatchDone,
+  type MatchLine,
+} from "@/lib/interclub-notify";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -99,12 +104,13 @@ export async function PATCH(
   // affectations faites dans une fermeture, et rétrécirait le type à `null`.
   const finished: {
     value: {
-      fixtureId: string;
-      teamId: string;
-      teamName: string;
-      opponent: string;
+      ctx: { fixtureId: string; teamId: string; teamName: string; opponent: string };
+      players: { player: string; opponent: string };
+      gameDone: GameScore[] | null;
+      matchDone: { home: number; away: number } | null;
+      fixtureDone: boolean;
       score: { home: number; away: number };
-      lines: { player: string; gamesHome: number | null; gamesAway: number | null }[];
+      lines: MatchLine[];
     } | null;
   } = { value: null };
 
@@ -117,6 +123,7 @@ export async function PATCH(
         const m = await tx.interclubMatch.findUnique({
           where: { id: mid },
           include: {
+            games: { select: { number: true } },
             interclub: {
               select: {
                 id: true,
@@ -237,15 +244,37 @@ export async function PATCH(
         const eff = derivedStatus(m.interclub.matchCount, siblings);
         await tx.interclub.update({ where: { id }, data: { status: eff } });
 
-        // Une saisie a posteriori ne notifie PAS chaque match : c'est une correction, pas un
-        // direct. Seul le passage de la rencontre à « terminée » fait événement — c'est
-        // exactement ce que demandent les abonnés au niveau « résultat ».
-        if (m.interclub.status !== "done" && eff === "done") {
+        // Une saisie a posteriori notifie les MÊMES transitions que le direct.
+        //
+        // Une première version ne signalait ici que la fin de rencontre, au motif qu'une
+        // saisie tardive est « une correction, pas un direct ». C'était une erreur de
+        // raisonnement : un club qui ne se sert jamais de l'écran de marquage ne recevait
+        // alors RIEN avant le tout dernier match, y compris pour qui s'était abonné au
+        // niveau « détaillé ». Ce qui doit décider, ce n'est pas la route employée, c'est
+        // qu'il y ait une information NOUVELLE — d'où les gardes de transition, qui taisent
+        // au passage les vraies corrections (rien n'avance, rien ne part).
+        const gamesGrew = !!parsedGames && parsedGames.length > m.games.length;
+        const winner = parsedGames ? sequenceWinner(parsedGames, m.interclub.bestOf) : null;
+        const matchNewlyDone = !!winner && m.status !== "done";
+
+        if (gamesGrew || matchNewlyDone || (m.interclub.status !== "done" && eff === "done")) {
           finished.value = {
-            fixtureId: id,
-            teamId: m.interclub.teamId,
-            teamName: m.interclub.team.name,
-            opponent: m.interclub.opponent,
+            ctx: {
+              fixtureId: id,
+              teamId: m.interclub.teamId,
+              teamName: m.interclub.team.name,
+              opponent: m.interclub.opponent,
+            },
+            players: { player: m.homeDisplayName, opponent: m.awayName },
+            gameDone: !winner && gamesGrew && parsedGames ? parsedGames : null,
+            matchDone:
+              matchNewlyDone && parsedGames
+                ? {
+                    home: parsedGames.filter((g) => g.home > g.away).length,
+                    away: parsedGames.filter((g) => g.away > g.home).length,
+                  }
+                : null,
+            fixtureDone: m.interclub.status !== "done" && eff === "done",
             score: fixtureScore(siblings),
             lines: siblings.map((s) => ({
               player: s.homeDisplayName,
@@ -266,9 +295,21 @@ export async function PATCH(
     try {
       await runOnce();
       interclubChanged();
-      if (finished.value) {
-        const { score, lines, ...ctx } = finished.value;
-        await notifyFixtureDone(ctx, score, lines);
+      const ev = finished.value;
+      if (ev) {
+        if (ev.matchDone) {
+          await notifyMatchDone(
+            ev.ctx,
+            ev.players.player,
+            ev.players.opponent,
+            ev.matchDone.home,
+            ev.matchDone.away,
+            ev.score,
+          );
+        } else if (ev.gameDone) {
+          await notifyGameDone(ev.ctx, ev.players.player, ev.players.opponent, ev.gameDone);
+        }
+        if (ev.fixtureDone) await notifyFixtureDone(ev.ctx, ev.score, ev.lines);
       }
       return NextResponse.json({ ok: true });
     } catch (e) {
