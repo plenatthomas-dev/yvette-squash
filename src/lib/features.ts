@@ -26,6 +26,7 @@ export const FEATURE_KEYS = [
   "tournament",
   "ranking",
   "externalBookings",
+  "interclub",
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
@@ -46,6 +47,7 @@ export const FEATURE_LABELS: Record<FeatureKey, string> = {
   tournament: "Tournois internes",
   ranking: "Classement fédéral",
   externalBookings: "Détection des résas faites directement sur ResaMania",
+  interclub: "Rencontres par équipes (interclub)",
 };
 
 function isOn(v: string | undefined): boolean {
@@ -83,6 +85,10 @@ export const ENV_FEATURES: Features = {
   // journal partagé et le blocage « un terrain par horaire » à ces résas. Sensible (écrit en
   // base une donnée déduite, pas déclarée par le membre) → testé sur Recette avant activation.
   externalBookings: isOn(process.env.NEXT_PUBLIC_FEATURE_EXTERNAL_BOOKINGS),
+  // Rencontres de championnat par équipes : vue « Interclub », comptage de points en direct
+  // et routes /api/interclub/**. Crée de la donnée nominative (qui joue, contre qui, quel
+  // score) → à éprouver sur Recette avant activation en prod.
+  interclub: isOn(process.env.NEXT_PUBLIC_FEATURE_INTERCLUB),
 };
 
 /** État effectif = override s'il y en a un, sinon le défaut de l'environnement. */

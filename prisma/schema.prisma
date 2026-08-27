@@ -73,6 +73,14 @@ model User {
   tournamentPlayers      TournamentPlayer[]
   // Classement fédéral (idée squashnet) : dernier classement rapproché, source publique.
   squashnetRanking       SquashnetRanking?
+  // Interclub : équipe de l'asso où ce membre est aligné (NULL = non aligné, cas le plus
+  // fréquent). Affiché comme colonne de l'annuaire. SetNull à la suppression de l'équipe.
+  team                   InterclubTeam?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  teamId                 String?
+  interclubsCreated      Interclub[]        @relation("InterclubCreator")
+  interclubPlayed        InterclubMatch[]   @relation("InterclubHomePlayer")
+  interclubScored        InterclubMatch[]   @relation("InterclubScorer")
+  interclubFollows       InterclubFollow[]
 }
 
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
@@ -551,4 +559,120 @@ model SquashnetRanking {
   club      String // libellé du club rapproché (audit)
   month     String // période de classement, "YYYY-MM-DD"
   fetchedAt DateTime @updatedAt // dernier rafraîchissement
+}
+
+// --- Interclub (rencontres de championnat par équipes) ----------------------
+// Une RENCONTRE = une équipe de l'asso contre un club adverse, un soir donné, en N matchs
+// de simple. Chaque match se compte en JEUX gagnés (comme Tournament/Match), et le détail
+// point par point vit dans `InterclubMatch.liveJson` + les lignes `InterclubGame`.
+//
+// ⚠️ Tous les modèles sont préfixés `Interclub` : le nom `Match` est DÉJÀ pris par le module
+// tournoi, et `Team` serait trop générique.
+
+// Une équipe de l'asso ("Équipe 1", "Équipe 2"). Un modèle plutôt qu'une colonne figée :
+// une 3e équipe un jour ne coûte alors qu'une ligne, pas une migration.
+model InterclubTeam {
+  id        String            @id @default(cuid())
+  name      String            @unique // "Équipe 1", "Équipe 2"
+  order     Int               @default(0) // ordre d'affichage
+  createdAt DateTime          @default(now())
+  members   User[]
+  fixtures  Interclub[]
+  followers InterclubFollow[]
+
+  @@index([order])
+}
+
+// La rencontre. `opponent` est un TEXTE LIBRE : on ne tient pas d'annuaire des clubs
+// adverses (décision produit). `matchCount` et `bestOf` sont configurables car le format
+// varie d'une division à l'autre.
+model Interclub {
+  id          String           @id @default(cuid())
+  date        String // "YYYY-MM-DD" (comme Tricount et Tournament)
+  team        InterclubTeam    @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  teamId      String
+  season      String? // ex. "2026/2027"
+  division    String? // ex. "D2 Hommes"
+  opponent    String // nom du club adverse, saisi à la main
+  home        Boolean          @default(true) // true = on reçoit
+  matchCount  Int              @default(4) // nombre de simples de la rencontre
+  bestOf      Int              @default(5) // 3 => 2 jeux gagnants ; 5 => 3 jeux gagnants
+  status      String           @default("scheduled") // scheduled | live | done
+  createdById String
+  createdBy   User             @relation("InterclubCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime         @default(now())
+  matches     InterclubMatch[]
+
+  @@index([date])
+  @@index([teamId, date])
+}
+
+// Un simple de la rencontre. Côté asso : un MEMBRE (homeUserId) ou un remplaçant hors appli
+// — `homeDisplayName` est FIGÉ à la création, comme TournamentPlayer, pour que supprimer un
+// compte ne casse pas l'historique. Côté adverse : nom libre, jamais de compte.
+//
+// `liveJson` porte l'instantané du match en cours (jeu courant, points, serveur, carré) ;
+// il est réécrit au plus toutes les 5 s par le marqueur. Le JOURNAL des points, lui, reste
+// dans le navigateur du marqueur : le persister coûterait ~200 écritures par match, sur un
+// chemin chaud que le palier gratuit ne supporte pas.
+model InterclubMatch {
+  id              String          @id @default(cuid())
+  interclub       Interclub       @relation(fields: [interclubId], references: [id], onDelete: Cascade)
+  interclubId     String
+  order           Int // 1..matchCount — ordre de passage
+  homeUser        User?           @relation("InterclubHomePlayer", fields: [homeUserId], references: [id], onDelete: SetNull)
+  homeUserId      String?
+  homeDisplayName String // figé : nom du membre ou du remplaçant
+  awayName        String // adversaire (texte libre)
+  // Couleur de maillot, pour reconnaître les joueurs depuis le bord du terrain. Clé d'une
+  // palette FERMÉE (cf. PLAYER_COLORS dans src/lib/interclub.ts) : une couleur libre ne
+  // garantirait pas le contraste exigé par DESIGN.md. NULL = pas de couleur choisie.
+  homeColor       String?
+  awayColor       String?
+  status          String          @default("pending") // pending | live | done
+  // Résultat en JEUX gagnés (comme Match).
+  gamesHome       Int?
+  gamesAway       Int?
+  // Marqueur DÉSIGNÉ : seul lui peut saisir tant qu'il ne relâche pas. `scorerClaimedAt`
+  // sert à périmer une prise abandonnée (téléphone à plat) plutôt que de geler le match.
+  scorer          User?           @relation("InterclubScorer", fields: [scorerId], references: [id], onDelete: SetNull)
+  scorerId        String?
+  scorerClaimedAt DateTime?
+  liveJson        String? // instantané du match en cours (cf. PlanningSnapshot.payloadJson)
+  updatedAt       DateTime        @updatedAt
+  games           InterclubGame[]
+
+  @@unique([interclubId, order])
+  @@index([interclubId])
+}
+
+// Un jeu TERMINÉ, en points. Les jeux en cours ne sont pas ici : ils vivent dans liveJson.
+model InterclubGame {
+  id         String         @id @default(cuid())
+  match      InterclubMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  matchId    String
+  number     Int // 1..5
+  pointsHome Int
+  pointsAway Int
+  finishedAt DateTime?
+
+  @@unique([matchId, number])
+}
+
+// Abonnement d'un membre au suivi d'une équipe. Une table et non un champ sur User : le
+// chemin critique est la requête INVERSE — « qui prévenir pour l'équipe 2, au niveau
+// highlights ou plus ? » — d'où l'index ([teamId, level]). Aucune ligne = aucune
+// notification ; une ligne par équipe suivie, donc on peut suivre les deux à des niveaux
+// différents.
+model InterclubFollow {
+  id        String        @id @default(cuid())
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  team      InterclubTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId    String
+  level     String // result | highlights | detailed
+  createdAt DateTime      @default(now())
+
+  @@unique([userId, teamId])
+  @@index([teamId, level])
 }
