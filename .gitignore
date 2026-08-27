@@ -46,3 +46,7 @@ yvette-squash-analyse-securite.md
 # (journal d'injection, état de session). Seule sa config est versionnée.
 /.impeccable/live/*
 !/.impeccable/live/config.json
+
+# Claude Code — config LOCALE (permissions propres à la machine). La config partagée
+# .claude/settings.json, elle, reste versionnée.
+.claude/settings.local.json
