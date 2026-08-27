@@ -81,6 +81,7 @@ model User {
   interclubPlayed        InterclubMatch[]   @relation("InterclubHomePlayer")
   interclubScored        InterclubMatch[]   @relation("InterclubScorer")
   interclubFollows       InterclubFollow[]
+  notifications          AppNotification[]
 }
 
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
@@ -677,4 +678,27 @@ model InterclubFollow {
 
   @@unique([userId, teamId])
   @@index([teamId, level])
+}
+
+// Journal des notifications envoyées à un membre.
+//
+// Le push est fragile par nature : permission refusée, notifications coupées au niveau du
+// système, iPhone hors écran d'accueil, appareil éteint. Une notification perdue l'était
+// définitivement, et le membre n'avait aucun moyen de savoir qu'elle avait existé. Ce journal
+// est le REPLI : il s'affiche dans l'appli, sous la cloche, que le push ait fonctionné ou non.
+//
+// Nommé `AppNotification` et non `Notification` : ce dernier est le type DOM des navigateurs,
+// et le confondre dans du code client serait un piège.
+model AppNotification {
+  id        String    @id @default(cuid())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  title     String
+  body      String
+  url       String? // où mène le clic
+  tag       String? // même sens que côté push : regroupe une série (une rencontre, une alerte)
+  createdAt DateTime  @default(now())
+  readAt    DateTime? // NULL = non lue, alimente la pastille de la cloche
+
+  @@index([userId, createdAt])
 }

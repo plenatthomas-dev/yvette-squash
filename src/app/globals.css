@@ -3986,3 +3986,40 @@ body[data-bottombar] .install-banner {
   background-image: none;
   border-color: var(--pico-contrast);
 }
+
+/* --- Journal des notifications (sous la cloche) --- */
+.notif-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.notif-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--pico-card-border-color);
+  background: var(--pico-card-background-color);
+}
+/* Non lue : un filet à gauche, pas un fond coloré. « Non lu » est un état, et DESIGN.md
+   réserve les aplats de couleur à ce qui est actionnable. */
+.notif-list li.is-unread {
+  border-left: 3px solid var(--pico-primary);
+  font-weight: 500;
+}
+.notif-title { font-size: 0.85rem; font-weight: 600; }
+.notif-body {
+  grid-column: 1 / -1;
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+  overflow-wrap: anywhere;
+}
+.notif-at {
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+  white-space: nowrap;
+}

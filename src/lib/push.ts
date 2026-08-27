@@ -1,5 +1,6 @@
 import webpush from "web-push";
 import { prisma } from "./db";
+import { recordNotifications } from "./notify-store";
 
 // Clés VAPID (à générer une fois : `npx web-push generate-vapid-keys`).
 //  - NEXT_PUBLIC_VAPID_PUBLIC_KEY : publique, aussi lue côté client pour s'abonner.
@@ -41,16 +42,22 @@ export type PushPayload = {
 // abonnements morts). Renvoie { recipients: joueurs effectivement notifiés, sent: total
 // d'appareils touchés }. Best-effort : un abonnement en échec n'interrompt pas les autres.
 export async function pushToAll(payload: PushPayload): Promise<{ recipients: number; sent: number }> {
-  if (!ensureConfigured()) return { recipients: 0, sent: 0 };
   const subs = await prisma.pushSubscription.findMany({
     distinct: ["userId"],
     select: { userId: true },
   });
+  // Journalisé AVANT le contrôle de configuration, et une seule fois pour tout le monde :
+  // c'est justement quand le push ne peut pas partir que la cloche doit garder une trace.
+  await recordNotifications(
+    subs.map((s) => s.userId),
+    payload,
+  );
+  if (!ensureConfigured()) return { recipients: 0, sent: 0 };
   let recipients = 0;
   let sent = 0;
   await Promise.all(
     subs.map(async ({ userId }) => {
-      const n = await pushToUser(userId, payload);
+      const n = await pushToUser(userId, payload, { record: false });
       if (n > 0) {
         recipients++;
         sent += n;
@@ -62,7 +69,14 @@ export async function pushToAll(payload: PushPayload): Promise<{ recipients: num
 
 // Envoie une notif à tous les abonnements d'un joueur.
 // Supprime au passage les abonnements devenus invalides (404/410). Renvoie le nb d'envois OK.
-export async function pushToUser(userId: string, payload: PushPayload): Promise<number> {
+export async function pushToUser(
+  userId: string,
+  payload: PushPayload,
+  opts: { record?: boolean } = {},
+): Promise<number> {
+  // Journalisé par DÉFAUT — y compris quand l'envoi échoue, c'est même là que le journal
+  // sert le plus. Les appels groupés passent `record: false` et journalisent en une fois.
+  if (opts.record !== false) await recordNotifications([userId], payload);
   if (!ensureConfigured()) return 0;
   const subs = await prisma.pushSubscription.findMany({ where: { userId } });
   let sent = 0;
@@ -104,13 +118,18 @@ export async function pushToUsers(
   userIds: readonly string[],
   payload: PushPayload,
 ): Promise<{ recipients: number; sent: number }> {
-  if (!ensureConfigured()) return { recipients: 0, sent: 0 };
   const unique = [...new Set(userIds)];
+  // Journalisé pour TOUTE la liste visée, avant le contrôle de configuration et sans se
+  // soucier de qui a un abonnement push. C'est le point du dispositif : un membre abonné au
+  // suivi d'une équipe voit la notification dans l'appli même si son téléphone n'en reçoit
+  // aucune — permission refusée, iPhone hors écran d'accueil, ou clés absentes.
+  await recordNotifications(unique, payload);
+  if (!ensureConfigured()) return { recipients: 0, sent: 0 };
   let recipients = 0;
   let sent = 0;
   await Promise.all(
     unique.map(async (userId) => {
-      const n = await pushToUser(userId, payload);
+      const n = await pushToUser(userId, payload, { record: false });
       if (n > 0) {
         recipients += 1;
         sent += n;

@@ -35,7 +35,7 @@ const Tricount = dynamic(() => import("@/components/Tricount"), { ssr: false });
 // Idem pour le module Tournoi (vue « Tournoi ») : chargé seulement à l'ouverture.
 const Tournament = dynamic(() => import("@/components/Tournament"), { ssr: false });
 const Interclub = dynamic(() => import("@/components/Interclub"), { ssr: false });
-import { fmtTime, slotMinutes } from "@/lib/time";
+import { fmtTime, slotMinutes, relativeTime } from "@/lib/time";
 import { downloadIcs } from "@/lib/ics";
 import {
   ensurePushSubscribed,
@@ -214,6 +214,12 @@ export default function Home() {
   const dateInputRef = useRef<HTMLInputElement>(null);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  // Journal des notifications, affiché sous la même cloche. C'est le REPLI du push : il
+  // fonctionne que le téléphone ait reçu quelque chose ou non.
+  const [notifs, setNotifs] = useState<
+    { id: string; title: string; body: string; url: string | null; at: string; read: boolean }[]
+  >([]);
+  const [unread, setUnread] = useState(0);
   // Liste d'attente (idée D) : nombre d'inscrits par créneau ("YYYY-MM-DD|HH:MM" -> n),
   // pour la plage affichée. Alimenté par /api/alerts/counts, montré à tous.
   const [waitCounts, setWaitCounts] = useState<Record<string, number>>({});
@@ -332,6 +338,26 @@ export default function Home() {
     const r = await fetch("/api/alerts");
     if (r.ok) setAlerts(await r.json());
   }, []);
+
+  // Une seule requête sert la liste ET la pastille. Chargée pour TOUT membre connecté, sans
+  // condition sur le push : la cloche doit précisément renseigner ceux qui ne le reçoivent pas.
+  const loadNotifs = useCallback(async () => {
+    try {
+      const r = await fetch("/api/notifications", { cache: "no-store" });
+      if (!r.ok) return;
+      const d = (await r.json()) as { items: typeof notifs; unread: number };
+      setNotifs(d.items);
+      setUnread(d.unread);
+    } catch {
+      /* la cloche est un confort : son échec ne doit rien interrompre */
+    }
+    // `notifs` n'est pas une dépendance : il n'est ici qu'un type, jamais lu.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (me) loadNotifs();
+  }, [me, loadNotifs]);
+
   useEffect(() => {
     if (me && canNotify) loadAlerts();
   }, [me, canNotify, loadAlerts]);
@@ -1051,17 +1077,26 @@ export default function Home() {
                 ))}
               </select>
             )}
-            {canNotify && (
-              <button
-                className="secondary icon-btn alerts-btn"
-                onClick={() => setAlertsOpen(true)}
-                aria-label={`Ma liste d'attente${alerts.length ? ` (${alerts.length})` : ""}`}
-                title="Ma liste d'attente"
-              >
-                <BellIcon />
-                {alerts.length > 0 && <span className="badge">{alerts.length}</span>}
-              </button>
-            )}
+            {/* La cloche s'affiche pour TOUT membre connecté, et non plus seulement quand le
+                push est disponible : son journal est justement ce qui reste quand le push ne
+                fonctionne pas. La pastille compte les notifications non lues — la liste
+                d'attente, elle, se lit à l'intérieur. */}
+            <button
+              className="secondary icon-btn alerts-btn"
+              onClick={() => {
+                setAlertsOpen(true);
+                if (unread > 0) {
+                  setUnread(0);
+                  setNotifs((prev) => prev.map((n) => ({ ...n, read: true })));
+                  fetch("/api/notifications", { method: "POST" }).catch(() => {});
+                }
+              }}
+              aria-label={`Notifications et liste d'attente${unread ? ` (${unread} non lue${unread > 1 ? "s" : ""})` : ""}`}
+              title="Notifications et liste d'attente"
+            >
+              <BellIcon />
+              {unread > 0 && <span className="badge">{unread}</span>}
+            </button>
             {/* Réglages : accès DIRECT (hors menu ⋯), comme les notifications. */}
             <SettingsButton
               myId={myId}
@@ -1456,7 +1491,24 @@ export default function Home() {
 
       <PrivacyNotice />
       {alertsOpen && (
-        <Dialog onClose={() => setAlertsOpen(false)} label="Ma liste d'attente">
+        <Dialog onClose={() => setAlertsOpen(false)} label="Notifications et liste d'attente">
+            <h3>🔔 Notifications</h3>
+            {notifs.length === 0 ? (
+              <p className="muted tiny">Aucune notification pour le moment.</p>
+            ) : (
+              <ul className="notif-list">
+                {notifs.map((n) => (
+                  <li key={n.id} className={n.read ? undefined : "is-unread"}>
+                    <span className="notif-title">{n.title}</span>
+                    <span className="notif-body">{n.body}</span>
+                    <span className="notif-at" title={new Date(n.at).toLocaleString("fr-FR")}>
+                      {relativeTime(n.at)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
             <h3>🕒 Ma liste d'attente</h3>
             {alerts.length === 0 ? (
               <p className="muted">
