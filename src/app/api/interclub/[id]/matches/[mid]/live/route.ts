@@ -136,10 +136,23 @@ export async function PUT(
 
   // Recale le statut de la rencontre : sinon la liste reste « à venir » alors qu'un match
   // est en cours sous les yeux de tout le monde.
+  // Les noms servent au résumé de fin de rencontre : « Tom 3-0, Marc 1-3 ». Deux colonnes
+  // de plus sur une requête déjà nécessaire, à raison d'une fois toutes les 5 s au plus.
   const siblings = await prisma.interclubMatch.findMany({
     where: { interclubId: id },
-    select: { gamesHome: true, gamesAway: true, status: true },
+    orderBy: { order: "asc" },
+    select: {
+      gamesHome: true,
+      gamesAway: true,
+      status: true,
+      homeDisplayName: true,
+    },
   });
+  const lines = siblings.map((s) => ({
+    player: s.homeDisplayName,
+    gamesHome: s.gamesHome,
+    gamesAway: s.gamesAway,
+  }));
   const nextStatus = derivedStatus(m.interclub.matchCount, siblings);
   await prisma.interclub.update({ where: { id }, data: { status: nextStatus } });
 
@@ -160,7 +173,7 @@ export async function PUT(
   const gamesGrew = parsed.length > m.games.length;
 
   if (m.interclub.status !== "live" && nextStatus === "live") {
-    await notifyFixtureStart(ctx);
+    await notifyFixtureStart(ctx, m.homeDisplayName, m.awayName);
   }
   if (winner) {
     await notifyMatchDone(
@@ -175,7 +188,7 @@ export async function PUT(
     await notifyGameDone(ctx, m.homeDisplayName, m.awayName, parsed);
   }
   if (m.interclub.status !== "done" && nextStatus === "done") {
-    await notifyFixtureDone(ctx, fixtureScore(siblings));
+    await notifyFixtureDone(ctx, fixtureScore(siblings), lines);
   }
 
   return NextResponse.json({ ok: true, done: !!winner });

@@ -104,6 +104,7 @@ export async function PATCH(
       teamName: string;
       opponent: string;
       score: { home: number; away: number };
+      lines: { player: string; gamesHome: number | null; gamesAway: number | null }[];
     } | null;
   } = { value: null };
 
@@ -225,7 +226,13 @@ export async function PATCH(
         // afficher « en cours » alors que le dernier match vient d'être saisi.
         const siblings = await tx.interclubMatch.findMany({
           where: { interclubId: id },
-          select: { gamesHome: true, gamesAway: true, status: true },
+          orderBy: { order: "asc" },
+          select: {
+            gamesHome: true,
+            gamesAway: true,
+            status: true,
+            homeDisplayName: true,
+          },
         });
         const eff = derivedStatus(m.interclub.matchCount, siblings);
         await tx.interclub.update({ where: { id }, data: { status: eff } });
@@ -240,6 +247,11 @@ export async function PATCH(
             teamName: m.interclub.team.name,
             opponent: m.interclub.opponent,
             score: fixtureScore(siblings),
+            lines: siblings.map((s) => ({
+              player: s.homeDisplayName,
+              gamesHome: s.gamesHome,
+              gamesAway: s.gamesAway,
+            })),
           };
         }
       },
@@ -255,8 +267,8 @@ export async function PATCH(
       await runOnce();
       interclubChanged();
       if (finished.value) {
-        const { score, ...ctx } = finished.value;
-        await notifyFixtureDone(ctx, score);
+        const { score, lines, ...ctx } = finished.value;
+        await notifyFixtureDone(ctx, score, lines);
       }
       return NextResponse.json({ ok: true });
     } catch (e) {

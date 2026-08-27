@@ -70,6 +70,54 @@ describe("contenu et garde-fous", () => {
     expect(h.sent.every((s) => s.payload.tag === "interclub-f1")).toBe(true);
   });
 
+  it("alerte à chaque fois malgré le tag partagé, sinon la soirée serait muette", async () => {
+    await notifyFixtureDone(ctx, { home: 3, away: 1 });
+    expect(h.sent[0].payload.renotify).toBe(true);
+  });
+
+  it("le résultat final porte le score de la rencontre ET le détail par joueur", async () => {
+    await notifyFixtureDone(ctx, { home: 3, away: 1 }, [
+      { player: "Tom", gamesHome: 3, gamesAway: 0 },
+      { player: "Marc", gamesHome: 1, gamesAway: 3 },
+      { player: "Luc", gamesHome: 3, gamesAway: 2 },
+      { player: "Paul", gamesHome: 3, gamesAway: 1 },
+    ]);
+    const body = String(h.sent[0].payload.body);
+    expect(body).toContain("l'emporte 3-1");
+    expect(body).toContain("Tom 3-0");
+    expect(body).toContain("Marc 1-3");
+  });
+
+  it("passe sous silence les matchs sans résultat", async () => {
+    await notifyFixtureDone(ctx, { home: 1, away: 0 }, [
+      { player: "Tom", gamesHome: 3, gamesAway: 0 },
+      { player: "Marc", gamesHome: null, gamesAway: null },
+    ]);
+    const body = String(h.sent[0].payload.body);
+    expect(body).toContain("Tom 3-0");
+    expect(body).not.toContain("Marc");
+  });
+
+  it("tronque un corps trop long plutôt que de laisser le système couper au milieu d'un nom", async () => {
+    const lines = Array.from({ length: 40 }, (_, i) => ({
+      player: `Joueur numéro ${i}`,
+      gamesHome: 3,
+      gamesAway: 0,
+    }));
+    await notifyFixtureDone(ctx, { home: 40, away: 0 }, lines);
+    expect(String(h.sent[0].payload.body).length).toBeLessThanOrEqual(300);
+  });
+
+  it("nomme le match qui démarre", async () => {
+    await notifyFixtureStart(ctx, "Tom", "Gégé");
+    expect(String(h.sent[0].payload.body)).toContain("Tom c. Gégé");
+  });
+
+  it("reste lisible si le match qui démarre n'est pas connu", async () => {
+    await notifyFixtureStart(ctx);
+    expect(String(h.sent[0].payload.body)).toBe("La rencontre commence.");
+  });
+
   it("dit qui gagne et où en est la rencontre", async () => {
     await notifyMatchDone(ctx, "Tom", "Gégé", 3, 1, { home: 2, away: 1 });
     expect(String(h.sent[0].payload.body)).toContain("Tom gagne 3-1");

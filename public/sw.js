@@ -35,6 +35,11 @@ self.addEventListener("push", (event) => {
     icon: "/logo_squash.jpeg",
     badge: "/logo_squash.jpeg",
     tag: data.tag || undefined, // remplace une notif de même tag plutôt que d'empiler
+    // Sans `renotify`, une notification qui en REMPLACE une autre de même tag échange son
+    // contenu SANS alerter : ni son, ni vibration. Un suivi en direct qui partage un tag
+    // pour tenir sur une seule ligne deviendrait alors muet dès la deuxième notification.
+    // Les émetteurs qui veulent être entendus à chaque fois le demandent explicitement.
+    renotify: !!data.renotify && !!data.tag,
     data: { url: data.url || "/" },
   };
 

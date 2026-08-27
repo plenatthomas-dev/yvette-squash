@@ -22,7 +22,19 @@ export function pushConfigured(): boolean {
   return !!(PUB && PRIV);
 }
 
-export type PushPayload = { title: string; body: string; url?: string; tag?: string };
+export type PushPayload = {
+  title: string;
+  body: string;
+  url?: string;
+  /** Notifications de même tag : la nouvelle REMPLACE la précédente au lieu d'empiler. */
+  tag?: string;
+  /**
+   * Alerter (son/vibration) même lorsqu'on remplace une notification de même tag. Sans cela
+   * la spec impose un remplacement SILENCIEUX : une série d'événements partageant un tag ne
+   * signalerait que le premier. Sans effet en l'absence de `tag`.
+   */
+  renotify?: boolean;
+};
 
 // Envoie une notif à TOUS les membres abonnés (annonce club, cf. espace admin). Un envoi par
 // joueur ayant au moins un abonnement (pushToUser dédoublonne les appareils et purge les

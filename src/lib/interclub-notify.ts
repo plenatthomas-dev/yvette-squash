@@ -44,8 +44,12 @@ async function send(ctx: Ctx, want: FollowLevel, title: string, body: string): P
       body,
       url: "/?view=interclub",
       // Un tag par RENCONTRE : la nouvelle notification remplace la précédente au lieu
-      // d'empiler la soirée entière sur l'écran verrouillé.
+      // d'empiler la soirée entière sur l'écran verrouillé. Deux rencontres le même soir
+      // (équipe 1 et équipe 2) ont donc deux tags, donc deux lignes distinctes.
       tag: `interclub-${ctx.fixtureId}`,
+      // …mais on veut être ENTENDU à chaque fois : sans ceci, le remplacement serait
+      // silencieux et seul le premier événement de la soirée alerterait.
+      renotify: true,
     });
   } catch {
     /* best-effort */
@@ -93,27 +97,56 @@ export function notifyMatchDone(
   );
 }
 
-/** La rencontre est terminée — tous les niveaux, y compris « résultat seul ». */
+/** Un simple, tel qu'on le résume dans la notification de fin de rencontre. */
+export interface MatchLine {
+  player: string;
+  gamesHome: number | null;
+  gamesAway: number | null;
+}
+
+/**
+ * Longueur maximale du corps, alignée sur l'annonce admin. Au-delà, les systèmes tronquent
+ * eux-mêmes, et souvent au milieu d'un nom — mieux vaut couper nous-mêmes, proprement.
+ */
+const MAX_BODY = 300;
+
+/** « Tom 3-0, Marc 1-3 » — les matchs sans résultat sont passés sous silence. */
+function summarize(lines: readonly MatchLine[]): string {
+  return lines
+    .filter((l) => l.gamesHome !== null && l.gamesAway !== null)
+    .map((l) => `${l.player} ${l.gamesHome}-${l.gamesAway}`)
+    .join(", ");
+}
+
+/**
+ * La rencontre est terminée — tous les niveaux, y compris « résultat seul ».
+ *
+ * C'est LA notification que reçoivent ceux qui n'en veulent qu'une par soirée : elle doit donc
+ * se suffire à elle-même, d'où le détail par joueur et pas seulement le score global.
+ */
 export function notifyFixtureDone(
   ctx: Ctx,
   score: { home: number; away: number },
+  lines: readonly MatchLine[] = [],
 ): Promise<void> {
   const verdict =
     score.home > score.away ? "l'emporte" : score.home < score.away ? "s'incline" : "fait match nul";
-  return send(
-    ctx,
-    "result",
-    `${ctx.teamName} – ${ctx.opponent}`,
-    `Rencontre terminée : ${ctx.teamName} ${verdict} ${score.home}-${score.away}.`,
-  );
+  const detail = summarize(lines);
+  const body = `${ctx.teamName} ${verdict} ${score.home}-${score.away}${detail ? ` · ${detail}` : ""}`;
+  return send(ctx, "result", `${ctx.teamName} – ${ctx.opponent}`, body.slice(0, MAX_BODY));
 }
 
-/** Le premier point vient d'être marqué — niveau « temps forts ». */
-export function notifyFixtureStart(ctx: Ctx): Promise<void> {
+/**
+ * Le premier point vient d'être marqué — niveau « temps forts ». On nomme le match qui
+ * démarre : « la rencontre commence » tout court n'apprend rien qu'on ne sache déjà en
+ * s'étant abonné.
+ */
+export function notifyFixtureStart(ctx: Ctx, player?: string, opponentName?: string): Promise<void> {
+  const who = player && opponentName ? ` ${player} c. ${opponentName} entre sur le court.` : "";
   return send(
     ctx,
     "highlights",
     `${ctx.teamName} – ${ctx.opponent}`,
-    "La rencontre commence.",
+    `La rencontre commence.${who}`.slice(0, MAX_BODY),
   );
 }
