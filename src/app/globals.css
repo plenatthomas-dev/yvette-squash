@@ -1689,37 +1689,39 @@ td.cell.past {
 .setting-head h4 {
   margin: 0;
 }
-/* Pastille « i ». Elle indique, elle ne demande rien : à 20 px et en aplat de couleur, elle
-   pesait plus lourd que le titre qu'elle accompagne. Ramenée à 13 px — un repère, pas un
-   bouton d'action — et rendue franchement
-   RONDE — `aspect-ratio` + les `min-*` empêchent un parent flex de l'étirer en losange, et
-   `border: 0` retire l'épaisseur de bordure que Pico met sur tout <button> et qui décentrait
-   le disque. Le repère rétrécit, PAS la cible du pouce : ::after garde 30 × 30 de zone
-   cliquable autour (sous le minimum de 24 px, la pastille devenait un piège tactile). */
+/* Pastille « i ». Elle indique, elle ne demande rien — c'est un repère, pas une action. En
+   APLAT de couleur elle pesait plus lourd que le titre qu'elle accompagne, et la rapetisser ne
+   suffisait pas : à 20, 16 puis 13 px, un disque plein reste un disque plein. D'où le
+   changement de FORME plutôt que de taille — un simple contour, rempli seulement quand
+   l'explication est ouverte. La couleur reste --pico-primary et non un gris : elle suit les
+   thèmes, là où un « i » gris foncé disparaissait sur fond sombre.
+
+   Trois précautions de forme, parce que Pico habille tous les <button> : `aspect-ratio` et les
+   `min-*` empêchent un parent flex d'étirer le cercle en losange, et `box-sizing: border-box`
+   garde le contour dans les 14 px. Le repère est petit, PAS la cible du pouce : ::after tient
+   30 × 30 de zone cliquable autour. */
 .info-tip-btn {
   position: relative;
   box-sizing: border-box;
-  width: 13px;
-  height: 13px;
-  min-width: 13px;
-  min-height: 13px;
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  min-height: 14px;
   aspect-ratio: 1;
   flex: 0 0 auto;
   margin: 0;
   padding: 0;
-  border: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.56rem;
+  font-size: 0.6rem;
   font-style: italic;
   font-weight: 700;
   line-height: 1;
+  border: 1px solid var(--pico-primary);
   border-radius: 50%;
-  /* Toujours rempli (bleu + « i » clair) pour rester lisible quel que soit le thème :
-     un « i » gris foncé sur fond sombre/bleuté était illisible. */
-  background: var(--pico-primary);
-  color: var(--pico-primary-inverse);
+  background: transparent;
+  color: var(--pico-primary);
   cursor: pointer;
 }
 .info-tip-btn::after {
@@ -1731,15 +1733,12 @@ td.cell.past {
   height: 30px;
   transform: translate(-50%, -50%);
 }
-.info-tip-btn:hover {
-  background: var(--pico-primary-hover);
-}
+/* Ouverte (ou survolée) : la pastille se remplit. L'état actif se lit donc sur le REMPLISSAGE
+   et non sur un halo — à cette taille, un anneau autour d'un contour ne se distinguait plus. */
+.info-tip-btn:hover,
 .info-tip-btn[aria-expanded="true"] {
-  /* État ouvert : anneau autour de la pastille pour marquer l'activation. */
-  box-shadow: 0 0 0 2px var(--pico-background-color), 0 0 0 3px var(--pico-primary);
-  /* La pastille étant petite, l'anneau seul se remarque peu : on la décale d'un ton pour que
-     l'état ouvert reste lisible d'un coup d'œil. */
-  background: var(--pico-primary-hover);
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
 }
 .setting-info-text {
   margin: 0 0 10px;
@@ -3924,17 +3923,19 @@ body[data-bottombar] .install-banner {
    portrait comme en paysage, et même quand le panneau du bas (carré de service, pause) vient
    rogner la hauteur du tableau. Un `vmin` s'en serait tenu à l'écran et aurait débordé.
    Chaque règle donne d'abord un repli en `vmin`, pour les navigateurs sans requêtes de
-   conteneur : eux ignorent la seconde déclaration, plus récente. */
+   conteneur : eux ignorent la seconde déclaration, plus récente.
+
+   LES QUATRE COINS. Le nom, les jeux gagnés et le carré de service étaient empilés en colonne
+   AVEC le score : ils lui volaient donc de la hauteur, et c'est exactement la ressource rare
+   quand le téléphone est couché. Ils passent aux quatre coins de la case, le score occupe seul
+   le centre et peut enfin prendre toute la place. En paysage il gagne environ 45 %. */
 .ics-side {
   container-type: size;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: clamp(6px, 2cqh, 22px);
+  position: relative;
+  display: block;
   height: 100%;
   margin: 0;
-  padding: 8px 4px;
+  padding: 0;
   border-radius: var(--radius-lg);
   border: 2px solid var(--grid-line);
   background: var(--pico-card-background-color);
@@ -3943,39 +3944,79 @@ body[data-bottombar] .install-banner {
 }
 .ics-side:disabled { opacity: 1; } /* désactivé = « pas maintenant », pas « indisponible » */
 
+/* Le nom et la barre du bas passent AU-DESSUS du score : sa boîte couvre toute la case, et
+   c'est le nom qui doit rester lisible si un score à deux chiffres vient l'effleurer. */
+.ics-name,
+.ics-foot {
+  position: absolute;
+  z-index: 1;
+}
+
+/* Haut-gauche. Deux lignes au plus : un nom à rallonge ne doit pas descendre sur le score. */
 .ics-name {
+  top: 6px;
+  left: 8px;
+  right: 8px;
+  text-align: left;
   font-size: clamp(0.95rem, 4.6vmin, 1.75rem);
   font-size: clamp(0.9rem, min(11cqw, 8.5cqh), 2rem);
   font-weight: 700;
   line-height: 1.1;
-  text-align: center;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
+
 /* Le score se lit à bout de bras — l'arbitre TOURNE le téléphone vers les joueurs pour le
    montrer. C'est la seule information de l'écran qui doit tenir à trois mètres, donc la seule
    dont la taille est calculée pour remplir la case plutôt que pour suivre l'échelle
-   typographique du système. Les deux bornes cadrent le calcul : 66 % de la largeur laisse
-   passer un score à deux chiffres sans le tronquer (12-10, 13-11) même sur un écran de 320 px,
-   et 48 % de la hauteur garde la place du nom et de la ligne de service — y compris dans le cas
-   le plus serré, téléphone couché ET panneau du bas ouvert. */
+   typographique du système. Centré sur la case ENTIÈRE, les libellés étant hors de son chemin.
+   Les deux bornes cadrent le calcul : 66 % de la largeur laisse passer un score à deux
+   chiffres sans le tronquer (12-10, 13-11) même sur un écran de 320 px, et 70 % de la hauteur
+   laisse aux libellés de coin la marge qu'il leur faut, y compris téléphone couché ET panneau
+   du bas ouvert. */
 .ics-points {
-  font-size: clamp(3rem, 34vmin, 15rem);
-  font-size: clamp(2.5rem, min(66cqw, 48cqh), 18rem);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(3rem, 30vmin, 15rem);
+  font-size: clamp(2.5rem, min(66cqw, 70cqh), 22rem);
   font-weight: 800;
   line-height: 0.95;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
-/* Jeux gagnés : le score de la RENCONTRE, celui qu'on montre entre deux jeux. */
+
+/* Barre du bas : jeux gagnés à gauche, carré de service à droite, chacun collé à son bord.
+   `flex-wrap` est le point important : sur une case étroite (téléphone debout, deux colonnes)
+   « sert à gauche » ne tient pas à côté de « 1 jeu ». La barre passe alors à deux lignes —
+   sans quoi les deux se chevauchaient, chacun ancré dans son coin. */
+.ics-foot {
+  left: 8px;
+  right: 8px;
+  bottom: 6px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+
+/* Les jeux gagnés, c'est-à-dire le score de la RENCONTRE. */
 .ics-won {
   font-size: clamp(0.85rem, 3.8vmin, 1.4rem);
   font-size: clamp(0.8rem, min(10.5cqw, 8cqh), 1.6rem);
   font-weight: 700;
   opacity: 0.9;
 }
-/* « sert à gauche/à droite » : encadré, parce qu'il se lit d'un coup d'œil au moment de
-   servir. La bordure prend l'encre calculée du maillot — donc lisible sur n'importe quelle
-   couleur d'équipe, comme le reste de la case. */
+
+/* « sert à gauche/à droite », encadré parce qu'il se lit d'un coup d'œil au moment de servir.
+   La bordure prend l'encre calculée du maillot — donc lisible sur n'importe quelle couleur
+   d'équipe, comme le reste de la case. */
 .ics-serve {
   font-size: clamp(0.85rem, 3.8vmin, 1.4rem);
   font-size: clamp(0.8rem, min(10.5cqw, 8cqh), 1.6rem);

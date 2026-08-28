@@ -284,15 +284,21 @@ export default function InterclubScorer({
       >
         <span className="ics-name">{name}</span>
         <span className="ics-points">{pts}</span>
-        <span className="ics-won">
-          <span className="sr-only">Jeux gagnés : </span>
-          {won} jeu{won > 1 ? "x" : ""}
-        </span>
-        {serving && (
-          <span className="ics-serve" title={`${name} sert`}>
-            sert {state.servingBox === "left" ? "à gauche" : state.servingBox === "right" ? "à droite" : ""}
+        {/* Barre du bas : jeux gagnés à gauche, carré de service à droite. Groupés plutôt que
+            posés chacun dans son coin — sur une case étroite (téléphone debout), « sert à
+            gauche » et « 1 jeu » ne tiennent pas côte à côte, et se chevauchaient. Ici la
+            barre se replie sur deux lignes au lieu de les superposer. */}
+        <span className="ics-foot">
+          <span className="ics-won">
+            <span className="sr-only">Jeux gagnés : </span>
+            {won} jeu{won > 1 ? "x" : ""}
           </span>
-        )}
+          {serving && (
+            <span className="ics-serve" title={`${name} sert`}>
+              sert {state.servingBox === "left" ? "à gauche" : state.servingBox === "right" ? "à droite" : ""}
+            </span>
+          )}
+        </span>
       </button>
     );
   };
