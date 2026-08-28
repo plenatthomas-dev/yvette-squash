@@ -1689,33 +1689,53 @@ td.cell.past {
 .setting-head h4 {
   margin: 0;
 }
+/* Pastille « i ». Elle indique, elle ne demande rien : à 20 px et en aplat de couleur, elle
+   pesait plus lourd que le titre qu'elle accompagne. Ramenée à 16 px, et rendue franchement
+   RONDE — `aspect-ratio` + les `min-*` empêchent un parent flex de l'étirer en losange, et
+   `border: 0` retire l'épaisseur de bordure que Pico met sur tout <button> et qui décentrait
+   le disque. Le repère rétrécit, PAS la cible du pouce : ::after garde 30 × 30 de zone
+   cliquable autour (sous le minimum de 24 px, la pastille devenait un piège tactile). */
 .info-tip-btn {
-  width: 20px;
-  height: 20px;
+  position: relative;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  aspect-ratio: 1;
   flex: 0 0 auto;
   margin: 0;
   padding: 0;
+  border: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   font-style: italic;
   font-weight: 700;
   line-height: 1;
-  border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: 50%;
   /* Toujours rempli (bleu + « i » clair) pour rester lisible quel que soit le thème :
      un « i » gris foncé sur fond sombre/bleuté était illisible. */
   background: var(--pico-primary);
   color: var(--pico-primary-inverse);
   cursor: pointer;
 }
+.info-tip-btn::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 30px;
+  height: 30px;
+  transform: translate(-50%, -50%);
+}
 .info-tip-btn:hover {
   background: var(--pico-primary-hover);
 }
 .info-tip-btn[aria-expanded="true"] {
   /* État ouvert : anneau autour de la pastille pour marquer l'activation. */
-  box-shadow: 0 0 0 2px var(--pico-background-color), 0 0 0 4px var(--pico-primary);
+  box-shadow: 0 0 0 2px var(--pico-background-color), 0 0 0 3px var(--pico-primary);
 }
 .setting-info-text {
   margin: 0 0 10px;
@@ -1801,19 +1821,22 @@ td.cell.past {
 
 /* Switch 3 positions (Coupée · Auto · Active) pour piloter une fonction dans /admin,
    en remplacement du menu déroulant. Segment unique : la position choisie se colore. */
-/* Contrôle segmenté, base commune à ses deux emplois : le tri-état des feature flags
-   (.tri-switch, état porté par une classe .active) et le tri de l'annuaire (.directory-sort,
-   état porté par aria-pressed). Un seul jeu de règles de forme : un futur ajustement (taille
-   tactile, focus visible, contraste) ne peut plus n'atterrir que sur l'un des deux. */
+/* Contrôle segmenté, base commune à ses trois emplois : le tri-état des feature flags
+   (.tri-switch, état porté par une classe .active), le tri de l'annuaire (.directory-sort) et
+   l'équipe interclub d'un membre dans /admin/membres (.team-switch), tous deux à aria-pressed.
+   Un seul jeu de règles de forme : un futur ajustement (taille tactile, focus visible,
+   contraste) ne peut plus n'atterrir que sur l'un d'eux. */
 .tri-switch,
-.directory-sort {
+.directory-sort,
+.team-switch {
   display: inline-flex;
   border: 1px solid var(--pico-muted-border-color);
   border-radius: 999px; /* rounded.pilule */
   overflow: hidden;
 }
 .tri-switch button,
-.directory-sort button {
+.directory-sort button,
+.team-switch button {
   margin: 0;
   width: auto;
   border: 0;
@@ -1826,10 +1849,12 @@ td.cell.past {
   cursor: pointer;
 }
 .tri-switch button + button,
-.directory-sort button + button {
+.directory-sort button + button,
+.team-switch button + button {
   border-left: 1px solid var(--pico-muted-border-color);
 }
-.tri-switch button:disabled {
+.tri-switch button:disabled,
+.team-switch button:disabled {
   opacity: 0.55;
   cursor: default;
 }
@@ -1838,13 +1863,31 @@ td.cell.past {
   color: #ffffff;
 }
 .tri-switch button.tri-auto.active,
-.directory-sort button[aria-pressed="true"] {
+.directory-sort button[aria-pressed="true"],
+.team-switch button[aria-pressed="true"] {
   background: var(--accent);
   color: var(--accent-fg);
 }
 .tri-switch button.tri-on.active {
   background: var(--free);
   color: var(--free-fg);
+}
+/* Pico habille tout [role="group"] : il l'étire sur 100 % de la ligne, lui ajoute une marge
+   basse d'1 rem et fait grossir chaque bouton à parts égales. Sur la carte d'un membre on veut
+   l'inverse — un contrôle COMPACT, à la largeur de ses libellés, posé sur la même ligne que le
+   « Équipe interclub : » qui l'annonce. (Le tri-état des fonctions, lui, garde le comportement
+   pleine largeur de Pico : c'est ainsi qu'il s'affiche aujourd'hui dans /admin.) */
+.team-switch {
+  width: auto;
+  margin-bottom: 0;
+}
+.team-switch > button {
+  flex: 0 0 auto;
+  /* Ce switch-là se touche au pouce, sur une liste de cartes : les positions « 1 » et « 2 »
+     doivent rester des cibles et pas des points, d'où une largeur plancher et une hauteur un
+     peu plus généreuse que le tri-état de /admin, qui se pilote surtout à la souris. */
+  min-width: 2.6rem;
+  padding: 8px 14px;
 }
 
 /* Case à cocher alignée avec son libellé (opt-out annuaire). */
@@ -1881,11 +1924,34 @@ td.cell.past {
 }
 
 /* --- Délégation de droits (idée 4) -------------------------------------- */
+/* Interrupteur qui déplie la liste des délégués possibles. Replié, il ne doit rien peser :
+   largeur du contenu (Pico met 100 %) et aucune marge. Ouvert, il se détache de la liste
+   qu'il vient de faire apparaître. */
+.delegate-toggle {
+  margin: 0;
+  width: auto;
+  padding: 6px 12px;
+  font-size: 0.85rem;
+}
+.delegate-toggle[aria-expanded="true"] {
+  margin-bottom: 8px;
+}
+
 .delegation-form {
   display: flex;
   flex-wrap: wrap;
   align-items: center; /* centre la bulle « i » sur la ligne durée + Déléguer */
   gap: 8px;
+}
+
+/* Filtre de la liste à cocher : pleine ligne, juste au-dessus de la liste qu'il réduit.
+   `margin: 0` parce que Pico pose une marge basse d'1 rem sur tout champ de formulaire —
+   ici c'est le `gap` du conteneur qui espace, pas la marge. */
+.delegate-search {
+  flex: 1 1 100%;
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 0.9rem;
 }
 
 /* Liste à cocher des délégués possibles (multi-sélection). Bornée en hauteur :
@@ -1900,6 +1966,11 @@ td.cell.past {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* Recherche sans résultat : occupe la place de la liste, sans la marge d'un <p>. */
+.delegate-no-match {
+  margin: 0;
 }
 
 /* Une délégation active par ligne, chacune avec son bouton « Révoquer ». */
@@ -3830,7 +3901,8 @@ body[data-bottombar] .install-banner {
 .ics-history {
   margin: 0;
   text-align: center;
-  font-size: 0.72rem;
+  font-size: 0.85rem;
+  font-weight: 600;
   color: var(--pico-muted-color);
   font-variant-numeric: tabular-nums;
 }
@@ -3843,15 +3915,22 @@ body[data-bottombar] .install-banner {
   gap: 8px;
 }
 
+/* Chaque case est un CONTENEUR DE TAILLE : toute la typo ci-dessous se règle sur la case
+   elle-même, pas sur l'écran. C'est ce qui la rend juste dans tous les cas de figure — en
+   portrait comme en paysage, et même quand le panneau du bas (carré de service, pause) vient
+   rogner la hauteur du tableau. Un `vmin` s'en serait tenu à l'écran et aurait débordé.
+   Chaque règle donne d'abord un repli en `vmin`, pour les navigateurs sans requêtes de
+   conteneur : eux ignorent la seconde déclaration, plus récente. */
 .ics-side {
+  container-type: size;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: clamp(6px, 2cqh, 22px);
   height: 100%;
   margin: 0;
-  padding: 10px;
+  padding: 8px 4px;
   border-radius: var(--radius-lg);
   border: 2px solid var(--grid-line);
   background: var(--pico-card-background-color);
@@ -3861,21 +3940,47 @@ body[data-bottombar] .install-banner {
 .ics-side:disabled { opacity: 1; } /* désactivé = « pas maintenant », pas « indisponible » */
 
 .ics-name {
-  font-size: 0.85rem;
-  font-weight: 600;
+  font-size: clamp(0.95rem, 4.6vmin, 1.75rem);
+  font-size: clamp(0.9rem, min(11cqw, 8.5cqh), 2rem);
+  font-weight: 700;
+  line-height: 1.1;
   text-align: center;
   overflow-wrap: anywhere;
 }
-/* Le score doit se lire à bout de bras : c'est la seule information vraiment lue pendant
-   l'échange. Hors échelle typographique du système, et c'est voulu. */
+/* Le score se lit à bout de bras — l'arbitre TOURNE le téléphone vers les joueurs pour le
+   montrer. C'est la seule information de l'écran qui doit tenir à trois mètres, donc la seule
+   dont la taille est calculée pour remplir la case plutôt que pour suivre l'échelle
+   typographique du système. Les deux bornes cadrent le calcul : 66 % de la largeur laisse
+   passer un score à deux chiffres sans le tronquer (12-10, 13-11) même sur un écran de 320 px,
+   et 48 % de la hauteur garde la place du nom et de la ligne de service — y compris dans le cas
+   le plus serré, téléphone couché ET panneau du bas ouvert. */
 .ics-points {
-  font-size: 4.5rem;
+  font-size: clamp(3rem, 34vmin, 15rem);
+  font-size: clamp(2.5rem, min(66cqw, 48cqh), 18rem);
   font-weight: 800;
-  line-height: 1;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
-.ics-won, .ics-serve { font-size: 0.72rem; opacity: 0.85; }
-.ics-serve { font-weight: 700; }
+/* Jeux gagnés : le score de la RENCONTRE, celui qu'on montre entre deux jeux. */
+.ics-won {
+  font-size: clamp(0.85rem, 3.8vmin, 1.4rem);
+  font-size: clamp(0.8rem, min(10.5cqw, 8cqh), 1.6rem);
+  font-weight: 700;
+  opacity: 0.9;
+}
+/* « sert à gauche/à droite » : encadré, parce qu'il se lit d'un coup d'œil au moment de
+   servir. La bordure prend l'encre calculée du maillot — donc lisible sur n'importe quelle
+   couleur d'équipe, comme le reste de la case. */
+.ics-serve {
+  font-size: clamp(0.85rem, 3.8vmin, 1.4rem);
+  font-size: clamp(0.8rem, min(10.5cqw, 8cqh), 1.6rem);
+  font-weight: 800;
+  line-height: 1.15;
+  padding: 2px 10px;
+  border: 2px solid currentColor;
+  border-radius: 999px;
+}
 
 /* Panneau de question (engagement, carré de service, pause, fin). Il occupe le bas de
    l'écran, à portée du pouce. */
@@ -3923,11 +4028,20 @@ body[data-bottombar] .install-banner {
 }
 
 /* Deux colonnes restent tenables sur un téléphone étroit : c'est tout l'intérêt du
-   dispositif. On ne réduit que les marges et la taille du score. */
+   dispositif. Il ne reste ici que les marges : la taille du score, elle, se règle désormais
+   sur la case (cf. .ics-points) et n'a plus besoin d'un palier de largeur d'écran. */
 @media (max-width: 560px) {
   .ics { padding: 8px; }
-  .ics-points { font-size: 3.6rem; }
   .ics-ask-row button { min-width: 0; }
+}
+
+/* Téléphone couché : la hauteur devient la ressource rare. On rend au tableau ce que
+   l'en-tête prenait — le score, lui, se réajuste tout seul. */
+@media (orientation: landscape) and (max-height: 460px) {
+  .ics { padding: 6px; gap: 6px; }
+  .ics-head button { padding: 6px 10px; }
+  .ics-ask { padding: 8px; }
+  .ics-ask p { margin: 0 0 6px; }
 }
 
 /* --- Interclub : suivi en direct (spectateurs) --- */

@@ -73,6 +73,14 @@ const card: CSSProperties = {
   gap: 8,
 };
 
+// Le switch d'équipe est étroit : « Équipe 1 » y tiendrait mal à côté de « Aucune ». On
+// n'affiche que ce qui suit « Équipe » quand le nom suit la convention, le nom entier sinon.
+// Le nom complet reste porté par le `title` et par le libellé lecteur d'écran du bouton.
+function shortTeamName(name: string): string {
+  const m = /^équipe\s+(\S.*)$/i.exec(name.trim());
+  return m ? m[1] : name;
+}
+
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
@@ -181,7 +189,12 @@ export default function MembersPage() {
     void postAction(id, action);
   };
 
+  // Retaper la position DÉJÀ active n'écrit rien : sur un switch, viser le choix courant est
+  // un geste ordinaire (on vérifie, on hésite), et le menu déroulant qu'il remplace ne
+  // déclenchait pas non plus de `change` dans ce cas.
   const setTeam = (id: string, teamId: string | null) => {
+    const current = members.find((m) => m.id === id)?.teamId ?? null;
+    if (current === teamId) return;
     void postAction(id, "set_team", { teamId });
   };
 
@@ -287,30 +300,48 @@ export default function MembersPage() {
                   </div>
                 </div>
 
-                {/* Équipe interclub. Un sélecteur et pas un bouton : le choix est à trois
-                    états (Équipe 1 / Équipe 2 / aucune), et « aucune » est le cas majoritaire
-                    d'un club où seule une poignée de membres joue le championnat. Enregistré
-                    au changement, sans bouton « valider » — une confirmation pour un menu
-                    déroulant serait une corvée sur vingt membres d'affilée. */}
+                {/* Équipe interclub. Switch à positions, pas un menu déroulant : le choix est
+                    court et fermé (Aucune / Équipe 1 / Équipe 2), et l'état de CHAQUE membre se
+                    lit sans rien ouvrir — sur une liste de vingt cartes, un menu à déplier puis
+                    replier à chaque ligne était le vrai coût. Même gabarit que le switch des
+                    fonctions de l'appli. Enregistré au tap, sans bouton « valider ». */}
                 {interclub && teams.length > 0 && (
-                  <label className="tiny" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div
+                    className="tiny"
+                    style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+                  >
                     <span className="muted" style={{ flex: "0 0 auto" }}>
                       Équipe interclub&nbsp;:
                     </span>
-                    <select
-                      value={m.teamId ?? ""}
-                      disabled={busyId === m.id}
-                      onChange={(e) => setTeam(m.id, e.target.value || null)}
-                      style={{ margin: 0 }}
+                    <div
+                      className="team-switch"
+                      role="group"
+                      aria-label={`Équipe interclub de ${m.displayName}`}
                     >
-                      <option value="">— aucune —</option>
+                      <button
+                        type="button"
+                        aria-pressed={m.teamId === null}
+                        disabled={busyId === m.id}
+                        onClick={() => setTeam(m.id, null)}
+                        title="Ne joue pas le championnat"
+                      >
+                        Aucune
+                      </button>
                       {teams.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
+                        <button
+                          key={t.id}
+                          type="button"
+                          aria-pressed={m.teamId === t.id}
+                          disabled={busyId === m.id}
+                          onClick={() => setTeam(m.id, t.id)}
+                          title={t.name}
+                        >
+                          {shortTeamName(t.name)}
+                          <span className="sr-only"> ({t.name})</span>
+                        </button>
                       ))}
-                    </select>
-                  </label>
+                    </div>
+                  </div>
                 )}
 
                 {/* Appareils biométriques : un « Retirer » par appareil (téléphone perdu, etc.). */}

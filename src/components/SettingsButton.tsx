@@ -27,6 +27,10 @@ import {
   hasPasskeyOnDevice,
 } from "@/lib/webauthnClient";
 import { isSoundEnabled, setSoundEnabled, playSuccessJingle } from "@/lib/sound";
+// Le même normaliseur que le rapprochement des classements : sans accents ni casse, « zoe »
+// doit trouver « Zoé » et « jean luc » trouver « Jean-Luc ». Module pur (son unique import est
+// un `import type`, effacé à la compilation) : rien de serveur n'entre dans le bundle client.
+import { normalize } from "@/lib/squashnet/match";
 
 type PasskeyInfo = {
   id: string;
@@ -228,6 +232,15 @@ export function SettingsButton({
   >([]);
   const [pickedDelegates, setPickedDelegates] = useState<string[]>([]);
   const [pickedHours, setPickedHours] = useState<number>(DELEGATION_DURATIONS[0].hours);
+  // Liste des délégués POSSIBLES : repliée par défaut. Elle grandit avec le club, et déroulée
+  // en permanence elle repoussait tout le reste des réglages sous la ligne de flottaison —
+  // alors qu'on ne délègue ses droits que quelques fois par saison. Ce qui compte au quotidien
+  // (à QUI j'ai délégué), lui, reste visible sans rien ouvrir.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // Filtre de cette liste. C'est le corollaire du repli : une liste qu'on n'ouvre qu'à la
+  // demande doit se parcourir vite une fois ouverte, et l'annuaire d'un club dépasse
+  // largement la hauteur du panneau.
+  const [delegateQuery, setDelegateQuery] = useState("");
   // Opération délégation en cours : "create" (formulaire) ou l'id de la ligne concernée
   // (prolongation/révocation). Un seul appel à la fois, mais le « … » ne s'affiche que
   // sur le bouton réellement actif (les autres sont juste désactivés).
@@ -347,6 +360,9 @@ export function SettingsButton({
     if (!open || !delegation) return;
     let cancelled = false;
     setExtending(null); // réouverture du panneau : pas de choix de durée résiduel
+    setPickerOpen(false); // …ni sélection de délégués restée ouverte
+    setPickedDelegates([]);
+    setDelegateQuery("");
     (async () => {
       try {
         // Annuaire via le cache mémoire partagé (dédupliqué avec la modale Annuaire) ;
@@ -383,8 +399,24 @@ export function SettingsButton({
     (m) => m.id !== myId && !outgoingDelegations.some((d) => d.delegateId === m.id),
   );
 
+  // Le filtre ne masque QUE l'affichage : une case cochée puis filtrée hors de vue reste
+  // sélectionnée, et le compteur du bouton « Déléguer (n) » continue de la compter — sans quoi
+  // taper une recherche annulerait en silence une partie du choix déjà fait.
+  const q = normalize(delegateQuery);
+  const shownDelegates = q
+    ? availableDelegates.filter((m) => normalize(m.name).includes(q))
+    : availableDelegates;
+
   const toggleDelegate = (id: string, on: boolean) =>
     setPickedDelegates((prev) => (on ? [...prev, id] : prev.filter((x) => x !== id)));
+
+  // Replier ANNULE la sélection en cours : rouvrir sur des cases encore cochées laisserait
+  // croire qu'une délégation a été accordée alors que « Déléguer » n'a jamais été touché.
+  const closePicker = () => {
+    setPickerOpen(false);
+    setPickedDelegates([]);
+    setDelegateQuery("");
+  };
 
   // POST partagé création / prolongation : le serveur renouvelle (révoque + recrée) toute
   // délégation active vers les mêmes délégués — prolonger = re-poster le même membre avec
@@ -440,7 +472,7 @@ export function SettingsButton({
       okMsg: pickedDelegates.length > 1 ? "Délégations activées" : "Délégation activée",
       busyKey: "create",
     });
-    if (ok) setPickedDelegates([]);
+    if (ok) closePicker();
   };
 
   // `rowId` = id de la délégation (la ligne affichée) ; le POST vise le délégué.
@@ -811,6 +843,12 @@ export function SettingsButton({
                     ))}
                   </ul>
                 )}
+                {/* État par défaut de la section : ce qui est EN COURS, et rien d'autre. La
+                    liste des délégués possibles ne s'ouvre qu'à la demande, sous l'interrupteur
+                    ci-dessous. */}
+                {outgoingDelegations.length === 0 && (
+                  <p className="muted tiny">Tu n'as délégué tes droits à personne.</p>
+                )}
                 {delegateMembers === null ? (
                   <p className="muted tiny">Chargement…</p>
                 ) : availableDelegates.length === 0 ? (
@@ -818,45 +856,73 @@ export function SettingsButton({
                     <p className="muted tiny">Aucun autre membre disponible pour l'instant.</p>
                   ) : null
                 ) : (
-                  <div className="delegation-form">
-                    <div
-                      className="delegate-picklist"
-                      role="group"
-                      aria-label="Choisir un ou plusieurs délégués"
-                    >
-                      {availableDelegates.map((m) => (
-                        <label key={m.id} className="check-row">
-                          <input
-                            type="checkbox"
-                            checked={pickedDelegates.includes(m.id)}
-                            onChange={(e) => toggleDelegate(m.id, e.target.checked)}
-                          />
-                          <span>{m.name}</span>
-                        </label>
-                      ))}
-                    </div>
-                    <select
-                      value={pickedHours}
-                      onChange={(e) => setPickedHours(Number(e.target.value))}
-                      aria-label="Durée de la délégation"
-                    >
-                      {DELEGATION_DURATIONS.map((d) => (
-                        <option key={d.hours} value={d.hours}>
-                          {d.label}
-                        </option>
-                      ))}
-                    </select>
+                  <>
                     <button
-                      onClick={createDelegations}
-                      disabled={busy !== null || pickedDelegates.length === 0}
+                      type="button"
+                      className="secondary delegate-toggle"
+                      aria-expanded={pickerOpen}
+                      disabled={busy !== null}
+                      onClick={() => (pickerOpen ? closePicker() : setPickerOpen(true))}
                     >
-                      {busy === "create"
-                        ? "…"
-                        : pickedDelegates.length > 1
-                          ? `Déléguer (${pickedDelegates.length})`
-                          : "Déléguer"}
+                      {pickerOpen ? "✕ Annuler" : "+ Déléguer à un membre"}
                     </button>
-                  </div>
+                    {pickerOpen && (
+                      <div className="delegation-form">
+                        <input
+                          type="search"
+                          className="delegate-search"
+                          value={delegateQuery}
+                          onChange={(e) => setDelegateQuery(e.target.value)}
+                          placeholder="Chercher un membre"
+                          aria-label="Filtrer la liste des membres"
+                          autoComplete="off"
+                        />
+                        <div
+                          className="delegate-picklist"
+                          role="group"
+                          aria-label="Choisir un ou plusieurs délégués"
+                        >
+                          {shownDelegates.length === 0 ? (
+                            <p className="muted tiny delegate-no-match">
+                              Aucun membre à ce nom.
+                            </p>
+                          ) : (
+                            shownDelegates.map((m) => (
+                              <label key={m.id} className="check-row">
+                                <input
+                                  type="checkbox"
+                                  checked={pickedDelegates.includes(m.id)}
+                                  onChange={(e) => toggleDelegate(m.id, e.target.checked)}
+                                />
+                                <span>{m.name}</span>
+                              </label>
+                            ))
+                          )}
+                        </div>
+                        <select
+                          value={pickedHours}
+                          onChange={(e) => setPickedHours(Number(e.target.value))}
+                          aria-label="Durée de la délégation"
+                        >
+                          {DELEGATION_DURATIONS.map((d) => (
+                            <option key={d.hours} value={d.hours}>
+                              {d.label}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={createDelegations}
+                          disabled={busy !== null || pickedDelegates.length === 0}
+                        >
+                          {busy === "create"
+                            ? "…"
+                            : pickedDelegates.length > 1
+                              ? `Déléguer (${pickedDelegates.length})`
+                              : "Déléguer"}
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
               </section>
             )}

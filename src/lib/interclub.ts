@@ -26,10 +26,17 @@ export type Box = "right" | "left";
 export const POINTS_TO_WIN = 11;
 /** …mais toujours avec 2 points d'écart (10-10 → 12-10, 13-11, …). */
 export const MIN_LEAD = 2;
-/** Pause réglementaire entre deux jeux, en secondes. */
-export const BREAK_SECONDS = 90;
-/** Échauffement d'avant-match, en secondes (2 min 30 par joueur). */
-export const WARMUP_SECONDS = 300;
+/**
+ * Pause réglementaire entre deux jeux, en secondes.
+ *
+ * 2 min depuis les règles WSF du 1er septembre 2025, qui alignent le squash amateur sur la
+ * PSA (c'était 1 min 30 auparavant). Cf. l'annonce de la FFSquash, « Nouvelles règles du jeu
+ * du squash en simple 2025 » : échauffement 4 min, 1 min avant le début du match, 2 min
+ * entre les jeux.
+ */
+export const BREAK_SECONDS = 120;
+/** Échauffement d'avant-match, en secondes (4 min depuis les règles 2025 — cf. ci-dessus). */
+export const WARMUP_SECONDS = 240;
 /** Formats de match admis : au meilleur des 3 ou des 5 jeux. */
 export const BEST_OF_VALUES = [3, 5] as const;
 /** Bornes du nombre de simples dans une rencontre. */
