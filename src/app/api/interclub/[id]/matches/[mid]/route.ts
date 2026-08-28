@@ -17,7 +17,7 @@ import {
   scorerIsStale,
   MAX_PLAYER_NAME_LEN,
 } from "@/lib/interclub-db";
-import { resolveHomePick } from "@/lib/interclub-roster";
+import { findAlignmentClash, resolveHomePick } from "@/lib/interclub-roster";
 import { interclubChanged } from "@/lib/interclub-gate";
 import {
   notifyFixtureDone,
@@ -235,6 +235,16 @@ export async function PATCH(
           });
           if (!resolved.ok) throw new HttpError(400, resolved.error);
           const p = resolved.value;
+          // Un joueur ne dispute qu'un simple par rencontre. La création l'imposait déjà (à
+          // l'intérieur de son propre formulaire) ; ici rien ne le vérifiait, et rouvrir un
+          // simple suffisait à aligner une seconde fois quelqu'un qui jouait déjà.
+          const clash = await findAlignmentClash(tx, m.interclubId, mid, p);
+          if (clash !== null) {
+            throw new HttpError(
+              400,
+              `${p.homeDisplayName} dispute déjà le match n° ${clash} de cette rencontre`,
+            );
+          }
           data.homeUser = p.homeUserId ? { connect: { id: p.homeUserId } } : { disconnect: true };
           data.homeGuest = p.homeGuestId ? { connect: { id: p.homeGuestId } } : { disconnect: true };
           data.homeDisplayName = p.homeDisplayName;

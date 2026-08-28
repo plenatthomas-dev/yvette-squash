@@ -1690,7 +1690,8 @@ td.cell.past {
   margin: 0;
 }
 /* Pastille « i ». Elle indique, elle ne demande rien : à 20 px et en aplat de couleur, elle
-   pesait plus lourd que le titre qu'elle accompagne. Ramenée à 16 px, et rendue franchement
+   pesait plus lourd que le titre qu'elle accompagne. Ramenée à 13 px — un repère, pas un
+   bouton d'action — et rendue franchement
    RONDE — `aspect-ratio` + les `min-*` empêchent un parent flex de l'étirer en losange, et
    `border: 0` retire l'épaisseur de bordure que Pico met sur tout <button> et qui décentrait
    le disque. Le repère rétrécit, PAS la cible du pouce : ::after garde 30 × 30 de zone
@@ -1698,10 +1699,10 @@ td.cell.past {
 .info-tip-btn {
   position: relative;
   box-sizing: border-box;
-  width: 16px;
-  height: 16px;
-  min-width: 16px;
-  min-height: 16px;
+  width: 13px;
+  height: 13px;
+  min-width: 13px;
+  min-height: 13px;
   aspect-ratio: 1;
   flex: 0 0 auto;
   margin: 0;
@@ -1710,7 +1711,7 @@ td.cell.past {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.65rem;
+  font-size: 0.56rem;
   font-style: italic;
   font-weight: 700;
   line-height: 1;
@@ -1736,6 +1737,9 @@ td.cell.past {
 .info-tip-btn[aria-expanded="true"] {
   /* État ouvert : anneau autour de la pastille pour marquer l'activation. */
   box-shadow: 0 0 0 2px var(--pico-background-color), 0 0 0 3px var(--pico-primary);
+  /* La pastille étant petite, l'anneau seul se remarque peu : on la décale d'un ton pour que
+     l'état ouvert reste lisible d'un coup d'œil. */
+  background: var(--pico-primary-hover);
 }
 .setting-info-text {
   margin: 0 0 10px;
@@ -4093,6 +4097,15 @@ body[data-bottombar] .install-banner {
 }
 .ic-follow-row > span { flex: 0 0 auto; }
 .ic-follow-row select { flex: 1; min-width: 0; margin: 0; }
+/* « Réessayer » d'une lecture d'abonnements ratée : au fil du texte de l'avertissement,
+   pas un bouton pleine largeur (Pico) qui pèserait plus lourd que l'incident. */
+.ic-follow-retry {
+  display: inline;
+  width: auto;
+  margin: 0;
+  padding: 2px 10px;
+  font-size: 0.8rem;
+}
 
 /* Pastille de choix libre : damier tant qu'aucune couleur personnalisée n'est retenue, la
    couleur elle-même sinon — sans quoi rien n'indiquait qu'un choix hors raccourcis était actif. */

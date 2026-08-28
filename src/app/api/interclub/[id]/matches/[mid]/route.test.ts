@@ -16,6 +16,8 @@ const h = vi.hoisted(() => ({
   fixtureStatus: null as null | string,
   notified: [] as string[],
   lastPlayers: null as null | { player: string; opponent: string },
+  /** Simple de la même rencontre qui aligne déjà le joueur choisi (null = aucun conflit). */
+  alignmentClash: null as null | { order: number },
 }));
 
 vi.mock("@/lib/features-server", () => ({
@@ -44,6 +46,7 @@ vi.mock("@/lib/db", () => {
     interclubMatch: {
       findUnique: vi.fn(async () => h.match),
       findMany: vi.fn(async () => h.siblings),
+      findFirst: vi.fn(async () => h.alignmentClash),
       update: vi.fn(async (args: { data: Record<string, unknown> }) => {
         h.updated = args.data;
         return {};
@@ -119,6 +122,7 @@ beforeEach(() => {
   h.fixtureStatus = null;
   h.notified = [];
   h.lastPlayers = null;
+  h.alignmentClash = null;
 });
 
 describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
@@ -267,6 +271,24 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
   it("refuse un membre sans équipe", async () => {
     h.user = { id: "u9", displayName: "Jérôme", nickname: null, teamId: null };
     expect((await PATCH(patch({ homeUserId: "u9" }), ctx)).status).toBe(400);
+  });
+
+  it("refuse d'aligner un joueur qui dispute déjà un autre simple de la rencontre", async () => {
+    h.user = { id: "u9", displayName: "Jérôme Blanc", nickname: "Jéjé", teamId: "team-1" };
+    h.alignmentClash = { order: 2 };
+    const res = await PATCH(patch({ homeUserId: "u9" }), ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/dispute déjà le match n° 2/);
+    expect(h.updated).toBeNull();
+  });
+
+  it("« à désigner » n'est jamais un doublon, même sur plusieurs simples", async () => {
+    // Le conflit ne porte que sur une PERSONNE : sans quoi la deuxième ligne encore à
+    // composer serait refusée au motif que la première l'est aussi.
+    h.alignmentClash = { order: 2 };
+    const res = await PATCH(patch({ homeUserId: null }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.updated).toMatchObject({ homeDisplayName: "À désigner" });
   });
 
   it("détache le joueur et remet le placeholder", async () => {

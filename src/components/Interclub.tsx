@@ -506,6 +506,20 @@ function FixtureDialog({
   // matchs et leurs jeux, et une boîte de dialogue bloquante fige l'onglet.
   const [confirmDel, setConfirmDel] = useState(false);
 
+  // Un joueur ne dispute qu'UN simple par rencontre. On retient donc qui est déjà pris, et par
+  // quel simple, pour le griser dans le sélecteur — plutôt que de le proposer, de le laisser
+  // choisir, et de faire refuser la sauvegarde par le serveur. Le contrôle sérieux reste côté
+  // serveur (cf. findAlignmentClash) ; celui-ci évite juste de tendre un piège.
+  const takenBy = new Map<string, number>();
+  for (const m of fixture.matches) {
+    const key = m.homeUserId
+      ? `member:${m.homeUserId}`
+      : m.homeGuestId
+        ? `guest:${m.homeGuestId}`
+        : null;
+    if (key) takenBy.set(key, m.order);
+  }
+
   return (
     <Dialog onClose={onClose} label="Rencontre" className="ic-detail">
       <h3>
@@ -529,6 +543,7 @@ function FixtureDialog({
                 match={m}
                 bestOf={fixture.bestOf}
                 roster={fixture.roster}
+                takenBy={takenBy}
                 teamName={fixture.team.name}
                 busy={busy}
                 onCancel={() => setEditing(null)}
@@ -717,6 +732,7 @@ function MatchEditor({
   match,
   bestOf,
   roster,
+  takenBy,
   teamName,
   busy,
   onCancel,
@@ -725,6 +741,8 @@ function MatchEditor({
   match: MatchRow;
   bestOf: number;
   roster: RosterEntry[];
+  /** Joueur déjà aligné → numéro du simple qui le retient, dans CETTE rencontre. */
+  takenBy: Map<string, number>;
   teamName: string;
   busy: boolean;
   onCancel: () => void;
@@ -764,11 +782,20 @@ function MatchEditor({
         <span className="ic-field-row">
           <select value={pick} onChange={(e) => setPick(e.target.value)}>
             <option value="">— à désigner —</option>
-            {roster.map((r) => (
-              <option key={`${r.kind}:${r.id}`} value={`${r.kind}:${r.id}`}>
-                {r.name}
-              </option>
-            ))}
+            {roster.map((r) => {
+              const key = `${r.kind}:${r.id}`;
+              // Comparé au NUMÉRO du simple et non au choix courant : le joueur que ce
+              // simple-ci retient doit rester sélectionnable ici (sinon on ne pourrait plus
+              // revenir en arrière après avoir changé d'avis), mais nulle part ailleurs.
+              const at = takenBy.get(key);
+              const blocked = at !== undefined && at !== match.order;
+              return (
+                <option key={key} value={key} disabled={blocked}>
+                  {r.name}
+                  {blocked ? ` — joue déjà le match n° ${at}` : ""}
+                </option>
+              );
+            })}
           </select>
           <ColorPicker value={homeColor} onChange={setHomeColor} label="Maillot du joueur" />
         </span>

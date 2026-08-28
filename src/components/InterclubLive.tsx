@@ -85,7 +85,16 @@ export default function InterclubLive({
   onExpired: (status: number) => boolean;
 }) {
   const [fixtures, setFixtures] = useState<LiveFixture[] | null>(null);
-  const [follows, setFollows] = useState<Follow[]>([]);
+  // `null` = on ne SAIT pas encore, et c'est différent de « aucun abonnement » ([]). Les deux
+  // s'affichaient jusqu'ici de la même façon — « Ne pas suivre » — donc le sélecteur affirmait
+  // un état qu'il n'avait pas vérifié. Dans ce sens-là c'est déjà faux (un abonné se voit
+  // « Ne pas suivre » le temps du chargement) ; dans l'autre c'est pire : sans jamais de
+  // second rendu, rien ne venait corriger la valeur que le navigateur restaure tout seul dans
+  // un <select> au rechargement. D'où l'écran qui promettait « Détaillé » à un compte dont la
+  // base ne contenait aucune ligne — abonnement fantôme, et aucune notification.
+  const [follows, setFollows] = useState<Follow[] | null>(null);
+  /** La lecture des abonnements a échoué : on ne prétend alors rien sur leur état. */
+  const [followsFailed, setFollowsFailed] = useState(false);
   const [pushReady, setPushReady] = useState<boolean | null>(null);
   const [denied, setDenied] = useState(false);
   /** Le dernier chargement a échoué : on ne conclut alors RIEN sur ce qu'il y a à voir. */
@@ -127,8 +136,12 @@ export default function InterclubLive({
       const data = await readOk<{ follows: Follow[]; pushReady: boolean }>(res);
       setFollows(data.follows);
       setPushReady(data.pushReady);
+      setFollowsFailed(false);
     } catch {
-      /* les abonnements ne sont pas critiques à l'affichage */
+      // On ne retombe SURTOUT pas sur une liste vide : ce serait annoncer « tu n'es abonné à
+      // rien » à quelqu'un qui l'est, sur la foi d'une requête qui n'a pas abouti. On le dit,
+      // et on laisse le choix de réessayer.
+      setFollowsFailed(true);
     }
   }, [onExpired]);
 
@@ -181,7 +194,7 @@ export default function InterclubLive({
       if (onExpired(res.status)) return;
       await readOk(res);
       setFollows((prev) => {
-        const rest = prev.filter((f) => f.teamId !== teamId);
+        const rest = (prev ?? []).filter((f) => f.teamId !== teamId);
         return level ? [...rest, { teamId, level }] : rest;
       });
       // On ne dit « enregistré » que si la notification peut RÉELLEMENT partir. L'abonnement
@@ -195,7 +208,7 @@ export default function InterclubLive({
     }
   }
 
-  const levelOf = (teamId: string) => follows.find((f) => f.teamId === teamId)?.level ?? "";
+  const levelOf = (teamId: string) => (follows ?? []).find((f) => f.teamId === teamId)?.level ?? "";
 
   // Un seul obstacle est signalé à la fois, du plus général au plus personnel : inutile de
   // parler de permission navigateur si le serveur n'a de toute façon pas de quoi envoyer.
@@ -281,9 +294,17 @@ export default function InterclubLive({
             <span>{t.name}</span>
             <select
               value={levelOf(t.id)}
+              disabled={follows === null}
+              // Le navigateur restaure de lui-même la position d'un <select> au rechargement.
+              // React ne la corrige qu'au rendu suivant — qui n'arrive jamais quand l'état ne
+              // change pas, c'est-à-dire précisément dans le cas « aucun abonnement ».
+              autoComplete="off"
               onChange={(e) => setFollow(t.id, (e.target.value || null) as FollowLevel | null)}
             >
-              <option value="">Ne pas suivre</option>
+              {/* Le libellé de la position neutre CHANGE une fois la réponse arrivée : c'est
+                  ce qui garantit un second rendu, donc la remise à la bonne valeur, même
+                  quand le membre n'est abonné à rien. */}
+              <option value="">{follows === null ? "…" : "Ne pas suivre"}</option>
               {FOLLOW_LEVELS.map((l) => (
                 <option key={l} value={l}>
                   {FOLLOW_LABELS[l]}
@@ -292,6 +313,14 @@ export default function InterclubLive({
             </select>
           </label>
         ))}
+        {followsFailed && (
+          <p className="notice tiny" role="status">
+            Impossible de lire tes abonnements — ce qui s&apos;affiche ici peut être faux.{" "}
+            <button type="button" className="secondary ic-follow-retry" onClick={loadFollows}>
+              Réessayer
+            </button>
+          </p>
+        )}
         {block && (
           <p className="notice tiny" role="status">
             {BLOCK_TEXT[block]}

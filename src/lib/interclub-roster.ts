@@ -50,6 +50,9 @@ export type PickResult = { ok: true; value: ResolvedPick } | { ok: false; error:
  */
 type Db = Pick<Prisma.TransactionClient, "user" | "interclubGuest">;
 
+/** Client minimal pour la recherche d'un doublon d'alignement. */
+type MatchDb = Pick<Prisma.TransactionClient, "interclubMatch">;
+
 /** Nom d'affichage d'un membre : le pseudo s'il en a choisi un, sinon son nom. */
 function memberName(u: { displayName: string; nickname: string | null }): string {
   return u.nickname ?? u.displayName;
@@ -84,6 +87,42 @@ export async function teamRoster(teamId: string): Promise<RosterEntry[]> {
     ...members.map((u) => ({ kind: "member" as const, id: u.id, name: memberName(u) })),
     ...guests.map((g) => ({ kind: "guest" as const, id: g.id, name: g.name })),
   ].sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
+}
+
+/**
+ * Le joueur est-il DÉJÀ aligné sur un autre simple de la même rencontre ?
+ *
+ * Un joueur ne dispute qu'un simple par rencontre : c'est une règle de la compétition, pas une
+ * préférence d'affichage. La création la faisait déjà respecter, mais seulement à l'intérieur
+ * du formulaire qu'elle recevait ; la modification d'un match, elle, ne regardait rien. Il
+ * suffisait donc de composer la rencontre puis de rouvrir un simple pour y remettre quelqu'un
+ * qui jouait déjà — l'écran le proposait, et le serveur l'acceptait.
+ *
+ * Renvoie le NUMÉRO du simple en conflit (pour pouvoir le nommer dans le message), ou `null`.
+ * « À désigner » n'est jamais un conflit : c'est l'état par défaut de tous les simples encore
+ * à composer.
+ *
+ * À appeler DANS la transaction qui écrit : hors transaction, deux capitaines alignant le même
+ * joueur au même instant passeraient tous les deux le contrôle.
+ */
+export async function findAlignmentClash(
+  db: MatchDb,
+  fixtureId: string,
+  exceptMatchId: string,
+  pick: Pick<ResolvedPick, "homeUserId" | "homeGuestId">,
+): Promise<number | null> {
+  const who = pick.homeUserId
+    ? { homeUserId: pick.homeUserId }
+    : pick.homeGuestId
+      ? { homeGuestId: pick.homeGuestId }
+      : null;
+  if (!who) return null;
+
+  const clash = await db.interclubMatch.findFirst({
+    where: { interclubId: fixtureId, id: { not: exceptMatchId }, ...who },
+    select: { order: true },
+  });
+  return clash?.order ?? null;
 }
 
 /**
