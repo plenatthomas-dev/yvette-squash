@@ -1712,6 +1712,11 @@ td.cell.past {
 }
 
 .setting {
+  /* UNE seule valeur pour la taille du titre de section ET le diamètre de la pastille « i »
+     qui l'accompagne. Elles étaient réglées séparément (0.95rem d'un côté, une taille en px de
+     l'autre) : rien n'empêchait le repère de grossir à côté du titre, et c'est exactement ce
+     qui s'est produit. Liées ici, la pastille fait par construction la hauteur du titre. */
+  --setting-title: 0.95rem;
   margin-bottom: 18px;
   /* Un défilement automatique (focus d'un champ, ancre) doit s'arrêter SOUS l'en-tête
      collant, sinon le titre de la section arrive juste dessous et disparaît. Compagnon
@@ -1732,7 +1737,7 @@ td.cell.past {
 
 .setting h4 {
   margin: 0 0 8px;
-  font-size: 0.95rem;
+  font-size: var(--setting-title);
 }
 
 /* En-tête de section avec bouton d'info : titre à gauche, pastille « i » à droite. */
@@ -1752,17 +1757,21 @@ td.cell.past {
    l'explication est ouverte. La couleur reste --pico-primary et non un gris : elle suit les
    thèmes, là où un « i » gris foncé disparaissait sur fond sombre.
 
+   Le DIAMÈTRE n'est plus un nombre écrit ici : c'est --setting-title, la taille du <h4> voisin.
+   La pastille fait donc exactement la hauteur du titre de section, et une retouche du titre
+   l'emporte avec elle — les deux ne peuvent plus diverger.
+
    Trois précautions de forme, parce que Pico habille tous les <button> : `aspect-ratio` et les
    `min-*` empêchent un parent flex d'étirer le cercle en losange, et `box-sizing: border-box`
-   garde le contour dans les 14 px. Le repère est petit, PAS la cible du pouce : ::after tient
+   garde le contour dans le diamètre. Le repère est petit, PAS la cible du pouce : ::after tient
    30 × 30 de zone cliquable autour. */
 .info-tip-btn {
   position: relative;
   box-sizing: border-box;
-  width: 14px;
-  height: 14px;
-  min-width: 14px;
-  min-height: 14px;
+  width: var(--setting-title, 0.95rem);
+  height: var(--setting-title, 0.95rem);
+  min-width: var(--setting-title, 0.95rem);
+  min-height: var(--setting-title, 0.95rem);
   aspect-ratio: 1;
   flex: 0 0 auto;
   margin: 0;
@@ -1770,7 +1779,9 @@ td.cell.past {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.6rem;
+  /* Le glyphe suit le diamètre : ~62 %, la proportion qui laisse le « i » respirer dans son
+     cercle sans le toucher. */
+  font-size: calc(var(--setting-title, 0.95rem) * 0.62);
   font-style: italic;
   font-weight: 700;
   line-height: 1;
