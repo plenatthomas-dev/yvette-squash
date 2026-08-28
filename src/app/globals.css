@@ -324,6 +324,56 @@ header.app h1 {
   box-shadow: var(--elev-2);
 }
 
+/* Retour au planning depuis un module (Frais / Tournois / Interclub). Il REMPLACE les onglets
+   Jour/Semaine, qui restaient montés dans ces vues uniquement parce qu'ils étaient la seule
+   sortie. Flèche + logo + nom du module : la flèche à sa place canonique, le nom pour dire où
+   l'on est. Le logo rétrécit dans ce mode — ici c'est le module qui titre, pas l'appli. */
+.brand-back {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  width: auto;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.brand-back .logo-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+}
+.brand-back-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid var(--pico-muted-border-color);
+  font-size: 1rem;
+  line-height: 1;
+}
+.brand-back:hover .brand-back-arrow {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: transparent;
+}
+/* Le nom du module reste visible sur mobile, contrairement au titre de l'appli : ici il ne
+   répète pas le logo, il dit dans quel module on se trouve. L'ellipse est la sécurité. */
+.brand-back-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Grand logo sur l'écran de connexion */
 .logo-hero {
   display: block;
@@ -699,9 +749,15 @@ header.app .sub {
   .brand-title {
     display: none;
   }
-  header.app .logo-mark {
+  header.app h1 > .logo-mark {
     width: 52px;
     height: 52px;
+  }
+  /* En mode retour, sous 560 px, le logo cède la place au NOM DU MODULE : la flèche dit déjà
+     « on revient », et savoir où l'on est vaut mieux qu'un logo qu'on vient de quitter. Sans
+     ça, « Frais partagés » se tronquait sur les écrans les plus étroits. */
+  .brand-back .logo-mark {
+    display: none;
   }
 }
 
@@ -4072,12 +4128,25 @@ body[data-bottombar] .install-banner {
   background: #fcd34d;
 }
 
-/* Deux colonnes restent tenables sur un téléphone étroit : c'est tout l'intérêt du
-   dispositif. Il ne reste ici que les marges : la taille du score, elle, se règle désormais
-   sur la case (cf. .ics-points) et n'a plus besoin d'un palier de largeur d'écran. */
 @media (max-width: 560px) {
   .ics { padding: 8px; }
   .ics-ask-row button { min-width: 0; }
+}
+
+/* Téléphone DEBOUT : les deux cases s'EMPILENT au lieu de se partager la largeur.
+   Côte à côte, chaque case ne fait qu'environ 183 px sur un téléphone, et c'est la LARGEUR qui
+   bride le score — il doit laisser passer deux chiffres entiers (12-10, 13-11), donc plafonne
+   vers 120 px, alors que la hauteur disponible est énorme et reste vide. Empilées, les cases
+   prennent toute la largeur : le score DOUBLE, à peu près, sans rien perdre d'autre.
+   Le geste ne change pas de nature — on tape toujours la case du joueur qui vient de marquer,
+   en haut / en bas au lieu de gauche / droite — et l'ordre est conservé : l'équipe qui reçoit
+   reste la première. En paysage, où la hauteur est la ressource rare, les deux colonnes
+   restent le bon dispositif. */
+@media (orientation: portrait) {
+  .ics-board {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
 }
 
 /* Téléphone couché : la hauteur devient la ressource rare. On rend au tableau ce que
@@ -4128,7 +4197,19 @@ body[data-bottombar] .install-banner {
 }
 .ic-live-matches .ic-games { margin-left: auto; }
 
-.ic-follow { margin-top: 14px; }
+/* Panneau d'abonnement, en TÊTE de la page interclub. Encadré parce qu'il ouvre l'écran sans
+   en être le sujet : c'est un réglage, pas du contenu, et le cadre le dit sans le grossir. */
+.ic-follow {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: var(--radius);
+  background: var(--pico-card-background-color);
+}
+.ic-follow-title {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+}
 .ic-follow-row {
   display: flex;
   align-items: center;

@@ -6,6 +6,7 @@ import { readOk } from "@/lib/apiFetch";
 import { onForeground } from "@/lib/onForeground";
 import { EmptyState, Skeleton } from "@/components/Placeholders";
 import InterclubScorer from "@/components/InterclubScorer";
+import InterclubFollow from "@/components/InterclubFollow";
 import InterclubLive from "@/components/InterclubLive";
 import { CLUB_TZ } from "@/lib/time";
 import {
@@ -300,6 +301,12 @@ export default function Interclub({
 
   return (
     <section className="interclub">
+      {/* L'abonnement OUVRE la page, avant même « Nouvelle rencontre ». Il vivait sous la liste
+          des rencontres du jour, dans le bloc « En direct » : personne ne l'y trouvait, et on
+          pouvait se croire abonné sans l'être. C'est le réglage le plus consulté de l'écran, et
+          le seul qui décide de ce qu'on recevra les soirs où l'on n'ouvre pas l'appli. */}
+      <InterclubFollow teams={teams} toast={toast} onExpired={onExpired} />
+
       <div className="ic-head">
         <h3>Interclub</h3>
         <button onClick={() => setCreating(true)} disabled={teams.length === 0}>
@@ -307,7 +314,7 @@ export default function Interclub({
         </button>
       </div>
 
-      <InterclubLive teams={teams} toast={toast} onExpired={onExpired} />
+      <InterclubLive onExpired={onExpired} />
 
       {rows.length === 0 ? (
         <EmptyState icon="🏸" text="Aucune rencontre pour le moment." />

@@ -136,6 +136,14 @@ function inRange(iso: string, r: Range): boolean {
   }
 }
 
+// Nom du module ouvert, affiché dans le bouton de retour de l'en-tête. Hors du composant :
+// c'est une constante, elle n'a pas à être reconstruite à chaque rendu.
+const SPECIAL_LABEL: Record<string, string> = {
+  money: "Frais partagés",
+  tourney: "Tournois",
+  interclub: "Interclub",
+};
+
 interface JournalEntry {
   id: string;
   displayName: string;
@@ -1084,18 +1092,48 @@ export default function Home() {
       <a href="#main-content" className="skip-link">Aller au contenu</a>
       <header className="app">
         <div className="app-top">
+          {/* Dans un module (Frais / Tournois / Interclub), l'en-tête devient le RETOUR au
+              planning. C'est la sortie qui manquait : jusqu'ici, les onglets Jour/Semaine
+              restaient montés dans ces vues uniquement parce qu'ils étaient le seul chemin de
+              retour — un contrôle de planning affiché hors du planning, qui n'avait de sens
+              que par accident. La flèche est désormais à sa place canonique, en haut à gauche,
+              et le libellé dit où l'on se trouve. */}
           <div className="brand">
             <h1>
-              <img
-                src="/logo_squash.jpeg"
-                alt="Squash de l'Yvette"
-                className="logo-mark"
-                width={46}
-                height={46}
-              />
-              <span className="brand-title" aria-hidden="true">
-                Squash de l'Yvette
-              </span>
+              {isSpecial ? (
+                <button
+                  type="button"
+                  className="brand-back"
+                  onClick={() => setView("day")}
+                  title="Retour au planning"
+                  aria-label="Retour au planning"
+                >
+                  <span className="brand-back-arrow" aria-hidden="true">
+                    ←
+                  </span>
+                  <img
+                    src="/logo_squash.jpeg"
+                    alt=""
+                    className="logo-mark"
+                    width={46}
+                    height={46}
+                  />
+                  <span className="brand-back-label">{SPECIAL_LABEL[view]}</span>
+                </button>
+              ) : (
+                <>
+                  <img
+                    src="/logo_squash.jpeg"
+                    alt="Squash de l'Yvette"
+                    className="logo-mark"
+                    width={46}
+                    height={46}
+                  />
+                  <span className="brand-title" aria-hidden="true">
+                    Squash de l'Yvette
+                  </span>
+                </>
+              )}
             </h1>
           </div>
           <div className="actions">
@@ -1223,7 +1261,9 @@ export default function Home() {
         {/* « Le Complexe, Bures » retiré : ce lieu est invariant et n'a jamais changé de
             session en session. Il appartient à la modale « Confidentialité », pas à la
             ligne 2 de chaque chargement — ~20 px rendus à la grille, qui est le produit. */}
-        <div className="sub">Bonjour {nickname || me.split(" ")[0]} 👋</div>
+        {!isSpecial && (
+          <div className="sub">Bonjour {nickname || me.split(" ")[0]} 👋</div>
+        )}
       </header>
 
       {/* Relance d'enrôlement biométrique (une seule fois, masquable) : gated en interne sur le
@@ -1335,18 +1375,16 @@ export default function Home() {
 
       {/* Vue (Jour/Semaine) à gauche ; à droite les actions compactes en icônes :
           sélection multiple, légende (ⓘ) et rafraîchir.
-          ⚠️ Les onglets Jour/Semaine restent montés dans les vues Frais et Tournoi : ce sont
-          les SEULS contrôles qui ramènent au planning. Les démonter enfermait l'utilisateur
-          dans ces modules, sans aucun retour. Seules les icônes (sélection, légende,
-          rafraîchir), qui n'ont pas de sens hors planning, sont masquées. */}
+          La barre entière ne s'affiche QUE sur le planning. Elle restait montée dans les
+          modules faute d'autre sortie ; le retour vit maintenant dans l'en-tête, et
+          « Jour / Semaine » redevient ce qu'il est — un choix de vue du planning, qui n'avait
+          rien à faire au-dessus d'une liste de rencontres ou d'un tableau de frais. */}
+      {!isSpecial && (
       <div className="viewbar">
         <div className="viewtabs" role="group" aria-label="Vue">
           <button className={view === "day" ? "active" : ""} aria-pressed={view === "day"} onClick={() => setView("day")}>Jour</button>
           <button className={view === "week" ? "active" : ""} aria-pressed={view === "week"} onClick={() => setView("week")}>Semaine</button>
         </div>
-        {/* Icônes masquées hors planning : sélection, légende et rafraîchir n'ont pas de
-            sens dans Frais / Tournoi. Les onglets, eux, restent — ils sont le retour. */}
-        {!isSpecial && (
         <div className="viewbar-icons">
           <button
             type="button"
@@ -1372,8 +1410,8 @@ export default function Home() {
             <RefreshIcon />
           </button>
         </div>
-        )}
       </div>
+      )}
 
       {!isSpecial && (
       <div className="filters" role="group" aria-label="Plage horaire">
