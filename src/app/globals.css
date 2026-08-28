@@ -1750,56 +1750,61 @@ td.cell.past {
 .setting-head h4 {
   margin: 0;
 }
-/* Pastille « i ». Elle indique, elle ne demande rien — c'est un repère, pas une action. En
-   APLAT de couleur elle pesait plus lourd que le titre qu'elle accompagne, et la rapetisser ne
-   suffisait pas : à 20, 16 puis 13 px, un disque plein reste un disque plein. D'où le
-   changement de FORME plutôt que de taille — un simple contour, rempli seulement quand
-   l'explication est ouverte. La couleur reste --pico-primary et non un gris : elle suit les
-   thèmes, là où un « i » gris foncé disparaissait sur fond sombre.
+/* Repère « i ». Il indique, il ne demande rien — et sa rondeur n'est plus une propriété de sa
+   BOÎTE. C'était toute la difficulté : un <button> carré arrondi à 50 % redevient une ellipse
+   dès qu'une règle tierce touche sa hauteur, son remplissage ou son interligne, et Pico habille
+   tous les <button>. Le cercle est maintenant DESSINÉ (cf. InfoTipIcon) : c'est de la géométrie,
+   plus une mise en boîte, et rien de ce qui arrive au bouton ne peut l'aplatir.
 
-   Le DIAMÈTRE n'est plus un nombre écrit ici : c'est --setting-title, la taille du <h4> voisin.
-   La pastille fait donc exactement la hauteur du titre de section, et une retouche du titre
-   l'emporte avec elle — les deux ne peuvent plus diverger.
-
-   Trois précautions de forme, parce que Pico habille tous les <button> : `aspect-ratio` et les
-   `min-*` empêchent un parent flex d'étirer le cercle en losange, et `box-sizing: border-box`
-   garde le contour dans le diamètre. Le repère est petit, PAS la cible du pouce : ::after tient
-   30 × 30 de zone cliquable autour. */
+   Le bouton n'est plus qu'une cible : aucune bordure, aucun fond, aucune dimension propre.
+   Sa taille de police EST --setting-title, celle du titre voisin, et le dessin fait 1em — le
+   repère est donc à la hauteur exacte du titre, et une retouche du titre l'emporte avec elle.
+   Le repère est petit, PAS la cible du pouce : ::after tient 30 × 30 de zone cliquable autour
+   (et ne peint rien, cf. plus bas). */
 .info-tip-btn {
   position: relative;
-  box-sizing: border-box;
-  width: var(--setting-title, 0.95rem);
-  height: var(--setting-title, 0.95rem);
-  min-width: var(--setting-title, 0.95rem);
-  min-height: var(--setting-title, 0.95rem);
-  /* Plafond autant que plancher : les quatre bornes enferment le diamètre, pour qu'aucune
-     règle de « cible tactile » posée plus tard sur les <button> ne puisse le gonfler. */
-  max-width: var(--setting-title, 0.95rem);
-  max-height: var(--setting-title, 0.95rem);
-  aspect-ratio: 1;
-  flex: 0 0 auto;
-  margin: 0;
-  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* Le glyphe suit le diamètre : ~62 %, la proportion qui laisse le « i » respirer dans son
-     cercle sans le toucher. */
-  font-size: calc(var(--setting-title, 0.95rem) * 0.62);
-  font-style: italic;
-  font-weight: 700;
-  line-height: 1;
-  border: 1px solid var(--pico-primary);
-  border-radius: 50%;
-  background: transparent;
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  line-height: 0;
+  font-size: var(--setting-title, 0.95rem);
   color: var(--pico-primary);
   cursor: pointer;
 }
-/* Zone tactile 30 × 30 autour du repère, qui n'en fait que ~15. Elle ne doit RIEN peindre :
+.info-tip-svg {
+  display: block;
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+/* Ouvert (ou survolé) : le disque se remplit et le « i » passe en réserve. L'état actif se lit
+   donc sur le REMPLISSAGE — à cette taille, un halo autour d'un contour ne se distinguait pas. */
+.info-tip-btn:hover,
+.info-tip-btn[aria-expanded="true"] {
+  color: var(--pico-primary-hover);
+}
+.info-tip-btn:hover .info-tip-disc,
+.info-tip-btn[aria-expanded="true"] .info-tip-disc {
+  fill: currentColor;
+}
+.info-tip-btn:hover .info-tip-stem,
+.info-tip-btn[aria-expanded="true"] .info-tip-stem {
+  stroke: var(--pico-card-background-color);
+}
+/* Zone tactile 30 × 30 autour d'un repère qui n'en fait que ~15. Elle ne doit RIEN peindre :
    sans ces remises à zéro explicites, n'importe quelle règle attrapant `button::after` (Pico en
-   a pour les accordéons et les listes déroulantes) dessinerait un second cercle deux fois plus
-   grand que la pastille — exactement le symptôme rapporté. On le rend impossible plutôt que de
-   parier que personne n'écrira jamais cette règle. */
+   a pour les accordéons et les listes déroulantes) dessinerait une seconde forme deux fois plus
+   grande que le repère. On le rend impossible plutôt que de parier sur l'avenir. */
 .info-tip-btn::after {
   content: "";
   position: absolute;
@@ -1813,14 +1818,6 @@ td.cell.past {
   background: none;
   box-shadow: none;
   filter: none;
-  pointer-events: auto;
-}
-/* Ouverte (ou survolée) : la pastille se remplit. L'état actif se lit donc sur le REMPLISSAGE
-   et non sur un halo — à cette taille, un anneau autour d'un contour ne se distinguait plus. */
-.info-tip-btn:hover,
-.info-tip-btn[aria-expanded="true"] {
-  background: var(--pico-primary);
-  color: var(--pico-primary-inverse);
 }
 .setting-info-text {
   margin: 0 0 10px;

@@ -144,6 +144,27 @@ function ResetIcon() {
 
 // En-tête d'une section de Paramètres : titre + petit bouton « i » qui déplie/replie
 // l'explication (les phrases longues n'occupent plus la modale en permanence).
+// Le repère « i », DESSINÉ et non composé.
+//
+// Sa rondeur était jusqu'ici une propriété de sa boîte : un <button> carré arrondi à 50 %.
+// Toute la difficulté venait de là — il suffisait qu'une règle tierce (Pico habille tous les
+// <button>) touche la hauteur, le remplissage ou l'interligne pour que le carré devienne un
+// rectangle, et le cercle une ellipse. Quatre tailles et deux formes plus tard, c'était encore
+// le cas.
+//
+// En SVG, la rondeur n'est plus une affaire de boîte mais de géométrie : le cercle reste un
+// cercle quoi qu'il arrive à l'élément qui le porte. Le dessin fait 1em, et le `em` du bouton
+// est la taille du titre voisin — le repère est donc exactement à sa hauteur, par construction.
+function InfoTipIcon() {
+  return (
+    <svg className="info-tip-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle className="info-tip-disc" cx="12" cy="12" r="10" />
+      <line className="info-tip-stem" x1="12" y1="11" x2="12" y2="17" />
+      <line className="info-tip-stem" x1="12" y1="7.2" x2="12" y2="7.2" />
+    </svg>
+  );
+}
+
 function SettingInfo({ title, children }: { title: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
@@ -158,7 +179,7 @@ function SettingInfo({ title, children }: { title: string; children: ReactNode }
           title="Qu'est-ce que c'est ?"
           onClick={() => setOpen((o) => !o)}
         >
-          i
+          <InfoTipIcon />
         </button>
       </div>
       {open && <p className="muted tiny setting-info-text">{children}</p>}
