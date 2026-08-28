@@ -29,6 +29,13 @@ const CONTACT_EMAIL = process.env.NEXT_PUBLIC_PRIVACY_CONTACT?.trim() ?? "";
 // c'est une information de dépannage, pas un élément d'interface.
 const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "";
 
+// Identifiant du build qui a produit CETTE page — inliné à la compilation, donc figé dans le
+// JS que le navigateur exécute réellement. C'est la donnée qui manquait pour départager
+// « le correctif n'est pas bon » de « cet onglet tourne encore sur l'ancien build » :
+// /api/version répond, lui, l'identifiant du SERVEUR, et les deux diffèrent précisément dans
+// le cas qu'on cherche à diagnostiquer. Affiché dans l'infobulle de la version, pas à l'écran.
+const BUILD_ID = (process.env.NEXT_PUBLIC_BUILD_ID ?? "").slice(0, 7);
+
 // Icône « information » (cercle + i) — ouvre la note de confidentialité.
 export function InfoIcon() {
   return (
@@ -59,7 +66,13 @@ export function PrivacyNotice() {
         <span>Confidentialité &amp; données</span>
       </button>
       {APP_VERSION && (
-        <span className="footer-version" title={`Version ${APP_VERSION} de l'application`}>
+        <span
+          className="footer-version"
+          title={
+            `Version ${APP_VERSION} de l'application` +
+            (BUILD_ID ? ` · build ${BUILD_ID} (celui de cette page)` : "")
+          }
+        >
           v{APP_VERSION}
         </span>
       )}
