@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { getFeatures } from "@/lib/features-server";
 import { isAdminEmail } from "@/lib/admin";
 import { interclubInclude, serializeInterclub } from "@/lib/interclub-db";
+import { teamRoster } from "@/lib/interclub-roster";
 import { interclubChanged } from "@/lib/interclub-gate";
 
 export const runtime = "nodejs";
@@ -24,23 +25,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "Rencontre introuvable" }, { status: 404 });
   }
 
-  // Composition possible : STRICTEMENT les membres de l'équipe qui dispute la rencontre.
-  // Règle voulue du club, appliquée ici et non pas seulement à l'écran — c'est la seule
-  // façon qu'elle tienne. Conséquence assumée : aligner quelqu'un suppose de l'avoir
-  // d'abord rattaché à l'équipe (paramètres du membre, ou espace admin).
-  const rosterRows = await prisma.user.findMany({
-    where: { teamId: f.teamId, disabledAt: null },
-    select: { id: true, displayName: true, nickname: true },
-  });
-  const roster = rosterRows
-    .map((u) => ({ id: u.id, name: u.nickname ?? u.displayName }))
-    .sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
+  // Composition possible : STRICTEMENT le roster de l'équipe qui dispute la rencontre —
+  // ses membres inscrits ET ses joueurs sans compte. Règle voulue du club, appliquée côté
+  // serveur à l'écriture (cf. `resolveHomePick`) ; ce qu'on renvoie ici n'est que de quoi
+  // remplir le sélecteur. Composer suppose donc d'avoir été rattaché à l'équipe par un admin.
+  const roster = await teamRoster(f.teamId);
 
-  const me = await prisma.user.findUnique({
-    where: { id: session.userId },
-    select: { email: true },
-  });
-  const view = { ...serializeInterclub(f, session.userId, isAdminEmail(me?.email)), roster };
+  // Statut admin lu sur la SESSION, déjà chargée : ce `GET` est rejoué à chaque retour au
+  // premier plan, un `user.findUnique` de moins y est une économie Neon réelle.
+  const view = { ...serializeInterclub(f, session.userId, isAdminEmail(session.email)), roster };
   // Auto-cicatrisation : le statut DÉDUIT fait foi. Si la colonne a divergé (dernier score
   // saisi ailleurs, rencontre laissée « en cours »), on la recale pour que la LISTE soit juste.
   if (view.status !== f.status) {
@@ -64,11 +57,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return NextResponse.json({ error: "Rencontre introuvable" }, { status: 404 });
   }
 
-  if (f.createdById !== session.userId) {
-    const me = await prisma.user.findUnique({ where: { id: session.userId }, select: { email: true } });
-    if (!isAdminEmail(me?.email)) {
-      return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
-    }
+  if (f.createdById !== session.userId && !isAdminEmail(session.email)) {
+    return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
   }
 
   await prisma.interclub.delete({ where: { id } });

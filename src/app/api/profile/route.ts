@@ -3,7 +3,6 @@ import { Prisma } from "@prisma/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { invalidateAnnotationUsers } from "@/lib/planning-annotate";
-import { getFeatures } from "@/lib/features-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,13 +13,18 @@ const NICK_MAX = 24;
 // Lettres (accents inclus), chiffres, espace, tiret, apostrophe, point. Pas de balises.
 const NICK_ALLOWED = /^[\p{L}\p{N} .'\-]+$/u;
 
-// PATCH /api/profile  { nickname?: string | null, listed?: boolean, teamId?: string | null }
+// PATCH /api/profile  { nickname?: string | null, listed?: boolean }
 // Met à jour le profil du joueur courant. Les champs sont indépendants et optionnels :
 //  - nickname : pseudonyme (vide/null → retour au diminutif auto). Modifiable à volonté.
 //  - listed   : visibilité dans l'annuaire (idée 6, opt-out). Absent = inchangé.
-//  - teamId   : équipe interclub où le joueur est aligné (null = non aligné). Auto-déclaratif,
-//               comme le pseudo : dans un club de cette taille, une validation par un tiers
-//               coûterait plus qu'elle ne rapporte.
+//
+// ⚠️ PAS d'équipe interclub ici. Cette route l'a acceptée un temps, en la traitant comme le
+// pseudo — « auto-déclaratif, une validation par un tiers coûterait plus qu'elle ne rapporte ».
+// C'était une erreur d'analogie : le pseudo n'engage que celui qui le choisit, alors que
+// l'appartenance à une équipe décide QUI PEUT ÊTRE ALIGNÉ dans une rencontre. S'y inscrire
+// soi-même revenait à s'inviter dans une composition. L'affectation se fait donc depuis
+// l'espace admin (POST /api/admin/members, action "set_team"), comme dans la vraie vie du club.
+// Aucun appelant n'envoyait ce champ : le retirer ne casse rien.
 export async function PATCH(req: NextRequest) {
   const session = await getSession(req.cookies.get("sid")?.value);
   if (!session) {
@@ -29,10 +33,9 @@ export async function PATCH(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as {
     nickname?: unknown;
     listed?: unknown;
-    teamId?: unknown;
   };
 
-  const data: { nickname?: string | null; listed?: boolean; teamId?: string | null } = {};
+  const data: { nickname?: string | null; listed?: boolean } = {};
 
   // Pseudonyme : traité seulement si la clé est présente dans le corps.
   if ("nickname" in body) {
@@ -68,28 +71,6 @@ export async function PATCH(req: NextRequest) {
     data.listed = body.listed;
   }
 
-  // Équipe interclub : la fonction doit être active, et l'équipe exister. On refuse plutôt
-  // que d'ignorer, pour qu'un client qui envoie un id périmé le sache.
-  if ("teamId" in body) {
-    if (!(await getFeatures()).interclub) {
-      return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
-    }
-    if (body.teamId === null) {
-      data.teamId = null;
-    } else if (typeof body.teamId !== "string" || !body.teamId) {
-      return NextResponse.json({ error: "Équipe invalide" }, { status: 400 });
-    } else {
-      const team = await prisma.interclubTeam.findUnique({
-        where: { id: body.teamId },
-        select: { id: true },
-      });
-      if (!team) {
-        return NextResponse.json({ error: "Équipe inconnue" }, { status: 400 });
-      }
-      data.teamId = team.id;
-    }
-  }
-
   if (Object.keys(data).length === 0) {
     return NextResponse.json({ error: "Rien à mettre à jour" }, { status: 400 });
   }
@@ -120,7 +101,7 @@ export async function PATCH(req: NextRequest) {
     updated = await prisma.user.update({
       where: { id: session.userId },
       data,
-      select: { nickname: true, listed: true, teamId: true },
+      select: { nickname: true, listed: true },
     });
   } catch (e) {
     // Filet DB (index unique insensible à la casse sur LOWER(nickname)) : rattrape une course

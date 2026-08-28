@@ -26,6 +26,12 @@ export const MAX_SEASON_LEN = 12;
 export const MAX_DIVISION_LEN = 30;
 
 /**
+ * Nom porté par un simple dont on ne connaît pas encore le joueur. Défini une seule fois et
+ * posé PAR LE SERVEUR : c'est un état, pas une saisie de l'utilisateur.
+ */
+export const UNSET_PLAYER = "À désigner";
+
+/**
  * Une prise de marquage est PÉRIMÉE au-delà de ce délai sans activité DU MARQUEUR : sinon un
  * téléphone à plat gèlerait le match pour toute la soirée, personne d'autre ne pouvant
  * reprendre.
@@ -152,6 +158,9 @@ export function serializeInterclub(f: FullInterclub, userId: string | null, isAd
       id: m.id,
       order: m.order,
       homeUserId: m.homeUserId,
+      // Un simple porte un membre OU un invité (joueur d'équipe sans compte) : l'écran a
+      // besoin des deux pour resélectionner la bonne entrée du roster à la réouverture.
+      homeGuestId: m.homeGuestId,
       homeDisplayName: m.homeDisplayName,
       awayName: m.awayName,
       // Normalisé à la sortie : les lignes saisies avant le passage au choix libre portent

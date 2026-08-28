@@ -25,6 +25,9 @@ export type MemberRow = {
   lastSeenAt: string | null; // dernière ACTIVITÉ réelle (throttlée), même sans ré-authentification
   disabledAt: string | null;
   createdAt: string;
+  // Équipe interclub, décidée par l'admin depuis cette page (NULL = aucune). Ce n'est pas une
+  // préférence du membre : elle décide qui peut être aligné dans une rencontre.
+  teamId: string | null;
   // Origine des résas du membre sur 30 j glissants (cf. src/lib/booking-origin.ts pour la
   // mise en mots, qui dépend aussi de `mode` : un compte « email seul » n'est pas mesurable).
   bookingsApp: number;
@@ -66,6 +69,7 @@ export async function listMembers(): Promise<MemberRow[]> {
       lastSeenAt: true,
       disabledAt: true,
       createdAt: true,
+      teamId: true,
       passkeys: {
         select: { id: true, deviceLabel: true, createdAt: true, lastUsedAt: true },
         orderBy: { createdAt: "desc" },
@@ -90,6 +94,7 @@ export async function listMembers(): Promise<MemberRow[]> {
     lastSeenAt: u.lastSeenAt?.toISOString() ?? null,
     disabledAt: u.disabledAt?.toISOString() ?? null,
     createdAt: u.createdAt.toISOString(),
+    teamId: u.teamId,
     bookingsApp: originByUser.get(u.id)?.app ?? 0,
     bookingsResa: originByUser.get(u.id)?.resa ?? 0,
   }));

@@ -37,19 +37,30 @@ export type PushPayload = {
   renotify?: boolean;
 };
 
-// Envoie une notif à TOUS les membres abonnés (annonce club, cf. espace admin). Un envoi par
-// joueur ayant au moins un abonnement (pushToUser dédoublonne les appareils et purge les
-// abonnements morts). Renvoie { recipients: joueurs effectivement notifiés, sent: total
-// d'appareils touchés }. Best-effort : un abonnement en échec n'interrompt pas les autres.
+// Envoie une notif à TOUS les membres (annonce club, cf. espace admin). Un envoi par joueur
+// ayant au moins un abonnement (pushToUser dédoublonne les appareils et purge les abonnements
+// morts). Renvoie { recipients: joueurs effectivement notifiés, sent: total d'appareils
+// touchés }. Best-effort : un abonnement en échec n'interrompt pas les autres.
 export async function pushToAll(payload: PushPayload): Promise<{ recipients: number; sent: number }> {
-  const subs = await prisma.pushSubscription.findMany({
-    distinct: ["userId"],
-    select: { userId: true },
-  });
+  // DEUX populations distinctes, et c'est tout l'objet de cette fonction :
+  //  - `members` = qui doit VOIR l'annonce (tout le club) → alimente le journal ;
+  //  - `subs`    = qui peut la RECEVOIR sur son téléphone → alimente le push.
+  //
+  // Les confondre — ne journaliser que les abonnés au push, comme le faisait cette fonction —
+  // vidait le dispositif de son sens : un membre qui coupe ses notifications (ou ne les a
+  // jamais autorisées) ne voyait plus les annonces du club NULLE PART, ni en push ni sous la
+  // cloche. C'est exactement le cas que le journal existe pour couvrir, et la fonction sœur
+  // `pushToUsers` faisait déjà l'inverse, à dix lignes d'ici.
+  //
+  // Les comptes désactivés sont exclus : ils ne peuvent plus se connecter pour lire.
+  const [members, subs] = await Promise.all([
+    prisma.user.findMany({ where: { disabledAt: null }, select: { id: true } }),
+    prisma.pushSubscription.findMany({ distinct: ["userId"], select: { userId: true } }),
+  ]);
   // Journalisé AVANT le contrôle de configuration, et une seule fois pour tout le monde :
   // c'est justement quand le push ne peut pas partir que la cloche doit garder une trace.
   await recordNotifications(
-    subs.map((s) => s.userId),
+    members.map((m) => m.id),
     payload,
   );
   if (!ensureConfigured()) return { recipients: 0, sent: 0 };

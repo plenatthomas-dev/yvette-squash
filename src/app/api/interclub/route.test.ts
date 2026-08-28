@@ -7,7 +7,10 @@ const h = vi.hoisted(() => ({
   session: null as null | { userId: string },
   teams: [] as Array<Record<string, unknown>>,
   team: null as null | Record<string, unknown>,
-  users: [] as Array<Record<string, unknown>>,
+  /** Le membre que `resolveHomePick` trouvera (ou non) — un seul suffit à ces tests. */
+  user: null as null | Record<string, unknown>,
+  /** Idem pour un joueur d'équipe sans compte. */
+  guest: null as null | Record<string, unknown>,
   fixtures: [] as Array<Record<string, unknown>>,
   created: null as null | Record<string, unknown>,
 }));
@@ -29,7 +32,8 @@ vi.mock("@/lib/db", () => ({
         return { id: "f1" };
       }),
     },
-    user: { findMany: vi.fn(async () => h.users) },
+    user: { findUnique: vi.fn(async () => h.user) },
+    interclubGuest: { findUnique: vi.fn(async () => h.guest) },
   },
 }));
 
@@ -58,7 +62,8 @@ beforeEach(() => {
   h.session = { userId: "u1" };
   h.teams = [{ id: "t1", name: "Équipe 1" }];
   h.team = { id: "t1", name: "Équipe 1" };
-  h.users = [];
+  h.user = null;
+  h.guest = null;
   h.fixtures = [];
   h.created = null;
 });
@@ -125,12 +130,57 @@ describe("POST /api/interclub", () => {
   });
 
   it("fige le nom du membre aligné, pour survivre à une suppression de compte", async () => {
-    h.users = [{ id: "u9", displayName: "Jérôme Blanc", nickname: "Jéjé" }];
+    h.user = { id: "u9", displayName: "Jérôme Blanc", nickname: "Jéjé", teamId: "t1", disabledAt: null };
     await POST(post({ ...validBody, matches: [{ userId: "u9", awayName: "Dupont" }] }));
     const create = (h.created?.matches as { create: Array<Record<string, unknown>> }).create;
     expect(create[0].homeDisplayName).toBe("Jéjé");
     expect(create[0].homeUserId).toBe("u9");
     expect(create[0].awayName).toBe("Dupont");
+  });
+
+  // La règle du club, à la CRÉATION. Elle n'était appliquée que sur le PATCH d'un match :
+  // cette route acceptait n'importe quel id de membre existant, quelle que soit son équipe.
+  it("refuse d'aligner un membre d'une AUTRE équipe", async () => {
+    h.user = { id: "u9", displayName: "Jérôme", nickname: null, teamId: "t2", disabledAt: null };
+    const res = await POST(post({ ...validBody, matches: [{ userId: "u9" }] }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/équipe qui dispute/i);
+    expect(h.created).toBeNull();
+  });
+
+  it("refuse d'aligner un compte désactivé", async () => {
+    h.user = {
+      id: "u9",
+      displayName: "Jérôme",
+      nickname: null,
+      teamId: "t1",
+      disabledAt: new Date(),
+    };
+    expect((await POST(post({ ...validBody, matches: [{ userId: "u9" }] }))).status).toBe(400);
+  });
+
+  // Un nom LIBRE était la dernière porte par laquelle la règle se contournait : plus de champ
+  // `name`, un joueur hors appli passe par le roster de son équipe.
+  it("ignore un nom libre : sans identifiant, le simple reste « à désigner »", async () => {
+    await POST(post({ ...validBody, matches: [{ name: "N'importe qui", awayName: "Dupont" }] }));
+    const create = (h.created?.matches as { create: Array<Record<string, unknown>> }).create;
+    expect(create[0].homeDisplayName).toBe("À désigner");
+    expect(create[0].homeUserId).toBeNull();
+    expect(create[0].homeGuestId).toBeNull();
+  });
+
+  it("aligne un joueur hors appli inscrit au roster de l'équipe", async () => {
+    h.guest = { id: "g1", name: "Paul Hors-Appli", teamId: "t1" };
+    await POST(post({ ...validBody, matches: [{ guestId: "g1" }] }));
+    const create = (h.created?.matches as { create: Array<Record<string, unknown>> }).create;
+    expect(create[0].homeGuestId).toBe("g1");
+    expect(create[0].homeUserId).toBeNull();
+    expect(create[0].homeDisplayName).toBe("Paul Hors-Appli");
+  });
+
+  it("refuse un joueur hors appli rattaché à une autre équipe", async () => {
+    h.guest = { id: "g1", name: "Paul", teamId: "t2" };
+    expect((await POST(post({ ...validBody, matches: [{ guestId: "g1" }] }))).status).toBe(400);
   });
 
   it("laisse la composition ouverte quand elle n'est pas fournie", async () => {
@@ -163,26 +213,24 @@ describe("POST /api/interclub", () => {
   });
 
   it("refuse d'aligner deux fois le même membre", async () => {
-    h.users = [{ id: "u9", displayName: "Jérôme", nickname: null }];
+    h.user = { id: "u9", displayName: "Jérôme", nickname: null, teamId: "t1", disabledAt: null };
     const res = await POST(post({ ...validBody, matches: [{ userId: "u9" }, { userId: "u9" }] }));
     expect(res.status).toBe(400);
   });
 
   it("refuse ce qui n'est pas une couleur", async () => {
-    const res = await POST(post({ ...validBody, matches: [{ name: "Tom", homeColor: "bleu-ciel" }] }));
+    const res = await POST(post({ ...validBody, matches: [{ homeColor: "bleu-ciel" }] }));
     expect(res.status).toBe(400);
   });
 
   it("accepte une couleur libre et la normalise", async () => {
-    await POST(post({ ...validBody, matches: [{ name: "Tom", homeColor: "#A1B2C3" }] }));
+    await POST(post({ ...validBody, matches: [{ homeColor: "#A1B2C3" }] }));
     const create = (h.created?.matches as { create: Array<Record<string, unknown>> }).create;
     expect(create[0].homeColor).toBe("#a1b2c3");
   });
 
   it("refuse plus de joueurs que de matchs", async () => {
-    const res = await POST(
-      post({ ...validBody, matchCount: 1, matches: [{ name: "A" }, { name: "B" }] }),
-    );
+    const res = await POST(post({ ...validBody, matchCount: 1, matches: [{}, {}] }));
     expect(res.status).toBe(400);
   });
 });

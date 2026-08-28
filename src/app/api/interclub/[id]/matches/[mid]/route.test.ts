@@ -7,6 +7,7 @@ const h = vi.hoisted(() => ({
   match: null as null | Record<string, unknown>,
   siblings: [] as Array<Record<string, unknown>>,
   user: null as null | Record<string, unknown>,
+  guest: null as null | Record<string, unknown>,
   admin: false,
   // Ce que la transaction a réellement écrit.
   updated: null as null | Record<string, unknown>,
@@ -31,6 +32,9 @@ vi.mock("@/lib/interclub-notify", () => ({
   }),
   notifyFixtureDone: vi.fn(async () => {
     h.notified.push("fixtureDone");
+  }),
+  notifyFixtureStart: vi.fn(async () => {
+    h.notified.push("fixtureStart");
   }),
 }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
@@ -62,6 +66,7 @@ vi.mock("@/lib/db", () => {
       }),
     },
     user: { findUnique: vi.fn(async () => h.user) },
+    interclubGuest: { findUnique: vi.fn(async () => h.guest) },
   };
   return {
     prisma: {
@@ -106,6 +111,7 @@ beforeEach(() => {
   h.match = freshMatch();
   h.siblings = [{ gamesHome: null, status: "pending" }];
   h.user = { email: "someone@example.com", teamId: "team-1" };
+  h.guest = null;
   h.admin = false;
   h.updated = null;
   h.createdGames = null;
@@ -342,5 +348,162 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
     // 12-0 satisfait la règle naïve mais n'a pas pu exister : au-delà de 11 on ne marque
     // que pour prendre 2 points d'écart.
     expect((await PATCH(patch({ games: [{ home: 12, away: 0 }] }), ctx)).status).toBe(400);
+  });
+
+  // --- La prise de marquage ------------------------------------------------
+  // Cette route ignorait totalement `scorerId`, alors que sa sœur `PUT …/live` s'en protège.
+  // Deux conséquences, toutes deux atteignables sans malveillance un soir de rencontre.
+
+  it("refuse d'écrire des jeux pendant qu'un AUTRE marque ce match", async () => {
+    h.match = {
+      ...freshMatch(),
+      scorerId: "marqueur",
+      scorerClaimedAt: new Date(), // prise fraîche, donc non périmée
+      status: "live",
+    };
+    const res = await PATCH(patch({ games: [{ home: 11, away: 0 }] }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/marque ce match/i);
+    expect(h.deletedGames).toBe(0);
+  });
+
+  // Le scénario coûteux : un match VERROUILLÉ par un tiers. Un PATCH d'un score complet
+  // posait `status: done` et relâchait la prise, après quoi le marqueur légitime prenait 409
+  // sur son propre PUT et ne pouvait plus faire remonter ses points.
+  it("ne peut plus terminer d'autorité un match tenu par un marqueur", async () => {
+    h.match = {
+      ...freshMatch(),
+      scorerId: "marqueur",
+      scorerClaimedAt: new Date(),
+      status: "live",
+    };
+    const res = await PATCH(
+      patch({ games: [{ home: 11, away: 0 }, { home: 11, away: 0 }, { home: 11, away: 0 }] }),
+      ctx,
+    );
+    expect(res.status).toBe(409);
+    expect(h.updated).toBeNull();
+  });
+
+  it("une prise PÉRIMÉE ne bloque plus la correction du score", async () => {
+    h.match = {
+      ...freshMatch(),
+      scorerId: "marqueur",
+      scorerClaimedAt: new Date(Date.now() - 60 * 60_000), // une heure : périmée
+      status: "live",
+    };
+    expect((await PATCH(patch({ games: [{ home: 11, away: 0 }] }), ctx)).status).toBe(200);
+  });
+
+  it("le marqueur lui-même peut corriger le score de son match", async () => {
+    h.match = {
+      ...freshMatch(),
+      scorerId: "u1",
+      scorerClaimedAt: new Date(),
+      status: "live",
+    };
+    expect((await PATCH(patch({ games: [{ home: 11, away: 0 }] }), ctx)).status).toBe(200);
+  });
+
+  // La composition n'est pas le score : corriger un nom au bord du terrain reste possible
+  // pendant que quelqu'un marque, parce que ça ne touche aucun jeu.
+  it("laisse corriger la composition pendant qu'un autre marque", async () => {
+    h.match = {
+      ...freshMatch(),
+      scorerId: "marqueur",
+      scorerClaimedAt: new Date(),
+      status: "live",
+    };
+    expect((await PATCH(patch({ awayName: "Vrai nom" }), ctx)).status).toBe(200);
+  });
+
+  // --- Concurrence optimiste sur les jeux ----------------------------------
+
+  // LE scénario de perte de données : `games` remplace intégralement, et un écran ouvert dix
+  // minutes plus tôt renvoie la liste qu'il avait alors. Les deux écritures ne sont pas
+  // concurrentes — le Serializable ne voit donc rien —, la seconde est simplement calculée sur
+  // un état périmé, et elle efface le jeu clos entre-temps.
+  it("refuse une saisie calculée sur un nombre de jeux périmé", async () => {
+    h.match = { ...freshMatch(), games: [{ number: 1 }], gamesHome: 1, gamesAway: 0 };
+    const res = await PATCH(patch({ games: [], knownGameCount: 0 }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/changé pendant ta saisie/i);
+    expect(h.deletedGames).toBe(0);
+  });
+
+  it("accepte la même saisie quand l'écran est à jour", async () => {
+    h.match = { ...freshMatch(), games: [{ number: 1 }], gamesHome: 1, gamesAway: 0 };
+    expect((await PATCH(patch({ games: [], knownGameCount: 1 }), ctx)).status).toBe(200);
+  });
+
+  // Garde FACULTATIVE : un client qui ne l'envoie pas garde l'ancien comportement.
+  it("n'exige pas knownGameCount", async () => {
+    h.match = { ...freshMatch(), games: [{ number: 1 }], gamesHome: 1, gamesAway: 0 };
+    expect((await PATCH(patch({ games: [] }), ctx)).status).toBe(200);
+  });
+
+  // --- « Entamé » ne se lit pas sur gamesHome seul -------------------------
+
+  // `gamesHome` reste NULL pendant tout le premier jeu : la garde d'autorisation ne servait
+  // donc à rien exactement au moment où le match est le plus vivant.
+  it("protège un match en cours dès le premier jeu, avant tout jeu terminé", async () => {
+    h.match = {
+      ...freshMatch(),
+      status: "live",
+      gamesHome: null,
+      homeUserId: "autre",
+      interclub: { ...freshMatch().interclub, createdById: "autre" },
+    };
+    h.session = { userId: "intrus" };
+    const res = await PATCH(patch({ games: [{ home: 11, away: 0 }] }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/déjà saisi/i);
+  });
+
+  // --- Joueurs sans compte -------------------------------------------------
+
+  it("aligne un joueur hors appli du roster de l'équipe", async () => {
+    h.guest = { id: "g1", name: "Paul Hors-Appli", teamId: "team-1" };
+    await PATCH(patch({ homeGuestId: "g1" }), ctx);
+    expect(h.updated).toMatchObject({ homeDisplayName: "Paul Hors-Appli" });
+    expect(h.updated?.homeGuest).toEqual({ connect: { id: "g1" } });
+    expect(h.updated?.homeUser).toEqual({ disconnect: true });
+  });
+
+  it("refuse un joueur hors appli d'une autre équipe", async () => {
+    h.guest = { id: "g1", name: "Paul", teamId: "team-2" };
+    expect((await PATCH(patch({ homeGuestId: "g1" }), ctx)).status).toBe(400);
+  });
+
+  it("refuse de désigner à la fois un membre et un joueur hors appli", async () => {
+    h.user = { id: "u9", displayName: "Jérôme", nickname: null, teamId: "team-1" };
+    h.guest = { id: "g1", name: "Paul", teamId: "team-1" };
+    expect((await PATCH(patch({ homeUserId: "u9", homeGuestId: "g1" }), ctx)).status).toBe(400);
+  });
+
+  // Le placeholder est posé PAR LE SERVEUR : c'était la dernière porte par laquelle un nom
+  // libre entrait, et donc par laquelle la règle d'équipe se contournait.
+  it("ignore un nom libre envoyé avec un détachement", async () => {
+    await PATCH(patch({ homeUserId: null, homeGuestId: null, homeDisplayName: "N'importe qui" }), ctx);
+    expect(h.updated).toMatchObject({ homeDisplayName: "À désigner" });
+  });
+
+  // --- Début de rencontre --------------------------------------------------
+
+  // Le commentaire de la route promet « les MÊMES transitions que le direct », mais
+  // `notifyFixtureStart` n'existait que côté direct : un club qui saisit tout a posteriori —
+  // le cas que ce raisonnement dit vouloir couvrir — ne l'a jamais reçu.
+  it("annonce le début de rencontre, comme le direct", async () => {
+    h.match = { ...freshMatch(), interclub: { ...freshMatch().interclub, status: "scheduled" } };
+    h.siblings = [{ gamesHome: 1, status: "live" }];
+    await PATCH(patch({ games: [{ home: 11, away: 0 }] }), ctx);
+    expect(h.notified).toContain("fixtureStart");
+  });
+
+  it("ne réannonce pas le début d'une rencontre déjà en cours", async () => {
+    h.match = { ...freshMatch(), interclub: { ...freshMatch().interclub, status: "live" } };
+    h.siblings = [{ gamesHome: 1, status: "live" }];
+    await PATCH(patch({ games: [{ home: 11, away: 0 }] }), ctx);
+    expect(h.notified).not.toContain("fixtureStart");
   });
 });

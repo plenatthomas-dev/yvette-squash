@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog } from "@/components/Dialog";
 import { readOk } from "@/lib/apiFetch";
+import { onForeground } from "@/lib/onForeground";
 import { EmptyState, Skeleton } from "@/components/Placeholders";
 import InterclubScorer from "@/components/InterclubScorer";
 import InterclubLive from "@/components/InterclubLive";
@@ -25,9 +26,11 @@ import {
 
 type Team = { id: string; name: string };
 
-// Le serveur ne renvoie QUE les membres de l'équipe qui dispute la rencontre : la
-// restriction est appliquée là-bas, pas ici.
-type RosterEntry = { id: string; name: string };
+// Le serveur ne renvoie QUE le roster de l'équipe qui dispute la rencontre : la restriction
+// est appliquée là-bas, pas ici. Deux populations s'y mêlent — les MEMBRES (compte sur
+// l'appli) et les joueurs sans compte, qu'un admin a inscrits au roster de l'équipe. Le
+// `kind` sert à renvoyer le bon champ au serveur ; à l'écran, un joueur est un joueur.
+type RosterEntry = { kind: "member" | "guest"; id: string; name: string };
 
 type FixtureRow = {
   id: string;
@@ -45,6 +48,8 @@ type MatchRow = {
   id: string;
   order: number;
   homeUserId: string | null;
+  /** Renseigné à la place de `homeUserId` quand le joueur aligné n'a pas de compte. */
+  homeGuestId: string | null;
   homeDisplayName: string;
   awayName: string;
   homeColor: string | null;
@@ -181,18 +186,16 @@ export default function Interclub({
 
   // Rafraîchissement au retour sur l'onglet : plusieurs personnes saisissent en parallèle un
   // soir de rencontre. Pas d'intervalle — le palier gratuit ne supporte pas le polling.
+  //
+  // `onForeground` dédoublonne la rafale `focus` + `visibilitychange` : cet écran recharge la
+  // liste ET le détail ouvert, il partait donc en quatre requêtes à chaque déverrouillage du
+  // téléphone au bord du terrain.
   useEffect(() => {
-    const onFocus = () => {
-      if (document.visibilityState !== "visible" || busyRef.current) return;
+    return onForeground(() => {
+      if (busyRef.current) return;
       loadList();
       if (openId) loadFixture(openId);
-    };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onFocus);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onFocus);
-    };
+    });
   }, [loadList, loadFixture, openId]);
 
   async function createFixture(form: {
@@ -727,9 +730,15 @@ function MatchEditor({
   onCancel: () => void;
   onSave: (body: Record<string, unknown>) => void;
 }) {
-  // "" = non renseigné, sinon l'id d'un membre de l'équipe. Pas de nom libre : la règle du
-  // club veut que seuls les membres de l'équipe désignée soient alignés.
-  const [pick, setPick] = useState(match.homeUserId ?? "");
+  // "" = non renseigné, sinon `member:<id>` ou `guest:<id>`. Pas de nom libre : la règle du
+  // club veut que seuls les joueurs du roster de l'équipe soient alignés, et un joueur sans
+  // compte y entre par l'espace admin — pas par une case de texte de cet écran.
+  //
+  // Le préfixe est nécessaire : rien ne garantit qu'un id de membre et un id d'invité ne se
+  // ressemblent pas, et le serveur attend deux champs différents.
+  const [pick, setPick] = useState(
+    match.homeUserId ? `member:${match.homeUserId}` : match.homeGuestId ? `guest:${match.homeGuestId}` : "",
+  );
   const [awayName, setAwayName] = useState(match.awayName === UNSET ? "" : match.awayName);
   const [homeColor, setHomeColor] = useState(match.homeColor ?? "");
   const [awayColor, setAwayColor] = useState(match.awayColor ?? "");
@@ -756,7 +765,7 @@ function MatchEditor({
           <select value={pick} onChange={(e) => setPick(e.target.value)}>
             <option value="">— à désigner —</option>
             {roster.map((r) => (
-              <option key={r.id} value={r.id}>
+              <option key={`${r.kind}:${r.id}`} value={`${r.kind}:${r.id}`}>
                 {r.name}
               </option>
             ))}
@@ -767,8 +776,9 @@ function MatchEditor({
 
       {roster.length === 0 && (
         <p className="notice tiny" role="status">
-          Aucun membre n&apos;est rattaché à {teamName}. Rattache-les depuis leurs paramètres,
-          ou depuis l&apos;espace admin, pour pouvoir composer l&apos;équipe.
+          Aucun joueur n&apos;est rattaché à {teamName}. Un administrateur compose le roster de
+          l&apos;équipe depuis l&apos;espace admin — les membres inscrits sur la page Membres,
+          les joueurs sans compte dans la section « Équipes interclub ».
         </p>
       )}
 
@@ -853,15 +863,24 @@ function MatchEditor({
           disabled={busy || !!problem}
           onClick={() =>
             onSave({
-              // Un membre choisi : le serveur fige son nom d'affichage et vérifie au passage
-              // qu'il est bien de l'équipe. Revenir sur « à désigner » remet le placeholder.
-              ...(pick ? { homeUserId: pick } : { homeUserId: null, homeDisplayName: UNSET }),
+              // Un joueur choisi : le serveur fige son nom d'affichage et vérifie au passage
+              // qu'il est bien du roster de l'équipe. Les deux clés partent TOUJOURS ensemble,
+              // y compris à `null` — c'est ce qui dit au serveur « la composition est touchée »,
+              // et c'est ainsi qu'on revient à « à désigner » (le placeholder est posé
+              // là-bas, jamais envoyé d'ici).
+              homeUserId: pick.startsWith("member:") ? pick.slice(7) : null,
+              homeGuestId: pick.startsWith("guest:") ? pick.slice(6) : null,
               awayName: awayName.trim() || UNSET,
               homeColor: homeColor || null,
               awayColor: awayColor || null,
               // Les lignes vides ou inachevées ne partent pas : `problem` a déjà bloqué les
               // secondes, les premières sont juste des lignes qu'on a ouvertes sans s'en servir.
               games: playedGames(games),
+              // Combien de jeux cet écran avait sous les yeux en s'ouvrant. Le serveur refuse
+              // d'écrire si la base en compte un autre nombre : entre l'ouverture du
+              // formulaire et l'enregistrement, quelqu'un a pu clore un jeu au bord du terrain,
+              // et `games` — qui REMPLACE tout — l'effacerait sans que rien ne le signale.
+              knownGameCount: match.games.length,
             })
           }
         >

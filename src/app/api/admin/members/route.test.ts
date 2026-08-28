@@ -12,8 +12,11 @@ const h = vi.hoisted(() => ({
     passwordHash: string | null;
     disabledAt: Date | null;
   },
+  featureInterclub: true,
   blockers: { expenses: 0, shares: 0, tournaments: 0, total: 0 },
   members: [{ id: "u1" }] as unknown[],
+  teams: [{ id: "t1", name: "Équipe 1" }] as unknown[],
+  team: { id: "t1" } as null | { id: string },
   userUpdate: vi.fn(),
   userDelete: vi.fn(),
   sessionDeleteMany: vi.fn(),
@@ -35,6 +38,7 @@ vi.mock("@/lib/features-server", () => ({
     delegation: false,
     tournament: false,
     ranking: false,
+    interclub: h.featureInterclub,
   }),
 }));
 vi.mock("@/lib/members", () => ({
@@ -59,6 +63,10 @@ vi.mock("@/lib/db", () => ({
     },
     session: { deleteMany: h.sessionDeleteMany },
     passkey: { deleteMany: h.passkeyDeleteMany },
+    interclubTeam: {
+      findMany: vi.fn(async () => h.teams),
+      findUnique: vi.fn(async () => h.team),
+    },
   },
 }));
 
@@ -83,8 +91,11 @@ beforeEach(() => {
     passwordHash: "hash",
     disabledAt: null,
   };
+  h.featureInterclub = true;
   h.blockers = { expenses: 0, shares: 0, tournaments: 0, total: 0 };
   h.members = [{ id: "u1" }];
+  h.teams = [{ id: "t1", name: "Équipe 1" }];
+  h.team = { id: "t1" };
   h.userUpdate.mockReset().mockResolvedValue({});
   h.userDelete.mockReset().mockResolvedValue({});
   h.sessionDeleteMany.mockReset().mockResolvedValue({ count: 0 });
@@ -232,5 +243,40 @@ describe("POST /api/admin/members", () => {
 
   it("400 sur action inconnue", async () => {
     expect((await POST(postReq({ id: "u1", action: "frobnicate" }))).status).toBe(400);
+  });
+
+  // --- Équipe interclub ----------------------------------------------------
+  // L'appartenance à une équipe décide QUI PEUT ÊTRE ALIGNÉ dans une rencontre : c'est donc
+  // une décision d'admin, et non un réglage que le membre se donne (elle a un temps vécu dans
+  // PATCH /api/profile, où chacun pouvait s'inviter dans une composition).
+
+  it("set_team : rattache un membre à une équipe", async () => {
+    const res = await POST(postReq({ id: "u1", action: "set_team", teamId: "t1" }));
+    expect(res.status).toBe(200);
+    expect(h.userUpdate).toHaveBeenCalledWith({ where: { id: "u1" }, data: { teamId: "t1" } });
+  });
+
+  it("set_team : null retire de toute équipe", async () => {
+    await POST(postReq({ id: "u1", action: "set_team", teamId: null }));
+    expect(h.userUpdate).toHaveBeenCalledWith({ where: { id: "u1" }, data: { teamId: null } });
+  });
+
+  // On refuse plutôt qu'on ignore : un écran resté ouvert après la suppression d'une équipe
+  // doit l'apprendre, pas croire son geste enregistré.
+  it("set_team : refuse une équipe inconnue", async () => {
+    h.team = null;
+    const res = await POST(postReq({ id: "u1", action: "set_team", teamId: "fantome" }));
+    expect(res.status).toBe(400);
+    expect(h.userUpdate).not.toHaveBeenCalled();
+  });
+
+  it("set_team : 404 si l'interclub est désactivé", async () => {
+    h.featureInterclub = false;
+    expect((await POST(postReq({ id: "u1", action: "set_team", teamId: "t1" }))).status).toBe(404);
+  });
+
+  it("set_team : réservé aux admins, comme le reste de la route", async () => {
+    h.admin = null;
+    expect((await POST(postReq({ id: "u1", action: "set_team", teamId: "t1" }))).status).toBe(403);
   });
 });

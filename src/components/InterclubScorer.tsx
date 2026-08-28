@@ -136,6 +136,19 @@ export default function InterclubScorer({
   const push = useCallback(
     async (evts: ScoreEvent[]) => {
       const st = replay(evts, bestOf);
+      // Horodaté AVANT la requête, et non après un succès.
+      //
+      // Cette marque borne la cadence d'envoi (cf. `scheduleSync`), et c'est sur cette borne —
+      // « une écriture toutes les 5 s au plus » — que reposent le modèle de coût de
+      // `interclub-gate.ts` et le commentaire de `schema.prisma` sur `liveJson`. En ne la
+      // posant qu'en cas de SUCCÈS, l'ancienne version la laissait à sa valeur ancienne dès
+      // qu'un envoi échouait : `wait` retombait à 0, et CHAQUE point tapé déclenchait aussitôt
+      // un PUT — donc une transaction Serializable — au lieu d'un toutes les 5 secondes. Deux
+      // onglets sur le même match (409 en boucle) ou un réseau intermittent suffisaient à
+      // transformer la borne en son contraire, exactement quand la base souffrait déjà.
+      //
+      // Ce qu'on veut borner, c'est le nombre de REQUÊTES ÉMISES ; leur issue n'y change rien.
+      lastSentRef.current = Date.now();
       try {
         const res = await fetch(`/api/interclub/${fixtureId}/matches/${match.id}/live`, {
           method: "PUT",
@@ -157,7 +170,6 @@ export default function InterclubScorer({
           return;
         }
         setOffline(!res.ok);
-        lastSentRef.current = Date.now();
       } catch {
         // Hors-ligne : on garde la main, la prochaine tentative renverra l'état COMPLET.
         setOffline(true);

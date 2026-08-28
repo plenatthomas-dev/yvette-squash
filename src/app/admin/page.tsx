@@ -20,6 +20,11 @@ type PendingRequest = {
 };
 
 type CronRun = { name: string; lastRunAt: string; ok: boolean; info: string | null };
+
+/** Équipe interclub et son effectif inscrit sur l'appli (l'affectation se fait page Membres). */
+type IcTeam = { id: string; name: string; memberCount: number };
+/** Joueur d'une équipe SANS compte : il joue le championnat sans utiliser l'appli. */
+type IcGuest = { id: string; teamId: string; name: string };
 type Dashboard = {
   members: number;
   disabledMembers: number;
@@ -96,6 +101,10 @@ export default function AdminPage() {
   const [rkResult, setRkResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [icBusy, setIcBusy] = useState(false);
   const [icResult, setIcResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [icTeams, setIcTeams] = useState<IcTeam[]>([]);
+  const [icGuests, setIcGuests] = useState<IcGuest[]>([]);
+  const [icTeamId, setIcTeamId] = useState("");
+  const [icName, setIcName] = useState("");
 
   useEffect(() => {
     if (!emailLogin) return;
@@ -160,6 +169,16 @@ export default function AdminPage() {
       }
     })();
   }, []);
+
+  // Roster interclub. Chargé seulement si la fonction est active : sinon c'est une requête
+  // Postgres de plus à chaque ouverture de l'admin, pour une section qui ne s'affiche pas.
+  useEffect(() => {
+    if (!interclub) return;
+    void loadTeams();
+    // `loadTeams` est stable pour ce qui nous intéresse (il ne lit que des setters) ; le
+    // relister en dépendance rejouerait la requête à chaque rendu.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [interclub]);
 
   const act = async (id: string, action: "approve" | "reject" | "reject-block") => {
     setBusyId(id);
@@ -285,35 +304,67 @@ export default function AdminPage() {
     }
   };
 
-  const seedTeams = async (mode: "fill" | "clear") => {
+  // Roster des équipes : les joueurs SANS compte sur l'appli. Les membres inscrits, eux, sont
+  // rattachés depuis la page « Membres », où la liste des comptes vit déjà — dupliquer cette
+  // liste ici aurait fait deux endroits pour la même décision.
+  const loadTeams = async () => {
+    try {
+      const res = await fetch("/api/admin/interclub-teams");
+      if (!res.ok) return;
+      const data = (await res.json()) as { teams: IcTeam[]; guests: IcGuest[] };
+      setIcTeams(data.teams);
+      setIcGuests(data.guests);
+    } catch {
+      /* la section reste vide : le reste de l'admin n'a pas à en souffrir */
+    }
+  };
+
+  const addGuest = async () => {
+    const name = icName.trim();
+    if (!name || !icTeamId) return;
     setIcBusy(true);
     setIcResult(null);
     try {
       const res = await fetch("/api/admin/interclub-teams", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode }),
+        body: JSON.stringify({ action: "add_guest", teamId: icTeamId, name }),
       });
-      const data = (await res.json().catch(() => ({}))) as {
-        ok?: boolean;
-        assigned?: number;
-        cleared?: number;
-        teams?: number;
-        error?: string;
-      };
-      if (!res.ok) {
-        setIcResult({ ok: false, text: data.error ?? "Répartition impossible." });
+      const data = (await res.json().catch(() => ({}))) as { guest?: IcGuest; error?: string };
+      if (!res.ok || !data.guest) {
+        setIcResult({ ok: false, text: data.error ?? "Ajout impossible." });
         return;
       }
-      setIcResult({
-        ok: true,
-        text:
-          mode === "clear"
-            ? `${data.cleared ?? 0} membre(s) retiré(s) de leur équipe.`
-            : `${data.assigned ?? 0} membre(s) réparti(s) sur ${data.teams ?? 0} équipe(s). Les affectations existantes n'ont pas bougé.`,
-      });
+      setIcGuests((prev) => [...prev, data.guest!].sort((a, b) => a.name.localeCompare(b.name, "fr")));
+      setIcName("");
+      setIcResult({ ok: true, text: `${data.guest.name} ajouté.` });
     } catch {
-      setIcResult({ ok: false, text: "Répartition impossible." });
+      setIcResult({ ok: false, text: "Ajout impossible." });
+    } finally {
+      setIcBusy(false);
+    }
+  };
+
+  const removeGuest = async (g: IcGuest) => {
+    if (!confirm(`Retirer ${g.name} de l'équipe ? Les rencontres déjà jouées gardent son nom.`)) {
+      return;
+    }
+    setIcBusy(true);
+    setIcResult(null);
+    try {
+      const res = await fetch("/api/admin/interclub-teams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "remove_guest", guestId: g.id }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setIcResult({ ok: false, text: data.error ?? "Retrait impossible." });
+        return;
+      }
+      setIcGuests((prev) => prev.filter((x) => x.id !== g.id));
+    } catch {
+      setIcResult({ ok: false, text: "Retrait impossible." });
     } finally {
       setIcBusy(false);
     }
@@ -701,30 +752,104 @@ export default function AdminPage() {
               )}
             </section>
 
-            {/* Interclub : outil de mise en place, pas une fonction du produit. Sert à peupler
-                les équipes en recette pour éprouver le sélecteur de composition. */}
+            {/* Interclub : le roster des équipes.
+                Deux populations, deux endroits, chacun là où la liste existe déjà —
+                les MEMBRES se rattachent depuis la page « Membres » (un sélecteur par compte),
+                les joueurs SANS COMPTE se saisissent ici. Une équipe de championnat ne coïncide
+                jamais tout à fait avec la liste des inscrits sur l'appli. */}
             {interclub && (
               <section style={masonryCard}>
                 <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Équipes interclub</h2>
                 <p className="muted tiny">
-                  Répartit les membres <strong>sans équipe</strong> entre les équipes, en
-                  alternant. Les affectations déjà faites à la main sont préservées. Outil de
-                  mise en place pour la recette — en production, les membres choisissent leur
-                  équipe dans leurs paramètres.
+                  Seuls les joueurs du roster d&apos;une équipe peuvent être alignés dans ses
+                  rencontres. Les membres inscrits se rattachent depuis la{" "}
+                  <Link href="/admin/membres">page Membres</Link>. Ajoute ici ceux qui jouent le
+                  championnat <strong>sans compte sur l&apos;appli</strong>.
                 </p>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button type="button" disabled={icBusy} onClick={() => seedTeams("fill")}>
-                    {icBusy ? "Répartition…" : "Répartir les membres"}
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={icBusy}
-                    onClick={() => seedTeams("clear")}
-                  >
-                    Tout retirer
-                  </button>
-                </div>
+
+                {icTeams.length === 0 ? (
+                  <p className="muted tiny">Aucune équipe en base.</p>
+                ) : (
+                  <>
+                    {icTeams.map((t) => {
+                      const mine = icGuests.filter((g) => g.teamId === t.id);
+                      return (
+                        <div key={t.id} style={{ marginBottom: 10 }}>
+                          <div className="tiny">
+                            <strong>{t.name}</strong>{" "}
+                            <span className="muted">
+                              · {t.memberCount} membre{t.memberCount > 1 ? "s" : ""} inscrit
+                              {t.memberCount > 1 ? "s" : ""}
+                              {mine.length > 0 && ` · ${mine.length} hors appli`}
+                            </span>
+                          </div>
+                          {mine.length > 0 && (
+                            <ul
+                              className="tiny"
+                              style={{ margin: "4px 0 0", paddingLeft: 0, listStyle: "none" }}
+                            >
+                              {mine.map((g) => (
+                                <li
+                                  key={g.id}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    gap: 8,
+                                  }}
+                                >
+                                  <span>{g.name}</span>
+                                  <button
+                                    type="button"
+                                    className="secondary tiny"
+                                    disabled={icBusy}
+                                    onClick={() => removeGuest(g)}
+                                    style={{ flex: "0 0 auto" }}
+                                  >
+                                    Retirer
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <select
+                        value={icTeamId}
+                        onChange={(e) => setIcTeamId(e.target.value)}
+                        style={{ margin: 0, flex: "1 1 120px" }}
+                        aria-label="Équipe du joueur à ajouter"
+                      >
+                        <option value="">Équipe…</option>
+                        {icTeams.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        value={icName}
+                        onChange={(e) => setIcName(e.target.value)}
+                        placeholder="Prénom Nom"
+                        maxLength={40}
+                        aria-label="Prénom et nom du joueur hors appli"
+                        style={{ margin: 0, flex: "1 1 140px" }}
+                      />
+                      <button
+                        type="button"
+                        disabled={icBusy || !icTeamId || !icName.trim()}
+                        onClick={addGuest}
+                        style={{ flex: "0 0 auto" }}
+                      >
+                        Ajouter
+                      </button>
+                    </div>
+                  </>
+                )}
+
                 {icResult && (
                   <div className={`notice ${icResult.ok ? "info" : "error"}`} style={{ marginTop: 8 }}>
                     {icResult.ok ? "✓ " : "⚠️ "}

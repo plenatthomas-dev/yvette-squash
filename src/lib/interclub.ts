@@ -343,13 +343,20 @@ export function seedEvents(games: readonly GameScore[], bestOf: number): ScoreEv
 // acceptable que si elle fixe le fond ET l'encre. On ne stocke donc que le fond, et l'encre
 // est CALCULÉE : blanc ou noir, celui des deux qui contraste le mieux.
 //
-// Ce choix garantit le seuil AA sur TOUTE couleur possible : le pire cas du cube RGB atteint
-// 4.58:1, au-dessus des 4.5 requis (le test le vérifie en balayant le cube). La règle est ainsi
-// tenue par construction, là où une palette figée ne la tenait que par curation.
+// Sur l'encre PLEINE, ce choix tient le seuil AA quelle que soit la couleur : le pire cas du
+// cube RGB atteint 4.58:1, au-dessus des 4.5 requis (le test le vérifie en balayant le cube).
 //
-// ⚠️ La couleur s'applique en PASTILLE, jamais en aplat sur une zone tactile : DESIGN.md
-// réserve le vert à ce qui est actionnable, et un joueur en vert transformerait sinon sa
-// moitié d'écran en faux bouton.
+// ⚠️ CE QUE CE MODULE NE PEUT PAS GARANTIR — et ce commentaire l'a affirmé à tort. La borne
+// ci-dessus ne vaut que si l'encre est rendue TELLE QUELLE. `.ics-won` et `.ics-serve`
+// (globals.css) la repeignent à `opacity: .85` sur le maillot : le pire cas du cube retombe
+// alors à 3.51:1, et quatre des douze raccourcis de couleur passent sous 4.5 (rose 3.89,
+// vert 4.21, turquoise 4.36, rouge 4.43). Le test continue de passer — il mesure une couleur
+// qui n'est jamais celle qu'on voit. Écart CONNU ET ASSUMÉ à ce jour ; ce qu'il faut retenir,
+// c'est que toute opacité posée sur cette encre défait le calcul, et que le test ne le dira pas.
+//
+// ⚠️ La couleur s'applique en PASTILLE ou en grande zone TACTILE (les deux demi-écrans du
+// marqueur, cf. `.ics-side`), jamais en aplat décoratif : DESIGN.md réserve les grandes
+// surfaces colorées à ce qui est actionnable.
 
 export const INK_LIGHT = "#ffffff";
 export const INK_DARK = "#000000";

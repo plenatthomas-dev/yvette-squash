@@ -11,7 +11,14 @@ export const dynamic = "force-dynamic";
 // Réservé aux membres connectés, comme le reste de l'appli — on y lit des noms de joueurs.
 // L'économie ne vient donc PAS d'un cache CDN (qui servirait la réponse à des requêtes non
 // authentifiées, cf. l'avertissement en tête de `interclub-gate.ts`) mais du Data Cache côté
-// serveur : dix spectateurs qui interrogent coûtent une seule lecture Postgres.
+// serveur : la requête LOURDE — rencontres, matchs et jeux joints — est mutualisée entre tous
+// les spectateurs.
+//
+// ⚠️ Ce qui reste à payer par sondage : `getSession` lit la table `Session` à chaque appel,
+// sans cache. Dix spectateurs coûtent donc dix lectures légères, et non une seule — le module
+// qu'appelle cette route le dit noir sur blanc (`interclub-gate.ts`), et c'est pourtant cette
+// route-ci qu'on lit en premier. C'est aussi pourquoi le sondage client s'arrête quand il n'y a
+// rien à voir (cf. InterclubLive) : à ce prix-là, le nombre de sondages compte.
 //
 // `no-store` est explicite : il interdit à tout cache PARTAGÉ de retenir cette réponse.
 export async function GET(req: NextRequest) {

@@ -578,10 +578,33 @@ model InterclubTeam {
   order     Int               @default(0) // ordre d'affichage
   createdAt DateTime          @default(now())
   members   User[]
+  guests    InterclubGuest[]
   fixtures  Interclub[]
   followers InterclubFollow[]
 
   @@index([order])
+}
+
+/// Joueur d'une équipe qui n'a PAS de compte sur l'appli.
+///
+/// Une équipe interclub ne coïncide pas avec la liste des inscrits : il y a toujours quelqu'un
+/// qui joue le championnat sans jamais avoir ouvert l'appli. Sans cette table, la règle « seuls
+/// les membres de l'équipe peuvent être alignés » rendait ces joueurs-là impossibles à composer,
+/// et la seule échappatoire était un nom libre — qui rouvrait la règle à tout le monde.
+///
+/// C'est donc un ROSTER, pas un compte : ni email, ni connexion, ni notification. L'admin le
+/// tient à jour depuis l'espace d'administration, au même endroit qu'il affecte les équipes.
+model InterclubGuest {
+  id        String           @id @default(cuid())
+  team      InterclubTeam    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId    String
+  name      String // « Prénom Nom », saisi par l'admin — un seul champ, comme TricountGuest
+  createdAt DateTime         @default(now())
+  matches   InterclubMatch[] @relation("InterclubHomeGuest")
+
+  // Deux fois le même nom dans la même équipe est une faute de saisie, pas un cas d'usage.
+  @@unique([teamId, name])
+  @@index([teamId])
 }
 
 // La rencontre. `opponent` est un TEXTE LIBRE : on ne tient pas d'annuaire des clubs
@@ -623,7 +646,13 @@ model InterclubMatch {
   order           Int // 1..matchCount — ordre de passage
   homeUser        User?           @relation("InterclubHomePlayer", fields: [homeUserId], references: [id], onDelete: SetNull)
   homeUserId      String?
-  homeDisplayName String // figé : nom du membre ou du remplaçant
+  // Joueur de l'équipe SANS compte (cf. InterclubGuest). Exclusif de `homeUserId` : une ligne
+  // porte l'un ou l'autre, jamais les deux — c'est la même case « qui joue ce simple ».
+  // SetNull comme pour un membre : retirer un joueur du roster ne doit pas effacer l'historique,
+  // `homeDisplayName` gardant le nom figé.
+  homeGuest       InterclubGuest? @relation("InterclubHomeGuest", fields: [homeGuestId], references: [id], onDelete: SetNull)
+  homeGuestId     String?
+  homeDisplayName String // figé : nom du membre ou du joueur hors appli
   awayName        String // adversaire (texte libre)
   // Couleur de maillot, pour reconnaître les joueurs depuis le bord du terrain. Un « #rrggbb »
   // LIBRE : l'encre posée dessus est calculée (cf. inkFor dans src/lib/interclub.ts), ce qui

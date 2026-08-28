@@ -4011,7 +4011,34 @@ body[data-bottombar] .install-banner {
   border-left: 3px solid var(--pico-primary);
   font-weight: 500;
 }
+/* Une notification qui porte une `url` devient cliquable ENTIÈREMENT : la cible tactile est
+   la ligne, pas un lien de trois mots. Le lien reprend la grille du <li> (le <a> serait sinon
+   l'unique cellule, et l'horodatage repasserait à la ligne). Pas de couleur de lien ni de
+   soulignement : la ligne entière est déjà l'affordance, et douze lignes bleues d'affilée
+   feraient un mur — DESIGN.md réserve la couleur à ce qui doit ressortir. */
+.notif-link {
+  display: grid;
+  /* Les colonnes sont REDÉCLARÉES plutôt qu'héritées par `subgrid` : la valeur est la même
+     que celle du <li> juste au-dessus, et le repli d'un navigateur sans subgrid serait une
+     colonne unique, donc un horodatage passé à la ligne sur toutes les notifications. */
+  grid-template-columns: 1fr auto;
+  grid-column: 1 / -1;
+  gap: 2px 10px;
+  color: inherit;
+  text-decoration: none;
+}
+.notif-list li:has(> .notif-link) { padding: 0; }
+.notif-list li > .notif-link { padding: 8px 12px; }
+.notif-link:hover { background: var(--pico-secondary-background, transparent); }
 .notif-title { font-size: 0.85rem; font-weight: 600; }
+/* Nombre de notifications repliées sous une même série. Discret : c'est une précision, pas
+   une alerte — et le chiffre est porté par un `title` pour qui ne lit pas « ×7 ». */
+.notif-count {
+  margin-left: 6px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--pico-muted-color);
+}
 .notif-body {
   grid-column: 1 / -1;
   font-size: 0.8rem;

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { PlanningGrid } from "@/components/PlanningGrid";
 import { WeekGrid } from "@/components/WeekGrid";
@@ -218,7 +219,16 @@ export default function Home() {
   // Journal des notifications, affiché sous la même cloche. C'est le REPLI du push : il
   // fonctionne que le téléphone ait reçu quelque chose ou non.
   const [notifs, setNotifs] = useState<
-    { id: string; title: string; body: string; url: string | null; at: string; read: boolean }[]
+    {
+      id: string;
+      title: string;
+      body: string;
+      url: string | null;
+      at: string;
+      read: boolean;
+      /** Lignes que cette entrée représente (série de même `tag`). 1 = notification isolée. */
+      count: number;
+    }[]
   >([]);
   const [unread, setUnread] = useState(0);
   const [confirmWipe, setConfirmWipe] = useState(false);
@@ -1123,7 +1133,11 @@ export default function Home() {
               title="Notifications et liste d'attente"
             >
               <BellIcon />
-              {unread > 0 && <span className="badge">{unread}</span>}
+              {/* Plafonné à « 9+ » : au-delà, le chiffre exact n'apprend plus rien et sa
+                  largeur déforme la pastille. Le serveur compte sur une fenêtre bornée
+                  (cf. /api/notifications), le plafond est donc atteint bien avant que ce
+                  décompte ne puisse être pris en défaut. */}
+              {unread > 0 && <span className="badge">{unread > 9 ? "9+" : unread}</span>}
             </button>
             {/* Réglages : accès DIRECT (hors menu ⋯), comme les notifications. */}
             <SettingsButton
@@ -1553,13 +1567,43 @@ export default function Home() {
                 )}
               </div>
               <ul className="notif-list">
-                {notifs.map((n) => (
-                  <li key={n.id} className={n.read ? undefined : "is-unread"}>
-                    <span className="notif-title">{n.title}</span>
-                    <span className="notif-body">{n.body}</span>
-                    <span className="notif-at">{stampFR(n.at)}</span>
-                  </li>
-                ))}
+                {notifs.map((n) => {
+                  const inner = (
+                    <>
+                      <span className="notif-title">
+                        {n.title}
+                        {/* Une série repliée dit combien elle représente, sinon « 1 ligne pour
+                            toute une soirée » se lirait comme une notification manquante. */}
+                        {n.count > 1 && (
+                          <span className="notif-count" title={`${n.count} notifications`}>
+                            ×{n.count}
+                          </span>
+                        )}
+                      </span>
+                      <span className="notif-body">{n.body}</span>
+                      <span className="notif-at">{stampFR(n.at)}</span>
+                    </>
+                  );
+                  // `url` était renvoyé par l'API et stocké depuis toujours — le schéma le
+                  // décrit comme « où mène le clic » — mais la cloche n'en faisait rien : le
+                  // clic ne menait nulle part. Les liens sont INTERNES (poser une notification
+                  // vers l'extérieur n'a jamais été prévu), d'où `<Link>`.
+                  return (
+                    <li key={n.id} className={n.read ? undefined : "is-unread"}>
+                      {n.url ? (
+                        <Link
+                          href={n.url}
+                          className="notif-link"
+                          onClick={() => setAlertsOpen(false)}
+                        >
+                          {inner}
+                        </Link>
+                      ) : (
+                        inner
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
               </>
             )}

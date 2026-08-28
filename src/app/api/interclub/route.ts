@@ -11,7 +11,9 @@ import {
   MAX_OPPONENT_LEN,
   MAX_PLAYER_NAME_LEN,
   MAX_SEASON_LEN,
+  UNSET_PLAYER,
 } from "@/lib/interclub-db";
+import { resolveHomePick, type ResolvedPick } from "@/lib/interclub-roster";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,7 +64,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/interclub : crée une rencontre et ses N simples d'un coup.
 // { date, teamId, opponent, home?, season?, division?, matchCount?, bestOf?,
-//   matches?: [{ userId? | name?, awayName?, homeColor?, awayColor? }] }
+//   matches?: [{ userId? | guestId?, awayName?, homeColor?, awayColor? }] }
 // Ouvert à TOUT membre connecté : dans un club de cette taille, exiger un rôle bloquerait la
 // saisie les soirs où le capitaine joue.
 export async function POST(req: NextRequest) {
@@ -111,16 +113,21 @@ export async function POST(req: NextRequest) {
   }
 
   // Composition : facultative à la création (on inscrit souvent la rencontre avant de savoir
-  // qui joue). Chaque ligne est soit un MEMBRE (userId), soit un nom libre (remplaçant).
+  // qui joue). Chaque ligne désigne un joueur DU ROSTER de l'équipe : un membre (`userId`) ou
+  // un joueur sans compte (`guestId`, cf. InterclubGuest).
+  //
+  // ⚠️ Il n'y a plus de nom LIBRE ici. La route en acceptait un, et c'est par là que la règle
+  // « seuls les joueurs de l'équipe peuvent être alignés » se contournait : il suffisait de ne
+  // pas envoyer d'identifiant. Un joueur hors appli s'inscrit désormais au roster de son équipe
+  // depuis l'espace admin, ce qui le rend choisissable sans rouvrir la porte à tout le monde.
   const lines = Array.isArray(matches) ? matches : [];
   if (lines.length > (nb as number)) {
     return NextResponse.json({ error: "Plus de joueurs que de matchs" }, { status: 400 });
   }
 
-  const memberIds = new Set<string>();
+  const alreadyPicked = new Set<string>();
   const roster: {
-    userId: string | null;
-    name: string | null;
+    pick: ResolvedPick;
     awayName: string;
     homeColor: string | null;
     awayColor: string | null;
@@ -131,53 +138,40 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Joueur invalide" }, { status: 400 });
     }
     const l = raw as Record<string, unknown>;
-    const uid = l.userId;
-    const name = l.name;
     if (!isColorValue(l.homeColor) || !isColorValue(l.awayColor)) {
       return NextResponse.json({ error: "Couleur inconnue" }, { status: 400 });
     }
     const awayName =
       typeof l.awayName === "string" && l.awayName.trim()
         ? l.awayName.trim().slice(0, MAX_PLAYER_NAME_LEN)
-        : "À désigner";
+        : UNSET_PLAYER;
 
-    if (typeof uid === "string" && uid) {
-      if (memberIds.has(uid)) {
-        return NextResponse.json({ error: "Un membre est aligné deux fois" }, { status: 400 });
-      }
-      memberIds.add(uid);
-      roster.push({
-        userId: uid,
-        name: null,
-        awayName,
-        homeColor: normalizeColor(l.homeColor),
-        awayColor: normalizeColor(l.awayColor),
-      });
-    } else if (typeof name === "string" && name.trim()) {
-      roster.push({
-        userId: null,
-        name: name.trim().slice(0, MAX_PLAYER_NAME_LEN),
-        awayName,
-        homeColor: normalizeColor(l.homeColor),
-        awayColor: normalizeColor(l.awayColor),
-      });
-    } else {
-      return NextResponse.json({ error: "Joueur invalide" }, { status: 400 });
+    // Le contrôle d'appartenance à l'équipe se fait ici, contre `teamId` lu en base — la même
+    // fonction que celle qu'emploie le PATCH d'un match, pour que les deux chemins d'écriture
+    // ne puissent pas diverger.
+    const resolved = await resolveHomePick(prisma, team.id, {
+      userId: l.userId,
+      guestId: l.guestId,
+    });
+    if (!resolved.ok) {
+      return NextResponse.json({ error: resolved.error }, { status: 400 });
     }
-  }
+    const { homeUserId, homeGuestId } = resolved.value;
+    const key = homeUserId ? `u:${homeUserId}` : homeGuestId ? `g:${homeGuestId}` : null;
+    if (key) {
+      if (alreadyPicked.has(key)) {
+        return NextResponse.json({ error: "Un joueur est aligné deux fois" }, { status: 400 });
+      }
+      alreadyPicked.add(key);
+    }
 
-  // Nom d'affichage FIGÉ à la création : supprimer un compte plus tard ne doit pas effacer
-  // qui a joué (même motif que TournamentPlayer).
-  const members = memberIds.size
-    ? await prisma.user.findMany({
-        where: { id: { in: [...memberIds] } },
-        select: { id: true, displayName: true, nickname: true },
-      })
-    : [];
-  if (members.length !== memberIds.size) {
-    return NextResponse.json({ error: "Membre inconnu" }, { status: 400 });
+    roster.push({
+      pick: resolved.value,
+      awayName,
+      homeColor: normalizeColor(l.homeColor),
+      awayColor: normalizeColor(l.awayColor),
+    });
   }
-  const nameOfMember = new Map(members.map((m) => [m.id, m.nickname ?? m.displayName]));
 
   const created = await prisma.interclub.create({
     data: {
@@ -197,11 +191,12 @@ export async function POST(req: NextRequest) {
           const r = roster[i];
           return {
             order: i + 1,
-            homeUserId: r?.userId ?? null,
-            homeDisplayName: r
-              ? (r.userId ? (nameOfMember.get(r.userId) ?? "?") : (r.name ?? "?"))
-              : "À désigner",
-            awayName: r?.awayName ?? "À désigner",
+            // Nom d'affichage FIGÉ dès la création : supprimer un compte, ou retirer un joueur
+            // du roster, ne doit pas effacer qui a joué (même motif que TournamentPlayer).
+            homeUserId: r?.pick.homeUserId ?? null,
+            homeGuestId: r?.pick.homeGuestId ?? null,
+            homeDisplayName: r?.pick.homeDisplayName ?? UNSET_PLAYER,
+            awayName: r?.awayName ?? UNSET_PLAYER,
             homeColor: r?.homeColor ?? null,
             awayColor: r?.awayColor ?? null,
             status: "pending",

@@ -31,8 +31,8 @@ vi.mock("./session", () => ({ getResaTokenForUser: vi.fn(async () => h.delegator
 import { resolveActingContext, isDelegationActive } from "./delegation";
 
 const RESA_ME = { accessToken: "tok-me" } as never;
-const me: AppSession = { userId: "me", displayName: "Moi", resa: RESA_ME };
-const meEmailOnly: AppSession = { userId: "me", displayName: "Moi", resa: null };
+const me: AppSession = { userId: "me", displayName: "Moi", email: "moi@example.com", resa: RESA_ME };
+const meEmailOnly: AppSession = { userId: "me", displayName: "Moi", email: "moi@example.com", resa: null };
 const MSG = "La réservation nécessite une connexion ResaMania.";
 
 beforeEach(() => {

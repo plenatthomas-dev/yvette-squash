@@ -31,13 +31,25 @@ type Member = {
   lastSeenAt: string | null;
   disabledAt: string | null;
   createdAt: string;
+  // Équipe interclub (null = aucune). Décidée ICI et nulle part ailleurs : elle commande qui
+  // peut être aligné dans une rencontre, ce n'est donc pas un réglage que le membre se donne.
+  teamId: string | null;
   // Résas du membre sur 30 j, par origine. Mises en mots par memberOriginLabel, qui tient
   // compte de `mode` : un compte « email seul » n'est pas mesurable côté ResaMania.
   bookingsApp: number;
   bookingsResa: number;
 };
 
-type Action = "link" | "disable" | "enable" | "revoke_passkey" | "revoke_passkeys" | "delete";
+type Team = { id: string; name: string };
+
+type Action =
+  | "link"
+  | "disable"
+  | "enable"
+  | "revoke_passkey"
+  | "revoke_passkeys"
+  | "delete"
+  | "set_team";
 
 // Petite pastille de statut (pas de classe .badge globale : elle n'existe qu'en scopé).
 const badge: CSSProperties = {
@@ -79,9 +91,10 @@ function fmtDateTime(iso: string | null): string {
 }
 
 export default function MembersPage() {
-  const { emailLogin } = useFeatures();
+  const { emailLogin, interclub } = useFeatures();
   const [state, setState] = useState<"loading" | "forbidden" | "ready" | "error">("loading");
   const [members, setMembers] = useState<Member[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
   // Flag `externalBookings` côté serveur : pilote la mise en mots des compteurs d'origine.
   const [externalDetection, setExternalDetection] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -94,8 +107,13 @@ export default function MembersPage() {
       const res = await fetch("/api/admin/members");
       if (res.status === 403) return setState("forbidden");
       if (!res.ok) return setState("error");
-      const data = (await res.json()) as { members: Member[]; externalDetection?: boolean };
+      const data = (await res.json()) as {
+        members: Member[];
+        teams?: Team[];
+        externalDetection?: boolean;
+      };
       setMembers(data.members);
+      setTeams(data.teams ?? []);
       setExternalDetection(!!data.externalDetection);
       setState("ready");
     } catch {
@@ -109,7 +127,11 @@ export default function MembersPage() {
 
   // Cœur d'une action serveur { id, action, … } : gère le « busy », les erreurs et le
   // rechargement. `extra` porte le passkeyId pour la révocation d'un appareil précis.
-  const postAction = async (id: string, action: Action, extra?: { passkeyId?: string }) => {
+  const postAction = async (
+    id: string,
+    action: Action,
+    extra?: { passkeyId?: string; teamId?: string | null },
+  ) => {
     setBusyId(id);
     setMsg(null);
     try {
@@ -118,13 +140,26 @@ export default function MembersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, action, ...extra }),
       });
-      const data = (await res.json().catch(() => ({}))) as { link?: string; error?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        link?: string;
+        error?: string;
+        teamId?: string | null;
+      };
       if (!res.ok) {
         setMsg({ id, text: data.error ?? "Action impossible." });
         return;
       }
       if (action === "link" && data.link) {
         setLinks((m) => ({ ...m, [id]: data.link! }));
+      } else if (action === "set_team") {
+        // Pas de rechargement ici, à la différence des autres actions : composer les équipes,
+        // c'est enchaîner vingt sélecteurs d'affilée, et `listMembers` agrège au passage les
+        // réservations de TOUS les membres sur 30 jours. Vingt allers-retours de cette taille
+        // pour changer vingt listes déroulantes réveillerait Neon pour rien. La réponse du
+        // serveur fait foi (`data.teamId`), on recale simplement la ligne concernée.
+        setMembers((prev) =>
+          prev.map((m) => (m.id === id ? { ...m, teamId: data.teamId ?? null } : m)),
+        );
       } else {
         // disable / enable / delete / révocations : on recharge pour refléter le nouvel état.
         await load();
@@ -144,6 +179,10 @@ export default function MembersPage() {
     )
       return;
     void postAction(id, action);
+  };
+
+  const setTeam = (id: string, teamId: string | null) => {
+    void postAction(id, "set_team", { teamId });
   };
 
   const revokePasskey = (id: string, pk: MemberPasskey) => {
@@ -247,6 +286,32 @@ export default function MembersPage() {
                     )}
                   </div>
                 </div>
+
+                {/* Équipe interclub. Un sélecteur et pas un bouton : le choix est à trois
+                    états (Équipe 1 / Équipe 2 / aucune), et « aucune » est le cas majoritaire
+                    d'un club où seule une poignée de membres joue le championnat. Enregistré
+                    au changement, sans bouton « valider » — une confirmation pour un menu
+                    déroulant serait une corvée sur vingt membres d'affilée. */}
+                {interclub && teams.length > 0 && (
+                  <label className="tiny" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span className="muted" style={{ flex: "0 0 auto" }}>
+                      Équipe interclub&nbsp;:
+                    </span>
+                    <select
+                      value={m.teamId ?? ""}
+                      disabled={busyId === m.id}
+                      onChange={(e) => setTeam(m.id, e.target.value || null)}
+                      style={{ margin: 0 }}
+                    >
+                      <option value="">— aucune —</option>
+                      {teams.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
 
                 {/* Appareils biométriques : un « Retirer » par appareil (téléphone perdu, etc.). */}
                 {m.passkeys.length > 0 && (

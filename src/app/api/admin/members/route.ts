@@ -17,7 +17,19 @@ export async function GET(req: NextRequest) {
   // `externalDetection` accompagne la liste : sans le flag, les compteurs « sur ResaMania »
   // valent 0 par construction et l'UI doit le dire au lieu de laisser lire « aucune ».
   const [members, features] = await Promise.all([listMembers(), getFeatures()]);
-  return NextResponse.json({ members, externalDetection: features.externalBookings });
+  // Les équipes accompagnent la liste pour que chaque carte propose son sélecteur. Requête
+  // faite seulement si l'interclub est actif : inutile de réveiller la table sinon.
+  const teams = features.interclub
+    ? await prisma.interclubTeam.findMany({
+        orderBy: { order: "asc" },
+        select: { id: true, name: true },
+      })
+    : [];
+  return NextResponse.json({
+    members,
+    teams,
+    externalDetection: features.externalBookings,
+  });
 }
 
 // POST /api/admin/members  { id, action }
@@ -30,6 +42,9 @@ export async function GET(req: NextRequest) {
 //   revoke_passkeys → retire TOUS les passkeys du membre d'un coup ; il pourra en ré-enrôler
 //                     depuis ses Réglages. Recouvrable → non « sensible ».
 //   delete          → suppression définitive, refusée si le membre porte un historique bloquant.
+//   set_team        → rattache le membre à une équipe interclub (body.teamId, null = aucune).
+//                     Décision d'ADMIN et non réglage personnel : l'appartenance à une équipe
+//                     décide qui peut être aligné dans une rencontre.
 export async function POST(req: NextRequest) {
   const admin = await requireAdmin(req);
   if (!admin) {
@@ -39,6 +54,7 @@ export async function POST(req: NextRequest) {
     id?: unknown;
     action?: unknown;
     passkeyId?: unknown;
+    teamId?: unknown;
   };
   if (typeof body.id !== "string" || !body.id) {
     return NextResponse.json({ error: "Membre invalide." }, { status: 400 });
@@ -113,6 +129,32 @@ export async function POST(req: NextRequest) {
     // le membre pourra en réactiver un depuis ses Réglages. `removed` alimente le retour UI.
     const r = await prisma.passkey.deleteMany({ where: { userId: target.id } });
     return NextResponse.json({ ok: true, removed: r.count });
+  }
+
+  if (action === "set_team") {
+    if (!(await getFeatures()).interclub) {
+      return NextResponse.json({ error: "Fonction indisponible." }, { status: 404 });
+    }
+    // `null` retire de toute équipe. On refuse un id inconnu plutôt que de l'ignorer, pour
+    // qu'un écran resté ouvert après la suppression d'une équipe le sache.
+    let teamId: string | null = null;
+    if (body.teamId !== null && body.teamId !== undefined && body.teamId !== "") {
+      if (typeof body.teamId !== "string") {
+        return NextResponse.json({ error: "Équipe invalide." }, { status: 400 });
+      }
+      const team = await prisma.interclubTeam.findUnique({
+        where: { id: body.teamId },
+        select: { id: true },
+      });
+      if (!team) {
+        return NextResponse.json({ error: "Équipe inconnue." }, { status: 400 });
+      }
+      teamId = team.id;
+    }
+    // Les rencontres passées ne bougent pas : `homeDisplayName` y est figé et `homeUserId`
+    // garde le lien. Changer d'équipe n'engage que les compositions À VENIR.
+    await prisma.user.update({ where: { id: target.id }, data: { teamId } });
+    return NextResponse.json({ ok: true, teamId });
   }
 
   if (action === "delete") {

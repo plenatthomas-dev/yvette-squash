@@ -11,10 +11,17 @@ import {
   validGameSequence,
   type GameScore,
 } from "@/lib/interclub";
-import { derivedStatus, fixtureScore, MAX_PLAYER_NAME_LEN } from "@/lib/interclub-db";
+import {
+  derivedStatus,
+  fixtureScore,
+  scorerIsStale,
+  MAX_PLAYER_NAME_LEN,
+} from "@/lib/interclub-db";
+import { resolveHomePick } from "@/lib/interclub-roster";
 import { interclubChanged } from "@/lib/interclub-gate";
 import {
   notifyFixtureDone,
+  notifyFixtureStart,
   notifyGameDone,
   notifyMatchDone,
   type MatchLine,
@@ -34,11 +41,20 @@ class HttpError extends Error {
 }
 
 // PATCH /api/interclub/{id}/matches/{mid} : composition et/ou score d'un simple.
-//   { homeUserId?, homeDisplayName?, awayName?, homeColor?, awayColor?,
-//     games?: [{ home, away }] }
+//   { homeUserId?, homeGuestId?, awayName?, homeColor?, awayColor?,
+//     games?: [{ home, away }], knownGameCount? }
 //
 // `games` remplace INTÉGRALEMENT la liste des jeux : c'est une correction de saisie, pas un
 // ajout incrémental — on évite ainsi qu'une double soumission crée deux fois le même jeu.
+//
+// ⚠️ C'est ce remplacement intégral qui rend cette route DANGEREUSE, et deux gardes distinctes
+// le tiennent (cf. plus bas, dans la transaction) :
+//   1. la PRISE DE MARQUAGE — on n'écrit pas de jeux sous les doigts de celui qui marque ;
+//   2. `knownGameCount` — l'écran qui enregistre doit avoir vu le même nombre de jeux que la
+//      base. Sans cela, un formulaire ouvert dix minutes plus tôt renvoyait `games: []` et
+//      effaçait ce qui avait été joué entre-temps, sans conflit de sérialisation possible :
+//      les deux écritures ne sont pas concurrentes, la seconde est juste calculée sur un état
+//      périmé. Un `Serializable` ne protège de rien dans ce cas.
 //
 // Tout est ATOMIQUE (Serializable + retry P2034) : plusieurs personnes saisissent en parallèle
 // un soir de rencontre, et le statut de la rencontre se recale dans la même transaction.
@@ -56,18 +72,24 @@ export async function PATCH(
   const { id, mid } = await params;
 
   const body = await req.json().catch(() => ({}));
-  const { homeUserId, homeDisplayName, awayName, homeColor, awayColor, games } = body as {
-    homeUserId?: unknown;
-    homeDisplayName?: unknown;
-    awayName?: unknown;
-    homeColor?: unknown;
-    awayColor?: unknown;
-    games?: unknown;
-  };
+  const { homeUserId, homeGuestId, awayName, homeColor, awayColor, games, knownGameCount } =
+    body as {
+      homeUserId?: unknown;
+      homeGuestId?: unknown;
+      awayName?: unknown;
+      homeColor?: unknown;
+      awayColor?: unknown;
+      games?: unknown;
+      knownGameCount?: unknown;
+    };
 
   if (!isColorValue(homeColor) || !isColorValue(awayColor)) {
     return NextResponse.json({ error: "Couleur inconnue" }, { status: 400 });
   }
+
+  // La composition est TOUCHÉE dès que l'une des deux clés est présente, `null` compris — c'est
+  // ainsi que l'écran remet un simple à « à désigner ».
+  const touchesLineup = "homeUserId" in body || "homeGuestId" in body;
 
   // Normalise les jeux avant d'ouvrir la transaction : une saisie invalide ne doit même pas
   // toucher la base.
@@ -89,13 +111,11 @@ export async function PATCH(
     parsedGames = out;
   }
 
-  const isAdmin = async () => {
-    const me = await prisma.user.findUnique({
-      where: { id: session.userId },
-      select: { email: true },
-    });
-    return isAdminEmail(me?.email);
-  };
+  // L'e-mail vient de la SESSION, déjà chargée : plus de `user.findUnique` ici. L'ancienne
+  // version en émettait un depuis l'INTÉRIEUR de la transaction, et sur le client global —
+  // donc une seconde connexion mobilisée pendant qu'une transaction Serializable en détenait
+  // déjà une, motif classique d'interblocage sur un pool serverless étroit.
+  const admin = isAdminEmail(session.email);
 
   // Rempli DANS la transaction, consommé après : notifier depuis l'intérieur enverrait la
   // notification même si la transaction était finalement annulée.
@@ -108,6 +128,7 @@ export async function PATCH(
       players: { player: string; opponent: string };
       gameDone: GameScore[] | null;
       matchDone: { home: number; away: number } | null;
+      fixtureStarted: boolean;
       fixtureDone: boolean;
       score: { home: number; away: number };
       lines: MatchLine[];
@@ -142,16 +163,56 @@ export async function PATCH(
           throw new HttpError(404, "Match introuvable");
         }
 
-        // Un match DÉJÀ saisi n'est modifiable que par ceux qui ont une raison d'y toucher :
-        // le créateur de la rencontre, le joueur concerné, le marqueur, ou un admin. Sinon on
+        // Un match ENTAMÉ n'est modifiable que par ceux qui ont une raison d'y toucher : le
+        // créateur de la rencontre, le joueur concerné, le marqueur, ou un admin. Sinon on
         // refuse plutôt que d'écraser silencieusement le travail de quelqu'un d'autre.
-        const alreadyScored = m.gamesHome !== null;
+        //
+        // ⚠️ « Entamé » ne peut PAS se lire sur `gamesHome !== null` seul : cette colonne reste
+        // nulle pendant tout le PREMIER jeu, si bien que la garde ne servait à rien exactement
+        // au moment où le match est le plus vivant. On regarde donc aussi le statut et les jeux
+        // déjà enregistrés — même erreur de lecture que celle documentée sur `derivedStatus`.
+        const started =
+          m.gamesHome !== null || m.status === "live" || m.status === "done" || m.games.length > 0;
         const closeToIt =
           m.interclub.createdById === session.userId ||
           m.homeUserId === session.userId ||
           m.scorerId === session.userId;
-        if (alreadyScored && !closeToIt && !(await isAdmin())) {
+        if (started && !closeToIt && !admin) {
           throw new HttpError(409, "Score déjà saisi par quelqu'un d'autre");
+        }
+
+        // GARDE 1 — la prise de marquage. Tant qu'un marqueur NON PÉRIMÉ tient ce match, ses
+        // jeux lui appartiennent : cette route ne s'en mêle pas. La route sœur `PUT …/live` se
+        // protégeait déjà ainsi ; ici rien ne consultait `scorerId` en dehors de `closeToIt`,
+        // et un capitaine qui corrigeait un nom sur un écran ouvert dix minutes plus tôt
+        // effaçait le jeu que le marqueur venait de clore.
+        //
+        // La composition et les couleurs, elles, restent modifiables pendant le marquage : ce
+        // sont justement les corrections qu'on fait au bord du terrain, et elles ne touchent
+        // aucun jeu.
+        const heldByOther =
+          m.scorerId !== null &&
+          m.scorerId !== session.userId &&
+          !scorerIsStale(m.scorerClaimedAt);
+        if (parsedGames && heldByOther) {
+          throw new HttpError(409, "Quelqu'un marque ce match en direct — attends qu'il ait fini");
+        }
+
+        // GARDE 2 — concurrence optimiste sur les jeux. L'écran annonce combien de jeux il
+        // avait sous les yeux ; s'il en manque ou s'il y en a plus, c'est qu'il a été rempli
+        // sur un état qui n'existe plus, et son `games` effacerait ce qu'il n'a jamais vu.
+        // Facultatif : un client qui ne l'envoie pas garde l'ancien comportement (aucune
+        // rupture pour les corrections faites depuis un écran fraîchement chargé).
+        if (parsedGames && knownGameCount !== undefined) {
+          if (!Number.isInteger(knownGameCount) || (knownGameCount as number) < 0) {
+            throw new HttpError(400, "knownGameCount invalide");
+          }
+          if ((knownGameCount as number) !== m.games.length) {
+            throw new HttpError(
+              409,
+              "Le score a changé pendant ta saisie — rouvre le match pour repartir du score à jour",
+            );
+          }
         }
 
         if (parsedGames && !validGameSequence(parsedGames, m.interclub.bestOf)) {
@@ -160,34 +221,23 @@ export async function PATCH(
 
         const data: Prisma.InterclubMatchUpdateInput = {};
 
-        if (homeUserId !== undefined) {
-          if (homeUserId === null) {
-            data.homeUser = { disconnect: true };
-          } else if (typeof homeUserId === "string" && homeUserId) {
-            const u = await tx.user.findUnique({
-              where: { id: homeUserId },
-              select: { id: true, displayName: true, nickname: true, teamId: true },
-            });
-            if (!u) throw new HttpError(400, "Membre inconnu");
-            // Restriction voulue du club : seuls les membres de l'ÉQUIPE qui dispute la
-            // rencontre peuvent être alignés. Vérifié côté serveur et pas seulement à
-            // l'écran, sinon la règle ne tiendrait pas.
-            if (u.teamId !== m.interclub.teamId) {
-              throw new HttpError(400, "Ce membre n'est pas dans l'équipe qui dispute la rencontre");
-            }
-            data.homeUser = { connect: { id: u.id } };
-            data.homeDisplayName = u.nickname ?? u.displayName;
-          } else {
-            throw new HttpError(400, "Membre invalide");
-          }
-        }
-        // Nom libre (remplaçant hors appli, ou remise à « à désigner »). On ne l'applique que
-        // si aucun MEMBRE n'est rattaché dans la même requête, sinon il écraserait le nom figé
-        // juste au-dessus. `homeUserId: null` accompagne au contraire un nom libre : c'est
-        // ainsi que le client détache un membre tout en nommant son remplaçant.
-        const memberAttached = typeof homeUserId === "string" && homeUserId.length > 0;
-        if (typeof homeDisplayName === "string" && homeDisplayName.trim() && !memberAttached) {
-          data.homeDisplayName = homeDisplayName.trim().slice(0, MAX_PLAYER_NAME_LEN);
+        // Composition. Un simple porte un MEMBRE ou un INVITÉ (joueur d'équipe sans compte),
+        // jamais les deux, et jamais un nom libre : `resolveHomePick` applique la règle du club
+        // contre `teamId` lu en base. C'est la MÊME fonction qu'emploie la création d'une
+        // rencontre — la règle ne peut donc plus tenir d'un côté et pas de l'autre.
+        //
+        // Résolu avec `tx` et non le client global : la vérification d'appartenance doit voir
+        // le même état que l'écriture qu'elle autorise.
+        if (touchesLineup) {
+          const resolved = await resolveHomePick(tx, m.interclub.teamId, {
+            userId: homeUserId,
+            guestId: homeGuestId,
+          });
+          if (!resolved.ok) throw new HttpError(400, resolved.error);
+          const p = resolved.value;
+          data.homeUser = p.homeUserId ? { connect: { id: p.homeUserId } } : { disconnect: true };
+          data.homeGuest = p.homeGuestId ? { connect: { id: p.homeGuestId } } : { disconnect: true };
+          data.homeDisplayName = p.homeDisplayName;
         }
         if (typeof awayName === "string" && awayName.trim()) {
           data.awayName = awayName.trim().slice(0, MAX_PLAYER_NAME_LEN);
@@ -264,8 +314,14 @@ export async function PATCH(
         const gamesGrew = !!parsedGames && parsedGames.length > m.games.length;
         const winner = parsedGames ? sequenceWinner(parsedGames, m.interclub.bestOf) : null;
         const matchNewlyDone = !!winner && m.status !== "done";
+        // « La rencontre commence », que le direct était seul à envoyer — alors que le
+        // commentaire ci-dessus promet les MÊMES transitions des deux côtés. Un club qui saisit
+        // tout a posteriori, précisément le cas que ce raisonnement dit vouloir couvrir, ne le
+        // recevait donc jamais.
+        const fixtureStarted = m.interclub.status !== "live" && eff === "live";
+        const fixtureNewlyDone = m.interclub.status !== "done" && eff === "done";
 
-        if (gamesGrew || matchNewlyDone || (m.interclub.status !== "done" && eff === "done")) {
+        if (gamesGrew || matchNewlyDone || fixtureStarted || fixtureNewlyDone) {
           finished.value = {
             ctx: {
               fixtureId: id,
@@ -282,7 +338,8 @@ export async function PATCH(
                     away: parsedGames.filter((g) => g.away > g.home).length,
                   }
                 : null,
-            fixtureDone: m.interclub.status !== "done" && eff === "done",
+            fixtureStarted,
+            fixtureDone: fixtureNewlyDone,
             score: fixtureScore(siblings),
             lines: siblings.map((s) => ({
               player: s.homeDisplayName,
@@ -305,6 +362,10 @@ export async function PATCH(
       interclubChanged();
       const ev = finished.value;
       if (ev) {
+        // Même ORDRE que le direct : le début de rencontre avant ce qui s'y produit.
+        if (ev.fixtureStarted) {
+          await notifyFixtureStart(ev.ctx, ev.players.player, ev.players.opponent);
+        }
         if (ev.matchDone) {
           await notifyMatchDone(
             ev.ctx,

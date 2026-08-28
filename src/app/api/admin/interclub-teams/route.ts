@@ -1,74 +1,141 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/admin";
 import { getFeatures } from "@/lib/features-server";
+import { MAX_PLAYER_NAME_LEN } from "@/lib/interclub-db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// POST /api/admin/interclub-teams { mode: "fill" | "clear" }
+// Composition des ÉQUIPES interclub — qui appartient à quelle équipe.
 //
-// Outil de MISE EN PLACE, pas une fonction du produit : répartit les membres entre les équipes
-// pour pouvoir éprouver le sélecteur de composition en recette.
+// POURQUOI C'EST UNE FONCTION D'ADMIN, ET PAS UN RÉGLAGE DE MEMBRE
+// L'appartenance à une équipe n'est pas une préférence personnelle : elle décide qui peut être
+// aligné dans une rencontre. Laisser chacun se déclarer reviendrait à laisser chacun s'inviter
+// dans une composition. Le capitaine / l'admin décide, comme dans la vraie vie du club.
 //
-// Délibérément une action d'admin et NON une migration : une migration s'appliquerait aussi à
-// la production le jour du merge, et y inventerait des appartenances d'équipe fausses, visibles
-// de tous dans l'annuaire. Ici rien ne bouge tant que personne n'appuie sur le bouton.
+// Une équipe interclub NE COÏNCIDE PAS avec la liste des inscrits sur l'appli : il y a toujours
+// des joueurs du championnat qui ne l'ont jamais ouverte. D'où les « invités » (InterclubGuest),
+// gérés ici aussi — sans eux, la règle « seuls les joueurs de l'équipe peuvent être alignés »
+// obligeait à rouvrir la composition à un nom libre, donc à tout le monde.
 //
-//  - "fill"  : n'affecte QUE les membres sans équipe, en alternant pour équilibrer. Les
-//              affectations déjà faites à la main sont préservées.
-//  - "clear" : remet tout le monde sans équipe (marche arrière).
+// L'ancien contenu de cette route était un outil de RECETTE (« fill » / « clear ») qui
+// répartissait les membres en alternance pour éprouver le sélecteur. Il n'a plus de raison
+// d'être maintenant qu'une vraie affectation existe, et il inventait des appartenances fausses.
+
+/** Nombre d'invités par équipe. Large pour un club, mais borné : c'est une saisie humaine. */
+const MAX_GUESTS_PER_TEAM = 40;
+
+// GET /api/admin/interclub-teams — équipes, leurs membres inscrits et leurs joueurs hors appli.
+export async function GET(req: NextRequest) {
+  if (!(await getFeatures()).interclub) {
+    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
+  }
+  if (!(await requireAdmin(req))) {
+    return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
+  }
+
+  const [teams, guests] = await Promise.all([
+    prisma.interclubTeam.findMany({
+      orderBy: { order: "asc" },
+      select: {
+        id: true,
+        name: true,
+        // Le décompte des membres suffit à l'écran d'admin : la liste nominative, elle, vit
+        // sur la page « Membres », où l'affectation se fait.
+        _count: { select: { members: true } },
+      },
+    }),
+    prisma.interclubGuest.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, teamId: true, name: true },
+    }),
+  ]);
+
+  return NextResponse.json({
+    teams: teams.map((t) => ({ id: t.id, name: t.name, memberCount: t._count.members })),
+    guests,
+  });
+}
+
+// POST /api/admin/interclub-teams
+//   { action: "add_guest", teamId, name }  → inscrit un joueur sans compte au roster d'une équipe
+//   { action: "remove_guest", guestId }    → l'en retire
 export async function POST(req: NextRequest) {
   if (!(await getFeatures()).interclub) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
-  const admin = await requireAdmin(req);
-  if (!admin) {
+  if (!(await requireAdmin(req))) {
     return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
   }
 
-  const { mode } = (await req.json().catch(() => ({}))) as { mode?: unknown };
+  const body = (await req.json().catch(() => ({}))) as {
+    action?: unknown;
+    teamId?: unknown;
+    guestId?: unknown;
+    name?: unknown;
+  };
 
-  if (mode === "clear") {
-    const { count } = await prisma.user.updateMany({
-      where: { teamId: { not: null } },
-      data: { teamId: null },
+  if (body.action === "add_guest") {
+    if (typeof body.teamId !== "string" || !body.teamId) {
+      return NextResponse.json({ error: "Équipe invalide" }, { status: 400 });
+    }
+    if (typeof body.name !== "string") {
+      return NextResponse.json({ error: "Nom invalide" }, { status: 400 });
+    }
+    // Espaces normalisés : « Jean  Dupont » et « Jean Dupont » sont le même joueur, et sans
+    // cela l'unicité par nom se contournerait d'une frappe.
+    const name = body.name.trim().replace(/\s+/g, " ").slice(0, MAX_PLAYER_NAME_LEN);
+    if (!name) {
+      return NextResponse.json({ error: "Nom manquant" }, { status: 400 });
+    }
+
+    const team = await prisma.interclubTeam.findUnique({
+      where: { id: body.teamId },
+      select: { id: true, _count: { select: { guests: true } } },
     });
-    return NextResponse.json({ ok: true, cleared: count });
+    if (!team) {
+      return NextResponse.json({ error: "Équipe inconnue" }, { status: 400 });
+    }
+    if (team._count.guests >= MAX_GUESTS_PER_TEAM) {
+      return NextResponse.json(
+        { error: `Cette équipe a déjà ${MAX_GUESTS_PER_TEAM} joueurs hors appli.` },
+        { status: 400 },
+      );
+    }
+
+    try {
+      const guest = await prisma.interclubGuest.create({
+        data: { teamId: team.id, name },
+        select: { id: true, teamId: true, name: true },
+      });
+      return NextResponse.json({ ok: true, guest }, { status: 201 });
+    } catch (e) {
+      // P2002 = @@unique([teamId, name]) : le même joueur est déjà au roster. Ce n'est pas une
+      // erreur d'admin, juste un doublon — on le dit sans dramatiser.
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+        return NextResponse.json(
+          { error: "Ce joueur est déjà dans cette équipe." },
+          { status: 409 },
+        );
+      }
+      throw e;
+    }
   }
 
-  if (mode !== "fill") {
-    return NextResponse.json({ error: "Mode invalide" }, { status: 400 });
+  if (body.action === "remove_guest") {
+    if (typeof body.guestId !== "string" || !body.guestId) {
+      return NextResponse.json({ error: "Joueur invalide" }, { status: 400 });
+    }
+    // Les rencontres déjà jouées survivent : `InterclubMatch.homeGuestId` est en SetNull et
+    // `homeDisplayName` porte le nom figé. Retirer quelqu'un du roster ne réécrit pas l'histoire.
+    const { count } = await prisma.interclubGuest.deleteMany({ where: { id: body.guestId } });
+    if (count === 0) {
+      return NextResponse.json({ error: "Joueur introuvable" }, { status: 404 });
+    }
+    return NextResponse.json({ ok: true });
   }
 
-  const teams = await prisma.interclubTeam.findMany({ orderBy: { order: "asc" }, select: { id: true } });
-  if (teams.length === 0) {
-    return NextResponse.json({ error: "Aucune équipe en base" }, { status: 400 });
-  }
-
-  const orphans = await prisma.user.findMany({
-    where: { teamId: null, disabledAt: null },
-    select: { id: true },
-    orderBy: { createdAt: "asc" },
-  });
-
-  // Alternance plutôt que tirage au sort : le résultat est équilibré et reproductible, alors
-  // qu'un vrai hasard peut mettre tout le monde dans la même équipe et ne rien démontrer.
-  //
-  // Un `updateMany` par ÉQUIPE, et non un `update` par membre : sur un club entier, la boucle
-  // séquentielle tenait la base éveillée pour rien.
-  const buckets = teams.map<string[]>(() => []);
-  orphans.forEach((o, i) => buckets[i % teams.length].push(o.id));
-
-  let assigned = 0;
-  for (let t = 0; t < teams.length; t++) {
-    if (buckets[t].length === 0) continue;
-    const { count } = await prisma.user.updateMany({
-      where: { id: { in: buckets[t] } },
-      data: { teamId: teams[t].id },
-    });
-    assigned += count;
-  }
-
-  return NextResponse.json({ ok: true, assigned, teams: teams.length });
+  return NextResponse.json({ error: "Action inconnue" }, { status: 400 });
 }

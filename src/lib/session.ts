@@ -188,6 +188,16 @@ export async function createResaSessionFromUser(userId: string): Promise<string 
 export interface AppSession {
   userId: string;
   displayName: string;
+  /**
+   * E-mail du membre, DÉJÀ chargé par la lecture de session (`include: { user: true }`) et
+   * jusqu'ici jeté. L'exposer épargne un `user.findUnique` par requête à tout appelant qui
+   * n'avait besoin que de tester l'allowlist admin (`isAdminEmail`) — sur Neon, chaque requête
+   * évitée sur un chemin chaud compte davantage que la ligne de code qu'elle coûte.
+   *
+   * `null` pour un compte ResaMania sans adresse connue : `isAdminEmail(null)` vaut false, donc
+   * le défaut reste fail-safe.
+   */
+  email: string | null;
   resa: ResaSession | null; // null = session « email seul » (sans ResaMania)
 }
 
@@ -350,7 +360,12 @@ export async function getSession(sid: string | undefined): Promise<AppSession | 
 
   const resa = await resolveResaToken(s);
   if (resa === null) return null; // jeton irrécupérable → session invalidée (déjà supprimée)
-  return { userId: s.userId, displayName: s.user.displayName, resa: resa ?? null };
+  return {
+    userId: s.userId,
+    displayName: s.user.displayName,
+    email: s.user.email,
+    resa: resa ?? null,
+  };
 }
 
 /**
