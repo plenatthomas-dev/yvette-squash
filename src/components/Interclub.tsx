@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Dialog } from "@/components/Dialog";
 import { readOk } from "@/lib/apiFetch";
 import { onForeground } from "@/lib/onForeground";
@@ -116,6 +116,76 @@ const STATUS_LABEL: Record<FixtureRow["status"], string> = {
   done: "Terminée",
 };
 
+/** Les mêmes trois états, côté SIMPLE. Le vocabulaire diffère : un match se « saisit ». */
+const MATCH_STATUS_LABEL: Record<string, string> = {
+  pending: "À saisir",
+  live: "En cours",
+  done: "Terminé",
+};
+
+/**
+ * Onglets d'équipe.
+ *
+ * ⚠️ Le filtrage porte sur les rencontres DÉJÀ CHARGÉES, jamais sur une nouvelle requête. La
+ * route accepte pourtant `?teamId`, et l'évidence serait de s'en servir — mais changer d'onglet
+ * réveillerait alors Neon à chaque appui, sur un écran qu'on parcourt justement en tapotant.
+ * Vingt rencontres tiennent en mémoire ; le palier gratuit, lui, ne tient pas le sondage.
+ *
+ * L'onglet sélectionné se marque par le POIDS et un trait, jamais par un aplat vert :
+ * DESIGN.md réserve le vert à ce qui est actionnable, et un filtre actif est un état.
+ */
+function TeamTabs({
+  teams,
+  value,
+  onChange,
+}: {
+  teams: Team[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const ids = ["all", ...teams.map((t) => t.id)];
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Navigation au clavier attendue d'un `tablist` : les flèches déplacent la sélection, et un
+  // seul onglet reste dans l'ordre de tabulation (`tabIndex` roulant).
+  const onKeyDown = (e: KeyboardEvent, i: number) => {
+    const last = ids.length - 1;
+    let next = -1;
+    if (e.key === "ArrowRight") next = i === last ? 0 : i + 1;
+    else if (e.key === "ArrowLeft") next = i === 0 ? last : i - 1;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = last;
+    else return;
+    e.preventDefault();
+    onChange(ids[next]);
+    refs.current[next]?.focus();
+  };
+
+  return (
+    <div className="ic-tabs" role="tablist" aria-label="Filtrer les rencontres par équipe">
+      {ids.map((id, i) => (
+        <button
+          key={id}
+          type="button"
+          role="tab"
+          id={`ic-tab-${id}`}
+          aria-selected={value === id}
+          aria-controls="ic-fixtures"
+          tabIndex={value === id ? 0 : -1}
+          ref={(el) => {
+            refs.current[i] = el;
+          }}
+          className={`ic-tab${value === id ? " is-on" : ""}`}
+          onClick={() => onChange(id)}
+          onKeyDown={(e) => onKeyDown(e, i)}
+        >
+          {id === "all" ? "Toutes" : (teams.find((t) => t.id === id)?.name ?? id)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** "2026-09-03" → "jeu. 3 sept." — les rencontres se repèrent au jour de la semaine. */
 function shortDate(iso: string): string {
   const d = new Date(`${iso}T12:00:00`);
@@ -164,6 +234,8 @@ export default function Interclub({
   const [fixture, setFixture] = useState<Fixture | null>(null);
   const [creating, setCreating] = useState(false);
   const [scoring, setScoring] = useState<string | null>(null);
+  /** Onglet d'équipe actif : `"all"` ou un `teamId`. Filtre d'affichage, rien de plus. */
+  const [tab, setTab] = useState<string>("all");
   const [busy, setBusy] = useState(false);
   // Garde-fou multi-utilisateur : on ne rafraîchit pas pendant qu'une saisie est en vol,
   // sinon on écraserait l'écran de celui qui est en train de taper (cf. Tournament.tsx).
@@ -323,6 +395,11 @@ export default function Interclub({
 
   if (rows === null) return <Skeleton />;
 
+  // Une équipe retirée pendant que son onglet était actif ne doit pas vider l'écran sans
+  // explication : on retombe sur « Toutes ».
+  const activeTab = tab !== "all" && !teams.some((t) => t.id === tab) ? "all" : tab;
+  const visibleRows = activeTab === "all" ? rows : rows.filter((f) => f.team.id === activeTab);
+
   return (
     <section className="interclub">
       {/* L'abonnement OUVRE la page, avant même « Nouvelle rencontre ». Il vivait sous la liste
@@ -340,27 +417,53 @@ export default function Interclub({
 
       <InterclubLive onExpired={onExpired} />
 
+      {/* Les onglets ne s'affichent qu'à partir de DEUX équipes : avec une seule, un filtre
+          qui ne filtre rien est du bruit. Le schéma prévoit la troisième. */}
+      {teams.length > 1 && <TeamTabs teams={teams} value={activeTab} onChange={setTab} />}
+
       {rows.length === 0 ? (
         <EmptyState icon="🏸" text="Aucune rencontre pour le moment." />
       ) : (
-        <ul className="ic-list">
-          {rows.map((f) => (
+        <ul
+          className="ic-list"
+          id="ic-fixtures"
+          role={teams.length > 1 ? "tabpanel" : undefined}
+          aria-labelledby={teams.length > 1 ? `ic-tab-${activeTab}` : undefined}
+        >
+          {visibleRows.length === 0 && (
+            <li className="ic-empty-tab muted">Aucune rencontre pour cette équipe.</li>
+          )}
+          {visibleRows.map((f) => (
             <li key={f.id}>
-              <button className="ic-row" onClick={() => setOpenId(f.id)}>
-                <span className="ic-date" title={`Date de la rencontre : ${shortDate(f.date)}`}>
-                  {shortDate(f.date)}
+              <button className={`ic-row ic-row-${f.status}`} onClick={() => setOpenId(f.id)}>
+                <span className="ic-row-head">
+                  <span className="ic-date" title={`Date de la rencontre : ${shortDate(f.date)}`}>
+                    {shortDate(f.date)}
+                  </span>
+                  <span className={`ic-status ic-${f.status}`}>
+                    <span className="sr-only">État : </span>
+                    {STATUS_LABEL[f.status]}
+                  </span>
                 </span>
-                <span className="ic-opponent">
-                  {f.team.name} {f.home ? "reçoit" : "se déplace à"} {f.opponent}
-                  {f.division && <span className="muted tiny"> · {f.division}</span>}
+                <span className="ic-row-main">
+                  <span className="ic-opponent">
+                    {f.team.name}{" "}
+                    <span className="ic-vs-word">{f.home ? "reçoit" : "se déplace à"}</span>{" "}
+                    {f.opponent}
+                  </span>
+                  {/* Une rencontre pas encore commencée n'a pas de score : afficher « 0–0 »
+                      annonçait un nul là où il n'y a rien eu. */}
+                  {f.status === "scheduled" ? (
+                    <span className="ic-score ic-score-none" aria-label="Pas encore jouée">
+                      <span aria-hidden="true">–</span>
+                    </span>
+                  ) : (
+                    <span className="ic-score" aria-label={`Score ${f.score.home} à ${f.score.away}`}>
+                      {f.score.home}–{f.score.away}
+                    </span>
+                  )}
                 </span>
-                <span className="ic-score" aria-label={`Score ${f.score.home} à ${f.score.away}`}>
-                  {f.score.home}–{f.score.away}
-                </span>
-                <span className={`ic-status ic-${f.status}`}>
-                  <span className="sr-only">État : </span>
-                  {STATUS_LABEL[f.status]}
-                </span>
+                {f.division && <span className="ic-division">{f.division}</span>}
               </button>
             </li>
           ))}
@@ -580,7 +683,13 @@ function FixtureDialog({
 
       <ul className="ic-matches">
         {fixture.matches.map((m) => (
-          <li key={m.id}>
+          // La vignette porte l'état ET englobe les actions : un simple est UN bloc. Le bouton
+          // de marquage vivait à côté de la ligne, sur le fond du dialogue — il paraissait
+          // appartenir à la rencontre plutôt qu'au match qu'il concerne.
+          <li
+            key={m.id}
+            className={editing === m.id ? "ic-match-card is-editing" : `ic-match-card ic-match-${m.status}`}
+          >
             {editing === m.id ? (
               <MatchEditor
                 match={m}
@@ -597,7 +706,13 @@ function FixtureDialog({
               />
             ) : (
               <button className="ic-match" onClick={() => setEditing(m.id)}>
-                <span className="ic-order">#{m.order}</span>
+                <span className="ic-match-head">
+                  <span className="ic-order">Simple {m.order}</span>
+                  <span className={`ic-status ic-${m.status}`}>
+                    <span className="sr-only">État : </span>
+                    {MATCH_STATUS_LABEL[m.status] ?? m.status}
+                  </span>
+                </span>
                 <span className="ic-players">
                   <span className="ic-player">
                     <ColorDot color={m.homeColor} size="lg" />
@@ -614,28 +729,28 @@ function FixtureDialog({
                     <span className={m.awayName === UNSET_PLAYER ? "muted" : undefined}>{m.awayName}</span>
                   </span>
                 </span>
-                <span className="ic-games">
-                  {m.live && (
-                    <span className="ic-inplay" title="Marquage en cours">
-                      {m.live.current.home}–{m.live.current.away}
-                    </span>
-                  )}
-                  {m.gamesHome === null ? (
-                    <span className="muted tiny">à saisir</span>
-                  ) : (
-                    <>
-                      <span className="ic-gamescore">
+                {(m.live || m.gamesHome !== null) && (
+                  <span className="ic-games">
+                    {m.games.length > 0 && (
+                      <span className="ic-gamelist">
+                        {m.games.map((g) => `${g.home}-${g.away}`).join(" · ")}
+                      </span>
+                    )}
+                    {m.live && (
+                      <span className="ic-inplay" title="Jeu en cours">
+                        {m.live.current.home}–{m.live.current.away}
+                      </span>
+                    )}
+                    {m.gamesHome !== null && (
+                      <span
+                        className="ic-gamescore"
+                        aria-label={`Jeux gagnés : ${m.gamesHome} à ${m.gamesAway}`}
+                      >
                         {m.gamesHome}–{m.gamesAway}
                       </span>
-                      {m.games.length > 0 && (
-                        <span className="muted tiny">
-                          {" "}
-                          ({m.games.map((g) => `${g.home}-${g.away}`).join(", ")})
-                        </span>
-                      )}
-                    </>
-                  )}
-                </span>
+                    )}
+                  </span>
+                )}
               </button>
             )}
             {editing !== m.id && m.status !== "done" && (

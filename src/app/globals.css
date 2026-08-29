@@ -43,6 +43,17 @@
      à servir. L'opacité ne peut pas assombrir un texte : elle le fait disparaître. */
   --past: #e4e7ec;
   --past-fg: #5b626e;
+  /* Surface EN CREUX : les vignettes d'une liste posée sur une carte. Elle s'enfonce sous la
+     carte au lieu de flotter au-dessus — empiler une carte sur une carte ne sépare rien, c'est
+     le contraste de surface qui sépare (cf. Règle du Fond Toujours Plus Sombre). Mesuré :
+     texte 15,75:1, secondaire 4,95:1. */
+  --sunken: #f4f6f9;
+  /* Voile « en cours », posé sur la LIGNE entière. Teinté de la même famille que la pastille
+     ambre, assez pâle pour rester un fond : texte 16,09:1, secondaire 5,06:1. C'est le seul
+     état peint au niveau de la ligne — « à venir » et « terminée » n'ont rien à signaler
+     d'urgent, et un accent plein sur un état inactif est du bruit. */
+  --live-wash: #fff8e6;
+  --live-edge: #f0b429;
   --accent: #2f6fe0;
   /* Encre à poser SUR --accent (fond plein : segment actif, pastille). Le blanc ne tient le
      seuil que sur l'accent clair — 4,70:1 ici, mais 3,22:1 sur le bleu du thème sombre, d'où
@@ -122,6 +133,11 @@
     --closed: #14171d;
     --past: #10141a;
     --past-fg: #8b94a5;
+    /* En sombre la carte est plus CLAIRE que la page : la vignette en creux se place ENTRE
+       les deux, jamais au-dessus. Texte 14,09:1, secondaire 5,94:1. */
+    --sunken: #12161d;
+    --live-wash: #2a2314;
+    --live-edge: #8a6a1f;
     /* Muted relevé de #7b8495 : il tombait à 4,44:1 sur les cartes et 4,18:1 sur les
        encarts, sous le seuil de 4,5. Touche TOUT le texte secondaire du thème sombre. */
     --pico-muted-color: #8b94a5;
@@ -165,6 +181,10 @@
   --closed: #14171d;
   --past: #10141a;
   --past-fg: #8b94a5;
+  /* Cf. bloc prefers-color-scheme ci-dessus. */
+  --sunken: #12161d;
+  --live-wash: #2a2314;
+  --live-edge: #8a6a1f;
   /* Cf. bloc prefers-color-scheme ci-dessus : #7b8495 échouait à 4,44:1 / 4,18:1. */
   --pico-muted-color: #8b94a5;
   --accent: #4f8cff;
@@ -252,6 +272,12 @@
   --closed: #ffcbe4;
   --past: #ffd9ee;
   --past-fg: #8f3563;
+  /* Rose : la vignette se place entre la carte (#ffe3f2) et la page (#ffc9e3). Texte 12,96:1,
+     secondaire 5,58:1. Le voile « en cours » garde sa famille ambre — c'est précisément son
+     écart de teinte avec le rose ambiant qui le rend repérable. Texte 14,37:1. */
+  --sunken: #ffd5ea;
+  --live-wash: #ffe8cf;
+  --live-edge: #d98a2b;
   --accent: #c8008f;
   --accent-fg: #ffffff; /* 5,45:1 sur ce magenta */
   --notice-bg: #ffdcef;
@@ -3676,13 +3702,56 @@ body[data-bottombar] .install-banner {
 .ic-head h3 { margin: 0; }
 .ic-head button { margin: 0; width: auto; }
 
+/* --- Onglets d'équipe ---
+   Un filtre actif est un ÉTAT, pas une action : il se marque au poids et au trait, jamais par
+   l'aplat vert que DESIGN.md réserve à ce qu'on peut toucher. Le trait est posé en `box-shadow`
+   plutôt qu'en `border-bottom` pour ne pas décaler la ligne de base entre l'onglet actif et les
+   autres. */
+.ic-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 14px;
+  border-bottom: 1px solid var(--pico-card-border-color);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ic-tabs::-webkit-scrollbar { display: none; }
+
+.ic-tab {
+  --pico-color: var(--pico-contrast);
+  flex: 0 0 auto;
+  margin: 0;
+  width: auto;
+  padding: 8px 14px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--pico-muted-color);
+  font-size: 0.92rem;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ic-tab:hover { color: var(--pico-contrast); background: var(--sunken); }
+.ic-tab.is-on {
+  color: var(--pico-contrast);
+  font-weight: 700;
+  box-shadow: inset 0 -2px 0 0 var(--pico-contrast);
+}
+
+.ic-empty-tab {
+  padding: 14px;
+  text-align: center;
+  font-size: 0.92rem;
+}
+
 .ic-list, .ic-matches {
   list-style: none;
   padding: 0;
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
 }
 
 /* Ligne de rencontre / de match : un bouton pleine largeur, pas un lien — la cible doit
@@ -3693,44 +3762,81 @@ body[data-bottombar] .install-banner {
    nu qu'elles contiennent — le nom des joueurs, le score en jeux — sortait blanc sur blanc,
    seuls survivant les spans portant .muted (autre variable). --pico-contrast, lui, n'est
    pas détourné par les boutons et suit les trois thèmes. */
+/* Ligne de rencontre : DEUX lignes de texte, et non plus une seule à quatre colonnes.
+   Empilées, la date et l'état tiennent la première, l'adversaire et le score la seconde : le
+   texte peut alors grossir sans que rien ne se comprime au pouce, alors que la version en
+   colonnes serrait l'adversaire dès qu'un nom de club dépassait deux mots. */
 .ic-row, .ic-match {
   --pico-color: var(--pico-contrast);
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
   width: 100%;
   margin: 0;
-  padding: 10px 14px;
+  padding: 12px 14px;
   text-align: left;
   background: var(--pico-card-background-color);
   border: 1px solid var(--pico-card-border-color);
   border-radius: var(--radius);
   color: var(--pico-contrast);
-  font-size: 0.85rem;
+  font-size: 0.95rem;
 }
-.ic-row:hover, .ic-match:hover { border-color: var(--grid-line); }
+.ic-row:hover { border-color: var(--grid-line); }
+
+.ic-row-head,
+.ic-row-main,
+.ic-match-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.ic-row-head, .ic-match-head { align-items: center; }
 
 .ic-date {
   flex: 0 0 auto;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   color: var(--pico-muted-color);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.ic-opponent { flex: 1; min-width: 0; }
+.ic-opponent {
+  flex: 1;
+  min-width: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+/* « reçoit » / « se déplace à » n'est pas un nom : il relie les deux qui comptent. */
+.ic-vs-word { font-weight: 400; color: var(--pico-muted-color); }
+.ic-division {
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+}
 .ic-score, .ic-games {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.ic-score, .ic-gamescore { font-weight: 700; }
+.ic-score {
+  font-size: 1.3rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.ic-score-none { color: var(--pico-muted-color); font-weight: 400; }
+.ic-gamescore { font-weight: 700; font-size: 1.15rem; }
 
+/* Trois états, trois traitements franchement différents : contour seul (rien n'a commencé),
+   ambre plein (ça se joue maintenant), gris plein (c'est fini). L'ancien vocabulaire n'en
+   distinguait que deux — « à venir » et « terminée » portaient exactement la même pastille. */
 .ic-status {
   flex: 0 0 auto;
-  padding: 2px 8px;
+  padding: 3px 10px;
   border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 600;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
   white-space: nowrap;
   color: var(--pico-muted-color);
   border: 1px solid var(--pico-card-border-color);
@@ -3740,6 +3846,19 @@ body[data-bottombar] .install-banner {
   background: #fcd34d;
   border-color: #f59e0b;
 }
+.ic-status.ic-done {
+  color: var(--past-fg);
+  background: var(--past);
+  border-color: transparent;
+}
+
+/* Seul « en cours » se peint au niveau de la LIGNE : c'est le seul état qui demande qu'on
+   regarde maintenant. Le reste se lit à la pastille. */
+.ic-row-live {
+  background: var(--live-wash);
+  border-color: var(--live-edge);
+}
+.ic-row-live:hover { border-color: var(--live-edge); }
 
 .ic-total {
   font-size: 1.4rem;
@@ -3748,9 +3867,41 @@ body[data-bottombar] .install-banner {
   margin: 6px 0 14px;
 }
 
+/* --- Vignette d'un simple ---
+   UN bloc par match, actions comprises. Le bouton de marquage vivait à côté de la ligne, sur
+   le fond du dialogue : il semblait appartenir à la rencontre plutôt qu'au simple qu'il
+   concerne, et rien ne disait où finissait un match et où commençait le suivant.
+
+   La vignette s'ENFONCE (--sunken) au lieu de flotter : le dialogue est déjà une carte, et
+   poser une carte sur une carte ne sépare rien. C'est l'écart de surface qui sépare. */
+.ic-match-card {
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: var(--radius);
+  background: var(--sunken);
+  overflow: hidden;
+}
+.ic-match-card.is-editing {
+  border-color: var(--pico-primary);
+  background: var(--pico-card-background-color);
+}
+.ic-match-card.ic-match-live {
+  background: var(--live-wash);
+  border-color: var(--live-edge);
+}
+.ic-match-card:has(.ic-match:hover) { border-color: var(--grid-line); }
+.ic-match-card.ic-match-live:has(.ic-match:hover) { border-color: var(--live-edge); }
+
+/* Le bouton remplit la vignette : c'est la vignette qui porte le cadre et la couleur. */
+.ic-match {
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+
 .ic-order {
   flex: 0 0 auto;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
+  font-weight: 600;
   color: var(--pico-muted-color);
   font-variant-numeric: tabular-nums;
 }
@@ -3759,8 +3910,10 @@ body[data-bottombar] .install-banner {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
+  font-size: 1rem;
+  line-height: 1.35;
 }
 .ic-player {
   display: inline-flex;
@@ -3770,8 +3923,22 @@ body[data-bottombar] .install-banner {
 }
 .ic-versus {
   flex: 0 0 auto;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   color: var(--pico-muted-color);
+}
+/* Le détail des jeux (11-5 · 9-11) est une PREUVE du score, pas le score : il se lit après lui
+   et ne doit pas lutter avec. Il descend sous la barre du micro-étiquetage, d'où l'`aria-label`
+   porté par le score lui-même. */
+.ic-gamelist {
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+  font-variant-numeric: tabular-nums;
+}
+.ic-games {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 /* Pastille de maillot : un disque, jamais un aplat. La taille « lg » sert dans les listes,
@@ -3927,10 +4094,15 @@ body[data-bottombar] .install-banner {
 /* Unique point de rupture du projet. En dessous, la ligne passe sur deux niveaux plutôt que
    de comprimer les noms jusqu'à l'illisible. */
 @media (max-width: 560px) {
-  .ic-row, .ic-match { flex-wrap: wrap; gap: 6px 10px; }
-  .ic-opponent, .ic-players { flex: 1 0 100%; order: 2; }
-  .ic-score, .ic-games { order: 3; }
-  .ic-status { order: 4; margin-left: auto; }
+  /* Ce bloc REPLIAIT la ligne : `flex: 1 0 100%` sur l'adversaire et une série d'`order`
+     poussaient chaque partie sur sa propre ligne, puisque la version en une seule ligne à
+     quatre colonnes ne tenait pas au pouce. La ligne est désormais empilée à TOUTE largeur, et
+     ces règles ne repliaient plus rien — elles imposaient une base de 100 % à l'intérieur d'un
+     conteneur qui n'en avait plus besoin, et chassaient le score HORS de l'écran (mesuré :
+     390 px de contenu pour 375 px de fenêtre). Il ne reste ici que ce qui relève vraiment du
+     petit écran. */
+  .ic-row, .ic-match { padding: 10px 12px; }
+  .ic-tabs { margin-bottom: 10px; }
   .ic-form-row { flex-direction: column; gap: 0; }
   .ic-swatches { grid-template-columns: repeat(3, auto); }
 }
@@ -4134,19 +4306,24 @@ body[data-bottombar] .install-banner {
 .ics-done { font-size: 1.1rem; font-weight: 700; }
 
 /* Ligne de match : accès au marquage, et score en direct s'il y en a un. */
+/* Les actions vivent DANS la vignette, séparées du contenu par un filet plutôt que par un
+   blanc : le lien entre le bouton et le match qu'il concerne doit rester visible. */
 .ic-match-actions {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 14px 0;
+  padding: 10px 14px;
+  border-top: 1px solid var(--pico-card-border-color);
   flex-wrap: wrap;
 }
-.ic-score-btn { margin: 0; width: auto; padding: 6px 12px; font-size: 0.8rem; }
+.ic-match-live .ic-match-actions { border-top-color: var(--live-edge); }
+.ic-score-btn { margin: 0; width: auto; padding: 7px 14px; font-size: 0.85rem; }
 .ic-inplay {
-  margin-right: 6px;
-  padding: 1px 7px;
+  padding: 2px 8px;
   border-radius: 999px;
   font-weight: 700;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
   color: #78350f;
   background: #fcd34d;
 }
