@@ -261,6 +261,20 @@ export default function Interclub({
   const toastRef = useRef(toast);
   toastRef.current = toast;
 
+  // …et c'est SOUS CETTE FORME qu'ils descendent aux enfants. `InterclubFollow`, `InterclubLive`
+  // et `InterclubScorer` en font le même usage que nous — dépendances de `useCallback`, donc
+  // d'effets qui émettent des requêtes — et repasser les rappels bruts leur transmettait
+  // l'instabilité du parent en la contournant chez nous seulement. Le bandeau du direct, en
+  // particulier, y perdait ses trois garde-fous de sondage.
+  //
+  // Deux enveloppes créées une fois pour toutes, qui lisent la dernière version au moment de
+  // l'appel : tout le sous-arbre devient indifférent à la cadence de rendu de la page.
+  const stableExpired = useCallback((status: number) => onExpiredRef.current(status), []);
+  const stableToast = useCallback(
+    (type: "ok" | "err" | "info", msg: string) => toastRef.current(type, msg),
+    [],
+  );
+
   const loadList = useCallback(async () => {
     try {
       const res = await fetch("/api/interclub", { cache: "no-store" });
@@ -422,7 +436,7 @@ export default function Interclub({
           des rencontres du jour, dans le bloc « En direct » : personne ne l'y trouvait, et on
           pouvait se croire abonné sans l'être. C'est le réglage le plus consulté de l'écran, et
           le seul qui décide de ce qu'on recevra les soirs où l'on n'ouvre pas l'appli. */}
-      <InterclubFollow teams={teams} toast={toast} onExpired={onExpired} />
+      <InterclubFollow teams={teams} toast={stableToast} onExpired={stableExpired} />
 
       <div className="ic-head">
         <h3>Interclub</h3>
@@ -431,7 +445,7 @@ export default function Interclub({
         </button>
       </div>
 
-      <InterclubLive onExpired={onExpired} />
+      <InterclubLive onExpired={stableExpired} />
 
       {/* Les onglets ne s'affichent qu'à partir de DEUX équipes : avec une seule, un filtre
           qui ne filtre rien est du bruit. Le schéma prévoit la troisième. */}
@@ -496,8 +510,8 @@ export default function Interclub({
           match={scoringMatch}
           bestOf={fixture.bestOf}
           onClose={() => stopScoring(scoringMatch.id)}
-          onExpired={onExpired}
-          toast={toast}
+          onExpired={stableExpired}
+          toast={stableToast}
         />
       )}
 
