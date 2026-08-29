@@ -26,6 +26,8 @@ import {
   winGamesFor,
   type ScoreEvent,
   type Side,
+  hexToHsv,
+  hsvToHex,
 } from "./interclub";
 
 /**
@@ -546,5 +548,40 @@ describe("seedEvents — ne désigne AUCUN serveur quand il n'y a rien à reprod
     const st = replay(seedEvents([g(11, 5)], 5), 5);
     expect(st.games).toEqual([g(11, 5)]);
     expect(st.serving).not.toBeNull();
+  });
+});
+
+describe("hexToHsv / hsvToHex — l'aller-retour doit se refermer", () => {
+  it("retrouve chaque couleur du nuancier après un aller-retour", () => {
+    // C'est la propriété qui compte : le sélecteur lit une couleur, la décompose en trois
+    // curseurs, et doit rendre la MÊME couleur tant qu'on n'a touché à rien.
+    for (const c of COLOR_PRESETS) {
+      const hsv = hexToHsv(c.hex);
+      expect(hsv).not.toBeNull();
+      expect(hsvToHex(hsv!)).toBe(c.hex);
+    }
+  });
+
+  it("place les primaires là où on les attend", () => {
+    expect(hexToHsv("#ff0000")).toEqual({ h: 0, s: 1, v: 1 });
+    expect(hexToHsv("#00ff00")).toEqual({ h: 120, s: 1, v: 1 });
+    expect(hexToHsv("#0000ff")).toEqual({ h: 240, s: 1, v: 1 });
+    expect(hsvToHex({ h: 240, s: 1, v: 1 })).toBe("#0000ff");
+  });
+
+  it("rend une teinte de 0 sur un gris, plutôt que NaN — le curseur doit se poser quelque part", () => {
+    expect(hexToHsv("#808080")).toEqual({ h: 0, s: 0, v: 128 / 255 });
+    expect(hexToHsv("#000000")).toEqual({ h: 0, s: 0, v: 0 });
+  });
+
+  it("borne les entrées hors domaine au lieu de produire une couleur invalide", () => {
+    expect(hsvToHex({ h: 720, s: 1, v: 1 })).toBe("#ff0000");
+    expect(hsvToHex({ h: -60, s: 2, v: 5 })).toBe("#ff00ff");
+    expect(/^#[0-9a-f]{6}$/.test(hsvToHex({ h: 33, s: -1, v: -1 }))).toBe(true);
+  });
+
+  it("refuse ce qui n'est pas un #rrggbb", () => {
+    expect(hexToHsv("rouge")).toBeNull();
+    expect(hexToHsv("#fff")).toBeNull();
   });
 });

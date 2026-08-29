@@ -411,6 +411,63 @@ export const COLOR_PRESETS: readonly { key: string; label: string; hex: string }
   { key: "marine", label: "Marine", hex: "#1a237e" },
 ] as const;
 
+/**
+ * Conversions TSV ⇄ `#rrggbb`, pour le sélecteur de couleur libre.
+ *
+ * Pourquoi ici, et pas dans le composant : ce sont des fonctions pures et rondes (l'aller-retour
+ * doit se refermer), donc exactement le genre de chose qui se teste sans navigateur — et le
+ * reste du raisonnement couleur de ce fichier vit déjà là.
+ *
+ * Teinte en degrés [0, 360[, saturation et valeur en [0, 1].
+ */
+export type Hsv = { h: number; s: number; v: number };
+
+export function hexToHsv(hex: string): Hsv | null {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  const num = parseInt(m[1], 16);
+  const r = ((num >> 16) & 255) / 255;
+  const g = ((num >> 8) & 255) / 255;
+  const b = (num & 255) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  // Gris : la teinte n'a pas de valeur définie. On rend 0 plutôt que `NaN` — le curseur doit
+  // pouvoir se poser quelque part, et 0 est aussi arbitraire qu'une autre.
+  let h = 0;
+  if (d !== 0) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return { h, s: max === 0 ? 0 : d / max, v: max };
+}
+
+export function hsvToHex({ h, s, v }: Hsv): string {
+  const hh = ((h % 360) + 360) % 360;
+  const sc = Math.min(1, Math.max(0, s));
+  const vc = Math.min(1, Math.max(0, v));
+  const c = vc * sc;
+  const x = c * (1 - Math.abs(((hh / 60) % 2) - 1));
+  const m = vc - c;
+  const seg = Math.floor(hh / 60) % 6;
+  const rgb = [
+    [c, x, 0],
+    [x, c, 0],
+    [0, c, x],
+    [0, x, c],
+    [x, 0, c],
+    [c, 0, x],
+  ][seg];
+  const to = (u: number) =>
+    Math.round((u + m) * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${to(rgb[0])}${to(rgb[1])}${to(rgb[2])}`;
+}
+
 /** Luminance relative WCAG d'une couleur `#rrggbb`. */
 export function relativeLuminance(hex: string): number {
   const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());

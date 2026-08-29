@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { Dialog } from "@/components/Dialog";
 import { readOk } from "@/lib/apiFetch";
 import { onForeground } from "@/lib/onForeground";
@@ -15,7 +22,10 @@ import {
   describeSequenceProblem,
   isValidBestOf,
   playedGames,
+  hexToHsv,
+  hsvToHex,
   resolveColor,
+  type Hsv,
   // ⚠️ Importé, jamais recopié : le client compare cette chaîne pour griser un nom et la
   // renvoie pour effacer un nom d'adversaire. Une divergence d'un caractère avec le serveur
   // faisait apparaître un « à désigner » qui n'en était plus un.
@@ -847,8 +857,41 @@ function ColorPicker({
   label: string;
 }) {
   const [open, setOpen] = useState(false);
+  /** Le panneau « autre couleur » est-il déplié ? */
+  const [free, setFree] = useState(false);
   const current = resolveColor(value);
   const isCustom = !!current && !COLOR_PRESETS.some((c) => c.hex === current.bg);
+
+  const hsv = hexToHsv(current?.bg ?? "") ?? { h: 0, s: 0.7, v: 0.8 };
+  const pose = (next: Hsv) => onChange(hsvToHex(next));
+  const borne = (u: number) => Math.min(1, Math.max(0, u));
+
+  const areaRef = useRef<HTMLDivElement>(null);
+  /** Traduit un point de l'aire en saturation/valeur. Origine en haut à gauche. */
+  const pointer = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const r = areaRef.current?.getBoundingClientRect();
+    if (!r || r.width === 0 || r.height === 0) return;
+    pose({
+      ...hsv,
+      s: borne((e.clientX - r.left) / r.width),
+      v: 1 - borne((e.clientY - r.top) / r.height),
+    });
+  };
+
+  const PAS = 0.02;
+  const clavier = (e: KeyboardEvent<HTMLDivElement>) => {
+    const gestes: Record<string, [number, number]> = {
+      ArrowLeft: [-PAS, 0],
+      ArrowRight: [PAS, 0],
+      ArrowUp: [0, PAS],
+      ArrowDown: [0, -PAS],
+    };
+    const g = gestes[e.key];
+    if (!g) return;
+    e.preventDefault();
+    const f = e.shiftKey ? 5 : 1;
+    pose({ ...hsv, s: borne(hsv.s + g[0] * f), v: borne(hsv.v + g[1] * f) });
+  };
 
   return (
     <span className="ic-picker">
@@ -857,7 +900,10 @@ function ColorPicker({
         className="ic-swatch-btn"
         aria-label={current ? `${label} : ${current.label}. Changer` : `${label} : choisir une couleur`}
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setOpen((o) => !o);
+          setFree(false);
+        }}
         style={current ? { background: current.bg, borderColor: current.fg } : undefined}
       >
         {!current && <span aria-hidden="true">?</span>}
@@ -865,54 +911,97 @@ function ColorPicker({
 
       {open && (
         <span className="ic-swatches">
-          {COLOR_PRESETS.map((c) => (
+          <span className="ic-swatch-grid">
+            {COLOR_PRESETS.map((c) => (
+              <button
+                key={c.key}
+                type="button"
+                aria-label={c.label}
+                className={`ic-swatch${value.toLowerCase() === c.hex ? " is-on" : ""}`}
+                style={{ background: c.hex }}
+                title={c.label}
+                onClick={() => {
+                  onChange(c.hex);
+                  setOpen(false);
+                }}
+              />
+            ))}
+
+            {/* Déplie l'aire de choix libre, au lieu d'appeler le sélecteur du système : celui-ci
+                présente, selon la plateforme, trois curseurs teinte/saturation/valeur où l'on
+                cherche une couleur à l'aveugle. L'aire carrée montre d'un coup toutes les
+                nuances d'une teinte — c'est le geste que tout le monde connaît. */}
             <button
-              key={c.key}
               type="button"
-              aria-label={c.label}
-              className={`ic-swatch${value.toLowerCase() === c.hex ? " is-on" : ""}`}
-              style={{ background: c.hex }}
-              title={c.label}
+              className={`ic-swatch ic-swatch-free${isCustom ? " is-custom" : ""}${free ? " is-on" : ""}`}
+              aria-expanded={free}
+              title={isCustom ? `Couleur personnalisée ${current?.bg}` : "Autre couleur…"}
+              style={isCustom && current ? { background: current.bg } : undefined}
+              onClick={() => setFree((f) => !f)}
+            >
+              <span className="sr-only">Choisir une autre couleur</span>
+            </button>
+
+            <button
+              type="button"
+              aria-label="Aucune couleur"
+              className={`ic-swatch ic-swatch-none${value === "" ? " is-on" : ""}`}
+              title="Aucune couleur"
               onClick={() => {
-                onChange(c.hex);
+                onChange("");
                 setOpen(false);
               }}
-            />
-          ))}
+            >
+              <span aria-hidden="true">✕</span>
+            </button>
+          </span>
 
-          {/* Choix libre : le sélecteur natif du système, donc tout le spectre RGB et un
-              rendu que l'utilisateur connaît déjà. L'encre posée dessus est CALCULÉE
-              (cf. inkFor), si bien qu'aucune couleur ne peut casser le contraste. */}
-          {/* Choix libre : le sélecteur natif du système, donc tout le spectre (teinte,
-              saturation, luminosité, ou saisie hexadécimale selon la plateforme) et une
-              interface que l'utilisateur connaît déjà. Il AFFICHE la couleur retenue quand
-              elle ne vient pas des raccourcis, sinon un damier — sans quoi rien n'indiquait
-              qu'une couleur personnalisée était active. */}
-          <label
-            className={`ic-swatch ic-swatch-free${isCustom ? " is-custom" : ""}`}
-            title={isCustom ? `Couleur personnalisée ${current?.bg}` : "Autre couleur…"}
-            style={isCustom && current ? { background: current.bg } : undefined}
-          >
-            <span className="sr-only">Choisir une autre couleur</span>
-            <input
-              type="color"
-              value={current?.bg ?? "#888888"}
-              onChange={(e) => onChange(e.target.value.toLowerCase())}
-            />
-          </label>
+          {free && (
+            <span className="ic-free">
+              {/* L'aire : saturation en abscisse, valeur en ordonnée, sur la teinte courante.
+                  Deux dégradés superposés — blanc→transparent, puis transparent→noir — donnent
+                  exactement le carré classique, sans une seule image. */}
+              <div
+                ref={areaRef}
+                className="ic-free-area"
+                style={{ backgroundColor: hsvToHex({ h: hsv.h, s: 1, v: 1 }) }}
+                role="application"
+                aria-label="Saturation et luminosité — flèches pour ajuster"
+                tabIndex={0}
+                onKeyDown={clavier}
+                onPointerDown={(e) => {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  pointer(e);
+                }}
+                onPointerMove={(e) => {
+                  if (e.buttons !== 0) pointer(e);
+                }}
+              >
+                <span
+                  className="ic-free-dot"
+                  style={{
+                    left: `${hsv.s * 100}%`,
+                    top: `${(1 - hsv.v) * 100}%`,
+                    background: current?.bg ?? "#888888",
+                  }}
+                />
+              </div>
 
-          <button
-            type="button"
-            aria-label="Aucune couleur"
-            className={`ic-swatch ic-swatch-none${value === "" ? " is-on" : ""}`}
-            title="Aucune couleur"
-            onClick={() => {
-              onChange("");
-              setOpen(false);
-            }}
-          >
-            <span aria-hidden="true">✕</span>
-          </button>
+              {/* La teinte reste un curseur natif : une seule dimension, accessible au clavier
+                  sans une ligne de code, et déjà annoncée par les lecteurs d'écran. Avec les
+                  flèches sur l'aire, c'est ce qui garantit que tout se fait sans souris. */}
+              <input
+                className="ic-free-hue"
+                type="range"
+                min={0}
+                max={359}
+                value={Math.round(hsv.h)}
+                aria-label="Teinte"
+                onChange={(e) => pose({ ...hsv, h: Number(e.target.value) })}
+              />
+
+            </span>
+          )}
         </span>
       )}
     </span>
@@ -963,9 +1052,25 @@ function MatchEditor({
   const [awayName, setAwayName] = useState(match.awayName === UNSET_PLAYER ? "" : match.awayName);
   const [homeColor, setHomeColor] = useState(match.homeColor ?? "");
   const [awayColor, setAwayColor] = useState(match.awayColor ?? "");
-  const [games, setGames] = useState<GameScore[]>(
-    match.games.map((g) => ({ home: g.home, away: g.away })),
+  /**
+   * Les points sont gardés en TEXTE, pas en nombre — pour qu'une case vide reste vide.
+   *
+   * L'état numérique obligeait à choisir une valeur pour « rien saisi », et c'était `0`. Un
+   * jeu ajouté s'ouvrait donc sur « 0 – 0 », qui se lit comme un score et non comme une case
+   * à remplir : il faut effacer le zéro avant de taper, et un jeu oublié ressemble à un vrai
+   * 0-0. La chaîne vide dit ce qu'elle est.
+   *
+   * La conversion se fait à un seul endroit (`nums`), et une case vide y vaut 0 : c'est
+   * exactement ce que faisait l'ancien état, donc rien ne change ni pour la validation ni pour
+   * ce qui part au serveur.
+   */
+  const [games, setGames] = useState<{ home: string; away: string }[]>(
+    match.games.map((g) => ({ home: String(g.home), away: String(g.away) })),
   );
+  const nums: GameScore[] = games.map((g) => ({
+    home: g.home === "" ? 0 : Number(g.home),
+    away: g.away === "" ? 0 : Number(g.away),
+  }));
 
   // ⚠️ FIGÉ AU MONTAGE, comme tout ce qui précède — et pour la même raison.
   //
@@ -981,15 +1086,15 @@ function MatchEditor({
   const [knownGameCount] = useState(match.games.length);
 
   const setGame = (i: number, side: "home" | "away", v: string) => {
-    const n = v === "" ? 0 : Number(v);
-    if (!Number.isInteger(n) || n < 0) return;
-    setGames((prev) => prev.map((g, k) => (k === i ? { ...g, [side]: n } : g)));
+    // La case vide est un état légitime, pas une valeur refusée.
+    if (v !== "" && !/^\d+$/.test(v)) return;
+    setGames((prev) => prev.map((g, k) => (k === i ? { ...g, [side]: v } : g)));
   };
 
   // Le moteur pur est le MÊME des deux côtés : ce que l'écran refuse, le serveur le refuse
   // aussi, et réciproquement. Un jeu qu'on vient d'ouvrir (0-0) n'est pas une erreur — il est
   // simplement vide, et ne remonte donc aucun message.
-  const problem = describeSequenceProblem(games, bestOf);
+  const problem = describeSequenceProblem(nums, bestOf);
 
   return (
     <div className="ic-editor">
@@ -1076,7 +1181,7 @@ function MatchEditor({
         <button
           type="button"
           className="secondary ic-add-game"
-          onClick={() => setGames((prev) => [...prev, { home: 0, away: 0 }])}
+          onClick={() => setGames((prev) => [...prev, { home: "", away: "" }])}
         >
           + Ajouter un jeu
         </button>
@@ -1118,7 +1223,7 @@ function MatchEditor({
               awayColor: awayColor || null,
               // Les lignes vides ou inachevées ne partent pas : `problem` a déjà bloqué les
               // secondes, les premières sont juste des lignes qu'on a ouvertes sans s'en servir.
-              games: playedGames(games),
+              games: playedGames(nums),
               // Combien de jeux cet écran avait sous les yeux en s'ouvrant. Le serveur refuse
               // d'écrire si la base en compte un autre nombre : entre l'ouverture du
               // formulaire et l'enregistrement, quelqu'un a pu clore un jeu au bord du terrain,

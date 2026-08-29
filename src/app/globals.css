@@ -3988,6 +3988,7 @@ body[data-bottombar] .install-banner {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 .ic-field-row > select,
 .ic-field-row > input {
@@ -4000,7 +4001,10 @@ body[data-bottombar] .install-banner {
 .ic-form-row > label { flex: 1; min-width: 0; }
 
 /* Sélecteur de couleur : pastille cliquable + grille dépliante. */
-.ic-picker { position: relative; flex: 0 0 auto; display: inline-flex; }
+/* `display: contents` : le composant n'est plus une boîte, ses deux enfants deviennent des
+   éléments de `.ic-field-row`. C'est ce qui permet au panneau de passer à la ligne SANS être
+   posé en position absolue — voir `.ic-swatches`. */
+.ic-picker { display: contents; }
 .ic-swatch-btn {
   width: 38px;
   height: 38px;
@@ -4013,19 +4017,34 @@ body[data-bottombar] .install-banner {
   font-weight: 700;
   line-height: 1;
 }
+/* LE PANNEAU EST DANS LE FLUX, ET C'EST TOUT LE CORRECTIF.
+   
+   Il était posé en position absolue sous la pastille. Or ce formulaire vit dans une modale qui
+   borne sa hauteur et DÉFILE (`.modal { max-height; overflow-y: auto }`), et un élément en
+   position absolue ne s'échappe pas d'un conteneur qui défile : il s'y fait découper. Sur le
+   champ « Adversaire », et surtout quand aucun jeu n'a encore été ajouté — la modale est alors
+   courte —, on n'en voyait qu'une partie. Mesuré au navigateur : le panneau tombait hors de la
+   boîte de la modale, qui affichait une barre de défilement sans jamais révéler le bas.
+   
+   Basculer l'ouverture vers le haut ne réglait rien : le découpage vient de la boîte, pas du
+   sens. Dans le flux, le panneau EST du contenu de la modale — elle grandit, ou elle défile
+   jusqu'à lui, et rien ne peut plus le rogner. Il pousse les champs suivants vers le bas
+   pendant qu'il est ouvert, ce qui vaut mieux que de les recouvrir. */
 .ic-swatches {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 5;
-  display: grid;
-  grid-template-columns: repeat(4, auto);
-  gap: 8px;
+  flex: 0 0 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 2px;
   padding: 10px;
   border-radius: var(--radius);
   border: 1px solid var(--grid-line);
-  background: var(--pico-card-background-color);
-  box-shadow: var(--elev-1);
+  background: var(--sunken);
+}
+.ic-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: 8px;
 }
 .ic-swatch {
   width: 34px;
@@ -4033,7 +4052,10 @@ body[data-bottombar] .install-banner {
   margin: 0;
   padding: 0;
   border-radius: 999px;
-  border: 2px solid transparent;
+  /* Un cerne neutre sur TOUTES les pastilles : sans lui, le blanc (#f5f5f5) disparaît sur le
+     fond du panneau, qui est désormais une surface creusée. Assez discret pour ne pas
+     concurrencer le liseré de sélection. */
+  border: 2px solid var(--grid-line);
   line-height: 1;
   display: inline-flex;
   align-items: center;
@@ -4063,15 +4085,78 @@ body[data-bottombar] .install-banner {
   background-size: 10px 10px;
   background-position: 0 0, 0 5px, 5px -5px, -5px 0;
 }
-.ic-swatch-free input[type="color"] {
-  position: absolute;
-  inset: 0;
+/* L'AIRE DE CHOIX LIBRE — le carré classique, pas trois curseurs.
+
+   Saturation en abscisse, valeur en ordonnée, sur la teinte courante posée en fond. Deux
+   dégradés superposés suffisent : blanc→transparent horizontalement, transparent→noir
+   verticalement. Aucune image, aucune dépendance, et le rendu suit le thème sans rien savoir
+   de lui — la couleur de fond est la seule chose que le composant impose. */
+.ic-free {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--grid-line);
+}
+.ic-free-area {
+  position: relative;
   width: 100%;
-  height: 100%;
+  min-width: 180px;
+  height: 128px;
+  border-radius: var(--radius);
+  border: 1px solid var(--grid-line);
+  cursor: crosshair;
+  touch-action: none;
+  background-image:
+    linear-gradient(to top, #000, rgba(0, 0, 0, 0)),
+    linear-gradient(to right, #fff, rgba(255, 255, 255, 0));
+}
+.ic-free-area:focus-visible {
+  outline: 2px solid var(--pico-primary);
+  outline-offset: 2px;
+}
+/* Le repère porte la couleur choisie, cerclé de blanc puis de noir : il reste visible sur un
+   fond clair comme sur un fond sombre, ce qu'un seul cerne ne garantit pas sur cette aire. */
+.ic-free-dot {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.ic-free-hue {
+  width: 100%;
   margin: 0;
+  height: 18px;
   padding: 0;
-  border: 0;
-  opacity: 0;
+  border-radius: 999px;
+  border: 1px solid var(--grid-line);
+  background: linear-gradient(
+    to right,
+    #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%
+  );
+  appearance: none;
+  -webkit-appearance: none;
+}
+.ic-free-hue::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #fff;
+  border: 2px solid #333;
+  cursor: pointer;
+}
+.ic-free-hue::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #fff;
+  border: 2px solid #333;
   cursor: pointer;
 }
 
@@ -4123,7 +4208,7 @@ body[data-bottombar] .install-banner {
   .ic-row, .ic-match { padding: 10px 12px; }
   .ic-tabs { margin-bottom: 10px; }
   .ic-form-row { flex-direction: column; gap: 0; }
-  .ic-swatches { grid-template-columns: repeat(3, auto); }
+  .ic-swatch-grid { grid-template-columns: repeat(3, auto); }
 }
 
 /* ===================== Interclub — écran de marquage =====================
