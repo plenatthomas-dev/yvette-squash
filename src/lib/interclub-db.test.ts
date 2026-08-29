@@ -131,3 +131,22 @@ describe("parseLive", () => {
     expect(parseLive(raw)).toMatchObject({ serving: null, servingBox: null });
   });
 });
+
+describe("parseLive — la borne haute, que la route affirmait déjà", () => {
+  const instantane = (home: number, away: number) =>
+    JSON.stringify({ current: { home, away }, serving: "home", servingBox: "right" });
+
+  it("accepte un jeu à l'avantage, qui n'a pas de plafond dans le règlement", () => {
+    // 15-13 est un vrai score de squash : la borne ne doit pas mordre sur le jeu réel.
+    expect(parseLive(instantane(15, 13))?.current).toEqual({ home: 15, away: 13 });
+  });
+
+  it("refuse un score que rien ne peut produire, plutôt que de le ramener dans les bornes", () => {
+    // Le modèle n'a qu'un seul rôle : n'importe quel membre connecté peut poster ceci sur un
+    // simple que personne ne tient. C'était stocké, mis en cache, puis servi à tous.
+    expect(parseLive(instantane(1e15, 0))).toBeNull();
+    expect(parseLive(instantane(0, 100))).toBeNull();
+    // Ramener à 99 aurait INVENTÉ un score — ce que l'en-tête de ce lecteur promet de ne
+    // jamais faire. On refuse, et l'affichage retombe sur les jeux terminés.
+  });
+});

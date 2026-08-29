@@ -63,9 +63,30 @@ export interface LiveSnapshot {
 }
 
 /**
+ * Borne HAUTE des points d'un instantané.
+ *
+ * Ce n'est pas une règle du squash — un jeu à l'avantage n'a pas de plafond théorique — mais
+ * une borne de ce qui peut être AFFICHÉ. Aucun jeu réel n'approche cette valeur, et au-delà on
+ * ne regarde plus un score mais une erreur de client ou un abus.
+ *
+ * Elle manquait, alors que `PUT …/live` affirme noir sur blanc que ce qui entre en base est
+ * « borné et normalisé » parce qu'il passe par ce lecteur. « Normalisé » était vrai ;
+ * « borné » ne l'était pas. Le modèle n'ayant qu'un seul rôle, n'importe quel membre connecté
+ * pouvait poster `{ current: { home: 1e15 } }` sur un simple que personne ne tenait, et cette
+ * valeur était stockée, mise en cache, puis servie à TOUS les spectateurs jusqu'à l'écriture
+ * suivante.
+ */
+const MAX_LIVE_POINTS = 99;
+
+/**
  * Relit `liveJson`. Tolérant par construction : la colonne peut porter une version plus
  * ancienne du format, ou un JSON tronqué. En cas de doute on renvoie `null` — l'affichage
  * retombe alors sur les jeux terminés, jamais sur un état inventé.
+ *
+ * On REFUSE plutôt qu'on ne ramène dans les bornes : ramener inventerait un score, et c'est
+ * précisément ce que la ligne ci-dessus promet de ne jamais faire. Côté écriture, ce `null`
+ * devient un 400 (cf. `PUT …/live`), donc la valeur n'entre pas en base ; côté lecture, il fait
+ * retomber l'affichage sur les jeux terminés.
  */
 export function parseLive(raw: string | null): LiveSnapshot | null {
   if (!raw) return null;
@@ -75,6 +96,7 @@ export function parseLive(raw: string | null): LiveSnapshot | null {
     const home = Number(cur?.home);
     const away = Number(cur?.away);
     if (!Number.isInteger(home) || !Number.isInteger(away) || home < 0 || away < 0) return null;
+    if (home > MAX_LIVE_POINTS || away > MAX_LIVE_POINTS) return null;
     const serving = o.serving === "home" || o.serving === "away" ? o.serving : null;
     const box = o.servingBox === "right" || o.servingBox === "left" ? o.servingBox : null;
     return { current: { home, away }, serving, servingBox: box, awaitingServeBox: !!o.awaitingServeBox };
