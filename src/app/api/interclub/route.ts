@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
 import { prisma } from "@/lib/db";
+import { readJsonBody } from "@/lib/http-tx";
+import { isRealDateISO } from "@/lib/time";
 import { interclubChanged } from "@/lib/interclub-gate";
 import { isColorValue, isValidBestOf, isValidMatchCount, normalizeColor } from "@/lib/interclub";
 import {
@@ -66,7 +68,7 @@ export async function POST(req: NextRequest) {
   if (!access.ok) return access.response;
   const { session } = access;
 
-  const body = await req.json().catch(() => ({}));
+  const body = await readJsonBody(req);
   const { date, teamId, opponent, home, season, division, matchCount, bestOf, matches } = body as {
     date?: unknown;
     teamId?: unknown;
@@ -79,7 +81,10 @@ export async function POST(req: NextRequest) {
     matches?: unknown;
   };
 
-  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  // La FORME ne suffit pas : `2026-13-45` la satisfait, s'écrit tel quel dans la colonne
+  // `String`, et remonte en tête d'un tri lexicographique — jusque dans le bandeau direct, dont
+  // le plancher de deux jours ne peut pas la rattraper.
+  if (typeof date !== "string" || !isRealDateISO(date)) {
     return NextResponse.json({ error: "Date invalide" }, { status: 400 });
   }
   if (typeof teamId !== "string" || !teamId) {

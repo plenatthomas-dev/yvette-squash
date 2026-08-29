@@ -208,6 +208,26 @@ describe("POST /api/interclub", () => {
     expect((await POST(post({ ...validBody, date: "03/09/2026" }))).status).toBe(400);
   });
 
+  // La forme ne suffisait pas : la colonne est un `String` et le tri est lexicographique, donc
+  // une date impossible remonte en tête de la liste ET satisfait le plancher du bandeau direct,
+  // où elle occupe une place que la borne de deux jours ne peut plus lui reprendre.
+  it("refuse une date bien formée mais qui n'existe pas", async () => {
+    expect((await POST(post({ ...validBody, date: "2026-13-45" }))).status).toBe(400);
+    expect((await POST(post({ ...validBody, date: "2026-02-31" }))).status).toBe(400);
+    expect((await POST(post({ ...validBody, date: "2026-99-99" }))).status).toBe(400);
+  });
+
+  it("accepte un 29 février d'année bissextile, qui existe bel et bien", async () => {
+    expect((await POST(post({ ...validBody, date: "2028-02-29" }))).status).toBe(201);
+  });
+
+  // Un corps `null` est du JSON VALIDE : `json()` résout, et c'est la déstructuration qui
+  // levait — un 500 non géré là où toute autre malformation finit en 400 propre.
+  it("refuse proprement un corps `null` au lieu de sortir en 500", async () => {
+    expect((await POST(post(null))).status).toBe(400);
+    expect((await POST(post(5))).status).toBe(400);
+  });
+
   it("refuse un club adverse vide", async () => {
     expect((await POST(post({ ...validBody, opponent: "   " }))).status).toBe(400);
   });

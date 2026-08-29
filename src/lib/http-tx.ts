@@ -69,13 +69,24 @@ function isSerializationConflict(e: unknown): boolean {
  * quelques millisecondes et rendre un 409 là où vingt millisecondes auraient suffi.
  *
  * Le tirage au sort compte autant que le recul lui-même : deux marqueurs qui entrent en conflit
- * rejouent sinon en cadence, et se retrouvent au même instant à chaque tour. Les bornes restent
- * petites — 40 ms au pire avant la dernière tentative — parce qu'un 40001 signifie que la
- * transaction concurrente est déjà retombée : on attend le temps de se désynchroniser, pas le
- * temps qu'une écriture se termine.
+ * rejouent sinon en cadence, et se retrouvent au même instant à chaque tour.
+ *
+ * BORNES EXACTES, parce qu'une borne approximative ne sert à rien : l'attente précédant la
+ * tentative n vaut au plus `20 × n` ms, soit 20, 40 puis 60 ms avant la quatrième et dernière —
+ * 120 ms cumulées au pire. Le commentaire annonçait « 40 ms au pire avant la dernière
+ * tentative » : il comptait l'avant-dernière.
+ *
+ * Elles restent petites parce qu'un 40001 signifie que la transaction concurrente est déjà
+ * retombée : on attend le temps de se désynchroniser, pas le temps qu'une écriture se termine.
  */
 const BACKOFF_MS = 10;
-function backoffFor(attempt: number): number {
+
+/**
+ * Exporté pour être ÉPROUVÉ, et non par commodité : la borne ci-dessus est un chiffre qu'on lit
+ * pour dimensionner un délai côté client, et un chiffre qu'aucun test ne mesure finit toujours
+ * par décrire une autre version du code.
+ */
+export function backoffFor(attempt: number): number {
   return Math.round(Math.random() * BACKOFF_MS * attempt * 2);
 }
 
@@ -129,4 +140,21 @@ export function httpErrorResponse(e: unknown): NextResponse | null {
     e.code ? { error: e.message, code: e.code } : { error: e.message },
     { status: e.status },
   );
+}
+
+/**
+ * Lit le corps JSON d'une requête en OBJET — ou rend `{}`.
+ *
+ * `await req.json().catch(() => ({}))` ne rattrape que le JSON ILLISIBLE. Or `null`, `5` et
+ * `"x"` sont du JSON parfaitement valide : `json()` résout, et c'est la ligne suivante qui
+ * casse — `const { date, teamId } = body as …` lève « Cannot destructure property of null », et
+ * `"homeUserId" in body` lève sur une primitive. Un corps que toutes les autres formes de
+ * malformation font finir en 400 propre sortait donc en 500 non géré.
+ *
+ * Rendre `{}` remet ces corps sur le chemin ordinaire : la validation manuelle qui suit les
+ * refuse comme elle refuse un corps vide, avec le même message et le même statut.
+ */
+export async function readJsonBody(req: { json: () => Promise<unknown> }): Promise<Record<string, unknown>> {
+  const raw = await req.json().catch(() => null);
+  return raw !== null && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
 }

@@ -89,3 +89,22 @@ export function stampFR(iso: string): string {
     minute: "2-digit",
   });
 }
+
+/**
+ * Une chaîne `AAAA-MM-JJ` désigne-t-elle un jour QUI EXISTE ?
+ *
+ * La forme ne suffit pas : `2026-13-45` et `2026-02-31` passent une expression régulière et
+ * s'écrivent tels quels dans une colonne `String`. Le tri des rencontres étant lexicographique,
+ * une date impossible remonte en tête de liste — et, `2026-99-99` étant supérieur à n'importe
+ * quelle date réelle, elle satisfait aussi le plancher du bandeau direct : elle occupe une des
+ * six places du direct et n'en sort jamais par la borne de deux jours.
+ *
+ * Le contrôle passe par `Date` et vérifie l'ALLER-RETOUR : un 31 février s'y normalise en
+ * 3 mars, donc ne se retrouve pas égal à lui-même. Midi UTC pour rester loin des bascules de
+ * fuseau, comme partout ailleurs dans ce module.
+ */
+export function isRealDateISO(s: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T12:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}

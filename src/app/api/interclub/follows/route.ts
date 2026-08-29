@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
 import { prisma } from "@/lib/db";
+import { readJsonBody } from "@/lib/http-tx";
 import { isFollowLevel } from "@/lib/interclub";
 import { pushConfigured } from "@/lib/push";
 
@@ -36,7 +37,7 @@ export async function PUT(req: NextRequest) {
   if (!access.ok) return access.response;
   const { session } = access;
 
-  const { teamId, level } = (await req.json().catch(() => ({}))) as {
+  const { teamId, level } = (await readJsonBody(req)) as {
     teamId?: unknown;
     level?: unknown;
   };
