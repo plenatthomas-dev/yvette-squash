@@ -242,35 +242,51 @@ export default function Interclub({
   const busyRef = useRef(false);
   busyRef.current = busy;
 
+  // LES DEUX RAPPELS DU PARENT PASSENT PAR UNE REF, ET N'ENTRENT PLUS EN DÉPENDANCE.
+  //
+  // Les chargeurs ci-dessous sont des dépendances de `useEffect` : leur identité décide donc
+  // du nombre de requêtes émises. La rattacher à celle de deux fonctions que le parent nous
+  // passe, c'est confier cette décision à un détail de rendu qui ne nous regarde pas — et le
+  // `catch` de `loadList` toaste, c'est-à-dire écrit dans l'état du parent. Une seule fonction
+  // nue là-haut et le cycle se refermait : échec → toast → rendu → nouveau chargeur → effet
+  // rejoué → échec. Sans fin, à la cadence de l'échec.
+  //
+  // Le parent mémoïse désormais les deux (cf. `handleExpired` dans `page.tsx`), ce qui suffit
+  // à casser la boucle. Ces refs la rendent IMPOSSIBLE À ROUVRIR : la stabilité cesse d'être
+  // une convention que l'appelant doit tenir, elle devient une propriété de ce fichier. Même
+  // motif que `busyRef` juste au-dessus — on lit toujours la dernière version, jamais celle
+  // capturée à la création.
+  const onExpiredRef = useRef(onExpired);
+  onExpiredRef.current = onExpired;
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+
   const loadList = useCallback(async () => {
     try {
       const res = await fetch("/api/interclub", { cache: "no-store" });
-      if (onExpired(res.status)) return;
+      if (onExpiredRef.current(res.status)) return;
       const data = await readOk<{ teams: Team[]; fixtures: FixtureRow[] }>(res);
       setTeams(data.teams);
       setRows(data.fixtures);
     } catch (e) {
       setRows([]);
-      toast("err", (e as Error).message);
+      toastRef.current("err", (e as Error).message);
     }
-  }, [toast, onExpired]);
+  }, []);
 
-  const loadFixture = useCallback(
-    async (id: string) => {
-      try {
-        const res = await fetch(`/api/interclub/${id}`, { cache: "no-store" });
-        if (onExpired(res.status)) return;
-        setFixture(await readOk<Fixture>(res));
-      } catch (e) {
-        // On NE ferme PAS le détail : ce rechargement se déclenche à chaque retour au premier
-        // plan, donc à chaque déverrouillage du téléphone au bord du terrain. Le fermer sur un
-        // échec réseau démontait l'écran de marquage EN PLEIN MATCH, sans relâcher la prise ni
-        // laisser partir la synchro en attente.
-        toast("err", (e as Error).message);
-      }
-    },
-    [toast, onExpired],
-  );
+  const loadFixture = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/interclub/${id}`, { cache: "no-store" });
+      if (onExpiredRef.current(res.status)) return;
+      setFixture(await readOk<Fixture>(res));
+    } catch (e) {
+      // On NE ferme PAS le détail : ce rechargement se déclenche à chaque retour au premier
+      // plan, donc à chaque déverrouillage du téléphone au bord du terrain. Le fermer sur un
+      // échec réseau démontait l'écran de marquage EN PLEIN MATCH, sans relâcher la prise ni
+      // laisser partir la synchro en attente.
+      toastRef.current("err", (e as Error).message);
+    }
+  }, []);
 
   useEffect(() => {
     loadList();

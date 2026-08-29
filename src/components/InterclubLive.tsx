@@ -112,10 +112,28 @@ export default function InterclubLive({
   const somethingToWatch =
     !givenUp && (fixtures === null || failures > 0 || fixtures.some((f) => f.status !== "done"));
 
+  // ⚠️ `onExpired` PASSE PAR UNE REF, ET N'ENTRE PAS EN DÉPENDANCE — c'est ici que se joue la
+  // valeur de tout ce qui précède.
+  //
+  // `load` est la dépendance des trois effets ci-dessous. Si son identité change, les trois se
+  // rejouent : le chargement de montage repart SANS consulter `somethingToWatch` ni `givenUp`,
+  // l'intervalle est démonté puis remonté — donc `ticks` retombe à zéro et la cadence de veille
+  // (`ticks % 6`) ne peut plus jamais atteindre 6 —, et `onForeground` se réabonne, remettant à
+  // zéro le dédoublonnage qu'il existe pour garantir.
+  //
+  // Or `onExpired` arrivait en fonction NUE du parent : identité neuve à chaque rendu de la
+  // page. Les trois garde-fous décrits en tête de fichier étaient donc contournés par le
+  // chemin le plus banal qui soit — un toast affiché ailleurs dans l'appli, puis sa
+  // disparition 3,5 s plus tard, suffisaient à relancer le sondage un dimanche sans rencontre.
+  // Le garde-fou n° 1, dont l'en-tête raconte qu'il a « longtemps été FAUX », l'était encore,
+  // par un autre chemin.
+  const onExpiredRef = useRef(onExpired);
+  onExpiredRef.current = onExpired;
+
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/interclub/live", { cache: "no-store" });
-      if (onExpired(res.status)) return;
+      if (onExpiredRef.current(res.status)) return;
       const data = await readOk<{ fixtures: LiveFixture[] }>(res);
       setFixtures(data.fixtures);
       setFailures(0);
@@ -126,7 +144,7 @@ export default function InterclubLive({
       setFixtures((f) => f ?? []);
       setFailures((n) => n + 1);
     }
-  }, [onExpired]);
+  }, []);
 
   useEffect(() => {
     load();

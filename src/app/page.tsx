@@ -633,14 +633,33 @@ export default function Home() {
   };
 
   // Détecte une session expirée (401) et renvoie vers le login proprement.
-  const handleExpired = (status: number): boolean => {
-    if (status === 401) {
-      setMe(null);
-      toast("err", "Session expirée — reconnecte-toi.");
-      return true;
-    }
-    return false;
-  };
+  //
+  // ⚠️ MÉMOÏSÉ, ET CE N'EST PAS UN CONFORT. Cette fonction descend en `onExpired` dans
+  // `Interclub`, `Tournament` et `Tricount`, où elle sert de DÉPENDANCE à des `useCallback` de
+  // chargement, eux-mêmes dépendances de `useEffect`. Déclarée en fonction nue, son identité
+  // changeait à chaque rendu de cette page : chaque rendu relançait donc tous les chargements
+  // de l'onglet ouvert, garde-fous compris — `InterclubLive` resondait sans consulter le sien,
+  // qui décide justement de NE PAS sonder les jours sans rencontre.
+  //
+  // Pire, le cycle se refermait sur lui-même : le `catch` d'un chargeur toaste, `toast` écrit
+  // l'état de CETTE page, le rendu qui suit recrée `handleExpired`, l'effet se rejoue, la
+  // requête échoue encore. Base en veille ou téléphone hors réseau, sur l'onglet Interclub, et
+  // l'appli partait en boucle de requêtes sans fin — plus une sonde `/api/health` par tour,
+  // exactement quand la base souffrait déjà.
+  //
+  // `toast` est lui-même mémoïsé (cf. plus haut) et `setMe` est stable : la liste de
+  // dépendances est donc réellement close. NE PAS la rouvrir.
+  const handleExpired = useCallback(
+    (status: number): boolean => {
+      if (status === 401) {
+        setMe(null);
+        toast("err", "Session expirée — reconnecte-toi.");
+        return true;
+      }
+      return false;
+    },
+    [toast],
+  );
 
   // On peut réserver soit avec son propre compte ResaMania, soit en agissant pour un
   // délégant (on emprunte SON jeton, cf. resolveActingContext côté serveur). Donc un compte
