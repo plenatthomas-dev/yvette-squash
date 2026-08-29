@@ -413,8 +413,16 @@ export default function InterclubScorer({
     scheduleSync(next);
   }
 
+  /**
+   * Tant que le premier serveur n'est pas désigné, marquer n'a pas de sens — et `applyPoint`
+   * IGNORE d'ailleurs un point dans cet état (« on ne devine pas un serveur »). Sans cette
+   * condition, les deux grandes cases restaient actives et absorbaient les appuis en silence :
+   * le pire des états pour un écran qu'on utilise sans le regarder, au bord du terrain.
+   */
+  const attendServeur = state.serving === null;
+
   const scorePoint = (side: Side) => {
-    if (state.awaitingServeBox || state.status === "done" || remaining > 0) return;
+    if (attendServeur || state.awaitingServeBox || state.status === "done" || remaining > 0) return;
     commit((prev) => applyPoint(prev, bestOf, side));
   };
 
@@ -481,7 +489,9 @@ export default function InterclubScorer({
         className="ics-side"
         style={c ? { background: c.bg, color: c.fg, borderColor: c.fg } : undefined}
         onClick={() => scorePoint(who)}
-        disabled={state.awaitingServeBox || state.status === "done" || remaining > 0}
+        disabled={
+          attendServeur || state.awaitingServeBox || state.status === "done" || remaining > 0
+        }
         aria-label={`Point pour ${name}`}
       >
         <span className="ics-name">{name}</span>

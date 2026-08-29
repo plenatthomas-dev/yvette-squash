@@ -306,6 +306,23 @@ export function undo(events: readonly ScoreEvent[]): ScoreEvent[] {
  * sorte que chaque jeu se termine exactement sur son dernier point et pas avant.
  */
 export function seedEvents(games: readonly GameScore[], bestOf: number): ScoreEvent[] {
+  // RIEN À REPRODUIRE ⇒ AUCUN SERVEUR DÉSIGNÉ, et c'est tout l'objet de cette clause.
+  //
+  // Le premier service d'un match se tire au sort sur le terrain : ni l'appli ni le serveur ne
+  // peuvent le savoir. L'écran de marquage sait le demander — il porte un panneau « Qui
+  // engage ? » conditionné à `serving === null` — mais ce panneau était INATTEIGNABLE sur un
+  // match vierge, parce qu'on arrivait ici avec une liste vide et qu'on posait quand même
+  // « le joueur qui reçoit sert, à droite ».
+  //
+  // Le déroulé inventé plus bas est assumé pour des jeux DÉJÀ JOUÉS, dont seul le score compte
+  // et dont le serveur n'a plus d'importance. Inventer le serveur d'un jeu qui n'a pas encore
+  // commencé, c'est autre chose : c'est décider à la place de ceux qui sont sur le terrain, et
+  // se tromper une fois sur deux sur la seule information que le marqueur avait à saisir.
+  //
+  // La condition porte sur les jeux REPRODUCTIBLES, pas sur la longueur : une liste ne
+  // contenant qu'un jeu inachevé ne reproduit rien non plus (la boucle le saute).
+  if (!games.some((g) => checkGame(g) === "finished")) return [];
+
   let ev: ScoreEvent[] = applyServe([], bestOf, "home", "right");
 
   const point = (side: Side) => {

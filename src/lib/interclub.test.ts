@@ -523,3 +523,28 @@ describe("niveaux d'abonnement", () => {
     expect(notifiesAt("result", "result")).toBe(true);
   });
 });
+
+describe("seedEvents — ne désigne AUCUN serveur quand il n'y a rien à reproduire", () => {
+  const g = (home: number, away: number) => ({ home, away });
+
+  // Le premier service se tire au sort sur le terrain. L'appli ne peut pas le savoir, et le
+  // supposer se trompe une fois sur deux — sur la seule information que le marqueur avait à
+  // saisir. Inventer le déroulé de jeux DÉJÀ joués est autre chose : leur serveur n'importe plus.
+  it("rend un journal vide sur un match vierge, pour que l'écran puisse demander qui engage", () => {
+    expect(seedEvents([], 5)).toEqual([]);
+    const st = replay(seedEvents([], 5), 5);
+    expect(st.serving).toBeNull();
+    expect(st.status).toBe("pending");
+  });
+
+  it("en fait autant quand le seul jeu fourni n'est pas terminé — il n'y a rien à reproduire", () => {
+    expect(seedEvents([g(7, 4)], 5)).toEqual([]);
+  });
+
+  it("désigne en revanche un serveur dès qu'un jeu est reproductible", () => {
+    // Le déroulé est inventé, c'est assumé : seul le score de chaque jeu terminé est fidèle.
+    const st = replay(seedEvents([g(11, 5)], 5), 5);
+    expect(st.games).toEqual([g(11, 5)]);
+    expect(st.serving).not.toBeNull();
+  });
+});

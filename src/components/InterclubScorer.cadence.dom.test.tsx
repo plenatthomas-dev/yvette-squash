@@ -85,11 +85,12 @@ afterEach(() => {
 
 describe("InterclubScorer — le nombre d'écritures ne suit pas le nombre de points", () => {
   it("n'écrit qu'UNE fois par fenêtre de 5 s, quel que soit le nombre de points marqués", async () => {
-    const { getByLabelText } = monte();
+    const { getByLabelText, getByRole } = monte();
     await souffle();
 
-    // Premier point : c'est le premier `commit`, et la fenêtre étant vierge il part tout de suite.
-    fireEvent.click(getByLabelText("Point pour Thomas"));
+    // Qui engage : c'est le premier `commit`, et la fenêtre étant vierge il part tout de suite.
+    // (Un match vierge n'a plus de serveur par défaut : le marqueur le désigne, cf. `seedEvents`.)
+    fireEvent.click(getByRole("button", { name: "Thomas · droite" }));
     await avance(0);
     expect(ecritures).toBe(1);
 
@@ -110,9 +111,11 @@ describe("InterclubScorer — le nombre d'écritures ne suit pas le nombre de po
   });
 
   it("ne s'ouvre pas de porte de sortie sur l'UNDO", async () => {
-    const { getByText, getByLabelText } = monte();
+    const { getByText, getByLabelText, getByRole } = monte();
     await souffle();
 
+    fireEvent.click(getByRole("button", { name: "Thomas · droite" }));
+    await avance(0);
     for (let i = 0; i < 5; i++) {
       fireEvent.click(getByLabelText("Point pour Thomas"));
       await avance(50);
