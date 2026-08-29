@@ -1,202 +1,487 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-02T12:18:57.227Z",
+  "generatedAt": "2026-08-29T12:04:38.908783Z",
   "title": "Design System: Squash de l'Yvette",
   "extensions": {
     "colorMeta": {
       "vert-signal": {
         "role": "primary",
         "displayName": "Vert Signal",
-        "canonical": "oklch(61.4% 0.148 152.9)",
+        "canonical": "#1f9d57",
         "tonalRamp": [
-          "oklch(15.0% 0.082 152.9)",
-          "oklch(26.0% 0.101 152.9)",
-          "oklch(37.0% 0.119 152.9)",
-          "oklch(48.0% 0.137 152.9)",
-          "oklch(59.0% 0.142 152.9)",
-          "oklch(70.0% 0.124 152.9)",
-          "oklch(82.0% 0.104 152.9)",
-          "oklch(95.0% 0.082 152.9)"
+          "#001700",
+          "#003600",
+          "#005612",
+          "#007834",
+          "#1b9b55",
+          "#4cbf77",
+          "#74e59a",
+          "#9bffbe"
+        ]
+      },
+      "vert-signal-survol": {
+        "role": "primary",
+        "displayName": "Vert Signal Survol",
+        "canonical": "#24b365",
+        "tonalRamp": [
+          "#001800",
+          "#003700",
+          "#00580a",
+          "#007a2f",
+          "#009d50",
+          "#3ac272",
+          "#66e796",
+          "#8effba"
         ]
       },
       "vert-libre": {
         "role": "primary",
         "displayName": "Vert Libre",
-        "canonical": "oklch(52.9% 0.130 152.4)",
+        "canonical": "#158044",
         "tonalRamp": [
-          "oklch(15.0% 0.072 152.4)",
-          "oklch(26.0% 0.088 152.4)",
-          "oklch(37.0% 0.104 152.4)",
-          "oklch(48.0% 0.120 152.4)",
-          "oklch(59.0% 0.125 152.4)",
-          "oklch(70.0% 0.109 152.4)",
-          "oklch(82.0% 0.091 152.4)",
-          "oklch(95.0% 0.072 152.4)"
+          "#001600",
+          "#003400",
+          "#00541a",
+          "#00753a",
+          "#36985a",
+          "#5dbc7c",
+          "#83e29f",
+          "#a8ffc4"
+        ]
+      },
+      "vert-libre-survol": {
+        "role": "primary",
+        "displayName": "Vert Libre Survol",
+        "canonical": "#127a40",
+        "tonalRamp": [
+          "#001600",
+          "#003400",
+          "#00531c",
+          "#05753b",
+          "#3a985c",
+          "#60bc7d",
+          "#85e1a0",
+          "#abffc5"
         ]
       },
       "reserve-surface": {
         "role": "tertiary",
-        "displayName": "Réservé — surface",
-        "canonical": "oklch(92.5% 0.028 358.0)",
+        "displayName": "Reserve Surface",
+        "canonical": "#f7dfe6",
         "tonalRamp": [
-          "oklch(15.0% 0.015 358.0)",
-          "oklch(26.0% 0.019 358.0)",
-          "oklch(37.0% 0.022 358.0)",
-          "oklch(48.0% 0.026 358.0)",
-          "oklch(59.0% 0.027 358.0)",
-          "oklch(70.0% 0.023 358.0)",
-          "oklch(82.0% 0.020 358.0)",
-          "oklch(95.0% 0.015 358.0)"
+          "#14060b",
+          "#301f25",
+          "#4f3c42",
+          "#6f5b61",
+          "#917c82",
+          "#b59ea5",
+          "#d9c2c9",
+          "#ffe7ee"
         ]
       },
       "reserve-encre": {
         "role": "tertiary",
-        "displayName": "Réservé — encre",
-        "canonical": "oklch(48.0% 0.147 2.6)",
+        "displayName": "Reserve Encre",
+        "canonical": "#9c2f56",
         "tonalRamp": [
-          "oklch(15.0% 0.082 2.6)",
-          "oklch(26.0% 0.100 2.6)",
-          "oklch(37.0% 0.118 2.6)",
-          "oklch(48.0% 0.136 2.6)",
-          "oklch(59.0% 0.141 2.6)",
-          "oklch(70.0% 0.123 2.6)",
-          "oklch(82.0% 0.103 2.6)",
-          "oklch(95.0% 0.082 2.6)"
+          "#310006",
+          "#55001f",
+          "#7a073b",
+          "#a0335a",
+          "#c7577a",
+          "#ef7a9d",
+          "#ff9ec0",
+          "#ffc3e6"
         ]
       },
       "club-surface": {
         "role": "tertiary",
-        "displayName": "Club — surface",
-        "canonical": "oklch(92.6% 0.035 264.4)",
+        "displayName": "Club Surface",
+        "canonical": "#dbe7ff",
         "tonalRamp": [
-          "oklch(15.0% 0.020 264.4)",
-          "oklch(26.0% 0.024 264.4)",
-          "oklch(37.0% 0.028 264.4)",
-          "oklch(48.0% 0.032 264.4)",
-          "oklch(59.0% 0.034 264.4)",
-          "oklch(70.0% 0.029 264.4)",
-          "oklch(82.0% 0.025 264.4)",
-          "oklch(95.0% 0.020 264.4)"
+          "#050a1a",
+          "#1c2536",
+          "#394255",
+          "#576176",
+          "#788398",
+          "#9aa5bc",
+          "#bec9e1",
+          "#e3efff"
         ]
       },
       "club-encre": {
         "role": "tertiary",
-        "displayName": "Club — encre",
-        "canonical": "oklch(43.7% 0.113 259.6)",
+        "displayName": "Club Encre",
+        "canonical": "#29508f",
         "tonalRamp": [
-          "oklch(15.0% 0.063 259.6)",
-          "oklch(26.0% 0.077 259.6)",
-          "oklch(37.0% 0.091 259.6)",
-          "oklch(48.0% 0.104 259.6)",
-          "oklch(59.0% 0.108 259.6)",
-          "oklch(70.0% 0.094 259.6)",
-          "oklch(82.0% 0.079 259.6)",
-          "oklch(95.0% 0.063 259.6)"
+          "#000039",
+          "#001f5a",
+          "#193f7d",
+          "#3860a1",
+          "#5982c6",
+          "#7aa6ec",
+          "#9dcaff",
+          "#c1f0ff"
         ]
       },
       "ferme": {
-        "role": "neutral",
-        "displayName": "Fermé",
-        "canonical": "oklch(94.9% 0.006 264.5)",
+        "role": "tertiary",
+        "displayName": "Ferme",
+        "canonical": "#eceef2",
         "tonalRamp": [
-          "oklch(15.0% 0.003 264.5)",
-          "oklch(26.0% 0.004 264.5)",
-          "oklch(37.0% 0.005 264.5)",
-          "oklch(48.0% 0.005 264.5)",
-          "oklch(59.0% 0.006 264.5)",
-          "oklch(70.0% 0.005 264.5)",
-          "oklch(82.0% 0.004 264.5)",
-          "oklch(95.0% 0.003 264.5)"
+          "#0a0b0e",
+          "#242528",
+          "#404245",
+          "#5f6165",
+          "#808286",
+          "#a3a5a9",
+          "#c7c9cd",
+          "#eceef2"
+        ]
+      },
+      "passe": {
+        "role": "tertiary",
+        "displayName": "Passe",
+        "canonical": "#e4e7ec",
+        "tonalRamp": [
+          "#090b0e",
+          "#232529",
+          "#404246",
+          "#5f6166",
+          "#808287",
+          "#a2a5aa",
+          "#c6c9ce",
+          "#eceff4"
+        ]
+      },
+      "passe-encre": {
+        "role": "tertiary",
+        "displayName": "Passe Encre",
+        "canonical": "#5b626e",
+        "tonalRamp": [
+          "#070b14",
+          "#1f252f",
+          "#3c424d",
+          "#5b626e",
+          "#7b838f",
+          "#9ea5b3",
+          "#c2cad7",
+          "#e7effd"
         ]
       },
       "bleu-info": {
         "role": "secondary",
         "displayName": "Bleu Info",
-        "canonical": "oklch(56.4% 0.185 260.8)",
+        "canonical": "#2f6fe0",
         "tonalRamp": [
-          "oklch(15.0% 0.103 260.8)",
-          "oklch(26.0% 0.125 260.8)",
-          "oklch(37.0% 0.148 260.8)",
-          "oklch(48.0% 0.170 260.8)",
-          "oklch(59.0% 0.176 260.8)",
-          "oklch(70.0% 0.154 260.8)",
-          "oklch(82.0% 0.129 260.8)",
-          "oklch(95.0% 0.103 260.8)"
+          "#090058",
+          "#00047c",
+          "#0034a1",
+          "#1858c8",
+          "#3c7def",
+          "#5ea1ff",
+          "#81c7ff",
+          "#a6edff"
+        ]
+      },
+      "notice-fond": {
+        "role": "neutral",
+        "displayName": "Notice Fond",
+        "canonical": "#eef2f8",
+        "tonalRamp": [
+          "#090b0f",
+          "#22252a",
+          "#3f4247",
+          "#5e6166",
+          "#7f8388",
+          "#a2a5ab",
+          "#c5c9cf",
+          "#ebeff5"
+        ]
+      },
+      "rouge-encre": {
+        "role": "secondary",
+        "displayName": "Rouge Encre",
+        "canonical": "#b3261e",
+        "tonalRamp": [
+          "#3a0000",
+          "#610000",
+          "#880000",
+          "#b0221b",
+          "#d84c3f",
+          "#ff7161",
+          "#ff9784",
+          "#ffbda8"
         ]
       },
       "rouge-alerte": {
         "role": "secondary",
         "displayName": "Rouge Alerte",
-        "canonical": "oklch(62.6% 0.193 23.0)",
+        "canonical": "#e5484d",
         "tonalRamp": [
-          "oklch(15.0% 0.107 23.0)",
-          "oklch(26.0% 0.131 23.0)",
-          "oklch(37.0% 0.155 23.0)",
-          "oklch(48.0% 0.178 23.0)",
-          "oklch(59.0% 0.185 23.0)",
-          "oklch(70.0% 0.161 23.0)",
-          "oklch(82.0% 0.135 23.0)",
-          "oklch(95.0% 0.107 23.0)"
+          "#3e0000",
+          "#650000",
+          "#8d0000",
+          "#b60d26",
+          "#de4148",
+          "#ff6969",
+          "#ff8f8c",
+          "#ffb5b0"
         ]
       },
       "page-claire": {
         "role": "neutral",
         "displayName": "Page Claire",
-        "canonical": "oklch(94.2% 0.007 260.7)",
+        "canonical": "#e9ecf1",
         "tonalRamp": [
-          "oklch(15.0% 0.004 260.7)",
-          "oklch(26.0% 0.005 260.7)",
-          "oklch(37.0% 0.006 260.7)",
-          "oklch(48.0% 0.007 260.7)",
-          "oklch(59.0% 0.007 260.7)",
-          "oklch(70.0% 0.006 260.7)",
-          "oklch(82.0% 0.005 260.7)",
-          "oklch(95.0% 0.004 260.7)"
+          "#090b0e",
+          "#232529",
+          "#404246",
+          "#5f6166",
+          "#808287",
+          "#a2a5aa",
+          "#c6c9ce",
+          "#eceff4"
+        ]
+      },
+      "carte-claire": {
+        "role": "neutral",
+        "displayName": "Carte Claire",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
         ]
       },
       "page-sombre": {
         "role": "neutral",
         "displayName": "Page Sombre",
-        "canonical": "oklch(17.7% 0.011 260.6)",
+        "canonical": "#0e1116",
         "tonalRamp": [
-          "oklch(15.0% 0.006 260.6)",
-          "oklch(26.0% 0.008 260.6)",
-          "oklch(37.0% 0.009 260.6)",
-          "oklch(48.0% 0.011 260.6)",
-          "oklch(59.0% 0.011 260.6)",
-          "oklch(70.0% 0.010 260.6)",
-          "oklch(82.0% 0.008 260.6)",
-          "oklch(95.0% 0.006 260.6)"
+          "#080b10",
+          "#22252b",
+          "#3f4248",
+          "#5e6168",
+          "#7e8389",
+          "#a1a5ac",
+          "#c5c9d1",
+          "#eaeff6"
         ]
       },
       "carte-sombre": {
         "role": "neutral",
         "displayName": "Carte Sombre",
-        "canonical": "oklch(23.4% 0.017 259.8)",
+        "canonical": "#191e26",
         "tonalRamp": [
-          "oklch(15.0% 0.010 259.8)",
-          "oklch(26.0% 0.012 259.8)",
-          "oklch(37.0% 0.014 259.8)",
-          "oklch(48.0% 0.016 259.8)",
-          "oklch(59.0% 0.016 259.8)",
-          "oklch(70.0% 0.014 259.8)",
-          "oklch(82.0% 0.012 259.8)",
-          "oklch(95.0% 0.010 259.8)"
+          "#070b12",
+          "#20252e",
+          "#3d424b",
+          "#5c626b",
+          "#7c838d",
+          "#9fa5b0",
+          "#c3cad5",
+          "#e8effa"
         ]
       },
       "rose-short": {
         "role": "tertiary",
         "displayName": "Rose Short",
-        "canonical": "oklch(60.0% 0.244 358.6)",
+        "canonical": "#e6007e",
         "tonalRamp": [
-          "oklch(15.0% 0.136 358.6)",
-          "oklch(26.0% 0.165 358.6)",
-          "oklch(37.0% 0.195 358.6)",
-          "oklch(48.0% 0.225 358.6)",
-          "oklch(59.0% 0.233 358.6)",
-          "oklch(70.0% 0.203 358.6)",
-          "oklch(82.0% 0.171 358.6)",
-          "oklch(95.0% 0.136 358.6)"
+          "#420009",
+          "#6b0023",
+          "#950040",
+          "#be005f",
+          "#e90980",
+          "#ff4aa3",
+          "#ff74c7",
+          "#ff9cec"
+        ]
+      },
+      "bandeau-info": {
+        "role": "secondary",
+        "displayName": "Bandeau Info",
+        "canonical": "#2563eb",
+        "tonalRamp": [
+          "#120065",
+          "#01008b",
+          "#0029b1",
+          "#1451d8",
+          "#3777ff",
+          "#599dff",
+          "#7cc3ff",
+          "#9feaff"
+        ]
+      },
+      "bandeau-avertissement": {
+        "role": "secondary",
+        "displayName": "Bandeau Avertissement",
+        "canonical": "#ea580c",
+        "tonalRamp": [
+          "#3d0000",
+          "#640000",
+          "#8c0000",
+          "#b41f00",
+          "#dc4b00",
+          "#ff7133",
+          "#ff975b",
+          "#ffbd82"
+        ]
+      },
+      "bandeau-incident": {
+        "role": "secondary",
+        "displayName": "Bandeau Incident",
+        "canonical": "#dc2626",
+        "tonalRamp": [
+          "#420000",
+          "#6b0000",
+          "#940000",
+          "#bd0000",
+          "#e73430",
+          "#ff5f54",
+          "#ff8778",
+          "#ffae9c"
+        ]
+      },
+      "sunken-clair": {
+        "role": "tertiary",
+        "displayName": "Creux (clair)",
+        "canonical": "#f4f6f9",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#242527",
+          "#404244",
+          "#606164",
+          "#818285",
+          "#a3a5a8",
+          "#c7c9cc",
+          "#edeff1"
+        ]
+      },
+      "sunken-sombre": {
+        "role": "tertiary",
+        "displayName": "Creux (sombre)",
+        "canonical": "#12161d",
+        "tonalRamp": [
+          "#080b12",
+          "#21252d",
+          "#3d424a",
+          "#5c616a",
+          "#7d838c",
+          "#a0a5af",
+          "#c4c9d3",
+          "#e9eff9"
+        ]
+      },
+      "sunken-rose": {
+        "role": "tertiary",
+        "displayName": "Creux (rose)",
+        "canonical": "#ffd5ea",
+        "tonalRamp": [
+          "#1a0210",
+          "#37192a",
+          "#573648",
+          "#785567",
+          "#9b7689",
+          "#bf98ac",
+          "#e5bcd0",
+          "#ffe1f6"
+        ]
+      },
+      "live-wash-clair": {
+        "role": "tertiary",
+        "displayName": "Voile En Cours (clair)",
+        "canonical": "#fff8e6",
+        "tonalRamp": [
+          "#0f0b02",
+          "#2a2517",
+          "#474233",
+          "#676151",
+          "#888272",
+          "#aba594",
+          "#cfc9b7",
+          "#f5eedc"
+        ]
+      },
+      "live-wash-sombre": {
+        "role": "tertiary",
+        "displayName": "Voile En Cours (sombre)",
+        "canonical": "#2a2314",
+        "tonalRamp": [
+          "#100a01",
+          "#2b2415",
+          "#494131",
+          "#68604f",
+          "#8a8170",
+          "#ada492",
+          "#d1c8b5",
+          "#f7eeda"
+        ]
+      },
+      "live-wash-rose": {
+        "role": "tertiary",
+        "displayName": "Voile En Cours (rose)",
+        "canonical": "#ffe8cf",
+        "tonalRamp": [
+          "#160700",
+          "#32210d",
+          "#503e29",
+          "#715d48",
+          "#937e68",
+          "#b6a189",
+          "#dbc5ad",
+          "#ffead1"
+        ]
+      },
+      "live-edge-clair": {
+        "role": "tertiary",
+        "displayName": "Bord En Cours (clair)",
+        "canonical": "#f0b429",
+        "tonalRamp": [
+          "#270000",
+          "#471100",
+          "#693300",
+          "#8b5400",
+          "#af7600",
+          "#d49a00",
+          "#fbbe38",
+          "#ffe466"
+        ]
+      },
+      "live-edge-sombre": {
+        "role": "tertiary",
+        "displayName": "Bord En Cours (sombre)",
+        "canonical": "#8a6a1f",
+        "tonalRamp": [
+          "#1d0300",
+          "#3a1e00",
+          "#5a3c00",
+          "#7b5c08",
+          "#9e7d35",
+          "#c2a059",
+          "#e7c47d",
+          "#ffeaa1"
+        ]
+      },
+      "live-edge-rose": {
+        "role": "tertiary",
+        "displayName": "Bord En Cours (rose)",
+        "canonical": "#d98a2b",
+        "tonalRamp": [
+          "#2c0000",
+          "#4e0300",
+          "#712900",
+          "#954b00",
+          "#ba6d00",
+          "#e09134",
+          "#ffb55d",
+          "#ffdb83"
         ]
       }
     },
@@ -378,19 +663,61 @@
       "description": "Retour au jour courant. Désactivée quand on y est déjà — elle reste visible plutôt que de disparaître.",
       "html": "<button class=\"ds-chip-today\">Aujourd'hui</button>",
       "css": ".ds-chip-today { background: transparent; color: var(--pico-primary, #1f9d57); border: 1px solid var(--pico-primary, #1f9d57); border-radius: 999px; padding: 4px 12px; font-family: system-ui, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; font-size: 0.8rem; font-weight: 500; cursor: pointer; } .ds-chip-today:hover { background: var(--pico-primary, #1f9d57); color: #fff; } .ds-chip-today:disabled { opacity: 0.45; cursor: default; }"
+    },
+    {
+      "name": "Onglets de filtre",
+      "kind": "nav",
+      "refersTo": null,
+      "description": "Filtre par equipe. L'actif se marque au poids et a un trait, jamais par un aplat vert.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\"><button class=\"ds-tab ds-tab-on\" role=\"tab\" aria-selected=\"true\">Toutes</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">&Eacute;quipe 1</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">&Eacute;quipe 2</button></div>",
+      "css": ".ds-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--pico-card-border-color); overflow-x: auto; } .ds-tab { padding: 8px 14px; background: none; border: 0; border-radius: 8px 8px 0 0; color: var(--pico-muted-color); font-size: .92rem; font-weight: 500; white-space: nowrap; cursor: pointer; } .ds-tab:hover { color: var(--pico-contrast); background: var(--sunken); } .ds-tab:focus-visible { outline: 2px solid var(--pico-primary); outline-offset: -2px; } .ds-tab-on { color: var(--pico-contrast); font-weight: 700; box-shadow: inset 0 -2px 0 0 var(--pico-contrast); }"
+    },
+    {
+      "name": "Pastilles d'etat",
+      "kind": "chip",
+      "refersTo": null,
+      "description": "Trois etats, trois FORMES : contour seul, aplat vif, aplat sourd. Verifiable en niveaux de gris.",
+      "html": "<span class=\"ds-state\">&Agrave; venir</span> <span class=\"ds-state ds-state-live\">En cours</span> <span class=\"ds-state ds-state-done\">Termin&eacute;e</span>",
+      "css": ".ds-state { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .75rem; font-weight: 700; letter-spacing: .01em; color: var(--pico-muted-color); border: 1px solid var(--pico-card-border-color); } .ds-state-live { color: #78350f; background: #fcd34d; border-color: #f59e0b; } .ds-state-done { color: var(--past-fg); background: var(--past); border-color: transparent; }"
+    },
+    {
+      "name": "Ligne de rencontre",
+      "kind": "card",
+      "refersTo": null,
+      "description": "Deux lignes empilees : la typo peut grossir sans que rien ne se comprime au pouce. Seul l'etat 'en cours' peint la ligne entiere.",
+      "html": "<button class=\"ds-fixture ds-fixture-live\"><span class=\"ds-fixture-head\"><span class=\"ds-fixture-date\">jeu. 3 sept.</span><span class=\"ds-state ds-state-live\">En cours</span></span><span class=\"ds-fixture-main\"><span class=\"ds-fixture-opp\">&Eacute;quipe 1 <span class=\"ds-fixture-word\">re&ccedil;oit</span> Massy</span><span class=\"ds-fixture-score\">2&ndash;1</span></span><span class=\"ds-fixture-div\">D2 Hommes</span></button>",
+      "css": ".ds-fixture { display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 12px 14px; text-align: left; background: var(--pico-card-background-color); border: 1px solid var(--pico-card-border-color); border-radius: 12px; color: var(--pico-contrast); font-size: .95rem; cursor: pointer; } .ds-fixture:hover { border-color: var(--grid-line); } .ds-fixture-live { background: var(--live-wash); border-color: var(--live-edge); } .ds-fixture-head, .ds-fixture-main { display: flex; justify-content: space-between; gap: 10px; } .ds-fixture-head { align-items: center; } .ds-fixture-main { align-items: baseline; } .ds-fixture-date { font-size: .8rem; color: var(--pico-muted-color); font-variant-numeric: tabular-nums; } .ds-fixture-opp { flex: 1; min-width: 0; font-size: 1rem; font-weight: 600; line-height: 1.3; } .ds-fixture-word { font-weight: 400; color: var(--pico-muted-color); } .ds-fixture-score { font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; } .ds-fixture-div { font-size: .8rem; color: var(--pico-muted-color); }"
+    },
+    {
+      "name": "Vignette de simple",
+      "kind": "card",
+      "refersTo": null,
+      "description": "Un match = un bloc, actions comprises. La vignette s'ENFONCE sous la carte au lieu de flotter (Regle de la Carte sur Carte).",
+      "html": "<div class=\"ds-tile\"><button class=\"ds-tile-btn\"><span class=\"ds-tile-head\"><span class=\"ds-tile-order\">Simple 2</span><span class=\"ds-state ds-state-live\">En cours</span></span><span class=\"ds-tile-players\">Marc Dubois <span class=\"ds-tile-vs\">c.</span> Paul Martin</span><span class=\"ds-tile-games\"><span class=\"ds-tile-list\">11-9</span><span class=\"ds-tile-inplay\">7&ndash;4</span><span class=\"ds-tile-score\">1&ndash;0</span></span></button><div class=\"ds-tile-actions\"><button class=\"ds-tile-cta\">Reprendre le marquage</button></div></div>",
+      "css": ".ds-tile { border: 1px solid var(--live-edge); border-radius: 12px; background: var(--live-wash); overflow: hidden; } .ds-tile-btn { display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 12px 14px; text-align: left; background: none; border: 0; color: var(--pico-contrast); font-size: .95rem; cursor: pointer; } .ds-tile-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; } .ds-tile-order { font-size: .8rem; font-weight: 600; color: var(--pico-muted-color); } .ds-tile-players { font-size: 1rem; line-height: 1.35; } .ds-tile-vs { font-size: .8rem; color: var(--pico-muted-color); } .ds-tile-games { display: flex; align-items: baseline; gap: 8px; } .ds-tile-list { font-size: .8rem; color: var(--pico-muted-color); font-variant-numeric: tabular-nums; } .ds-tile-inplay { padding: 2px 8px; border-radius: 999px; font-weight: 700; font-size: .9rem; color: #78350f; background: #fcd34d; } .ds-tile-score { font-weight: 700; font-size: 1.15rem; font-variant-numeric: tabular-nums; } .ds-tile-actions { padding: 10px 14px; border-top: 1px solid var(--live-edge); } .ds-tile-cta { padding: 7px 14px; font-size: .85rem; border-radius: 10px; border: 1px solid var(--pico-card-border-color); background: var(--pico-secondary-background, #5c6370); color: #fff; cursor: pointer; }"
     }
   ],
   "narrative": {
     "northStar": "L'outil de vestiaire",
-    "overview": "Cette interface est un outil qu'on sort debout, d'une main, entre deux portes. Elle ne cherche ni à impressionner ni à accueillir : elle répond. La densité est ici une qualité assumée — l'échelle typographique descend jusqu'à 0,62rem et une case de tableau porte à la fois un nom, des présences et un badge, parce que voir plus d'un coup d'œil vaut mieux que scroller.\n\nLe système est délibérément sobre et fonctionnel : Pico CSS assure toute la base (typographie, formulaires, boutons, thème sombre), et la couche maison ne fait qu'ajouter ce que Pico ne connaît pas — la palette des états de créneau, la grille, la barre d'outils. Aucune police n'est chargée : la typographie est celle du système d'exploitation. Ce n'est pas un oubli, c'est cohérent avec l'outil : rendu natif, aucun octet de webfont, aucun décalage de rendu.\n\nLe relief est ambiant. Les ombres à deux couches et le léger dégradé de surface donnent une facture moderne, mais ils n'encodent aucune hiérarchie : ils habillent, ils n'informent pas. La seule couleur qui parle est le vert.\n\nAnti-référence confirmée : ResaMania. L'appli existe parce que son amont oblige à naviguer pour savoir s'il reste un terrain. Reproduire cette logique — enfouir la réponse derrière un clic — serait perdre la raison d'être du produit.",
+    "overview": "Cette interface est un outil qu'on sort debout, d'une main, entre deux portes. Elle ne cherche ni à impressionner ni à accueillir : elle répond. La densité est ici une qualité assumée — l'échelle typographique descend jusqu'à 0,62rem et une case de tableau porte à la fois un nom, des présences et un badge, parce que voir plus d'un coup d'œil vaut mieux que scroller. Le système est délibérément sobre et fonctionnel : Pico CSS assure toute la base (typographie, formulaires, boutons, thème sombre), et la couche maison ne fait qu'ajouter ce que Pico ne connaît pas — la palette des états de créneau, la grille, la barre d'outils. Aucune police n'est chargée : la typographie est celle du système d'exploitation. Ce n'est pas un oubli, c'est cohérent avec l'outil : rendu natif, aucun octet de webfont, aucun décalage de rendu. Le relief est ambiant. Les ombres à deux couches et le léger dégradé de surface donnent une facture moderne, mais ils n'encodent aucune hiérarchie : ils habillent, ils n'informent pas. La seule couleur qui parle est le vert. **Anti-référence confirmée : ResaMania.** L'appli existe parce que son amont oblige à naviguer pour savoir s'il reste un terrain. Reproduire cette logique — enfouir la réponse derrière un clic — serait perdre la raison d'être du produit.",
     "keyCharacteristics": [
-      "Densité assumée, jamais cryptique : chaque abréviation est étiquetée ou porte un title.",
+      "Densité assumée, jamais cryptique : chaque abréviation est étiquetée ou porte un `title`.",
       "Un seul accent, le vert, strictement réservé à ce qui est jouable ou actionnable.",
       "Typographie 100 % système, aucune police chargée.",
       "Relief décoratif à coût runtime nul (CSS pur), retéclé par thème pour rester visible.",
       "Trois thèmes complets et égaux : clair, sombre, et « short rose »."
     ],
     "rules": [
+      {
+        "name": "La Règle de la Paire Complète",
+        "body": "Une couleur hors thème n'est acceptable que si elle définit son fond ET son texte. Poser une seule des deux fait suivre l'autre au thème et produit un échec de contraste dans au moins un des trois — c'est exactement ce qui est arrivé aux libellés d'état de l'admin (2,59:1 en sombre).",
+        "section": "colors"
+      },
+      {
+        "name": "La Règle du Bandeau Muet",
+        "body": "Un bandeau ne s'affiche que s'il apporte quelque chose que l'utilisateur ne peut ni déduire de l'écran, ni obtenir sans lui. Un bandeau qui demande une action que l'appli sait faire seule est un bandeau de trop.",
+        "section": "colors"
+      },
       {
         "name": "La Règle du Vert Actionnable",
         "body": "Le vert ne se pose que sur ce qu'on peut toucher : un bouton primaire, une case libre, un contour de focus. Un élément vert non actionnable est une faute, et elle se repère à l'œil nu sur une capture d'écran.",
@@ -403,12 +730,22 @@
       },
       {
         "name": "La Règle du Contraste Avant la Marque",
-        "body": "Quand la couleur de marque ne passe pas le seuil AA sur une surface, c'est la couleur qui plie. vert-libre existe uniquement pour cette raison.",
+        "body": "Quand la couleur de marque ne passe pas le seuil AA sur une surface, c'est la couleur qui plie. Le vert du produit a été approfondi pour cette raison, d'abord sur les cases puis — trop tard — sur les boutons.",
+        "section": "colors"
+      },
+      {
+        "name": "La Règle du Fond et de l'Encre",
+        "body": "Une même couleur de marque a besoin de DEUX valeurs : une pour servir de fond sous du texte clair, une pour être elle-même du texte sur la carte du thème. Les deux ne coïncident presque jamais. Chaque fois que le produit a réutilisé une valeur de fond comme couleur de texte, il a échoué au contraste — le primaire en texte (3,49:1), les pastilles de compteur (2,78:1). D'où les paires `--pico-primary`/`--primary-fg` et `--badge-bg`/`--badge-fg`, sur le modèle de `--past`/`--past-fg` qui existait déjà.",
+        "section": "colors"
+      },
+      {
+        "name": "La Règle du Filet Partagé",
+        "body": "Le quadrillage de la grille ne peut pas atteindre 3:1, et c'est un fait géométrique, pas un renoncement. `border-collapse: collapse` fait **partager un seul filet** entre deux cellules voisines, et la grille juxtapose un remplissage très sombre (le vert des cases libres) et des remplissages très pâles. Aucune couleur unique ne tient 3:1 contre les deux : le seul optimum est le point où les deux contrastes s'égalisent, soit **≈2,0:1**. C'est ce point qui est retenu dans les trois thèmes. Ne pas « corriger » ce chiffre vers le haut : le remonter d'un côté l'effondre de l'autre. L'état antérieur — filet hérité de la couleur de carte, donc 1,03:1 en clair et 1,07:1 en sombre sur cinq états sur six — était le vrai défaut.",
         "section": "colors"
       },
       {
         "name": "La Règle du Micro Étiqueté",
-        "body": "En dessous de 0,75rem, un texte doit être soit un chiffre, soit accompagné d'un libellé accessible (title, aria-label, ou texte sr-only). La densité se gagne par l'étiquetage, jamais en supposant que le lecteur sait déjà.",
+        "body": "En dessous de 0,75rem, un texte doit être soit un chiffre, soit accompagné d'un libellé accessible (`title`, `aria-label`, ou texte `sr-only`). La densité se gagne par l'étiquetage, jamais en supposant que le lecteur sait déjà.",
         "section": "typography"
       },
       {
@@ -420,26 +757,42 @@
         "name": "La Règle du Coût Nul",
         "body": "Le relief est intégralement CSS et ne coûte rien à l'exécution. Tout effet de profondeur qui demanderait du JavaScript, un filtre de flou animé ou un recalcul par image est refusé — les téléphones du club ne sont pas des machines de développement.",
         "section": "elevation"
+      },
+      {
+        "name": "La Règle de la Carte sur Carte",
+        "body": "Une liste d'éléments posée sur une carte ne se sépare pas en donnant une carte à chaque élément : deux surfaces de même valeur, si bien ombrées soient- elles, ne se distinguent pas l'une de l'autre. L'élément s'ENFONCE (`--sunken`) au lieu de flotter. C'est le corollaire de la Règle du Fond Toujours Plus Sombre appliqué vers l'intérieur, et il vaut dans les trois thèmes — en sombre, « s'enfoncer » veut dire aller vers la page, donc vers le plus foncé, alors que la carte y est la plus claire des trois surfaces.",
+        "section": "elevation"
+      },
+      {
+        "name": "La Règle des Trois Traitements",
+        "body": "Deux états qui partagent le même traitement visuel ne sont pas deux états. « À venir » et « terminée » ont longtemps porté la même pastille sourdine : la liste n'en distinguait donc que deux sur trois, et le seul moyen de savoir était de lire. Contour, aplat vif, aplat sourd : trois formes, pas trois nuances d'une même forme.",
+        "section": "components"
       }
     ],
     "dos": [
-      "Do réserver le vert à ce qui est jouable ou actionnable (Règle du Vert Actionnable).",
-      "Do garder la page plus sombre que les cartes, dans les trois thèmes.",
-      "Do faire plier la couleur de marque devant le contraste AA, comme vert-libre le fait déjà pour le texte blanc des cases.",
-      "Do étiqueter tout texte sous 0,75rem par un title, un aria-label ou un texte sr-only.",
-      "Do figer les deux axes de toute vue tabulaire dense.",
-      "Do thémer les bordures par --pico-card-border-color plutôt que de coder une couleur.",
-      "Do réutiliser les valeurs d'espacement déjà présentes (4, 6, 10, 14, 16, 18px) au lieu d'en introduire de nouvelles.",
-      "Do traiter les trois thèmes comme égaux : une nouveauté doit être vérifiée en clair, en sombre et en rose."
+      "**Do** réserver le vert à ce qui est jouable ou actionnable (Règle du Vert Actionnable).",
+      "**Do** garder la page plus sombre que les cartes, dans les trois thèmes.",
+      "**Do** faire plier la couleur de marque devant le contraste AA, comme le vert du produit le fait pour le texte blanc des boutons et des cases.",
+      "**Do** donner à toute couleur de marque une valeur de FOND et une valeur d'ENCRE distinctes avant de l'utiliser en texte (Règle du Fond et de l'Encre).",
+      "**Do** enfoncer (`--sunken`) les éléments d'une liste posée sur une carte, plutôt que de leur donner une carte à eux (Règle de la Carte sur Carte).",
+      "**Do** distinguer des états par la FORME du traitement — contour, aplat vif, aplat sourd — et non par trois nuances d'une même forme (Règle des Trois Traitements).",
+      "**Do** étiqueter tout texte sous 0,75rem par un `title`, un `aria-label` ou un texte `sr-only`.",
+      "**Do** figer les deux axes de toute vue tabulaire dense.",
+      "**Do** thémer les bordures par `--pico-card-border-color` plutôt que de coder une couleur — **sauf quand la bordure porte du sens.** Pico redéfinit ce jeton en *couleur de carte* sous thème sombre (`pico.css:448` et `583`) : une bordure décorative y disparaît sans dommage, mais une bordure structurelle disparaît aussi. C'est ce qui a effacé le quadrillage de la grille, qui a désormais son propre jeton `--grid-line`.",
+      "**Do** réutiliser les valeurs d'espacement déjà présentes (4, 6, 10, 14, 16, 18px) au lieu d'en introduire de nouvelles.",
+      "**Do** traiter les trois thèmes comme égaux : une nouveauté doit être vérifiée en clair, en sombre et en rose."
     ],
     "donts": [
-      "Don't obliger à naviguer pour savoir s'il reste un terrain. La réponse est visible, ou le design a échoué. C'est l'anti-référence ResaMania, et c'est la raison d'être du produit.",
-      "Don't utiliser l'ombre pour signifier une importance : le relief est ambiant ici, pas sémantique.",
-      "Don't ajouter un effet de profondeur qui coûte du JavaScript, un flou animé ou un recalcul par image (Règle du Coût Nul).",
-      "Don't charger une police web. La typographie est celle du système, dans tout le produit.",
-      "Don't confondre densité et opacité : une abréviation non étiquetée n'est pas de la densité, c'est une devinette.",
-      "Don't repeindre un champ en rouge à l'erreur ; le message porte la couleur, pas le champ.",
-      "Don't coder une couleur de bordure en dur : elle cassera l'un des trois thèmes."
+      "**Don't** obliger à naviguer pour savoir s'il reste un terrain. La réponse est visible, ou le design a échoué. C'est l'anti-référence ResaMania, et c'est la raison d'être du produit.",
+      "**Don't** utiliser l'ombre pour signifier une importance : le relief est ambiant ici, pas sémantique.",
+      "**Don't** ajouter un effet de profondeur qui coûte du JavaScript, un flou animé ou un recalcul par image (Règle du Coût Nul).",
+      "**Don't** charger une police web. La typographie est celle du système, dans tout le produit.",
+      "**Don't** confondre densité et opacité : une abréviation non étiquetée n'est pas de la densité, c'est une devinette.",
+      "**Don't** repeindre un champ en rouge à l'erreur ; le message porte la couleur, pas le champ.",
+      "**Don't** coder une couleur de bordure en dur : elle cassera l'un des trois thèmes.",
+      "**Don't** griser par `opacity` un élément qui porte du texte : l'opacité composite le texte et son fond, et effondre un contraste par ailleurs conforme. Utiliser une paire de couleurs dédiée, calculée par thème.",
+      "**Don't** peindre un ÉTAT avec l'aplat vert. Un onglet ou un filtre sélectionné se marque par le poids et un trait, jamais par le vert plein qui appartient à l'action.",
+      "**Don't** peindre une ligne entière pour un état qui n'a rien d'urgent à dire. Seul « en cours » le mérite ; un accent plein sur un état inactif est du bruit."
     ]
   }
 }

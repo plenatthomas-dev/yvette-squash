@@ -25,6 +25,15 @@ colors:
   bandeau-info: "#2563eb"
   bandeau-avertissement: "#ea580c"
   bandeau-incident: "#dc2626"
+  sunken-clair: "#f4f6f9"
+  sunken-sombre: "#12161d"
+  sunken-rose: "#ffd5ea"
+  live-wash-clair: "#fff8e6"
+  live-wash-sombre: "#2a2314"
+  live-wash-rose: "#ffe8cf"
+  live-edge-clair: "#f0b429"
+  live-edge-sombre: "#8a6a1f"
+  live-edge-rose: "#d98a2b"
 typography:
   display:
     fontFamily: "system-ui, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif"
@@ -195,6 +204,23 @@ Les états de créneau, qui ne sont ni des accents ni des neutres mais un vocabu
 - **Filet de Grille** (`--grid-line`) : la couleur du quadrillage de la grille de planning, et
   d'elle seule. Décliné par thème — `#9aa2ae` clair, `#434b58` sombre, `#c98aa8` rose. Voir la
   Règle du Filet Partagé ci-dessous : ce jeton ne vise délibérément pas 3:1.
+- **Creux** (`--sunken`) : la surface d'une vignette posée sur une carte. Elle s'ENFONCE sous la
+  carte au lieu de flotter au-dessus — `#f4f6f9` clair, `#12161d` sombre, `#ffd5ea` rose. En
+  sombre elle se place ENTRE la page et la carte, la carte y étant la plus claire des trois.
+  Mesuré : texte 15,75:1 (clair) · 14,09:1 (sombre) · 12,96:1 (rose) ; secondaire ≥ 4,95:1
+  partout. Voir la Règle de la Carte sur Carte ci-dessous.
+
+### Voile d'état
+
+Une seule famille de couleurs peint un ÉTAT au niveau d'une ligne entière, et c'est délibéré :
+« en cours » est le seul état qui demande qu'on regarde MAINTENANT. « À venir » et « terminée »
+n'ont rien d'urgent à dire et se lisent à leur pastille.
+
+- **Voile En Cours** (`--live-wash`) et **Bord En Cours** (`--live-edge`) : `#fff8e6`/`#f0b429`
+  clair, `#2a2314`/`#8a6a1f` sombre, `#ffe8cf`/`#d98a2b` rose. Le voile est de la même famille
+  ambre que la pastille « en cours », assez pâle pour rester un fond : texte 16,09:1 (clair) ·
+  12,10:1 (sombre) · 14,37:1 (rose). En thème rose il garde sa teinte ambre — c'est précisément
+  son écart avec le rose ambiant qui le rend repérable.
 
 ### Couleurs volontairement hors thème
 
@@ -359,6 +385,13 @@ s'exprime surtout par la clarté relative des surfaces.
 effet de profondeur qui demanderait du JavaScript, un filtre de flou animé ou un recalcul par
 image est refusé — les téléphones du club ne sont pas des machines de développement.
 
+**La Règle de la Carte sur Carte.** Une liste d'éléments posée sur une carte ne se sépare pas
+en donnant une carte à chaque élément : deux surfaces de même valeur, si bien ombrées soient-
+elles, ne se distinguent pas l'une de l'autre. L'élément s'ENFONCE (`--sunken`) au lieu de
+flotter. C'est le corollaire de la Règle du Fond Toujours Plus Sombre appliqué vers l'intérieur,
+et il vaut dans les trois thèmes — en sombre, « s'enfoncer » veut dire aller vers la page, donc
+vers le plus foncé, alors que la carte y est la plus claire des trois surfaces.
+
 ## Shapes
 
 Langage de formes doux et régulier, sans angle vif ni découpe. Cinq rayons portent
@@ -390,6 +423,37 @@ dessine le quadrillage.
 - **Hover / Focus :** transition courte ; focus visible par un contour net, jamais par une
   simple lueur.
 - **Secondary :** variante `secondary` de Pico, retéclée seulement dans le thème rose.
+
+### Onglets de filtre
+
+- **Style :** texte seul sur fond nu, séparés du contenu par un filet de 1px. L'onglet actif se
+  marque au **poids** (700 contre 500) et à un **trait** de 2px sous lui, posé en `box-shadow`
+  interne plutôt qu'en `border-bottom` pour ne pas décaler la ligne de base entre l'actif et les
+  autres.
+- **Couleur :** jamais d'aplat. Le trait reprend `--pico-contrast`, l'encre du thème — voir la
+  Règle du Vert Actionnable : un filtre sélectionné est un ÉTAT, et le vert appartient à
+  l'action.
+- **Débordement :** la barre défile horizontalement (`overflow-x: auto`, ascenseur masqué) : le
+  nombre d'équipes n'est pas borné, et une barre d'onglets ne doit jamais passer à la ligne.
+- **Accessibilité :** `role="tablist"` complet — flèches gauche/droite, Home/End, `tabIndex`
+  roulant (un seul onglet dans l'ordre de tabulation), `aria-controls` vers le panneau.
+
+### Pastilles d'état
+
+Le vocabulaire des états d'une rencontre ou d'un match. **Trois états, trois traitements
+franchement différents** — c'est la propriété qui compte, et elle se vérifie sur une capture en
+niveaux de gris.
+
+- **À venir / à saisir :** contour seul, fond transparent, encre sourdine. Rien n'a commencé.
+- **En cours :** ambre plein (`#fcd34d` sur `#78350f`, 6,29:1), la paire hors thème déjà
+  documentée plus haut. Seul état à peindre aussi la ligne entière (voile `--live-wash`).
+- **Terminée :** gris plein, la paire `passe`/`passe-encre` — celle du créneau écoulé, dont
+  c'est exactement le sens. Sans bordure, pour se distinguer du contour de « à venir ».
+
+**La Règle des Trois Traitements.** Deux états qui partagent le même traitement visuel ne sont
+pas deux états. « À venir » et « terminée » ont longtemps porté la même pastille sourdine : la
+liste n'en distinguait donc que deux sur trois, et le seul moyen de savoir était de lire.
+Contour, aplat vif, aplat sourd : trois formes, pas trois nuances d'une même forme.
 
 ### Chips
 
@@ -448,6 +512,10 @@ Le cœur du produit, et le seul composant qui justifie son propre vocabulaire.
   fait pour le texte blanc des boutons et des cases.
 - **Do** donner à toute couleur de marque une valeur de FOND et une valeur d'ENCRE distinctes
   avant de l'utiliser en texte (Règle du Fond et de l'Encre).
+- **Do** enfoncer (`--sunken`) les éléments d'une liste posée sur une carte, plutôt que de leur
+  donner une carte à eux (Règle de la Carte sur Carte).
+- **Do** distinguer des états par la FORME du traitement — contour, aplat vif, aplat sourd — et
+  non par trois nuances d'une même forme (Règle des Trois Traitements).
 - **Do** étiqueter tout texte sous 0,75rem par un `title`, un `aria-label` ou un texte
   `sr-only`.
 - **Do** figer les deux axes de toute vue tabulaire dense.
@@ -479,3 +547,5 @@ Le cœur du produit, et le seul composant qui justifie son propre vocabulaire.
   dédiée, calculée par thème.
 - **Don't** peindre un ÉTAT avec l'aplat vert. Un onglet ou un filtre sélectionné se marque
   par le poids et un trait, jamais par le vert plein qui appartient à l'action.
+- **Don't** peindre une ligne entière pour un état qui n'a rien d'urgent à dire. Seul « en
+  cours » le mérite ; un accent plein sur un état inactif est du bruit.
