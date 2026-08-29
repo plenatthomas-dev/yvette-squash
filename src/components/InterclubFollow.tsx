@@ -65,14 +65,32 @@ export default function InterclubFollow({
   }, [loadFollows]);
 
   async function setFollow(teamId: string, level: FollowLevel | null) {
+    // Le refus constaté À L'INSTANT, et non `block`, qui date du rendu courant : `setDenied`
+    // ci-dessous ne sera visible que du rendu SUIVANT, et l'interaction qui découvre le refus
+    // annonçait donc « Abonnement enregistré » sans la réserve qu'elle venait pourtant d'établir.
+    let blockedNow = block !== null;
     // S'abonner sans avoir autorisé les notifications ne produirait rien : on demande la
     // permission au moment où le geste a du sens, pas au chargement de la page.
     if (level && pushSupported() && pushEnabledOnServer()) {
-      const ok = await ensurePushSubscribed();
+      // ⚠️ `ensurePushSubscribed` PEUT JETER, et son échec ne doit pas emporter l'écriture.
+      //
+      // `serviceWorker.register`, `pushManager.subscribe` (`InvalidStateError` sur un
+      // abonnement déjà posé avec une autre clé VAPID, refus du système) et le `fetch` qu'elle
+      // termine rejettent tous les trois. Appelée hors du `try`, elle sortait alors de cette
+      // fonction par une promesse rejetée : le PUT ne partait jamais, aucun toast ne
+      // s'affichait, aucun état ne changeait — donc aucun rendu, et le `<select>` gardait
+      // visuellement le niveau choisi. C'est MOT POUR MOT l'abonnement fantôme que l'en-tête
+      // de ce fichier dit avoir corrigé, reproduit par l'autre bout.
+      //
+      // Une exception n'est ici qu'une façon de plus de ne pas être abonné : on la traite
+      // comme un `false`, et l'écriture serveur suit son cours — la ligne d'abonnement vaut
+      // d'être posée, elle servira dès que l'obstacle sera levé.
+      const ok = await ensurePushSubscribed().catch(() => false);
       setDenied(!ok);
-      if (!ok) {
-        toast("info", "Notifications refusées par le navigateur — l'abonnement reste sans effet.");
-      }
+      // Un seul toast par geste : le refus se dit dans le message de fin, qui porte déjà la
+      // réserve, et l'encart persistant sous la liste (`block`) le rappelle ensuite tant qu'il
+      // dure. Deux toasts coup sur coup pour un même fait n'apprenaient rien de plus.
+      if (!ok) blockedNow = true;
     }
     try {
       const res = await fetch("/api/interclub/follows", {
@@ -90,7 +108,7 @@ export default function InterclubFollow({
       // est bien stocké dans les deux cas — il servira dès que l'obstacle sera levé — mais le
       // dire sans réserve laissait attendre des notifications qui ne viendraient jamais.
       if (!level) toast("ok", "Abonnement retiré");
-      else if (block) toast("info", "Abonnement enregistré, mais les notifications ne peuvent pas encore arriver.");
+      else if (blockedNow) toast("info", "Abonnement enregistré, mais les notifications ne peuvent pas encore arriver.");
       else toast("ok", "Abonnement enregistré");
     } catch (e) {
       toast("err", (e as Error).message);
