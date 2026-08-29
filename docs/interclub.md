@@ -40,7 +40,7 @@ Les seules restrictions protègent quelqu'un d'un **écrasement**, jamais d'un a
 | Un match **tenu** par un marqueur non périmé ne s'écrit pas par-dessus lui | `POST …/claim`, `PUT …/live`, `PATCH …/matches/{mid}` | Deux scores divergents qu'on ne saurait départager |
 | Un match **terminé** ne se réécrit pas par un TIERS via le direct — le marqueur en titre, lui, le peut (il doit pouvoir annuler le point décisif) | `PUT …/live` | Qu'un passant inverse un score final |
 | **Supprimer** une rencontre : créateur et admins | `DELETE …/{id}` | L'irréversible |
-| `knownGameCount` : l'écriture doit se fonder sur le même nombre de jeux que la base | `PATCH …/matches/{mid}`, `PUT …/live` | Un écran ouvert dix minutes plus tôt qui efface ce qui a été joué |
+| `knownGameCount` : l'écriture doit se fonder sur le même ÉTAT que la base — même nombre de jeux **et mêmes scores** | `PATCH …/matches/{mid}`, `PUT …/live` (règle unique, `staleGamesReason`) | Un écran ouvert dix minutes plus tôt qui efface ce qui a été joué, ou qui rejoue un score corrigé depuis |
 
 Deux choses échappent toutefois au membre, et sont réservées à l'**admin** :
 
@@ -104,6 +104,16 @@ jamais un delta : les écritures sont donc idempotentes, ce qui dispense d'une f
 ordonnée à la reprise après coupure. Le seul envoi hors de cette file est celui du score final,
 au « Terminer », et le journal local n'est purgé **qu'après** un envoi confirmé.
 
+**Qui engage ?** Le marquage s'ouvre sur cette question — quel joueur, et de quel carré. Le
+premier service se tire au sort sur le terrain : ni l'appli ni le serveur ne peuvent le
+connaître, et le supposer se trompe une fois sur deux. Les deux cases de points restent
+**inertes** tant qu'on n'a pas répondu, parce que le moteur ignore un point sans serveur — des
+cases actives absorberaient les appuis en silence, sur un écran qu'on utilise sans le regarder.
+Aux jeux suivants, seul le **carré** est redemandé : le règlement désigne le serveur (le
+vainqueur du jeu précédent) mais lui laisse le côté. Un match repris dont des jeux sont déjà
+enregistrés ne repose pas la question — leur serveur n'a plus d'importance, et le déroulé que
+`seedEvents` reconstitue est assumé comme inventé.
+
 **A posteriori** — `MatchEditor` → `PATCH …/matches/{mid}`. Jeu par jeu, pour les soirs où
 personne n'a marqué, et pour corriger. `games` remplace **intégralement** la liste (une double
 soumission ne crée pas deux fois le même jeu), d'où la garde `knownGameCount`.
@@ -134,6 +144,13 @@ Prendre le marquage ne déclare **pas** la rencontre commencée : c'est le premi
 fait basculer en direct. Écrire `status: "live"` à la prise avait deux effets fâcheux — la
 notification de début n'était plus jamais émise (la transition n'existait plus), et un membre
 qui touchait « Marquer » par erreur laissait la rencontre « En cours » à vie.
+
+⚠️ Et « le premier point » se prend au pied de la lettre : un instantané à **0-0 sans aucun jeu**
+ne fait pas basculer le simple. C'est la désignation du serveur, envoyée pendant l'échauffement,
+et le serveur l'acceptait jadis comme un début — ce qui ramenait les deux effets ci-dessus par la
+porte de derrière, en consommant DÉFINITIVEMENT `startNotifiedAt` (le vrai début ne notifiait donc
+plus jamais). Le score de l'instantané est stocké dans les deux cas : le serveur désigné ne se
+perd pas, seul le statut attend le premier point.
 
 ---
 
@@ -226,7 +243,11 @@ score enregistré).
   WSF du 1ᵉʳ septembre 2025, qui alignent l'amateur sur la PSA).
 
 **Côté base**
-- `src/lib/interclub-db.ts` — sérialisation, score de rencontre, statut déduit, péremption de la prise
+- `src/lib/interclub-db.ts` — sérialisation, score de rencontre, statut déduit, péremption de la
+  prise, et `staleGamesReason` : la **garde de fraîcheur des jeux, écrite une seule fois** et
+  appliquée par les deux routes d'écriture. Elle a vécu en double, et les deux copies avaient
+  divergé — le `PATCH` n'appliquait qu'une moitié de ce que ce document décrivait. Deux
+  exemplaires d'une règle finissent toujours par ne plus dire la même chose.
 - `src/lib/interclub-roster.ts` — **qui peut être aligné** (`teamRoster`, `resolveHomePick`, `findAlignmentClash`)
 - `src/lib/interclub-gate.ts` — le **cache** du direct
 - `src/lib/interclub-access.ts` — le **contrôle d'accès** (flag + session)
@@ -249,6 +270,18 @@ score enregistré).
 **Composants** — `Interclub.tsx` (orchestration), `InterclubScorer.tsx` (marquage),
 `InterclubLive.tsx` (bandeau direct), `InterclubFollow.tsx` (abonnement).
 
+**Tests de composant** — `vitest.config.ts` définit DEUX projets : `node` pour les tests de
+modules (la grande majorité, aucun DOM à toucher) et `dom` pour les fichiers `*.dom.test.tsx`,
+sous jsdom. Les faire tourner tous sous jsdom coûterait un document complet par fichier pour
+rien ; `vitest run --project node` rend la boucle rapide.
+
+Ces tests-là mesurent des **requêtes** et des **corps JSON**, pas des pixels : c'est l'unité dans
+laquelle les promesses de cette page sont écrites. Ils couvrent la borne des 5 s du marqueur,
+l'absence d'intervalle les jours sans rencontre, la file d'envoi du marqueur, le doute sur
+l'accusé de réception, la question « qui engage ? », et l'abonnement qui survit à un échec de
+permission. Chacun a été vérifié en réintroduisant le défaut qu'il interdit — un test qui passe
+aussi bien avec que sans le correctif ne mesure rien.
+
 ---
 
 ## Ce qui reste ouvert
@@ -258,9 +291,13 @@ score enregistré).
 - **Note de confidentialité (RGPD)** : l'interclub crée de la donnée nominative (qui joue,
   contre qui, quel score) et une nouvelle finalité de notification. À documenter dans
   `PrivacyNotice` **avant** d'activer le flag en prod, comme cela a été fait pour l'annuaire.
-- **Aucun test de composant** — c'est la convention du dépôt (il n'existe aucun `.test.tsx`),
-  mais cela veut dire que le marqueur, l'écran le plus délicat, n'est couvert que par les tests
-  du moteur qu'il pilote.
+- **Deux soupçons non tranchés, mis sous test plutôt que corrigés** (cf. `http-tx.test.ts`) :
+  `serializableTransaction` ne rejoue que `P2034`, donc ni `P2002` — la violation d'unicité qu'un
+  `delete`-puis-`insert` concurrent peut produire à la place — ni `P2028` ; et la transaction ne
+  pose ni `timeout` ni `maxWait`, alors que le `PATCH` enchaîne jusqu'à huit allers-retours et
+  qu'un cold start Neon est « visible à l'œil nu ». Les tests épinglent le comportement actuel :
+  ils rendent la question vérifiable, ils n'y répondent pas. Trancher le premier demande deux
+  transactions concurrentes sur une vraie base.
 - **`Interclub.tsx` fait ~980 lignes** et concentre quatre écrans. Découpage à envisager si un
   cinquième s'ajoute.
 - **Pas de vue « saison »** : ni classement, ni historique par équipe. Volontaire pour un
