@@ -14,18 +14,50 @@ const h = vi.hoisted(() => ({
   cacheEnPanne: false,
   tagsInvalides: [] as string[],
   revalidateJette: false,
+  /** Le contenu du faux Data Cache : clé → valeur, tags, seconde d'expiration. */
+  entrees: new Map<string, { valeur: unknown; tags: string[]; expire: number }>(),
+  /** Horloge du faux cache, en SECONDES. Seul le TTL la lit. */
+  maintenant: 0,
 }));
 
+// UN FAUX CACHE QUI CACHE VRAIMENT.
+//
+// Le mock précédent remplaçait `unstable_cache` par un passe-plat : il ignorait `keyParts`,
+// `tags` et `revalidate`. Aucun test n'observait donc un hit, ni le tag posé sur l'entrée, ni
+// le TTL — et surtout, SUPPRIMER `liveCached` pour appeler `readLive()` directement n'aurait
+// fait échouer aucun test du fichier, « relit la base quand le cache est indisponible »
+// compris, qui comptait une lecture dans les deux cas.
+//
+// Or c'est cette pièce-là qui porte tout le modèle de coût du direct : « la requête lourde est
+// mutualisée entre tous les spectateurs », donc bornée par la cadence du marqueur et non par
+// l'audience. Une promesse de facture, vérifiée par rien.
+//
+// Celui-ci mémorise par clé, purge sur le tag, et expire. Il reste minuscule — ce n'est pas le
+// Data Cache de Next qu'on teste, c'est l'usage que ce module en fait.
 vi.mock("next/cache", () => ({
   unstable_cache:
-    (fn: () => Promise<unknown>) =>
+    (
+      fn: () => Promise<unknown>,
+      keyParts?: string[],
+      opts?: { tags?: string[]; revalidate?: number },
+    ) =>
     async () => {
       if (h.cacheEnPanne) throw new Error("Data Cache indisponible");
-      return fn();
+      const cle = (keyParts ?? []).join("|");
+      const e = h.entrees.get(cle);
+      if (e && h.maintenant < e.expire) return e.valeur;
+      const valeur = await fn();
+      h.entrees.set(cle, {
+        valeur,
+        tags: opts?.tags ?? [],
+        expire: h.maintenant + (opts?.revalidate ?? Number.POSITIVE_INFINITY),
+      });
+      return valeur;
     },
   revalidateTag: vi.fn((tag: string) => {
     if (h.revalidateJette) throw new Error("hors contexte de requête");
     h.tagsInvalides.push(tag);
+    for (const [cle, e] of h.entrees) if (e.tags.includes(tag)) h.entrees.delete(cle);
   }),
 }));
 
@@ -84,6 +116,8 @@ beforeEach(() => {
   h.cacheEnPanne = false;
   h.tagsInvalides = [];
   h.revalidateJette = false;
+  h.entrees.clear();
+  h.maintenant = 0;
 });
 
 describe("todayISO", () => {
@@ -172,6 +206,60 @@ describe("getLiveFixtures — panne de cache", () => {
     expect(fixtures).toHaveLength(1);
     expect(h.lecturesDb).toBe(1); // dégradé en coût…
     expect(fixtures[0].opponent).toBe("Massy"); // …jamais en exactitude
+  });
+});
+
+// Ce que promet l'en-tête du module, en toutes lettres : « la requête de rencontres — la plus
+// lourde, avec ses jointures sur les matchs et les jeux — est bornée par la CADENCE DU MARQUEUR
+// et non par le nombre de spectateurs ». C'est une promesse de facture, et elle se mesure.
+describe("getLiveFixtures — le Data Cache, qui porte tout le modèle de coût", () => {
+  it("mutualise la requête lourde : dix spectateurs, UNE lecture de base", async () => {
+    h.rows = [rencontre()];
+    for (let i = 0; i < 10; i++) await getLiveFixtures();
+    expect(h.lecturesDb).toBe(1);
+  });
+
+  it("pose le tag du direct sur l'entrée, et une écriture du marqueur la purge", async () => {
+    h.rows = [rencontre()];
+    await getLiveFixtures();
+    await getLiveFixtures();
+    expect(h.lecturesDb).toBe(1);
+
+    // Un point marqué : le marqueur invalide le tag…
+    interclubChanged();
+    expect(h.tagsInvalides).toEqual(["interclub-live"]);
+
+    // …et le spectateur suivant retouche la base. Sans le tag sur l'entrée, il aurait servi
+    // un score périmé jusqu'à l'expiration.
+    await getLiveFixtures();
+    expect(h.lecturesDb).toBe(2);
+  });
+
+  it("sert la donnée FRAÎCHE après une invalidation, pas l'ancienne", async () => {
+    h.rows = [rencontre({ opponent: "Massy" })];
+    expect((await getLiveFixtures())[0].opponent).toBe("Massy");
+
+    h.rows = [rencontre({ opponent: "Orsay" })];
+    // Tant que rien n'invalide, le cache fait son travail — y compris en cachant le changement.
+    expect((await getLiveFixtures())[0].opponent).toBe("Massy");
+
+    interclubChanged();
+    expect((await getLiveFixtures())[0].opponent).toBe("Orsay");
+  });
+
+  it("expire au bout de 30 s, filet d'une invalidation manquée", async () => {
+    h.rows = [rencontre()];
+    await getLiveFixtures();
+
+    // 29 s plus tard, toujours le cache : entre deux matchs, on ne relit pas Postgres.
+    h.maintenant = 29;
+    await getLiveFixtures();
+    expect(h.lecturesDb).toBe(1);
+
+    // Au-delà, on relit — une invalidation manquée ne fige donc l'affichage que le temps du TTL.
+    h.maintenant = 31;
+    await getLiveFixtures();
+    expect(h.lecturesDb).toBe(2);
   });
 });
 
