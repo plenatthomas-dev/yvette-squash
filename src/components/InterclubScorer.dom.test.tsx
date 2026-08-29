@@ -174,3 +174,77 @@ describe("InterclubScorer — on n'affirme que ce qu'on a entendu", () => {
     expect(localStorage.getItem(ACK_KEY)).toBe("1");
   });
 });
+
+// LE CONTRE-TEST, ET C'EST LE PLUS IMPORTANT DU FICHIER.
+//
+// Les deux blocs ci-dessus vérifient que le journal n'est PAS purgé quand le conflit est avec
+// soi-même. Pris seuls, ils décriraient aussi bien un marqueur qui ne purge plus jamais rien.
+//
+// Le correctif affaiblit délibérément la garde — `knownGameCount` devient absent tant que le
+// sort du dernier envoi est inconnu — en comptant sur la règle du RÉTRÉCISSEMENT côté serveur
+// pour prendre le relais : elle refuse toujours une écriture qui retire des jeux sans dire sur
+// quel état elle se fonde. Si ce relais ne fonctionnait pas, la suite ne le dirait pas.
+//
+// On vérifie donc ici l'inverse exact : quand la divergence est RÉELLE — un capitaine a saisi un
+// jeu pendant que le marqueur avait le dos tourné —, le journal doit bien être jeté. C'est la
+// moitié destructrice de la garde, et c'est celle qui protège le score partagé.
+describe("InterclubScorer — quand la divergence est réelle, le journal se jette", () => {
+  function refus(): Response {
+    return {
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "Le score a changé ailleurs", code: "stale-games" }),
+    } as unknown as Response;
+  }
+
+  it("purge le journal et ferme l'écran sur un refus `stale-games`", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => refus()));
+
+    const onClose = vi.fn();
+    const { getByText } = monte(onClose);
+    await souffle();
+    expect(localStorage.getItem(LOG_KEY)).not.toBeNull();
+
+    fireEvent.click(getByText("← Retour"));
+    await souffle();
+
+    // Le journal ne décrit plus rien : on le jette, et l'écran se ferme pour que le parent
+    // recharge la rencontre depuis le serveur — seule version que tout le monde partage.
+    expect(localStorage.getItem(LOG_KEY)).toBeNull();
+    expect(localStorage.getItem(ACK_KEY)).toBeNull();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("le fait AUSSI pendant le doute, la règle du rétrécissement ayant pris le relais", async () => {
+    // Premier envoi : la réponse se perd → l'accusé passe au doute, et les envois suivants
+    // n'annoncent plus de compte. C'est là que la garde repose entièrement sur le serveur.
+    let coupe = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+        envois.push({ url: "", corps: JSON.parse(String(init?.body)) });
+        if (coupe) throw new Error("réseau coupé");
+        return refus();
+      }),
+    );
+
+    const onClose = vi.fn();
+    const { getByText } = monte(onClose);
+    await souffle();
+
+    fireEvent.click(getByText("← Retour"));
+    await souffle();
+    expect(localStorage.getItem(ACK_KEY)).toBe("?");
+    expect(localStorage.getItem(LOG_KEY)).not.toBeNull();
+
+    // Second envoi, sans compte annoncé — et le serveur refuse quand même, parce que le journal
+    // retirerait des jeux qu'il a. Le marqueur doit obéir à ce refus-là comme à l'autre.
+    coupe = false;
+    fireEvent.click(getByText("← Retour"));
+    await souffle();
+
+    expect("knownGameCount" in envois[1].corps).toBe(false);
+    expect(localStorage.getItem(LOG_KEY)).toBeNull();
+    expect(onClose).toHaveBeenCalled();
+  });
+});
