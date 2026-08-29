@@ -13,7 +13,9 @@ export const dynamic = "force-dynamic";
 // par le service de push du navigateur, service worker, affichage par le système — et un
 // envoi collectif ne dit pas lequel a lâché. Ici on vise UN membre, le sien, et la réponse
 // distingue « aucun appareil enregistré » de « envoyé mais rien ne s'affiche » : le premier
-// cas est un abonnement manquant, le second un réglage du téléphone.
+// cas est un abonnement manquant, le second un réglage SYSTÈME de l'appareil — Windows, macOS
+// et Android coupent les notifications par application, indépendamment du navigateur, qui
+// continue alors de les créer sans rien afficher ni rien signaler.
 //
 // Ne peut viser personne d'autre : `session.userId`, jamais un identifiant reçu du client.
 export async function POST(req: NextRequest) {

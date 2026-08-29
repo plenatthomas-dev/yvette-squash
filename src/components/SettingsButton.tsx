@@ -1100,9 +1100,23 @@ export function SettingsButton({
                           else if ((d.sent ?? 0) === 0)
                             toast("err", "Le service de notifications a refusé l'envoi.");
                           else
+                            // Ce message est la MOITIÉ UTILE du diagnostic : arrivé ici, la
+                            // notification est partie et le service de push l'a acceptée. Tout
+                            // ce qui peut encore la retenir est hors de l'appli. Il disait
+                            // « les réglages du téléphone » — sur l'ordinateur d'où l'on teste
+                            // le plus souvent, il envoyait donc chercher au mauvais endroit,
+                            // exactement quand il fallait aller au bon (Windows coupe les
+                            // notifications d'une application entière depuis sa propre
+                            // bannière, d'un clic, et Chrome s'y retrouve désactivé sans que
+                            // rien dans le navigateur ne le dise).
+                            //
+                            // On nomme donc les DEUX porteurs possibles : le navigateur, et
+                            // l'appli installée — sur iPhone comme sur Android, une PWA posée
+                            // sur l'écran d'accueil a sa propre ligne dans les réglages, sous
+                            // son nom à elle et non sous celui du navigateur.
                             toast(
                               "info",
-                              `Envoyée à ${d.sent} appareil${(d.sent ?? 0) > 1 ? "s" : ""}. Rien ne s'affiche ? Regarde les réglages de notification du téléphone.`,
+                              `Envoyée à ${d.sent} appareil${(d.sent ?? 0) > 1 ? "s" : ""}. Rien ne s'affiche ? C'est l'appareil qui bloque : dans ses réglages système, autorise les notifications du navigateur — ou de l'appli, si tu l'as installée.`,
                             );
                         } catch {
                           toast("err", "Envoi impossible.");
