@@ -81,10 +81,37 @@ export function clearLog(matchId: string) {
  * doit rester légal. Ce que ce nombre affirme, c'est « voilà l'état du serveur sur lequel mon
  * journal est bâti » ; s'il ne s'y retrouve plus, c'est que quelqu'un d'autre a écrit.
  */
-function loadAck(matchId: string): number | null {
+/**
+ * Base de la concurrence optimiste, telle qu'on la connaît vraiment : un nombre CONFIRMÉ par le
+ * serveur, ou `"unsure"` — « j'ai écrit, je n'ai pas entendu la réponse ».
+ *
+ * Ce troisième état n'est pas un raffinement, il ferme une perte de données. Un envoi qui part,
+ * que le serveur COMMIT, et dont la réponse se perd en route — le sous-sol du club, précisément
+ * le cas que ce fichier revendique de savoir traiter — laissait le marqueur affirmer au coup
+ * suivant un compte que la base avait déjà dépassé de un. Le serveur refusait alors en
+ * `stale-games`, et la réaction à ce refus est la plus destructrice de tout le fichier :
+ * `clearLog`. Les points du jeu en cours, qui n'existaient que là, disparaissaient — au nom
+ * d'un conflit avec soi-même.
+ *
+ * On ne peut pas affirmer ce qu'on n'a pas entendu. Dans le doute on n'annonce rien : le champ
+ * devient absent, et le serveur applique alors sa propre règle — il laisse CROÎTRE une liste
+ * sans base annoncée (le chemin du marqueur, qui ne détruit rien) et refuse toujours d'en
+ * RETIRER (cf. l'en-tête de `PUT …/live`). La garde ne s'affaiblit donc que là où elle ne
+ * protégeait rien.
+ */
+type Ack = number | "unsure";
+
+/** Marque écrite à la place du compte quand le sort d'un envoi est inconnu. */
+const ACK_UNSURE = "?";
+
+function loadAck(matchId: string): Ack | null {
   try {
     const raw = localStorage.getItem(ACK_PREFIX + matchId);
     if (raw === null) return null;
+    // Le doute SURVIT au rechargement : sans cela, refermer puis rouvrir l'appli après une
+    // réponse perdue rejouait la perte à l'identique, le journal ayant survécu et le compte
+    // enregistré étant resté au dernier succès.
+    if (raw === ACK_UNSURE) return "unsure";
     const n = Number(raw);
     return Number.isInteger(n) && n >= 0 ? n : null;
   } catch {
@@ -92,9 +119,9 @@ function loadAck(matchId: string): number | null {
   }
 }
 
-function saveAck(matchId: string, count: number) {
+function saveAck(matchId: string, ack: Ack) {
   try {
-    localStorage.setItem(ACK_PREFIX + matchId, String(count));
+    localStorage.setItem(ACK_PREFIX + matchId, ack === "unsure" ? ACK_UNSURE : String(ack));
   } catch {
     // Même parti pris que `saveLog` : le stockage refusé ne doit pas empêcher de compter.
   }
@@ -154,7 +181,7 @@ export default function InterclubScorer({
   // repartait des jeux connus du serveur : les points du jeu en cours étaient effacés, alors
   // que `saveLog` promet précisément de « continuer en mémoire ».
   const seededFor = useRef<string | null>(null);
-  const ackRef = useRef<number | null>(null);
+  const ackRef = useRef<Ack | null>(null);
   useEffect(() => {
     if (seededFor.current === match.id) return;
     seededFor.current = match.id;
@@ -181,9 +208,18 @@ export default function InterclubScorer({
   const lastSentRef = useRef(0);
   const timerRef = useRef<number | null>(null);
   const pendingRef = useRef<ScoreEvent[] | null>(null);
+  /** Envoi en cours, s'il y en a un : deux envois ne se croisent jamais (cf. `push`). */
+  const inFlightRef = useRef<Promise<void> | null>(null);
+  /** Le marquage est clos — journal périmé, session expirée. Plus rien ne doit partir. */
+  const deadRef = useRef(false);
 
-  const push = useCallback(
+  const sendNow = useCallback(
     async (evts: ScoreEvent[]): Promise<PushOutcome> => {
+      // Un envoi mis en file DERRIÈRE celui qui vient de clore le marquage n'a plus lieu
+      // d'être : le journal a été purgé, ou la session a expiré. Le laisser partir renverrait
+      // au serveur un état qu'on vient précisément de déclarer mort — et, `knownGameCount`
+      // ayant été remis à zéro par la purge, sans même la garde qui l'aurait refusé.
+      if (deadRef.current) return "stale";
       const st = replay(evts, bestOf);
       // Horodaté AVANT la requête, et non après un succès.
       //
@@ -205,9 +241,13 @@ export default function InterclubScorer({
           body: JSON.stringify({
             games: st.games,
             // L'état du serveur sur lequel ce journal est bâti (cf. `loadAck`). `undefined`
-            // disparaît de la sérialisation, et le serveur retombe alors sur l'ancien
-            // comportement — le champ est facultatif de son côté.
-            knownGameCount: ackRef.current ?? undefined,
+            // disparaît de la sérialisation, et le serveur retombe alors sur sa propre règle —
+            // le champ est facultatif de son côté pour une écriture qui ne retire rien.
+            //
+            // On n'annonce QUE ce qui a été confirmé : `"unsure"` — un envoi dont la réponse
+            // s'est perdue — ne s'annonce pas, sous peine de se déclarer en conflit avec sa
+            // propre écriture et d'y perdre le journal.
+            knownGameCount: typeof ackRef.current === "number" ? ackRef.current : undefined,
             live: st.status === "done" ? null : {
               current: st.current,
               serving: st.serving,
@@ -216,7 +256,10 @@ export default function InterclubScorer({
             },
           }),
         });
-        if (onExpired(res.status)) return "expired";
+        if (onExpired(res.status)) {
+          deadRef.current = true;
+          return "expired";
+        }
         if (res.status === 409) {
           setOffline(false);
           // Deux refus partagent ce statut, et ils demandent l'inverse l'un de l'autre : d'où
@@ -232,6 +275,7 @@ export default function InterclubScorer({
             // score enregistré, seule version que tout le monde partage.
             clearLog(match.id);
             ackRef.current = null;
+            deadRef.current = true;
             toast("err", "Le score a changé ailleurs — rouvre le marquage pour repartir du score enregistré.");
             onClose();
             return "stale";
@@ -240,18 +284,61 @@ export default function InterclubScorer({
           return "conflict";
         }
         setOffline(!res.ok);
-        if (!res.ok) return "offline";
+        if (!res.ok) {
+          // Un 5xx est SANS DOUTE une transaction annulée, donc aucune écriture — mais
+          // « sans doute » ne suffit pas : une passerelle qui rend 502 après que le serveur a
+          // commité ressemble exactement à cela. On ne sait pas, donc on ne l'affirmera pas.
+          ackRef.current = "unsure";
+          saveAck(match.id, "unsure");
+          return "offline";
+        }
         // Le serveur a pris ce corps : c'est désormais l'état sur lequel le journal est bâti.
         ackRef.current = st.games.length;
         saveAck(match.id, st.games.length);
         return "ok";
       } catch {
         // Hors-ligne : on garde la main, la prochaine tentative renverra l'état COMPLET.
+        //
+        // Et l'on note qu'on NE SAIT PAS si celle-ci a abouti : `fetch` jette aussi bien avant
+        // d'atteindre le serveur qu'après qu'il a commité, la réponse s'étant perdue au retour.
+        // Rien ne distingue les deux ici, et c'est tout le propos de `"unsure"`.
         setOffline(true);
+        ackRef.current = "unsure";
+        saveAck(match.id, "unsure");
         return "offline";
       }
     },
     [fixtureId, match.id, bestOf, onExpired, onClose, toast],
+  );
+
+  /**
+   * DEUX ENVOIS NE SE CROISENT JAMAIS.
+   *
+   * `sendNow` lit `ackRef` au départ de la requête et ne le met à jour qu'au retour. Deux
+   * envois en vol portent donc le MÊME compte, alors que le premier à commiter le périme pour
+   * l'autre — qui se voyait refuser en `stale-games`, purger le journal et fermer l'écran sur
+   * un « le score a changé ailleurs » alors que personne d'autre n'avait rien touché.
+   *
+   * Le cas n'avait rien d'exotique : c'est le geste normal de fin de match. Le jeu décisif se
+   * clôt, `scheduleSync` lâche son envoi, le marqueur tape « Terminer » dans la foulée, et
+   * `finish` en lâche un second — il annulait bien le minuteur, mais pas une requête déjà
+   * partie.
+   *
+   * Mis en file, le second part APRÈS que le premier a rendu son verdict, donc avec le compte
+   * à jour : le serveur l'accepte comme la réécriture idempotente qu'il est.
+   */
+  const push = useCallback(
+    (evts: ScoreEvent[]): Promise<PushOutcome> => {
+      const run = (inFlightRef.current ?? Promise.resolve()).then(() => sendNow(evts));
+      // La file ne retient JAMAIS une erreur : `sendNow` rend toujours une issue plutôt que de
+      // jeter, et ce maillon ne doit de toute façon pas empêcher le suivant de partir.
+      inFlightRef.current = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
+    },
+    [sendNow],
   );
 
   const scheduleSync = useCallback(
