@@ -40,8 +40,25 @@ function ensureConfigured(): boolean {
   return true;
 }
 
+/**
+ * Le serveur a-t-il RÉELLEMENT de quoi envoyer une notification ?
+ *
+ * C'est ce que `GET /api/interclub/follows` publie sous `pushReady`, en se présentant comme
+ * « la SEULE source fiable sur ce point ». Elle ne testait que la PRÉSENCE des deux variables
+ * d'environnement — jamais leur validité, et sans jamais consulter `configFailed`.
+ *
+ * Or `ensureConfigured` documente juste en dessous que `setVapidDetails` JETTE sur un sujet mal
+ * formé, et donne comme exemple `VAPID_SUBJECT=contact@club.fr`, sans le `mailto:`. Avec cette
+ * valeur les trois variables sont présentes : la route répondait `true`, le membre s'abonnait,
+ * l'écran confirmait, et aucune notification ne partait jamais. C'est mot pour mot le symptôme
+ * que cette réponse existe pour empêcher, à une variable d'environnement près.
+ *
+ * On pose donc la vraie question, celle que se posent les envois eux-mêmes. L'appel est sans
+ * effet de bord observable : `ensureConfigured` est mémoïsé dans les deux sens — succès comme
+ * échec définitif.
+ */
 export function pushConfigured(): boolean {
-  return !!(PUB && PRIV);
+  return ensureConfigured();
 }
 
 export type PushPayload = {
