@@ -108,6 +108,28 @@ describe("contenu et garde-fous", () => {
     expect(String(h.sent[0].payload.body).length).toBeLessThanOrEqual(300);
   });
 
+  // La borne était posée à l'APPEL, sur deux des quatre notifications seulement, et le titre
+  // n'était borné nulle part. Elle vit désormais dans `send`, donc les quatre en héritent.
+  it("borne le corps des QUATRE notifications, pas seulement des deux longues", async () => {
+    const long = "N".repeat(400);
+    await notifyGameDone(ctx, long, long, [{ home: 11, away: 5 }]);
+    await notifyMatchDone(ctx, long, long, 3, 0, { home: 1, away: 0 });
+    await notifyFixtureStart(ctx, long, long);
+    await notifyFixtureDone(ctx, { home: 3, away: 0 }, [
+      { player: long, gamesHome: 3, gamesAway: 0 },
+    ]);
+    expect(h.sent).toHaveLength(4);
+    expect(h.sent.every((s) => String(s.payload.body).length <= 300)).toBe(true);
+  });
+
+  it("borne aussi le TITRE, que rien ne limitait", async () => {
+    await notifyFixtureDone({ ...ctx, teamName: "É".repeat(200), opponent: "M".repeat(200) }, {
+      home: 3,
+      away: 0,
+    });
+    expect(String(h.sent[0].payload.title).length).toBeLessThanOrEqual(120);
+  });
+
   it("nomme le match qui démarre", async () => {
     await notifyFixtureStart(ctx, "Tom", "Gégé");
     expect(String(h.sent[0].payload.body)).toContain("Tom c. Gégé");

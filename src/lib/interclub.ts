@@ -35,8 +35,6 @@ export const MIN_LEAD = 2;
  * entre les jeux.
  */
 export const BREAK_SECONDS = 120;
-/** Échauffement d'avant-match, en secondes (4 min depuis les règles 2025 — cf. ci-dessus). */
-export const WARMUP_SECONDS = 240;
 /** Formats de match admis : au meilleur des 3 ou des 5 jeux. */
 export const BEST_OF_VALUES = [3, 5] as const;
 /** Bornes du nombre de simples dans une rencontre. */
@@ -88,13 +86,6 @@ export function gameWinner(g: GameScore): Side | null {
   const lead = Math.abs(home - away);
   if (Math.max(home, away) < POINTS_TO_WIN || lead < MIN_LEAD) return null;
   return home > away ? "home" : "away";
-}
-
-/** Un score de jeu TERMINÉ est-il plausible ? Sert à valider une saisie a posteriori. */
-export function validGameScore(a: number, b: number): boolean {
-  if (!Number.isInteger(a) || !Number.isInteger(b)) return false;
-  if (a < 0 || b < 0) return false;
-  return gameWinner({ home: a, away: b }) !== null;
 }
 
 /**
@@ -304,10 +295,6 @@ export function undo(events: readonly ScoreEvent[]): ScoreEvent[] {
   return events.slice(0, -1);
 }
 
-export function isMatchOver(state: MatchState): boolean {
-  return state.status === "done";
-}
-
 /**
  * Fabrique un journal d'événements qui REPRODUIT une suite de jeux déjà connue. Sert à
  * reprendre au bord du terrain un match dont les premiers jeux ont été saisis à la main, ou
@@ -353,17 +340,40 @@ export function seedEvents(games: readonly GameScore[], bestOf: number): ScoreEv
 // Sur l'encre PLEINE, ce choix tient le seuil AA quelle que soit la couleur : le pire cas du
 // cube RGB atteint 4.58:1, au-dessus des 4.5 requis (le test le vérifie en balayant le cube).
 //
-// ⚠️ CE QUE CE MODULE NE PEUT PAS GARANTIR — et ce commentaire l'a affirmé à tort. La borne
-// ci-dessus ne vaut que si l'encre est rendue TELLE QUELLE. `.ics-won` et `.ics-serve`
-// (globals.css) la repeignent à `opacity: .85` sur le maillot : le pire cas du cube retombe
-// alors à 3.51:1, et quatre des douze raccourcis de couleur passent sous 4.5 (rose 3.89,
-// vert 4.21, turquoise 4.36, rouge 4.43). Le test continue de passer — il mesure une couleur
-// qui n'est jamais celle qu'on voit. Écart CONNU ET ASSUMÉ à ce jour ; ce qu'il faut retenir,
-// c'est que toute opacité posée sur cette encre défait le calcul, et que le test ne le dira pas.
+// ⚠️ CE QUE CE MODULE NE PEUT PAS GARANTIR. La borne ci-dessus ne vaut que si l'encre est
+// rendue TELLE QUELLE. Un seul sélecteur la repeint aujourd'hui : `.ics-won` (globals.css),
+// posé à `opacity: 0.9` — le compte de jeux gagnés sur le maillot. Composité sur son fond, le
+// pire cas du cube retombe à 3.86:1 (atteint vers `#ea0042`), et deux des douze raccourcis de
+// couleur passent sous 4.5 : vert 4.49 et rose 4.22. Le test continue de passer — il mesure
+// une couleur qui n'est jamais celle qu'on voit.
+//
+// `.ics-serve`, lui, ne porte AUCUNE opacité (poids 800 et `border: 2px solid currentColor`
+// font sa hiérarchie) : le badge de service est donc à 4.58:1 au pire, conforme.
+//
+// Écart CONNU ET ASSUMÉ à ce jour ; il se refermerait en retirant cette seule ligne d'opacité.
+// Ce qu'il faut retenir : toute opacité posée sur cette encre défait le calcul, et le test ne
+// le dira pas. Les chiffres ci-dessus ont été MESURÉS sur la CSS en vigueur — s'ils cessent de
+// correspondre à ce que `globals.css` fait, c'est le commentaire qui a tort, pas la CSS.
 //
 // ⚠️ La couleur s'applique en PASTILLE ou en grande zone TACTILE (les deux demi-écrans du
 // marqueur, cf. `.ics-side`), jamais en aplat décoratif : DESIGN.md réserve les grandes
 // surfaces colorées à ce qui est actionnable.
+
+/**
+ * Nom porté par un simple dont on ne connaît pas encore le joueur — et par un adversaire dont
+ * on ne connaît pas encore le nom.
+ *
+ * ⚠️ Il vit ICI, dans le moteur pur, et non dans `interclub-db.ts`, pour une raison précise :
+ * c'est la SEULE constante de la fonctionnalité que le client et le serveur doivent lire à
+ * l'identique. Le client la compare pour griser un nom, et la renvoie pour effacer un nom
+ * d'adversaire (le serveur n'écrit pas une chaîne vide) ; le serveur la pose sur la composition.
+ * Recopiée des deux côtés, comme elle l'était, un accent ou une espace de différence suffisait à
+ * faire apparaître un « à désigner » que l'écran ne grisait plus et que les notifications
+ * annonçaient comme un vrai nom d'adversaire.
+ *
+ * `interclub-db.ts` la réexporte : il connaît Prisma, aucun composant client ne peut l'importer.
+ */
+export const UNSET_PLAYER = "À désigner";
 
 export const INK_LIGHT = "#ffffff";
 export const INK_DARK = "#000000";
@@ -516,11 +526,6 @@ export const FOLLOW_LABELS: Record<FollowLevel, string> = {
 
 export function isFollowLevel(v: unknown): v is FollowLevel {
   return typeof v === "string" && (FOLLOW_LEVELS as readonly string[]).includes(v);
-}
-
-/** Lit un niveau venu d'une source non fiable. `null` = pas d'abonnement. */
-export function parseFollowLevel(v: unknown): FollowLevel | null {
-  return isFollowLevel(v) ? v : null;
 }
 
 /** Un abonné au niveau `have` doit-il être prévenu d'un événement de niveau `want` ? */

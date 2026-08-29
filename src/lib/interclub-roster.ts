@@ -137,52 +137,132 @@ export async function resolveHomePick(
   teamId: string,
   pick: HomePick,
 ): Promise<PickResult> {
+  const want = wanted(pick);
+  if (!want.ok) return want;
+
+  if (want.kind === "member") {
+    const u = await db.user.findUnique({
+      where: { id: want.id },
+      select: { id: true, displayName: true, nickname: true, teamId: true, disabledAt: true },
+    });
+    return decideMember(u, teamId);
+  }
+
+  if (want.kind === "guest") {
+    const g = await db.interclubGuest.findUnique({
+      where: { id: want.id },
+      select: { id: true, name: true, teamId: true },
+    });
+    return decideGuest(g, teamId);
+  }
+
+  return unsetPick();
+}
+
+/**
+ * Même résolution, pour PLUSIEURS choix d'un coup — la composition entière d'une rencontre.
+ *
+ * Deux requêtes au total (`id in […]`), là où appeler `resolveHomePick` dans une boucle en
+ * coûtait une PAR LIGNE, sérialisées : jusqu'à huit allers-retours Neon pour une rencontre
+ * complètement composée, sur un chemin où le cold start se voit à l'œil nu.
+ *
+ * ⚠️ Les décisions passent par les MÊMES fonctions (`decideMember`, `decideGuest`) que la
+ * version unitaire : c'est ce qui interdit aux deux chemins de diverger sur la règle du club.
+ * Le résultat est rendu dans l'ORDRE des choix reçus, refus compris — l'appelant doit pouvoir
+ * dire quelle ligne du formulaire est en cause.
+ */
+export async function resolveHomePicks(
+  db: Db,
+  teamId: string,
+  picks: readonly HomePick[],
+): Promise<PickResult[]> {
+  const wants = picks.map(wanted);
+  const userIds = [...new Set(wants.flatMap((w) => (w.ok && w.kind === "member" ? [w.id] : [])))];
+  const guestIds = [...new Set(wants.flatMap((w) => (w.ok && w.kind === "guest" ? [w.id] : [])))];
+
+  const [users, guests] = await Promise.all([
+    userIds.length
+      ? db.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, displayName: true, nickname: true, teamId: true, disabledAt: true },
+        })
+      : Promise.resolve([]),
+    guestIds.length
+      ? db.interclubGuest.findMany({
+          where: { id: { in: guestIds } },
+          select: { id: true, name: true, teamId: true },
+        })
+      : Promise.resolve([]),
+  ]);
+  const byUser = new Map(users.map((u) => [u.id, u]));
+  const byGuest = new Map(guests.map((g) => [g.id, g]));
+
+  return wants.map((w) => {
+    if (!w.ok) return w;
+    if (w.kind === "member") return decideMember(byUser.get(w.id) ?? null, teamId);
+    if (w.kind === "guest") return decideGuest(byGuest.get(w.id) ?? null, teamId);
+    return unsetPick();
+  });
+}
+
+/** Ce que le corps de la requête DEMANDE, avant toute lecture en base. */
+type Wanted =
+  | { ok: true; kind: "member"; id: string }
+  | { ok: true; kind: "guest"; id: string }
+  | { ok: true; kind: "unset" }
+  | { ok: false; error: string };
+
+function wanted(pick: HomePick): Wanted {
   const { userId, guestId } = pick;
   const wantsMember = typeof userId === "string" && userId.length > 0;
   const wantsGuest = typeof guestId === "string" && guestId.length > 0;
-
   if (wantsMember && wantsGuest) {
     return { ok: false, error: "Choisis un membre OU un joueur hors appli, pas les deux" };
   }
+  if (wantsMember) return { ok: true, kind: "member", id: userId as string };
+  if (wantsGuest) return { ok: true, kind: "guest", id: guestId as string };
+  return { ok: true, kind: "unset" };
+}
 
-  if (wantsMember) {
-    const u = await db.user.findUnique({
-      where: { id: userId as string },
-      select: { id: true, displayName: true, nickname: true, teamId: true, disabledAt: true },
-    });
-    if (!u) return { ok: false, error: "Membre inconnu" };
-    if (u.disabledAt) return { ok: false, error: "Ce compte est désactivé" };
-    if (u.teamId !== teamId) {
-      return { ok: false, error: "Ce membre n'est pas dans l'équipe qui dispute la rencontre" };
-    }
-    return {
-      ok: true,
-      value: { homeUserId: u.id, homeGuestId: null, homeDisplayName: memberName(u) },
-    };
+function decideMember(
+  u: { id: string; displayName: string; nickname: string | null; teamId: string | null; disabledAt: Date | null } | null,
+  teamId: string,
+): PickResult {
+  if (!u) return { ok: false, error: "Membre inconnu" };
+  if (u.disabledAt) return { ok: false, error: "Ce compte est désactivé" };
+  if (u.teamId !== teamId) {
+    return { ok: false, error: "Ce membre n'est pas dans l'équipe qui dispute la rencontre" };
   }
+  return {
+    ok: true,
+    value: { homeUserId: u.id, homeGuestId: null, homeDisplayName: memberName(u) },
+  };
+}
 
-  if (wantsGuest) {
-    const g = await db.interclubGuest.findUnique({
-      where: { id: guestId as string },
-      select: { id: true, name: true, teamId: true },
-    });
-    if (!g) return { ok: false, error: "Joueur inconnu" };
-    if (g.teamId !== teamId) {
-      return { ok: false, error: "Ce joueur n'est pas dans l'équipe qui dispute la rencontre" };
-    }
-    return {
-      ok: true,
-      value: {
-        homeUserId: null,
-        homeGuestId: g.id,
-        homeDisplayName: g.name.slice(0, MAX_PLAYER_NAME_LEN),
-      },
-    };
+function decideGuest(
+  g: { id: string; name: string; teamId: string } | null,
+  teamId: string,
+): PickResult {
+  if (!g) return { ok: false, error: "Joueur inconnu" };
+  if (g.teamId !== teamId) {
+    return { ok: false, error: "Ce joueur n'est pas dans l'équipe qui dispute la rencontre" };
   }
+  return {
+    ok: true,
+    value: {
+      homeUserId: null,
+      homeGuestId: g.id,
+      homeDisplayName: g.name.slice(0, MAX_PLAYER_NAME_LEN),
+    },
+  };
+}
 
-  // Ni l'un ni l'autre : remise à « à désigner ». Le placeholder est posé PAR LE SERVEUR et
-  // n'est jamais repris du corps de la requête — c'était la dernière porte par laquelle un nom
-  // libre pouvait entrer, et donc contourner la règle.
+/**
+ * Ni membre ni invité : remise à « à désigner ». Le placeholder est posé PAR LE SERVEUR et
+ * n'est jamais repris du corps de la requête — c'était la dernière porte par laquelle un nom
+ * libre pouvait entrer, et donc contourner la règle.
+ */
+function unsetPick(): PickResult {
   return {
     ok: true,
     value: { homeUserId: null, homeGuestId: null, homeDisplayName: UNSET_PLAYER },

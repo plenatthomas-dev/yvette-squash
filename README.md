@@ -108,13 +108,15 @@ Le socle historique (adaptateur ResaMania, réservation, journal partagé, dépl
 Vercel + Neon) est **en production** depuis 2026. S'y sont ajoutés : vue semaine,
 réservation groupée multi-créneaux, alertes & liste d'attente (Web Push), annuaire des
 membres, partage de frais (« tricount »), module tournois, classement fédéral
-(squashnet.fr), délégation temporaire de droits, note de confidentialité RGPD.
+(squashnet.fr), délégation temporaire de droits, rencontres interclub avec marquage en
+direct, note de confidentialité RGPD.
 
 Les fonctions sensibles restent derrière des **feature flags** (`src/lib/features.ts`),
 testées sur la branche `Recette` avant activation en prod.
 
 - **Backlog vivant** (idées, statuts, priorisation) : [docs/idees-developpement.md](docs/idees-developpement.md)
 - **Flux de branches & promotion** : [docs/flux-branches.md](docs/flux-branches.md)
+- **Interclub** (rencontres par équipes, marquage en direct) : [docs/interclub.md](docs/interclub.md)
 
 ---
 

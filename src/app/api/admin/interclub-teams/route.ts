@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/admin";
-import { getFeatures } from "@/lib/features-server";
+import { interclubDisabledResponse } from "@/lib/interclub-access";
 import { MAX_PLAYER_NAME_LEN } from "@/lib/interclub-db";
 
 export const runtime = "nodejs";
@@ -29,9 +29,8 @@ const MAX_GUESTS_PER_TEAM = 40;
 
 // GET /api/admin/interclub-teams — équipes, leurs membres inscrits et leurs joueurs hors appli.
 export async function GET(req: NextRequest) {
-  if (!(await getFeatures()).interclub) {
-    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
-  }
+  const off = await interclubDisabledResponse();
+  if (off) return off;
   if (!(await requireAdmin(req))) {
     return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
   }
@@ -63,9 +62,8 @@ export async function GET(req: NextRequest) {
 //   { action: "add_guest", teamId, name }  → inscrit un joueur sans compte au roster d'une équipe
 //   { action: "remove_guest", guestId }    → l'en retire
 export async function POST(req: NextRequest) {
-  if (!(await getFeatures()).interclub) {
-    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
-  }
+  const off = await interclubDisabledResponse();
+  if (off) return off;
   if (!(await requireAdmin(req))) {
     return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
   }

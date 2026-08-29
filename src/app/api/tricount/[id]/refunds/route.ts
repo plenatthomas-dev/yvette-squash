@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import { HttpError, httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
 import {
   computeBalances,
   payersOf,
@@ -17,12 +17,6 @@ export const runtime = "nodejs";
 
 // Erreur métier portant le code HTTP à renvoyer : levée dans la transaction pour
 // annuler (rollback) puis retraduite en réponse une fois hors transaction.
-class HttpError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-  }
-}
-
 // POST /api/tricount/{id}/refunds — deux façons de déclarer un remboursement :
 //  - { toId, amountCents } : JE (débiteur connecté) ai remboursé toId. Auto-
 //    déclaration classique, seul l'intéressé déclare ses propres remboursements.
@@ -97,83 +91,64 @@ export async function POST(
   // même solde et le dépassent à eux deux. Transaction Serializable + retry sur
   // conflit de sérialisation (Postgres détecte le write-skew et fait échouer l'un
   // des deux, qu'on rejoue sur un solde à jour).
-  const runOnce = () =>
-    prisma.$transaction(
-      async (tx) => {
-        const tricount = await tx.tricount.findUnique({
-          where: { id },
-          include: {
-            expenses: {
-              include: {
-                shares: { select: { userId: true, guestId: true, amountCents: true } },
-              },
+  let refund: { id: string };
+  try {
+    refund = await serializableTransaction(async (tx) => {
+      const tricount = await tx.tricount.findUnique({
+        where: { id },
+        include: {
+          expenses: {
+            include: {
+              shares: { select: { userId: true, guestId: true, amountCents: true } },
             },
-            approvals: { select: { userId: true } },
           },
-        });
-        if (!tricount) throw new HttpError(404, "Tricount introuvable");
+          approvals: { select: { userId: true } },
+        },
+      });
+      if (!tricount) throw new HttpError(404, "Tricount introuvable");
 
-        const keyedExpenses = tricount.expenses.map(toKeyedExpense);
-        // Les invités ne sont jamais payeurs d'une vraie dépense : payersOf ne
-        // renvoie donc que des clés membre ("u:xxx"), qu'on dépréfixe pour matcher
-        // TricountApproval.userId (toujours un id membre brut).
-        const payers = payersOf(keyedExpenses).map((k) => parseKey(k).id);
-        const approved = new Set(tricount.approvals.map((a) => a.userId));
-        if (payers.length === 0 || !payers.every((p) => approved.has(p))) {
-          throw new HttpError(409, "Tous les payeurs doivent d'abord valider ce tricount");
-        }
-
-        const balances = computeBalances(keyedExpenses);
-        const fromBal = balances.get(fromKey) ?? 0;
-        const toBal = balances.get(toKey) ?? 0;
-        if (fromBal >= 0) throw new HttpError(400, "Ce débiteur ne doit rien sur ce tricount");
-        if (toBal <= 0) {
-          throw new HttpError(400, "Ce membre n'a rien à récupérer sur ce tricount");
-        }
-        const max = Math.min(-fromBal, toBal);
-        if (amountCents > max) {
-          throw new HttpError(
-            400,
-            `Montant trop élevé : au plus ${(max / 100).toFixed(2).replace(".", ",")} €`,
-          );
-        }
-
-        return tx.expense.create({
-          data: {
-            tricountId: id,
-            ...expensePayer,
-            creatorId: session.userId,
-            label: "Remboursement",
-            amountCents,
-            isRefund: true,
-            spentAt: new Date(), // horodatage précis, affiché dans la liste
-            shares: { create: [{ userId: recipientUserId, amountCents }] },
-          },
-        });
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
-
-  // P2034 = conflit d'écriture / échec de sérialisation → on rejoue quelques fois.
-  const isSerializationConflict = (e: unknown) =>
-    e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2034";
-
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const refund = await runOnce();
-      return NextResponse.json({ id: refund.id }, { status: 201 });
-    } catch (e) {
-      if (e instanceof HttpError) {
-        return NextResponse.json({ error: e.message }, { status: e.status });
+      const keyedExpenses = tricount.expenses.map(toKeyedExpense);
+      // Les invités ne sont jamais payeurs d'une vraie dépense : payersOf ne
+      // renvoie donc que des clés membre ("u:xxx"), qu'on dépréfixe pour matcher
+      // TricountApproval.userId (toujours un id membre brut).
+      const payers = payersOf(keyedExpenses).map((k) => parseKey(k).id);
+      const approved = new Set(tricount.approvals.map((a) => a.userId));
+      if (payers.length === 0 || !payers.every((p) => approved.has(p))) {
+        throw new HttpError(409, "Tous les payeurs doivent d'abord valider ce tricount");
       }
-      if (isSerializationConflict(e) && attempt < 3) continue; // relecture + réessai
-      if (isSerializationConflict(e)) {
-        return NextResponse.json(
-          { error: "Remboursement concurrent, réessaie" },
-          { status: 409 },
+
+      const balances = computeBalances(keyedExpenses);
+      const fromBal = balances.get(fromKey) ?? 0;
+      const toBal = balances.get(toKey) ?? 0;
+      if (fromBal >= 0) throw new HttpError(400, "Ce débiteur ne doit rien sur ce tricount");
+      if (toBal <= 0) {
+        throw new HttpError(400, "Ce membre n'a rien à récupérer sur ce tricount");
+      }
+      const max = Math.min(-fromBal, toBal);
+      if (amountCents > max) {
+        throw new HttpError(
+          400,
+          `Montant trop élevé : au plus ${(max / 100).toFixed(2).replace(".", ",")} €`,
         );
       }
-      throw e;
-    }
+
+      return tx.expense.create({
+        data: {
+          tricountId: id,
+          ...expensePayer,
+          creatorId: session.userId,
+          label: "Remboursement",
+          amountCents,
+          isRefund: true,
+          spentAt: new Date(), // horodatage précis, affiché dans la liste
+          shares: { create: [{ userId: recipientUserId, amountCents }] },
+        },
+      });
+    }, "Remboursement concurrent, réessaie");
+  } catch (e) {
+    const res = httpErrorResponse(e);
+    if (res) return res;
+    throw e;
   }
+  return NextResponse.json({ id: refund.id }, { status: 201 });
 }

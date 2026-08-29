@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireAdmin, isAdminEmail } from "@/lib/admin";
 import { listMembers, deleteBlockersFor } from "@/lib/members";
 import { getFeatures } from "@/lib/features-server";
+import { interclubDisabledResponse } from "@/lib/interclub-access";
 import { createEmailToken, authLinkFor, clientIp } from "@/lib/email-auth";
 import { alertsChanged } from "@/lib/alerts-gate";
 
@@ -132,9 +133,8 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "set_team") {
-    if (!(await getFeatures()).interclub) {
-      return NextResponse.json({ error: "Fonction indisponible." }, { status: 404 });
-    }
+    const off = await interclubDisabledResponse();
+    if (off) return off;
     // `null` retire de toute équipe. On refuse un id inconnu plutôt que de l'ignorer, pour
     // qu'un écran resté ouvert après la suppression d'une équipe le sache.
     let teamId: string | null = null;

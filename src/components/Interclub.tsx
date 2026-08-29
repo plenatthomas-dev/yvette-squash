@@ -16,14 +16,41 @@ import {
   isValidBestOf,
   playedGames,
   resolveColor,
+  // ⚠️ Importé, jamais recopié : le client compare cette chaîne pour griser un nom et la
+  // renvoie pour effacer un nom d'adversaire. Une divergence d'un caractère avec le serveur
+  // faisait apparaître un « à désigner » qui n'en était plus un.
+  UNSET_PLAYER,
   winGamesFor,
   type GameScore,
 } from "@/lib/interclub";
 
-// Vue « Interclub » : les rencontres de championnat par équipes. Ce premier jet couvre le
-// SOCLE — créer une rencontre, composer l'équipe, saisir les scores et les consulter. Le
-// comptage en direct au bord du terrain viendra par-dessus, sans rien changer ici : la
-// saisie a posteriori reste le mode de repli les soirs où personne ne marque.
+// Vue « Interclub » : les rencontres de championnat par équipes.
+//
+// CE QUE CE FICHIER ORCHESTRE
+// Il tient l'état de la vue — la liste des rencontres, celle qui est ouverte, le match qu'on
+// marque — et délègue le reste à trois composants qui, eux, ne connaissent pas cet état :
+//   * `InterclubFollow` (abonnement aux notifications) en tête de page, avant même la création
+//     d'une rencontre : ces réglages décident de ce qu'on recevra dans trois semaines, pas de
+//     ce qui se passe ce soir ;
+//   * `InterclubLive` (le bandeau « en direct »), qui sonde pour son propre compte ;
+//   * `InterclubScorer` (le marquage au bord du terrain), ouvert par-dessus le détail.
+//
+// DEUX MODES DE SAISIE, ET C'EST VOULU
+// Le marquage EN DIRECT (`InterclubScorer`, point par point) et la saisie A POSTERIORI
+// (`MatchEditor`, jeu par jeu) coexistent : le direct est le mode normal, la saisie a
+// posteriori le repli des soirs où personne ne marque — et l'outil de correction quand le
+// marqueur s'est trompé. Les deux écrivent par des routes différentes, avec des gardes
+// différentes, mais valident par le MÊME moteur pur (`@/lib/interclub`) : ce que l'écran
+// refuse, le serveur le refuse aussi.
+//
+// AUTORISATIONS : il n'y en a qu'une, « membre connecté ». Tout membre peut créer une
+// rencontre, la composer et la marquer. Ce n'est pas un oubli — cf. `docs/interclub.md`. Les
+// seules restrictions protègent d'un ÉCRASEMENT (la prise de marquage, un match déjà entamé),
+// jamais d'un accès. L'écran n'a donc rien à masquer selon qui regarde.
+//
+// PAS D'INTERVALLE DE SONDAGE ICI : cet écran se rafraîchit au retour au premier plan et après
+// chaque écriture. Le direct, lui, sonde — mais c'est `InterclubLive` qui s'en charge, et
+// seulement quand il y a quelque chose à regarder.
 
 type Team = { id: string; name: string };
 
@@ -88,9 +115,6 @@ const STATUS_LABEL: Record<FixtureRow["status"], string> = {
   live: "En cours",
   done: "Terminée",
 };
-
-/** Placeholder posé à la création d'une rencontre dont la composition n'est pas connue. */
-const UNSET = "À désigner";
 
 /** "2026-09-03" → "jeu. 3 sept." — les rencontres se repèrent au jour de la semaine. */
 function shortDate(iso: string): string {
@@ -373,6 +397,11 @@ export default function Interclub({
 }
 
 // --- Création d'une rencontre ----------------------------------------------
+//
+// La COMPOSITION ne se fait pas ici, délibérément : on inscrit une rencontre bien avant de
+// savoir qui jouera, et réclamer quatre noms à la création aurait fait de ce formulaire un
+// obstacle. Les simples naissent donc « à désigner » (le serveur en crée `matchCount`), et se
+// composent un par un depuis le détail, quand l'équipe se décide.
 
 function CreateDialog({
   teams,
@@ -492,6 +521,13 @@ function CreateDialog({
 }
 
 // --- Détail d'une rencontre ------------------------------------------------
+//
+// C'est le pivot de la vue : il montre les simples, ouvre l'éditeur de l'un d'eux, et lance le
+// marquage. Il calcule aussi `takenBy` — qui est déjà aligné où — parce qu'un joueur ne dispute
+// qu'un simple par rencontre. Ce contrôle EXISTE AUSSI côté serveur (`findAlignmentClash`, dans
+// la transaction) ; ici il ne sert qu'à griser le choix avant qu'on le fasse, avec le numéro du
+// simple qui retient le joueur. Un écran qui empêche une faute vaut mieux qu'un message qui la
+// signale — mais l'écran n'est jamais la garantie.
 
 function FixtureDialog({
   fixture,
@@ -565,7 +601,7 @@ function FixtureDialog({
                 <span className="ic-players">
                   <span className="ic-player">
                     <ColorDot color={m.homeColor} size="lg" />
-                    <span className={m.homeDisplayName === UNSET ? "muted" : undefined}>
+                    <span className={m.homeDisplayName === UNSET_PLAYER ? "muted" : undefined}>
                       {m.homeDisplayName}
                     </span>
                   </span>
@@ -575,7 +611,7 @@ function FixtureDialog({
                   </span>
                   <span className="ic-player">
                     <ColorDot color={m.awayColor} size="lg" />
-                    <span className={m.awayName === UNSET ? "muted" : undefined}>{m.awayName}</span>
+                    <span className={m.awayName === UNSET_PLAYER ? "muted" : undefined}>{m.awayName}</span>
                   </span>
                 </span>
                 <span className="ic-games">
@@ -651,6 +687,11 @@ function FixtureDialog({
  * Un `<select>` pleine largeur mangeait un tiers de l'écran pour une information secondaire,
  * et n'affichait la couleur que par son nom — alors que c'est justement le repère visuel.
  */
+// Couleur de maillot : une pastille qui ouvre une palette. Elle sert à distinguer les deux
+// joueurs d'un coup d'œil sur l'écran de marquage, montré à bout de bras — d'où la palette
+// restreinte (`COLOR_PRESETS`) et l'alerte quand les deux couleurs sont trop proches
+// (`colorsTooClose`) : deux maillots indiscernables rendent le marqueur hésitant au pire
+// moment.
 function ColorPicker({
   value,
   onChange,
@@ -734,6 +775,16 @@ function ColorPicker({
 }
 
 // --- Saisie d'un match -----------------------------------------------------
+//
+// La saisie A POSTERIORI : composition, couleurs de maillot, et les jeux TERMINÉS d'un match
+// qu'on n'a pas marqué en direct. Elle ne remplace pas le marquage — elle le complète et le
+// corrige.
+//
+// ⚠️ Ce formulaire REMPLACE intégralement la liste des jeux ; il porte donc `knownGameCount`,
+// le nombre de jeux qu'il avait sous les yeux en s'ouvrant. Le serveur refuse l'écriture si la
+// base en a davantage : sans cela, un écran resté ouvert pendant qu'un marqueur travaillait
+// effaçait son travail en enregistrant, et aucune transaction n'aurait pu s'en apercevoir — les
+// deux écritures ne sont pas concurrentes, la seconde est juste calculée sur un état périmé.
 
 function MatchEditor({
   match,
@@ -764,12 +815,25 @@ function MatchEditor({
   const [pick, setPick] = useState(
     match.homeUserId ? `member:${match.homeUserId}` : match.homeGuestId ? `guest:${match.homeGuestId}` : "",
   );
-  const [awayName, setAwayName] = useState(match.awayName === UNSET ? "" : match.awayName);
+  const [awayName, setAwayName] = useState(match.awayName === UNSET_PLAYER ? "" : match.awayName);
   const [homeColor, setHomeColor] = useState(match.homeColor ?? "");
   const [awayColor, setAwayColor] = useState(match.awayColor ?? "");
   const [games, setGames] = useState<GameScore[]>(
     match.games.map((g) => ({ home: g.home, away: g.away })),
   );
+
+  // ⚠️ FIGÉ AU MONTAGE, comme tout ce qui précède — et pour la même raison.
+  //
+  // C'est le nombre de jeux que CET ÉCRAN a vus, celui qui doit être confronté à la base. Le
+  // lire dans la prop `match` au moment du clic annulait la garde : `match` est dérivée de
+  // l'état du parent, que `loadFixture` remplace à chaque retour au premier plan et après
+  // chaque écriture, tandis que ce formulaire reste monté (aucune `key` ne le recrée) avec son
+  // `games` d'origine. Un verrouillage d'écran suffisait donc à rafraîchir la prop sans
+  // rafraîchir le formulaire : on envoyait le compte que le serveur allait lui-même lire, la
+  // comparaison devenait tautologique, et le jeu saisi entre-temps par quelqu'un d'autre était
+  // effacé sans un mot. Le mécanisme serveur était bon ; c'est ce qu'on lui donnait qui ne
+  // décrivait plus l'écran.
+  const [knownGameCount] = useState(match.games.length);
 
   const setGame = (i: number, side: "home" | "away", v: string) => {
     const n = v === "" ? 0 : Number(v);
@@ -904,7 +968,7 @@ function MatchEditor({
               // là-bas, jamais envoyé d'ici).
               homeUserId: pick.startsWith("member:") ? pick.slice(7) : null,
               homeGuestId: pick.startsWith("guest:") ? pick.slice(6) : null,
-              awayName: awayName.trim() || UNSET,
+              awayName: awayName.trim() || UNSET_PLAYER,
               homeColor: homeColor || null,
               awayColor: awayColor || null,
               // Les lignes vides ou inachevées ne partent pas : `problem` a déjà bloqué les
@@ -914,7 +978,7 @@ function MatchEditor({
               // d'écrire si la base en compte un autre nombre : entre l'ouverture du
               // formulaire et l'enregistrement, quelqu'un a pu clore un jeu au bord du terrain,
               // et `games` — qui REMPLACE tout — l'effacerait sans que rien ne le signale.
-              knownGameCount: match.games.length,
+              knownGameCount,
             })
           }
         >

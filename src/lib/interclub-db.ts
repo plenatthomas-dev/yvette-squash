@@ -2,7 +2,7 @@
 // ce module connaît Prisma — il ne doit donc JAMAIS être importé depuis un composant client.
 
 import { Prisma } from "@prisma/client";
-import { gameWinner, normalizeColor, winGamesFor, type Side } from "./interclub";
+import { normalizeColor, UNSET_PLAYER, winGamesFor, type Side } from "./interclub";
 
 export const interclubInclude = {
   team: true,
@@ -26,10 +26,10 @@ export const MAX_SEASON_LEN = 12;
 export const MAX_DIVISION_LEN = 30;
 
 /**
- * Nom porté par un simple dont on ne connaît pas encore le joueur. Défini une seule fois et
- * posé PAR LE SERVEUR : c'est un état, pas une saisie de l'utilisateur.
+ * Réexport de commodité pour le code serveur : la définition vit dans le moteur pur
+ * (`interclub.ts`), seul module que le client et le serveur importent tous les deux.
  */
-export const UNSET_PLAYER = "À désigner";
+export { UNSET_PLAYER };
 
 /**
  * Une prise de marquage est PÉRIMÉE au-delà de ce délai sans activité DU MARQUEUR : sinon un
@@ -95,18 +95,6 @@ export function serializeLive(snap: LiveSnapshot): string {
     servingBox: snap.servingBox,
     awaitingServeBox: snap.awaitingServeBox,
   } satisfies LiveSnapshot);
-}
-
-/** Jeux gagnés déduits des jeux TERMINÉS enregistrés (source de vérité du résultat). */
-export function gamesWonFrom(games: { pointsHome: number; pointsAway: number }[]): { home: number; away: number } {
-  let home = 0;
-  let away = 0;
-  for (const g of games) {
-    const w = gameWinner({ home: g.pointsHome, away: g.pointsAway });
-    if (w === "home") home += 1;
-    else if (w === "away") away += 1;
-  }
-  return { home, away };
 }
 
 /**

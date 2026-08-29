@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
   createdGames: null as null | Array<Record<string, unknown>>,
   deleteCalls: 0,
   fixtureStatus: null as null | string,
+  fixtureUpdate: null as null | Record<string, unknown>,
   notified: [] as string[],
 }));
 
@@ -56,8 +57,9 @@ vi.mock("@/lib/db", () => {
       }),
     },
     interclub: {
-      update: vi.fn(async (args: { data: { status: string } }) => {
-        h.fixtureStatus = args.data.status;
+      update: vi.fn(async (args: { data: Record<string, unknown> }) => {
+        h.fixtureStatus = args.data.status as string;
+        h.fixtureUpdate = args.data;
         return {};
       }),
     },
@@ -90,11 +92,17 @@ const WIN = [
 const asRows = (games: { home: number; away: number }[]) =>
   games.map((g) => ({ pointsHome: g.home, pointsAway: g.away }));
 
+// Une rencontre déjà en cours a forcément vu partir son « la rencontre commence » : le marqueur
+// de début est donc posé, celui de fin ne l'est pas.
+const NOTIFIED = new Date(Date.now() - 20 * 60_000);
+
 const baseFixture = {
   id: "f1",
   bestOf: 5,
   matchCount: 4,
   status: "live",
+  startNotifiedAt: NOTIFIED,
+  doneNotifiedAt: null as Date | null,
   opponent: "Massy",
   teamId: "team-1",
   team: { name: "Équipe 1" },
@@ -123,6 +131,7 @@ beforeEach(() => {
   h.createdGames = null;
   h.deleteCalls = 0;
   h.fixtureStatus = null;
+  h.fixtureUpdate = null;
   h.notified = [];
 });
 
@@ -177,8 +186,56 @@ describe("PUT .../live — gardes", () => {
   });
 
   it("mais celui qui marquait peut revenir sur sa saisie", async () => {
+    // Le marqueur annule le point décisif : la liste RÉTRÉCIT, ce qui exige d'annoncer la base
+    // (cf. « fraîcheur du journal » plus bas) — l'écran de marquage le fait à chaque envoi.
     h.match = freshMatch({ status: "done", scorerId: "u1", games: asRows(WIN) });
+    const res = await PUT(put({ games: WIN.slice(0, 2), knownGameCount: 3 }), ctx);
+    expect(res.status).toBe(200);
+  });
+});
+
+// --- Garde de fraîcheur ----------------------------------------------------
+//
+// Le scénario, sans concurrence ni malveillance : le marqueur compte deux jeux, fait « Retour »
+// (la prise est relâchée, son journal local RESTE) ; un capitaine saisit le 3ᵉ jeu a posteriori ;
+// le marqueur rouvre le marquage, son journal l'emporte à l'amorçage, et le premier point tapé
+// renvoyait deux jeux là où la base en avait trois. `games` remplaçant tout, le 3ᵉ disparaissait.
+describe("PUT .../live — fraîcheur du journal", () => {
+  it("refuse un journal bâti sur un état que la base a dépassé", async () => {
+    h.match = freshMatch({ scorerId: null, games: asRows(WIN.slice(0, 3)) });
+    const res = await PUT(put({ games: WIN.slice(0, 2), knownGameCount: 2 }), ctx);
+    expect(res.status).toBe(409);
+    // Le code, et non le message : c'est là-dessus que le marqueur branche sa reprise.
+    expect((await res.json()).code).toBe("stale-games");
+    expect(h.deleteCalls).toBe(0);
+    expect(h.updated).toBeNull();
+  });
+
+  it("laisse passer un undo, qui raccourcit les jeux ENVOYÉS et non l'état connu", async () => {
+    h.match = freshMatch({ games: asRows(WIN.slice(0, 2)) });
+    const res = await PUT(put({ games: WIN.slice(0, 1), knownGameCount: 2 }), ctx);
+    expect(res.status).toBe(200);
+  });
+
+  it("reste facultatif tant que la liste ne RÉTRÉCIT pas", async () => {
+    h.match = freshMatch({ games: asRows(WIN.slice(0, 1)) });
     expect((await PUT(put({ games: WIN.slice(0, 2) }), ctx)).status).toBe(200);
+  });
+
+  it("refuse d'effacer des jeux sans dire sur quel score on se fonde", async () => {
+    // Le corps minimal : n'importe quel membre pouvait le poster sur un match que personne ne
+    // tient, et il remettait le simple à `pending` en supprimant toutes ses lignes.
+    h.match = freshMatch({ scorerId: null, games: asRows(WIN) });
+    const res = await PUT(put({ games: [], live: null }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("stale-games");
+    expect(h.deleteCalls).toBe(0);
+    expect(h.updated).toBeNull();
+  });
+
+  it("refuse un knownGameCount aberrant", async () => {
+    expect((await PUT(put({ games: [], knownGameCount: -1 }), ctx)).status).toBe(400);
+    expect((await PUT(put({ games: [], knownGameCount: "deux" }), ctx)).status).toBe(400);
   });
 });
 
@@ -229,11 +286,36 @@ describe("PUT .../live — écritures", () => {
 });
 
 describe("PUT .../live — notifications, sur les transitions seulement", () => {
-  it("annonce le début quand la rencontre bascule en direct", async () => {
-    h.match = freshMatch({ status: "pending", interclub: { ...baseFixture, status: "scheduled" } });
+  it("annonce le début quand la rencontre bascule en direct, et pose le marqueur", async () => {
+    h.match = freshMatch({
+      status: "pending",
+      interclub: { ...baseFixture, status: "scheduled", startNotifiedAt: null },
+    });
     h.siblings = [{ gamesHome: 1, gamesAway: 0, status: "live", homeDisplayName: "Tom" }];
     await PUT(put({ games: [{ home: 11, away: 5 }] }), ctx);
     expect(h.notified).toContain("fixtureStart");
+    // Le marqueur est écrit DANS la même transaction que le statut : c'est lui, et non le
+    // statut, qui empêchera la seconde annonce.
+    expect(h.fixtureUpdate?.startNotifiedAt).toBeInstanceOf(Date);
+  });
+
+  it("ne réannonce pas le début d'une rencontre revenue de `done` à `live`", async () => {
+    // Le geste : le créateur vide les jeux d'un simple pour ressaisir le bon score. La
+    // rencontre redescend alors de `done` à `live` — ce qui, comparé au statut STOCKÉ,
+    // ressemblait trait pour trait à un début de rencontre.
+    h.match = freshMatch({
+      status: "pending",
+      interclub: {
+        ...baseFixture,
+        status: "done",
+        startNotifiedAt: NOTIFIED,
+        doneNotifiedAt: NOTIFIED,
+      },
+    });
+    h.siblings = [{ gamesHome: 1, gamesAway: 0, status: "live", homeDisplayName: "Tom" }];
+    await PUT(put({ games: [{ home: 11, away: 5 }] }), ctx);
+    expect(h.notified).not.toContain("fixtureStart");
+    expect(h.fixtureUpdate?.startNotifiedAt).toBeUndefined();
   });
 
   it("annonce un jeu terminé", async () => {
@@ -260,8 +342,31 @@ describe("PUT .../live — notifications, sur les transitions seulement", () => 
       status: "done",
       homeDisplayName: "Tom",
     }));
-    h.match = freshMatch({ status: "done", games: asRows(WIN), interclub: { ...baseFixture, status: "done" } });
+    h.match = freshMatch({
+      status: "done",
+      games: asRows(WIN),
+      interclub: { ...baseFixture, status: "done", doneNotifiedAt: NOTIFIED },
+    });
     await PUT(put({ games: WIN }), ctx);
+    expect(h.notified).not.toContain("fixtureDone");
+  });
+
+  it("ne réannonce pas le résultat après une correction en deux temps", async () => {
+    // Vider puis ressaisir : la rencontre repasse par `live` avant de revenir à `done`. Une
+    // garde comparant le statut stocké voyait alors une transition neuve et renvoyait le
+    // résultat final à tous les abonnés. Le marqueur, lui, est déjà posé.
+    h.siblings = Array.from({ length: 4 }, () => ({
+      gamesHome: 3,
+      gamesAway: 0,
+      status: "done",
+      homeDisplayName: "Tom",
+    }));
+    h.match = freshMatch({
+      status: "live",
+      interclub: { ...baseFixture, status: "live", doneNotifiedAt: NOTIFIED },
+    });
+    await PUT(put({ games: WIN }), ctx);
+    expect(h.fixtureStatus).toBe("done");
     expect(h.notified).not.toContain("fixtureDone");
   });
 });

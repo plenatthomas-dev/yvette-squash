@@ -9,7 +9,6 @@ import {
   isValidBestOf,
   isValidMatchCount,
   notifiesAt,
-  parseFollowLevel,
   COLOR_PRESETS,
   colorDistance,
   colorsTooClose,
@@ -23,7 +22,6 @@ import {
   replay,
   sequenceWinner,
   undo,
-  validGameScore,
   validGameSequence,
   winGamesFor,
   type ScoreEvent,
@@ -224,21 +222,6 @@ describe("undo", () => {
     const annule = replay(undo(gagnant), 5);
     expect(annule.gamesWon).toEqual({ home: 0, away: 0 });
     expect(annule.current).toEqual({ home: 10, away: 0 });
-  });
-});
-
-describe("validGameScore", () => {
-  it("accepte un score de jeu terminé", () => {
-    expect(validGameScore(11, 9)).toBe(true);
-    expect(validGameScore(12, 10)).toBe(true);
-    expect(validGameScore(3, 11)).toBe(true);
-  });
-
-  it("refuse un jeu non terminé ou impossible", () => {
-    expect(validGameScore(11, 10)).toBe(false);
-    expect(validGameScore(9, 7)).toBe(false);
-    expect(validGameScore(-1, 11)).toBe(false);
-    expect(validGameScore(11.5, 2)).toBe(false);
   });
 });
 
@@ -530,12 +513,6 @@ describe("contrastRatio", () => {
 });
 
 describe("niveaux d'abonnement", () => {
-  it("lit un niveau valide et rejette le reste", () => {
-    expect(parseFollowLevel("highlights")).toBe("highlights");
-    expect(parseFollowLevel("tout")).toBeNull();
-    expect(parseFollowLevel(null)).toBeNull();
-  });
-
   it("un abonné « détaillé » reçoit aussi les temps forts et le résultat", () => {
     expect(notifiesAt("detailed", "result")).toBe(true);
     expect(notifiesAt("detailed", "highlights")).toBe(true);

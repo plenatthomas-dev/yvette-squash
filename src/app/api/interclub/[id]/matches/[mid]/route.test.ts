@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   createdGames: null as null | Array<Record<string, unknown>>,
   deletedGames: 0,
   fixtureStatus: null as null | string,
+  fixtureUpdate: null as null | Record<string, unknown>,
   notified: [] as string[],
   lastPlayers: null as null | { player: string; opponent: string },
   /** Simple de la même rencontre qui aligne déjà le joueur choisi (null = aucun conflit). */
@@ -63,8 +64,9 @@ vi.mock("@/lib/db", () => {
       }),
     },
     interclub: {
-      update: vi.fn(async (args: { data: { status: string } }) => {
-        h.fixtureStatus = args.data.status;
+      update: vi.fn(async (args: { data: Record<string, unknown> }) => {
+        h.fixtureStatus = args.data.status as string;
+        h.fixtureUpdate = args.data;
         return {};
       }),
     },
@@ -86,6 +88,8 @@ const patch = (body: unknown) =>
   ({ cookies: { get: () => undefined }, json: async () => body }) as unknown as NextRequest;
 
 /** Un match vierge d'une rencontre au meilleur des 5. */
+const NOTIFIED = new Date(Date.now() - 20 * 60_000);
+
 const freshMatch = () => ({
   id: "m1",
   interclubId: "f1",
@@ -103,6 +107,9 @@ const freshMatch = () => ({
     createdById: "u1",
     teamId: "team-1",
     status: "live",
+    // Une rencontre déjà en cours a vu partir son « la rencontre commence ».
+    startNotifiedAt: NOTIFIED,
+    doneNotifiedAt: null as Date | null,
     opponent: "Massy",
     team: { name: "Équipe 1" },
   },
@@ -120,6 +127,7 @@ beforeEach(() => {
   h.createdGames = null;
   h.deletedGames = 0;
   h.fixtureStatus = null;
+  h.fixtureUpdate = null;
   h.notified = [];
   h.lastPlayers = null;
   h.alignmentClash = null;
@@ -515,11 +523,15 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
   // Le commentaire de la route promet « les MÊMES transitions que le direct », mais
   // `notifyFixtureStart` n'existait que côté direct : un club qui saisit tout a posteriori —
   // le cas que ce raisonnement dit vouloir couvrir — ne l'a jamais reçu.
-  it("annonce le début de rencontre, comme le direct", async () => {
-    h.match = { ...freshMatch(), interclub: { ...freshMatch().interclub, status: "scheduled" } };
+  it("annonce le début de rencontre, comme le direct, et pose le marqueur", async () => {
+    h.match = {
+      ...freshMatch(),
+      interclub: { ...freshMatch().interclub, status: "scheduled", startNotifiedAt: null },
+    };
     h.siblings = [{ gamesHome: 1, status: "live" }];
     await PATCH(patch({ games: [{ home: 11, away: 0 }] }), ctx);
     expect(h.notified).toContain("fixtureStart");
+    expect(h.fixtureUpdate?.startNotifiedAt).toBeInstanceOf(Date);
   });
 
   it("ne réannonce pas le début d'une rencontre déjà en cours", async () => {
@@ -527,5 +539,56 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
     h.siblings = [{ gamesHome: 1, status: "live" }];
     await PATCH(patch({ games: [{ home: 11, away: 0 }] }), ctx);
     expect(h.notified).not.toContain("fixtureStart");
+  });
+
+  // --- Correction en DEUX temps --------------------------------------------
+  //
+  // Le formulaire de saisie n'offre qu'un « ✕ » par ligne : corriger un score revient
+  // naturellement à vider les jeux, enregistrer, puis ressaisir. La rencontre redescend alors
+  // de `done` à `live`, ce qu'une garde comparant le statut STOCKÉ prenait pour un début de
+  // rencontre — puis pour une fin toute neuve au second enregistrement.
+
+  it("ne réannonce pas le début quand une rencontre terminée redescend en direct", async () => {
+    h.match = {
+      ...freshMatch(),
+      games: [{ number: 1 }],
+      interclub: {
+        ...freshMatch().interclub,
+        status: "done",
+        startNotifiedAt: NOTIFIED,
+        doneNotifiedAt: NOTIFIED,
+      },
+    };
+    // Trois simples restent clos, le quatrième vient d'être vidé : la rencontre redescend
+    // RÉELLEMENT de `done` à `live`, c'est-à-dire la transition qui trompait l'ancienne garde.
+    h.siblings = [
+      { gamesHome: null, status: "pending" },
+      { gamesHome: 3, status: "done" },
+      { gamesHome: 3, status: "done" },
+      { gamesHome: 3, status: "done" },
+    ];
+    await PATCH(patch({ games: [], knownGameCount: 1 }), ctx);
+    expect(h.fixtureStatus).toBe("live");
+    expect(h.notified).not.toContain("fixtureStart");
+    expect(h.fixtureUpdate?.startNotifiedAt).toBeUndefined();
+  });
+
+  it("ne réannonce pas le résultat quand le bon score est ressaisi derrière", async () => {
+    h.match = {
+      ...freshMatch(),
+      interclub: {
+        ...freshMatch().interclub,
+        status: "live",
+        startNotifiedAt: NOTIFIED,
+        doneNotifiedAt: NOTIFIED,
+      },
+    };
+    // Les quatre simples sont clos : la rencontre repasse bien à `done`, donc la transition
+    // existe. C'est le marqueur, et lui seul, qui retient l'annonce.
+    h.siblings = Array.from({ length: 4 }, () => ({ gamesHome: 3, status: "done" }));
+    await PATCH(patch({ games: [{ home: 11, away: 0 }] }), ctx);
+    expect(h.fixtureStatus).toBe("done");
+    expect(h.notified).not.toContain("fixtureDone");
+    expect(h.fixtureUpdate?.doneNotifiedAt).toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 # Migrations — règle de nommage et pièges
 
-**Préfixe à DEUX CHIFFRES, toujours.** La prochaine migration s'appelle `32_<sujet>`.
+**Préfixe à DEUX CHIFFRES, toujours.** La prochaine migration s'appelle `38_<sujet>`.
 
 ## Pourquoi la largeur fixe
 

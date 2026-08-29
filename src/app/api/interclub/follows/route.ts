@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { requireInterclubMember } from "@/lib/interclub-access";
 import { prisma } from "@/lib/db";
-import { getFeatures } from "@/lib/features-server";
 import { isFollowLevel } from "@/lib/interclub";
 import { pushConfigured } from "@/lib/push";
 
@@ -17,13 +16,9 @@ export const dynamic = "force-dynamic";
 // s'abonner sur un environnement où les clés manquent affichait « Abonnement enregistré » et
 // ne produisait jamais rien.
 export async function GET(req: NextRequest) {
-  if (!(await getFeatures()).interclub) {
-    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
-  }
-  const session = await getSession(req.cookies.get("sid")?.value);
-  if (!session) {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  }
+  const access = await requireInterclubMember(req);
+  if (!access.ok) return access.response;
+  const { session } = access;
 
   const rows = await prisma.interclubFollow.findMany({
     where: { userId: session.userId },
@@ -37,13 +32,9 @@ export async function GET(req: NextRequest) {
 // `null` supprime l'abonnement. L'absence de ligne est l'état par défaut : personne ne reçoit
 // rien tant qu'il ne l'a pas demandé — c'est un opt-in franc, pas un opt-out déguisé.
 export async function PUT(req: NextRequest) {
-  if (!(await getFeatures()).interclub) {
-    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
-  }
-  const session = await getSession(req.cookies.get("sid")?.value);
-  if (!session) {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  }
+  const access = await requireInterclubMember(req);
+  if (!access.ok) return access.response;
+  const { session } = access;
 
   const { teamId, level } = (await req.json().catch(() => ({}))) as {
     teamId?: unknown;

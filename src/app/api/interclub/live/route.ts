@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
-import { getFeatures } from "@/lib/features-server";
+import { requireInterclubMember } from "@/lib/interclub-access";
 import { getLiveFixtures } from "@/lib/interclub-gate";
 
 export const runtime = "nodejs";
@@ -22,13 +21,8 @@ export const dynamic = "force-dynamic";
 //
 // `no-store` est explicite : il interdit à tout cache PARTAGÉ de retenir cette réponse.
 export async function GET(req: NextRequest) {
-  if (!(await getFeatures()).interclub) {
-    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
-  }
-  const session = await getSession(req.cookies.get("sid")?.value);
-  if (!session) {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  }
+  const access = await requireInterclubMember(req);
+  if (!access.ok) return access.response;
 
   const fixtures = await getLiveFixtures();
   return NextResponse.json(

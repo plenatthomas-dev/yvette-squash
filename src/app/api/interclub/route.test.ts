@@ -32,8 +32,22 @@ vi.mock("@/lib/db", () => ({
         return { id: "f1" };
       }),
     },
-    user: { findUnique: vi.fn(async () => h.user) },
-    interclubGuest: { findUnique: vi.fn(async () => h.guest) },
+    // `findMany` sert la résolution GROUPÉE de la composition (deux requêtes pour toute la
+    // rencontre, cf. `resolveHomePicks`). Le filtre par id est reproduit ici : sans lui, un
+    // identifiant inconnu remonterait quand même la seule ligne du bouchon, et le test « membre
+    // inconnu » passerait pour de mauvaises raisons.
+    user: {
+      findUnique: vi.fn(async () => h.user),
+      findMany: vi.fn(async (args: { where: { id: { in: string[] } } }) =>
+        h.user && args.where.id.in.includes(h.user.id as string) ? [h.user] : [],
+      ),
+    },
+    interclubGuest: {
+      findUnique: vi.fn(async () => h.guest),
+      findMany: vi.fn(async (args: { where: { id: { in: string[] } } }) =>
+        h.guest && args.where.id.in.includes(h.guest.id as string) ? [h.guest] : [],
+      ),
+    },
   },
 }));
 

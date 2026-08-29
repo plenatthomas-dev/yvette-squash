@@ -34,6 +34,20 @@ const POLL_MS = 10_000;
  * premier point ne verrait jamais la rencontre démarrer.
  */
 const IDLE_POLL_MS = 60_000;
+/**
+ * Combien d'échecs CONSÉCUTIFS avant de cesser de sonder pour ce seul motif.
+ *
+ * Sans cette borne, la nuance qui distingue « je n'ai pas réussi à savoir » de « la journée est
+ * finie » rouvrait le trou qu'elle est censée fermer : un 5xx durable — ou un 404 après qu'un
+ * admin a coupé le flag — laissait le sondage de veille tourner un appel par minute pendant des
+ * heures, exactement le coût que l'en-tête de ce fichier dit avoir éliminé. Réessayer est juste ;
+ * réessayer sans fin ne l'est pas.
+ *
+ * Cinq essais, c'est-à-dire cinq minutes à la cadence de veille : de quoi traverser une coupure
+ * réseau ou un réveil de base, pas de quoi tenir un après-midi. Au-delà on s'en remet au retour
+ * au premier plan, qui recharge sans condition et remet le compteur à zéro.
+ */
+const MAX_POLL_FAILURES = 5;
 
 type LiveMatch = {
   id: string;
@@ -74,8 +88,8 @@ export default function InterclubLive({
   onExpired: (status: number) => boolean;
 }) {
   const [fixtures, setFixtures] = useState<LiveFixture[] | null>(null);
-  /** Le dernier chargement a échoué : on ne conclut alors RIEN sur ce qu'il y a à voir. */
-  const [failed, setFailed] = useState(false);
+  /** Échecs consécutifs : tant qu'il y en a, on ne conclut RIEN sur ce qu'il y a à voir. */
+  const [failures, setFailures] = useState(0);
   const anyLive = (fixtures ?? []).some((f) => f.status === "live");
   const anyLiveRef = useRef(false);
   anyLiveRef.current = anyLive;
@@ -84,11 +98,19 @@ export default function InterclubLive({
   // et il faut alors sonder pour le découvrir. Une liste vide, ou dont tout est terminé, ferme
   // le sujet jusqu'au prochain retour au premier plan.
   //
-  // ⚠️ `failed` est indispensable : en cas d'échec réseau, `load` retombe sur une liste VIDE
-  // pour ne pas bloquer l'affichage — ce qui, sans cette nuance, se lirait « rien à voir
-  // aujourd'hui » et arrêterait le sondage pour toute la session. Une coupure de trois
+  // ⚠️ Le compteur d'échecs est indispensable : en cas d'échec réseau, `load` retombe sur une
+  // liste VIDE pour ne pas bloquer l'affichage — ce qui, sans cette nuance, se lirait « rien à
+  // voir aujourd'hui » et arrêterait le sondage pour toute la session. Une coupure de trois
   // secondes en début de soirée aurait éteint le direct jusqu'au prochain changement d'onglet.
-  const somethingToWatch = fixtures === null || failed || fixtures.some((f) => f.status !== "done");
+  //
+  // …mais il est BORNÉ (cf. `MAX_POLL_FAILURES`), et la borne l'emporte sur TOUT le reste : un
+  // échec qui dure n'est plus une coupure, c'est un état, et insister n'y change rien. Elle
+  // couvre donc aussi le cas où la liste garde une rencontre en cours — `load` conserve la
+  // dernière liste connue sur échec, et on sonderait sinon pour une rencontre dont on ne peut
+  // plus rien apprendre.
+  const givenUp = failures >= MAX_POLL_FAILURES;
+  const somethingToWatch =
+    !givenUp && (fixtures === null || failures > 0 || fixtures.some((f) => f.status !== "done"));
 
   const load = useCallback(async () => {
     try {
@@ -96,13 +118,13 @@ export default function InterclubLive({
       if (onExpired(res.status)) return;
       const data = await readOk<{ fixtures: LiveFixture[] }>(res);
       setFixtures(data.fixtures);
-      setFailed(false);
+      setFailures(0);
     } catch {
       // Silencieux : un direct qui ne se rafraîchit pas ne mérite pas d'interrompre la
       // lecture. Le prochain passage réessaiera — d'où `failed`, qui distingue « la journée
       // est finie » (on peut cesser de sonder) de « je n'ai pas réussi à savoir » (surtout pas).
       setFixtures((f) => f ?? []);
-      setFailed(true);
+      setFailures((n) => n + 1);
     }
   }, [onExpired]);
 

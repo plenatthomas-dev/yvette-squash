@@ -35,10 +35,26 @@ interface Ctx {
 }
 
 /**
+ * Longueurs maximales, alignées sur ce que `recordNotifications` écrit au journal (120 / 500)
+ * et sur l'annonce admin. Au-delà, les systèmes tronquent eux-mêmes, et souvent au milieu d'un
+ * nom — mieux vaut couper nous-mêmes, proprement.
+ */
+const MAX_TITLE = 120;
+const MAX_BODY = 300;
+
+/**
  * Envoi best-effort : une notification perdue ne doit jamais faire échouer la saisie d'un
  * score. `pushToUsers` ne jette pas, on ajoute une ceinture au cas où la requête, elle, jette.
+ *
+ * ⚠️ La TRONCATURE se fait ICI, et nulle part ailleurs. Deux des quatre notifications la
+ * posaient à l'appel et les deux autres l'oubliaient, sans que rien ne distingue les deux cas ;
+ * le titre, lui, n'était borné nulle part alors qu'il compose un nom d'équipe et un nom de club
+ * adverse (jusqu'à `MAX_OPPONENT_LEN`). Une seule porte de sortie, un seul endroit à tenir, et
+ * la prochaine notification en hérite sans y penser.
  */
 async function send(ctx: Ctx, want: FollowLevel, title: string, body: string): Promise<void> {
+  title = title.slice(0, MAX_TITLE);
+  body = body.slice(0, MAX_BODY);
   try {
     const ids = await followersFor(ctx.teamId, want);
     if (ids.length === 0) return;
@@ -107,11 +123,6 @@ export interface MatchLine {
   gamesAway: number | null;
 }
 
-/**
- * Longueur maximale du corps, alignée sur l'annonce admin. Au-delà, les systèmes tronquent
- * eux-mêmes, et souvent au milieu d'un nom — mieux vaut couper nous-mêmes, proprement.
- */
-const MAX_BODY = 300;
 
 /** « Tom 3-0, Marc 1-3 » — les matchs sans résultat sont passés sous silence. */
 function summarize(lines: readonly MatchLine[]): string {
@@ -136,7 +147,7 @@ export function notifyFixtureDone(
     score.home > score.away ? "l'emporte" : score.home < score.away ? "s'incline" : "fait match nul";
   const detail = summarize(lines);
   const body = `${ctx.teamName} ${verdict} ${score.home}-${score.away}${detail ? ` · ${detail}` : ""}`;
-  return send(ctx, "result", `${ctx.teamName} – ${ctx.opponent}`, body.slice(0, MAX_BODY));
+  return send(ctx, "result", `${ctx.teamName} – ${ctx.opponent}`, body);
 }
 
 /**
@@ -150,6 +161,6 @@ export function notifyFixtureStart(ctx: Ctx, player?: string, opponentName?: str
     ctx,
     "highlights",
     `${ctx.teamName} – ${ctx.opponent}`,
-    `La rencontre commence.${who}`.slice(0, MAX_BODY),
+    `La rencontre commence.${who}`,
   );
 }

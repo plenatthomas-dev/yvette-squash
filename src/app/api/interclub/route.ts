@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { requireInterclubMember } from "@/lib/interclub-access";
 import { prisma } from "@/lib/db";
-import { getFeatures } from "@/lib/features-server";
 import { interclubChanged } from "@/lib/interclub-gate";
 import { isColorValue, isValidBestOf, isValidMatchCount, normalizeColor } from "@/lib/interclub";
 import {
@@ -13,7 +12,7 @@ import {
   MAX_SEASON_LEN,
   UNSET_PLAYER,
 } from "@/lib/interclub-db";
-import { resolveHomePick, type ResolvedPick } from "@/lib/interclub-roster";
+import { resolveHomePicks, type HomePick, type ResolvedPick } from "@/lib/interclub-roster";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,13 +20,8 @@ export const dynamic = "force-dynamic";
 // GET /api/interclub -> équipes de l'asso + rencontres (plus récentes d'abord).
 // ?limit (défaut 20, max 100), ?teamId pour filtrer sur une équipe.
 export async function GET(req: NextRequest) {
-  if (!(await getFeatures()).interclub) {
-    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
-  }
-  const session = await getSession(req.cookies.get("sid")?.value);
-  if (!session) {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  }
+  const access = await requireInterclubMember(req);
+  if (!access.ok) return access.response;
 
   const raw = Number(req.nextUrl.searchParams.get("limit"));
   const limit = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), 100) : 20;
@@ -68,13 +62,9 @@ export async function GET(req: NextRequest) {
 // Ouvert à TOUT membre connecté : dans un club de cette taille, exiger un rôle bloquerait la
 // saisie les soirs où le capitaine joue.
 export async function POST(req: NextRequest) {
-  if (!(await getFeatures()).interclub) {
-    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
-  }
-  const session = await getSession(req.cookies.get("sid")?.value);
-  if (!session) {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  }
+  const access = await requireInterclubMember(req);
+  if (!access.ok) return access.response;
+  const { session } = access;
 
   const body = await req.json().catch(() => ({}));
   const { date, teamId, opponent, home, season, division, matchCount, bestOf, matches } = body as {
@@ -125,14 +115,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Plus de joueurs que de matchs" }, { status: 400 });
   }
 
-  const alreadyPicked = new Set<string>();
-  const roster: {
-    pick: ResolvedPick;
-    awayName: string;
-    homeColor: string | null;
-    awayColor: string | null;
-  }[] = [];
-
+  // Validation de forme d'abord, base ensuite : rien ne sert d'interroger Neon pour une ligne
+  // dont la couleur est déjà refusée.
+  const parsedLines: { pick: HomePick; awayName: string; homeColor: string | null; awayColor: string | null }[] = [];
   for (const raw of lines as unknown[]) {
     if (typeof raw !== "object" || raw === null) {
       return NextResponse.json({ error: "Joueur invalide" }, { status: 400 });
@@ -141,18 +126,33 @@ export async function POST(req: NextRequest) {
     if (!isColorValue(l.homeColor) || !isColorValue(l.awayColor)) {
       return NextResponse.json({ error: "Couleur inconnue" }, { status: 400 });
     }
-    const awayName =
-      typeof l.awayName === "string" && l.awayName.trim()
-        ? l.awayName.trim().slice(0, MAX_PLAYER_NAME_LEN)
-        : UNSET_PLAYER;
-
-    // Le contrôle d'appartenance à l'équipe se fait ici, contre `teamId` lu en base — la même
-    // fonction que celle qu'emploie le PATCH d'un match, pour que les deux chemins d'écriture
-    // ne puissent pas diverger.
-    const resolved = await resolveHomePick(prisma, team.id, {
-      userId: l.userId,
-      guestId: l.guestId,
+    parsedLines.push({
+      pick: { userId: l.userId, guestId: l.guestId },
+      awayName:
+        typeof l.awayName === "string" && l.awayName.trim()
+          ? l.awayName.trim().slice(0, MAX_PLAYER_NAME_LEN)
+          : UNSET_PLAYER,
+      homeColor: normalizeColor(l.homeColor),
+      awayColor: normalizeColor(l.awayColor),
     });
+  }
+
+  // Le contrôle d'appartenance à l'équipe se fait ici, contre `teamId` lu en base — les mêmes
+  // règles que celles qu'emploie le PATCH d'un match, pour que les deux chemins d'écriture ne
+  // puissent pas diverger. En DEUX requêtes pour toute la composition, et non une par ligne
+  // dans une boucle : les identifiants sont tous connus d'avance, et huit allers-retours Neon
+  // sérialisés s'entendent sur un cold start.
+  const resolvedAll = await resolveHomePicks(prisma, team.id, parsedLines.map((l) => l.pick));
+
+  const alreadyPicked = new Set<string>();
+  const roster: {
+    pick: ResolvedPick;
+    awayName: string;
+    homeColor: string | null;
+    awayColor: string | null;
+  }[] = [];
+
+  for (const [i, resolved] of resolvedAll.entries()) {
     if (!resolved.ok) {
       return NextResponse.json({ error: resolved.error }, { status: 400 });
     }
@@ -167,9 +167,9 @@ export async function POST(req: NextRequest) {
 
     roster.push({
       pick: resolved.value,
-      awayName,
-      homeColor: normalizeColor(l.homeColor),
-      awayColor: normalizeColor(l.awayColor),
+      awayName: parsedLines[i].awayName,
+      homeColor: parsedLines[i].homeColor,
+      awayColor: parsedLines[i].awayColor,
     });
   }
 

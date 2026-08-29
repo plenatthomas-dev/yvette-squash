@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { requireInterclubMember } from "@/lib/interclub-access";
 import { prisma } from "@/lib/db";
-import { getFeatures } from "@/lib/features-server";
 import { isAdminEmail } from "@/lib/admin";
 import { interclubInclude, serializeInterclub } from "@/lib/interclub-db";
 import { teamRoster } from "@/lib/interclub-roster";
@@ -12,13 +11,9 @@ export const dynamic = "force-dynamic";
 
 // GET /api/interclub/{id} : état complet de la rencontre (matchs, jeux, direct éventuel).
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  if (!(await getFeatures()).interclub) {
-    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
-  }
-  const session = await getSession(req.cookies.get("sid")?.value);
-  if (!session) {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  }
+  const access = await requireInterclubMember(req);
+  if (!access.ok) return access.response;
+  const { session } = access;
   const { id } = await params;
   const f = await prisma.interclub.findUnique({ where: { id }, include: interclubInclude });
   if (!f) {
@@ -36,21 +31,25 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const view = { ...serializeInterclub(f, session.userId, isAdminEmail(session.email)), roster };
   // Auto-cicatrisation : le statut DÉDUIT fait foi. Si la colonne a divergé (dernier score
   // saisi ailleurs, rencontre laissée « en cours »), on la recale pour que la LISTE soit juste.
+  //
+  // ⚠️ ÉCRITURE CONDITIONNELLE, et non un `update` simple. On lit puis on écrit la même ligne
+  // hors transaction : entre les deux, une écriture de score peut avoir posé le vrai statut.
+  // Un `update` inconditionnel l'écrasait alors avec une valeur calculée sur un état déjà mort
+  // — deux téléphones au bord du terrain suffisent. Le `where` reprend la valeur LUE : si elle
+  // a bougé, la clause ne trouve rien et ce GET, qui n'est qu'un lecteur, se tait.
   if (view.status !== f.status) {
-    await prisma.interclub.update({ where: { id }, data: { status: view.status } }).catch(() => {});
+    await prisma.interclub
+      .updateMany({ where: { id, status: f.status }, data: { status: view.status } })
+      .catch(() => {});
   }
   return NextResponse.json(view);
 }
 
 // DELETE /api/interclub/{id} : créateur ou admin (supprime matchs et jeux en cascade).
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  if (!(await getFeatures()).interclub) {
-    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
-  }
-  const session = await getSession(req.cookies.get("sid")?.value);
-  if (!session) {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  }
+  const access = await requireInterclubMember(req);
+  if (!access.ok) return access.response;
+  const { session } = access;
   const { id } = await params;
   const f = await prisma.interclub.findUnique({ where: { id }, select: { createdById: true } });
   if (!f) {

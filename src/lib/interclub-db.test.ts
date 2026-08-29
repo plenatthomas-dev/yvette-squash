@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   derivedStatus,
   fixtureScore,
-  gamesWonFrom,
   parseLive,
   scorerIsStale,
   SCORER_STALE_MS,
@@ -40,22 +39,6 @@ describe("fixtureScore", () => {
         { gamesHome: 1, gamesAway: 0, status: "live" },
       ]),
     ).toEqual({ home: 0, away: 0 });
-  });
-});
-
-describe("gamesWonFrom", () => {
-  it("déduit les jeux gagnés des jeux terminés", () => {
-    expect(
-      gamesWonFrom([
-        { pointsHome: 11, pointsAway: 5 },
-        { pointsHome: 9, pointsAway: 11 },
-        { pointsHome: 12, pointsAway: 10 },
-      ]),
-    ).toEqual({ home: 2, away: 1 });
-  });
-
-  it("ne compte pas un jeu non terminé", () => {
-    expect(gamesWonFrom([{ pointsHome: 7, pointsAway: 4 }])).toEqual({ home: 0, away: 0 });
   });
 });
 

@@ -11,10 +11,31 @@ const PRIV = process.env.VAPID_PRIVATE_KEY;
 const SUBJECT = process.env.VAPID_SUBJECT || "mailto:squash-yvette@example.com";
 
 let configured = false;
+let configFailed = false;
+/**
+ * Arme `web-push`, une fois pour toutes. Rend `false` — plutôt que de jeter — si la
+ * configuration est inutilisable.
+ *
+ * ⚠️ `setVapidDetails` VALIDE ses arguments et LÈVE : un sujet qui n'est ni `mailto:` ni une
+ * URL, une clé mal formée, et l'appel jette. Ces trois valeurs viennent de l'environnement, où
+ * une main humaine les pose — `VAPID_SUBJECT=contact@club.fr`, sans le `mailto:`, suffit. Hors
+ * `try`, ce module contredisait alors sa propre promesse de ne jamais jeter, et l'annonce du
+ * club (`POST /api/admin/announce`, qui appelle `pushToAll` SANS ceinture) remontait un 500
+ * muet — alors même que le journal était déjà écrit et l'annonce visible sous la cloche de tout
+ * le monde. L'admin réessayait, et dupliquait les lignes du journal.
+ */
 function ensureConfigured(): boolean {
   if (configured) return true;
-  if (!PUB || !PRIV) return false;
-  webpush.setVapidDetails(SUBJECT, PUB, PRIV);
+  if (configFailed || !PUB || !PRIV) return false;
+  try {
+    webpush.setVapidDetails(SUBJECT, PUB, PRIV);
+  } catch (e) {
+    // Une seule trace : la cause est de configuration, elle ne se corrigera pas d'elle-même et
+    // chaque notification de la soirée reviendrait ici.
+    configFailed = true;
+    console.warn(`[push] configuration VAPID invalide, aucun envoi possible : ${(e as Error).message}`);
+    return false;
+  }
   configured = true;
   return true;
 }
@@ -53,10 +74,19 @@ export async function pushToAll(payload: PushPayload): Promise<{ recipients: num
   // `pushToUsers` faisait déjà l'inverse, à dix lignes d'ici.
   //
   // Les comptes désactivés sont exclus : ils ne peuvent plus se connecter pour lire.
-  const [members, subs] = await Promise.all([
-    prisma.user.findMany({ where: { disabledAt: null }, select: { id: true } }),
-    prisma.pushSubscription.findMany({ distinct: ["userId"], select: { userId: true } }),
-  ]);
+  // Base injoignable → on rend un compte nul, on ne jette pas : cette fonction est appelée
+  // depuis `POST /api/admin/announce`, sans ceinture, et un rejet y devenait un 500 muet.
+  let members: { id: string }[];
+  let subs: { userId: string }[];
+  try {
+    [members, subs] = await Promise.all([
+      prisma.user.findMany({ where: { disabledAt: null }, select: { id: true } }),
+      prisma.pushSubscription.findMany({ distinct: ["userId"], select: { userId: true } }),
+    ]);
+  } catch (e) {
+    console.warn(`[push] destinataires illisibles, annonce non envoyée : ${(e as Error).message}`);
+    return { recipients: 0, sent: 0 };
+  }
   // Journalisé AVANT le contrôle de configuration, et une seule fois pour tout le monde :
   // c'est justement quand le push ne peut pas partir que la cloche doit garder une trace.
   await recordNotifications(
@@ -89,7 +119,16 @@ export async function pushToUser(
   // sert le plus. Les appels groupés passent `record: false` et journalisent en une fois.
   if (opts.record !== false) await recordNotifications([userId], payload);
   if (!ensureConfigured()) return 0;
-  const subs = await prisma.pushSubscription.findMany({ where: { userId } });
+  // Même parti pris que partout dans ce module : la base indisponible rend 0, elle ne jette
+  // pas. Sans ce `try`, un `pushToUsers` d'une soirée d'interclub rejetait en bloc dès que la
+  // requête d'un seul destinataire échouait, à l'intérieur du `Promise.all`.
+  let subs: { id: string; endpoint: string; p256dh: string; auth: string }[];
+  try {
+    subs = await prisma.pushSubscription.findMany({ where: { userId } });
+  } catch (e) {
+    console.warn(`[push] abonnements illisibles (user ${userId}) : ${(e as Error).message}`);
+    return 0;
+  }
   let sent = 0;
   await Promise.all(
     subs.map(async (s) => {
@@ -123,7 +162,8 @@ export async function pushToUser(
  * Dédoublonne les ids reçus (un même membre peut remonter de plusieurs abonnements) et
  * s'appuie sur `pushToUser`, qui gère déjà les appareils multiples et purge les abonnements
  * morts. Best-effort, comme le reste du module : un envoi en échec n'interrompt pas les autres
- * et ne jette jamais.
+ * et ne jette jamais — configuration VAPID invalide et base injoignable comprises, qui étaient
+ * les deux chemins par lesquels cette promesse était fausse.
  */
 export async function pushToUsers(
   userIds: readonly string[],

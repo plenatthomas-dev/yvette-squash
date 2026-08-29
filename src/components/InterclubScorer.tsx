@@ -29,6 +29,10 @@ import { isSoundEnabled } from "@/lib/sound";
 
 const SYNC_MS = 5_000;
 const LOG_PREFIX = "ic:log:";
+// Combien de jeux le SERVEUR a confirmés à ce journal. Clé séparée, et non un champ ajouté au
+// journal : les journaux déjà posés sur les téléphones du club restent lisibles tels quels, et
+// son absence se traite comme « on ne sait pas ».
+const ACK_PREFIX = "ic:ack:";
 
 type MatchInfo = {
   id: string;
@@ -63,8 +67,36 @@ function saveLog(matchId: string, events: ScoreEvent[]) {
 export function clearLog(matchId: string) {
   try {
     localStorage.removeItem(LOG_PREFIX + matchId);
+    localStorage.removeItem(ACK_PREFIX + matchId);
   } catch {
     /* sans importance */
+  }
+}
+
+/**
+ * Nombre de jeux que le serveur a confirmés au dernier envoi réussi, ou `null` si on l'ignore.
+ *
+ * C'est la BASE de la concurrence optimiste du marquage, et non le compte qu'on s'apprête à
+ * envoyer : un undo qui défait un jeu gagnant raccourcit le second sans toucher au premier, et
+ * doit rester légal. Ce que ce nombre affirme, c'est « voilà l'état du serveur sur lequel mon
+ * journal est bâti » ; s'il ne s'y retrouve plus, c'est que quelqu'un d'autre a écrit.
+ */
+function loadAck(matchId: string): number | null {
+  try {
+    const raw = localStorage.getItem(ACK_PREFIX + matchId);
+    if (raw === null) return null;
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveAck(matchId: string, count: number) {
+  try {
+    localStorage.setItem(ACK_PREFIX + matchId, String(count));
+  } catch {
+    // Même parti pris que `saveLog` : le stockage refusé ne doit pas empêcher de compter.
   }
 }
 
@@ -74,6 +106,16 @@ function mmss(total: number): string {
   const s = total % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
 }
+
+/**
+ * Issue d'un envoi, telle que `finish` a besoin de la connaître.
+ *
+ * `push` reste best-effort : il n'interrompt JAMAIS le marquage, c'est le parti pris n° 1 de ce
+ * fichier. Mais il ne peut pas pour autant AVALER son issue, car `finish` purge le journal
+ * local — seule copie du match tant que le serveur n'a rien accepté. Sans cette valeur de
+ * retour, un match compté de bout en bout dans le sous-sol disparaissait au « Terminer ».
+ */
+type PushOutcome = "ok" | "conflict" | "offline" | "expired" | "stale";
 
 export default function InterclubScorer({
   fixtureId,
@@ -112,6 +154,7 @@ export default function InterclubScorer({
   // repartait des jeux connus du serveur : les points du jeu en cours étaient effacés, alors
   // que `saveLog` promet précisément de « continuer en mémoire ».
   const seededFor = useRef<string | null>(null);
+  const ackRef = useRef<number | null>(null);
   useEffect(() => {
     if (seededFor.current === match.id) return;
     seededFor.current = match.id;
@@ -121,6 +164,12 @@ export default function InterclubScorer({
     const seed = local ?? seedEvents(match.games.map((g) => ({ home: g.home, away: g.away })), bestOf);
     eventsRef.current = seed;
     setEvents(seed);
+    // Sur quel état du serveur ce journal est-il bâti ? Amorcé depuis le serveur, la réponse
+    // est immédiate. Repris d'un journal local, elle a été notée au dernier envoi réussi ; à
+    // défaut — journal d'avant cette clé, stockage vidé — on retient ce que le journal lui-même
+    // a fait connaître, c'est-à-dire ses propres jeux terminés. Ce choix fait pencher le doute
+    // du côté du SERVEUR, qui est la copie partagée.
+    ackRef.current = (local ? loadAck(match.id) : null) ?? replay(seed, bestOf).games.length;
     setReady(true);
   }, [match.id, match.games, bestOf]);
 
@@ -134,7 +183,7 @@ export default function InterclubScorer({
   const pendingRef = useRef<ScoreEvent[] | null>(null);
 
   const push = useCallback(
-    async (evts: ScoreEvent[]) => {
+    async (evts: ScoreEvent[]): Promise<PushOutcome> => {
       const st = replay(evts, bestOf);
       // Horodaté AVANT la requête, et non après un succès.
       //
@@ -155,6 +204,10 @@ export default function InterclubScorer({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             games: st.games,
+            // L'état du serveur sur lequel ce journal est bâti (cf. `loadAck`). `undefined`
+            // disparaît de la sérialisation, et le serveur retombe alors sur l'ancien
+            // comportement — le champ est facultatif de son côté.
+            knownGameCount: ackRef.current ?? undefined,
             live: st.status === "done" ? null : {
               current: st.current,
               serving: st.serving,
@@ -163,26 +216,64 @@ export default function InterclubScorer({
             },
           }),
         });
-        if (onExpired(res.status)) return;
+        if (onExpired(res.status)) return "expired";
         if (res.status === 409) {
           setOffline(false);
+          // Deux refus partagent ce statut, et ils demandent l'inverse l'un de l'autre : d'où
+          // le code renvoyé par le serveur, sur lequel on branche — jamais sur le message.
+          const code = await res
+            .json()
+            .then((d) => (d as { code?: string } | null)?.code)
+            .catch(() => undefined);
+          if (code === "stale-games") {
+            // Le serveur a dépassé ce journal : quelqu'un a saisi un jeu pendant qu'on avait le
+            // dos tourné. Le journal ne décrit plus rien — on le jette, et on ferme pour que le
+            // parent recharge la rencontre. Rouvrir « Reprendre le marquage » repartira du
+            // score enregistré, seule version que tout le monde partage.
+            clearLog(match.id);
+            ackRef.current = null;
+            toast("err", "Le score a changé ailleurs — rouvre le marquage pour repartir du score enregistré.");
+            onClose();
+            return "stale";
+          }
           toast("err", "Quelqu'un d'autre marque ce match.");
-          return;
+          return "conflict";
         }
         setOffline(!res.ok);
+        if (!res.ok) return "offline";
+        // Le serveur a pris ce corps : c'est désormais l'état sur lequel le journal est bâti.
+        ackRef.current = st.games.length;
+        saveAck(match.id, st.games.length);
+        return "ok";
       } catch {
         // Hors-ligne : on garde la main, la prochaine tentative renverra l'état COMPLET.
         setOffline(true);
+        return "offline";
       }
     },
-    [fixtureId, match.id, bestOf, onExpired, toast],
+    [fixtureId, match.id, bestOf, onExpired, onClose, toast],
   );
 
   const scheduleSync = useCallback(
-    (evts: ScoreEvent[], immediate: boolean) => {
+    (evts: ScoreEvent[]) => {
       pendingRef.current = evts;
       if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-      const wait = immediate ? 0 : Math.max(0, SYNC_MS - (Date.now() - lastSentRef.current));
+      // La borne s'applique à TOUT le marquage, sans porte de sortie.
+      //
+      // Il existait une option `immediate` qui mettait `wait` à 0 sans même regarder
+      // `lastSentRef` : elle court-circuitait donc la seule chose qui borne la cadence. Elle
+      // était vraie pour chaque fin de jeu, chaque fin de match, et chaque UNDO — or annuler
+      // cinq points d'affilée, geste ordinaire quand on rattrape une inattention, envoyait cinq
+      // PUT en trois secondes, donc cinq transactions Serializable et cinq invalidations du
+      // direct. La borne annoncée partout ailleurs (`schema.prisma`, `interclub-gate.ts`,
+      // `docs/interclub.md`) était fausse d'un facteur ~8 sur cette fenêtre.
+      //
+      // Rien ne se perd à la refermer : chaque appui replanifie l'envoi à `lastSent + SYNC_MS`,
+      // le premier appui après une accalmie part immédiatement (`wait` vaut 0), les spectateurs
+      // sondent de toute façon toutes les 10 s — plus lentement que la borne elle-même — et le
+      // seul envoi réellement urgent, celui du score final, part hors de cette file par
+      // `finish`, qui appelle `push` directement.
+      const wait = Math.max(0, SYNC_MS - (Date.now() - lastSentRef.current));
       timerRef.current = window.setTimeout(() => {
         timerRef.current = null;
         const p = pendingRef.current;
@@ -208,14 +299,20 @@ export default function InterclubScorer({
 
   const remaining = breakUntil === null ? 0 : Math.max(0, Math.ceil((breakUntil - now) / 1000));
   useEffect(() => {
-    if (breakUntil !== null && remaining === 0 && isSoundEnabled()) {
+    if (breakUntil === null || remaining > 0) return;
+    if (isSoundEnabled()) {
       // Réutilise le bip déjà connu des membres plutôt que d'inventer un son de plus.
       import("@/lib/sound").then((m) => m.playAlert()).catch(() => {});
     }
+    // La pause est FINIE : on l'éteint ici, et pas seulement sur « Reprendre maintenant » ou
+    // sur un undo. Sans cela `breakUntil` restait posé, donc l'intervalle de 500 ms continuait
+    // de battre — deux rendus complets de l'écran par seconde jusqu'au jeu suivant, alors que
+    // le panneau de pause a déjà disparu et que plus rien ne dépend de `now`.
+    setBreakUntil(null);
   }, [breakUntil, remaining]);
 
   // --- actions ---------------------------------------------------------------
-  function commit(build: (prev: ScoreEvent[]) => ScoreEvent[], opts: { immediate?: boolean } = {}) {
+  function commit(build: (prev: ScoreEvent[]) => ScoreEvent[]) {
     const prev = eventsRef.current;
     const next = build(prev);
     const before = replay(prev, bestOf);
@@ -226,9 +323,7 @@ export default function InterclubScorer({
     const gameEnded = after.games.length > before.games.length;
     const finished = after.status === "done";
     if (gameEnded && !finished) setBreakUntil(Date.now() + BREAK_SECONDS * 1000);
-    // Une fin de jeu ou de match part tout de suite : c'est ce que les spectateurs attendent,
-    // et c'est aussi le moment où le score doit être en sécurité côté serveur.
-    scheduleSync(next, opts.immediate || gameEnded || finished);
+    scheduleSync(next);
   }
 
   const scorePoint = (side: Side) => {
@@ -247,7 +342,7 @@ export default function InterclubScorer({
 
   const doUndo = () => {
     setBreakUntil(null);
-    commit((prev) => undoEvent(prev), { immediate: true });
+    commit((prev) => undoEvent(prev));
   };
 
   async function finish() {
@@ -260,8 +355,28 @@ export default function InterclubScorer({
     }
     pendingRef.current = null;
     const latest = eventsRef.current;
-    await push(latest);
-    if (replay(latest, bestOf).status === "done") clearLog(match.id);
+    const outcome = await push(latest);
+    // Session périmée : `onExpired` a déjà pris la main (redirection) ; journal périmé : `push`
+    // a déjà purgé et fermé. Dans les deux cas il n'y a plus rien à faire ici.
+    if (outcome === "expired" || outcome === "stale") return;
+
+    // ⚠️ LE JOURNAL NE SE PURGE QUE SUR UN ENVOI CONFIRMÉ.
+    //
+    // `clearLog` supprime la seule copie du match tant que le serveur n'a rien accepté. Purger
+    // sans regarder l'issue de `push` — ce que faisait la version précédente — perdait un match
+    // entier dans le cas que ce fichier revendique pourtant de savoir traiter : compté du
+    // premier au dernier point sans réseau, le badge « hors-ligne » affiché tout du long, puis
+    // « Terminer ». Le score disparaissait alors des deux côtés à la fois.
+    //
+    // En cas d'échec on GARDE le journal et on ferme quand même : l'écran ne piège personne, et
+    // rouvrir « Reprendre le marquage » relit le journal et renvoie l'état complet — la synchro
+    // étant idempotente, un renvoi ne coûte rien.
+    if (outcome === "ok") {
+      if (replay(latest, bestOf).status === "done") clearLog(match.id);
+    } else if (outcome === "offline") {
+      toast("err", "Score gardé sur cet appareil : rouvre le marquage pour l'envoyer.");
+    }
+    // `conflict` : `push` a déjà prévenu, et le journal reste — c'est la version du marqueur.
     onClose();
   }
 

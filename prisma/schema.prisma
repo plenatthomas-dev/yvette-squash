@@ -611,21 +611,32 @@ model InterclubGuest {
 // adverses (décision produit). `matchCount` et `bestOf` sont configurables car le format
 // varie d'une division à l'autre.
 model Interclub {
-  id          String           @id @default(cuid())
-  date        String // "YYYY-MM-DD" (comme Tricount et Tournament)
-  team        InterclubTeam    @relation(fields: [teamId], references: [id], onDelete: Restrict)
-  teamId      String
-  season      String? // ex. "2026/2027"
-  division    String? // ex. "D2 Hommes"
-  opponent    String // nom du club adverse, saisi à la main
-  home        Boolean          @default(true) // true = on reçoit
-  matchCount  Int              @default(4) // nombre de simples de la rencontre
-  bestOf      Int              @default(5) // 3 => 2 jeux gagnants ; 5 => 3 jeux gagnants
-  status      String           @default("scheduled") // scheduled | live | done
-  createdById String
-  createdBy   User             @relation("InterclubCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  createdAt   DateTime         @default(now())
-  matches     InterclubMatch[]
+  id              String           @id @default(cuid())
+  date            String // "YYYY-MM-DD" (comme Tricount et Tournament)
+  team            InterclubTeam    @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  teamId          String
+  season          String? // ex. "2026/2027"
+  division        String? // ex. "D2 Hommes"
+  opponent        String // nom du club adverse, saisi à la main
+  home            Boolean          @default(true) // true = on reçoit
+  matchCount      Int              @default(4) // nombre de simples de la rencontre
+  bestOf          Int              @default(5) // 3 => 2 jeux gagnants ; 5 => 3 jeux gagnants
+  status          String           @default("scheduled") // scheduled | live | done
+  // Horodatage des DEUX annonces qui ne doivent partir qu'une fois par rencontre : « la
+  // rencontre commence » et le résultat final. Ce sont des MARQUEURS, pas des dates
+  // d'affichage — rien ne les lit hors des gardes de notification.
+  //
+  // Ils remplacent une comparaison sur `status`, qui ne pouvait pas tenir : le statut d'une
+  // rencontre redescend légitimement (vider les jeux d'un simple pour ressaisir le bon score
+  // le ramène de `done` à `live`), et chaque redescente réarmait les deux transitions. Corriger
+  // un score en deux temps annonçait donc « la rencontre commence » sur une rencontre jouée
+  // deux heures plus tôt, puis renvoyait le résultat final à tous les abonnés.
+  startNotifiedAt DateTime?
+  doneNotifiedAt  DateTime?
+  createdById     String
+  createdBy       User             @relation("InterclubCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt       DateTime         @default(now())
+  matches         InterclubMatch[]
 
   @@index([date])
   @@index([teamId, date])
