@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
-import { HttpError, httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
+import { HttpError, httpErrorResponse, readJsonBody, serializableTransaction } from "@/lib/http-tx";
 import { Prisma } from "@prisma/client";
 import { isAdminEmail } from "@/lib/admin";
 import {
@@ -12,6 +12,7 @@ import {
 } from "@/lib/interclub";
 import {
   derivedStatus,
+  staleGamesReason,
   fixtureScore,
   scorerIsStale,
   MAX_PLAYER_NAME_LEN,
@@ -56,7 +57,7 @@ export async function PATCH(
   const { session } = access;
   const { id, mid } = await params;
 
-  const body = await req.json().catch(() => ({}));
+  const body = await readJsonBody(req);
   const { homeUserId, homeGuestId, awayName, homeColor, awayColor, games, knownGameCount } =
     body as {
       homeUserId?: unknown;
@@ -121,13 +122,23 @@ export async function PATCH(
     lines: MatchLine[];
   }
 
-  let ev: Outcome | null;
+  /**
+   * Marque « la transaction n'a RIEN écrit », qu'il faut distinguer de « elle a écrit, mais il
+   * n'y a rien à annoncer » — les deux rendaient `null`, et le second doit purger le cache du
+   * direct quand le premier ne le doit pas.
+   */
+  const RIEN_ECRIT = Symbol("rien-ecrit");
+
+  let ev: Outcome | null | typeof RIEN_ECRIT;
   try {
-    ev = await serializableTransaction(async (tx): Promise<Outcome | null> => {
+    ev = await serializableTransaction(async (tx): Promise<Outcome | null | typeof RIEN_ECRIT> => {
       const m = await tx.interclubMatch.findUnique({
         where: { id: mid },
         include: {
-          games: { select: { number: true } },
+          // Les POINTS, et pas seulement le nombre : la garde de fraîcheur compare désormais
+          // le score des jeux déjà confirmés, un même nombre ne prouvant pas qu'on parle des
+          // mêmes jeux (cf. `staleGamesReason`).
+          games: { select: { number: true, pointsHome: true, pointsAway: true } },
           interclub: {
             select: {
               id: true,
@@ -188,16 +199,18 @@ export async function PATCH(
       // sur un état qui n'existe plus, et son `games` effacerait ce qu'il n'a jamais vu.
       // Facultatif : un client qui ne l'envoie pas garde l'ancien comportement (aucune
       // rupture pour les corrections faites depuis un écran fraîchement chargé).
-      if (parsedGames && knownGameCount !== undefined) {
-        if (!Number.isInteger(knownGameCount) || (knownGameCount as number) < 0) {
+      if (parsedGames) {
+        if (knownGameCount !== undefined && (!Number.isInteger(knownGameCount) || (knownGameCount as number) < 0)) {
           throw new HttpError(400, "knownGameCount invalide");
         }
-        if ((knownGameCount as number) !== m.games.length) {
-          throw new HttpError(
-            409,
-            "Le score a changé pendant ta saisie — rouvre le match pour repartir du score à jour",
-          );
-        }
+        // MÊME RÈGLE QUE LA ROUTE SŒUR, et c'est maintenant littéralement le même code.
+        //
+        // Elle ne l'était pas : ici tout était conditionné à la PRÉSENCE du champ, si bien
+        // qu'un `{ games: [] }` sans rien annoncer effaçait les jeux d'un simple et le
+        // ramenait à `pending`. `docs/interclub.md` affirmait pourtant que la garde couvrait
+        // les DEUX routes d'écriture.
+        const perime = staleGamesReason(knownGameCount as number | undefined, m.games, parsedGames);
+        if (perime) throw new HttpError(409, perime, "stale-games");
       }
 
       if (parsedGames && !validGameSequence(parsedGames, m.interclub.bestOf)) {
@@ -271,6 +284,18 @@ export async function PATCH(
           data.liveJson = null;
         }
       }
+
+      // RIEN À ÉCRIRE ⇒ ON N'ÉCRIT PAS.
+      //
+      // Un corps `{}` — un client qui rejoue sa requête au retour au premier plan, une double
+      // soumission — traversait tout : `update` (qui bouscule `updatedAt`), la relecture des
+      // simples voisins, la mise à jour de la rencontre, et `interclubChanged()`. Quatre
+      // allers-retours Neon et une purge du tag du direct, qui fait relire la requête LOURDE à
+      // tous les spectateurs — pour une requête qui ne demande rien.
+      //
+      // On sort avant d'avoir rien changé. La transaction n'a rien écrit : il n'y a donc ni
+      // statut à recaler, ni notification à envoyer, ni cache à invalider.
+      if (Object.keys(data).length === 0) return RIEN_ECRIT;
 
       await tx.interclubMatch.update({ where: { id: mid }, data });
 
@@ -371,6 +396,10 @@ export async function PATCH(
     if (res) return res;
     throw e;
   }
+
+  // Rien n'a été écrit : rien à invalider. Purger le tag ferait relire la requête LOURDE du
+  // direct à tous les spectateurs pour une requête qui n'a rien demandé.
+  if (ev === RIEN_ECRIT) return NextResponse.json({ ok: true });
 
   interclubChanged();
 

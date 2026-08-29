@@ -2,7 +2,13 @@
 // ce module connaît Prisma — il ne doit donc JAMAIS être importé depuis un composant client.
 
 import { Prisma } from "@prisma/client";
-import { normalizeColor, UNSET_PLAYER, winGamesFor, type Side } from "./interclub";
+import {
+  normalizeColor,
+  UNSET_PLAYER,
+  winGamesFor,
+  type GameScore,
+  type Side,
+} from "./interclub";
 
 export const interclubInclude = {
   team: true,
@@ -210,4 +216,61 @@ export function serializeInterclub(f: FullInterclub, userId: string | null, isAd
     canDelete: (!!userId && f.createdById === userId) || isAdmin,
     matches,
   };
+}
+
+/** Un jeu tel que la base le porte, réduit à ce que la garde de fraîcheur regarde. */
+export type StoredGame = { pointsHome: number; pointsAway: number };
+
+/**
+ * GARDE DE FRAÎCHEUR DES JEUX — écrite UNE fois, appliquée par les deux routes d'écriture.
+ *
+ * Elle protège d'un journal calculé sur un état que la base a dépassé. Le danger est le même
+ * des deux côtés : `games` REMPLACE intégralement la liste, donc un corps périmé efface.
+ *
+ * Elle vivait pourtant en double, et les deux copies avaient divergé — `docs/interclub.md`
+ * affirmait que la garde couvrait « les deux routes » alors que le `PATCH` n'en appliquait
+ * qu'une moitié. Deux exemplaires d'une règle finissent toujours par ne plus dire la même
+ * chose ; celui-ci est le seul.
+ *
+ * Trois refus, et un seul message par famille :
+ *
+ * 1. RETIRER SANS RIEN ANNONCER. Le champ reste facultatif — c'est le chemin du marqueur point
+ *    par point, qui ne fait que croître — mais il devient obligatoire pour raccourcir la liste.
+ *    Sans cette clause, un corps minimal `{ games: [] }` que n'importe quel membre peut poster
+ *    efface toutes les lignes et annule le score : rien ne distingue « je n'ai encore rien à
+ *    dire » de « efface tout ».
+ *
+ * 2. UN AUTRE NOMBRE DE JEUX. Le compte annoncé est celui que le serveur avait CONFIRMÉ, pas
+ *    celui qu'on envoie maintenant : un undo qui défait un jeu gagnant raccourcit le second
+ *    sans toucher au premier, et reste donc légal.
+ *
+ * 3. LE MÊME NOMBRE, UN AUTRE SCORE. C'est le trou que la comparaison de longueurs laissait
+ *    ouvert, et il se referme sur une correction ordinaire : le marqueur compte deux jeux puis
+ *    fait « Retour » (son journal local reste) ; le capitaine corrige une faute de frappe du
+ *    premier jeu — deux jeux avant, deux après ; le marqueur rouvre et son premier point
+ *    renvoie l'ANCIEN premier jeu, avec un compte qui tombe juste. La correction disparaissait
+ *    sans erreur ni trace. « Même nombre » ne veut pas dire « personne n'a écrit ».
+ *
+ * La comparaison porte sur le PRÉFIXE COMMUN, jamais sur toute la liste annoncée : après un
+ * undo, `envoye` est plus court que `known`, et exiger la présence des jeux manquants
+ * interdirait précisément l'undo que la règle 2 prend soin d'autoriser.
+ */
+export function staleGamesReason(
+  known: number | undefined,
+  base: readonly StoredGame[],
+  envoye: readonly GameScore[],
+): string | null {
+  if (known === undefined) {
+    return envoye.length < base.length
+      ? "Retirer des jeux demande de dire sur quel score on se fonde"
+      : null;
+  }
+  if (known !== base.length) return "Le score a changé ailleurs — le marquage repart du score enregistré";
+  const commun = Math.min(known, envoye.length);
+  for (let i = 0; i < commun; i++) {
+    if (base[i].pointsHome !== envoye[i].home || base[i].pointsAway !== envoye[i].away) {
+      return "Le score a changé ailleurs — le marquage repart du score enregistré";
+    }
+  }
+  return null;
 }

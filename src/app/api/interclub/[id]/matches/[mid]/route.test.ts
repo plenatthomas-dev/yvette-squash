@@ -24,7 +24,8 @@ const h = vi.hoisted(() => ({
 vi.mock("@/lib/features-server", () => ({
   getFeatures: async () => ({ interclub: h.interclub }),
 }));
-vi.mock("@/lib/interclub-gate", () => ({ interclubChanged: vi.fn() }));
+const interclubChanged = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/interclub-gate", () => ({ interclubChanged }));
 vi.mock("@/lib/interclub-notify", () => ({
   notifyGameDone: vi.fn(async (_ctx: unknown, player: string, opponent: string) => {
     h.notified.push("gameDone");
@@ -124,6 +125,7 @@ beforeEach(() => {
   h.guest = null;
   h.admin = false;
   h.updated = null;
+  interclubChanged.mockClear();
   h.createdGames = null;
   h.deletedGames = 0;
   h.fixtureStatus = null;
@@ -457,7 +459,8 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
     h.match = { ...freshMatch(), games: [{ number: 1 }], gamesHome: 1, gamesAway: 0 };
     const res = await PATCH(patch({ games: [], knownGameCount: 0 }), ctx);
     expect(res.status).toBe(409);
-    expect((await res.json()).error).toMatch(/changé pendant ta saisie/i);
+    // Message unifié avec la route sœur : la garde est désormais littéralement le même code.
+    expect((await res.json()).error).toMatch(/changé ailleurs/i);
     expect(h.deletedGames).toBe(0);
   });
 
@@ -466,10 +469,31 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
     expect((await PATCH(patch({ games: [], knownGameCount: 1 }), ctx)).status).toBe(200);
   });
 
-  // Garde FACULTATIVE : un client qui ne l'envoie pas garde l'ancien comportement.
-  it("n'exige pas knownGameCount", async () => {
-    h.match = { ...freshMatch(), games: [{ number: 1 }], gamesHome: 1, gamesAway: 0 };
-    expect((await PATCH(patch({ games: [] }), ctx)).status).toBe(200);
+  // Le champ reste FACULTATIF pour une écriture qui ne retire rien — le chemin ordinaire d'une
+  // correction faite depuis un écran fraîchement chargé.
+  it("n'exige pas knownGameCount pour une écriture qui ne retire rien", async () => {
+    h.match = { ...freshMatch(), games: [], gamesHome: null, gamesAway: null };
+    expect((await PATCH(patch({ games: [{ home: 11, away: 5 }] }), ctx)).status).toBe(200);
+  });
+
+  // …mais il devient obligatoire pour RETIRER. Ce cas rendait 200 et effaçait les jeux : la
+  // route sœur le refusait déjà, et `docs/interclub.md` affirmait que la garde couvrait les
+  // DEUX routes. Un corps minimal `{ games: [] }`, que tout membre proche du match peut poster,
+  // remettait le simple à `pending` et annulait son score sans que rien ne soit signalé.
+  it("l'exige pour RETIRER des jeux, comme la route sœur", async () => {
+    h.match = { ...freshMatch(), games: [{ number: 1, pointsHome: 11, pointsAway: 5 }], gamesHome: 1, gamesAway: 0 };
+    const res = await PATCH(patch({ games: [] }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/sur quel score/i);
+  });
+
+  // Le trou que la comparaison de LONGUEURS laissait ouvert : même nombre, autre score.
+  it("refuse une saisie du même nombre de jeux mais d'un autre score", async () => {
+    h.match = { ...freshMatch(), games: [{ number: 1, pointsHome: 11, pointsAway: 9 }], gamesHome: 1, gamesAway: 0 };
+    // Le capitaine a corrigé le premier jeu (11-2 → 11-9) pendant que cet écran était ouvert.
+    const res = await PATCH(patch({ games: [{ home: 11, away: 2 }], knownGameCount: 1 }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/changé ailleurs/i);
   });
 
   // --- « Entamé » ne se lit pas sur gamesHome seul -------------------------
@@ -590,5 +614,30 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
     expect(h.fixtureStatus).toBe("done");
     expect(h.notified).not.toContain("fixtureDone");
     expect(h.fixtureUpdate?.doneNotifiedAt).toBeUndefined();
+  });
+});
+
+// Un corps `{}` — un client qui rejoue sa requête au retour au premier plan, une double
+// soumission — traversait toute la route : `update` (qui bouscule `updatedAt`), la relecture des
+// simples voisins, la mise à jour de la rencontre, et l'invalidation du tag du direct. Quatre
+// allers-retours Neon et une purge qui fait relire la requête LOURDE à tous les spectateurs,
+// pour une requête qui ne demande rien.
+describe("PATCH .../matches/{mid} — une requête qui ne demande rien n'écrit rien", () => {
+  it("n'écrit pas et n'invalide pas le cache du direct sur un corps vide", async () => {
+    h.match = { ...freshMatch(), games: [] };
+    const res = await PATCH(patch({}), ctx);
+    expect(res.status).toBe(200);
+    expect(h.updated).toBeNull();
+    expect(interclubChanged).not.toHaveBeenCalled();
+  });
+
+  it("écrit et invalide dès qu'il y a quelque chose à écrire", async () => {
+    // Le contre-test : sans lui, « n'écrit rien » décrirait aussi bien une route qui n'écrit
+    // plus jamais.
+    h.match = { ...freshMatch(), games: [] };
+    const res = await PATCH(patch({ games: [{ home: 11, away: 5 }] }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.updated).not.toBeNull();
+    expect(interclubChanged).toHaveBeenCalled();
   });
 });

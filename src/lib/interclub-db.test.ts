@@ -5,6 +5,7 @@ import {
   parseLive,
   scorerIsStale,
   SCORER_STALE_MS,
+  staleGamesReason,
 } from "./interclub-db";
 
 describe("fixtureScore", () => {
@@ -148,5 +149,53 @@ describe("parseLive — la borne haute, que la route affirmait déjà", () => {
     expect(parseLive(instantane(0, 100))).toBeNull();
     // Ramener à 99 aurait INVENTÉ un score — ce que l'en-tête de ce lecteur promet de ne
     // jamais faire. On refuse, et l'affichage retombe sur les jeux terminés.
+  });
+});
+
+describe("staleGamesReason — la règle unique des deux routes d'écriture", () => {
+  const base = (...paires: [number, number][]) =>
+    paires.map(([h, a]) => ({ pointsHome: h, pointsAway: a }));
+  const envoi = (...paires: [number, number][]) => paires.map(([home, away]) => ({ home, away }));
+
+  describe("sans compte annoncé — le champ reste facultatif, sauf pour retirer", () => {
+    it("laisse CROÎTRE : c'est le chemin du marqueur point par point, il ne détruit rien", () => {
+      expect(staleGamesReason(undefined, base([11, 5]), envoi([11, 5], [11, 8]))).toBeNull();
+    });
+
+    it("laisse une écriture de même longueur", () => {
+      expect(staleGamesReason(undefined, base([11, 5]), envoi([11, 5]))).toBeNull();
+    });
+
+    it("REFUSE de retirer : rien ne distingue sinon « je n'ai rien à dire » de « efface tout »", () => {
+      // Le corps minimal `{ games: [] }`, que tout membre proche du match peut poster.
+      expect(staleGamesReason(undefined, base([11, 5], [11, 8]), envoi())).toMatch(/quel score/i);
+    });
+  });
+
+  describe("avec un compte annoncé", () => {
+    it("accepte quand le compte correspond et que les scores concordent", () => {
+      expect(staleGamesReason(2, base([11, 5], [11, 8]), envoi([11, 5], [11, 8]))).toBeNull();
+    });
+
+    it("refuse un autre nombre de jeux — quelqu'un a écrit entre-temps", () => {
+      expect(staleGamesReason(2, base([11, 5], [11, 8], [11, 3]), envoi([11, 5], [11, 8])))
+        .toMatch(/changé ailleurs/i);
+    });
+
+    it("refuse le MÊME nombre sous un autre score — le trou des comparaisons de longueur", () => {
+      // Le capitaine a corrigé le premier jeu ; le journal du marqueur porte l'ancienne version.
+      expect(staleGamesReason(2, base([11, 9], [11, 8]), envoi([11, 2], [11, 8])))
+        .toMatch(/changé ailleurs/i);
+    });
+
+    it("laisse passer un UNDO, qui raccourcit l'envoi sans toucher à l'état connu", () => {
+      // La comparaison porte sur le PRÉFIXE COMMUN : exiger les jeux manquants interdirait
+      // précisément l'undo que la règle du nombre prend soin d'autoriser.
+      expect(staleGamesReason(2, base([11, 5], [11, 8]), envoi([11, 5]))).toBeNull();
+    });
+
+    it("refuse un undo dont le jeu conservé a changé, lui", () => {
+      expect(staleGamesReason(2, base([11, 9], [11, 8]), envoi([11, 2]))).toMatch(/changé ailleurs/i);
+    });
   });
 });

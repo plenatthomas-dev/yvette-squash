@@ -6,6 +6,8 @@ const h = vi.hoisted(() => ({
   session: null as null | { userId: string },
   match: null as null | Record<string, unknown>,
   siblings: [] as Array<Record<string, unknown>>,
+  /** Les voisins reflètent-ils l'écriture en cours ? (cf. le mock de `findMany`) */
+  echoStatut: false,
   updated: null as null | Record<string, unknown>,
   createdGames: null as null | Array<Record<string, unknown>>,
   deleteCalls: 0,
@@ -40,7 +42,23 @@ vi.mock("@/lib/db", () => {
   const tx = {
     interclubMatch: {
       findUnique: vi.fn(async () => h.match),
-      findMany: vi.fn(async () => h.siblings),
+      // Par défaut les simples voisins sont FIGÉS — pratique, mais alors le statut de la
+      // rencontre ne dépend plus de ce que la route vient d'écrire, et un test sur cette
+      // chaîne-là ne prouverait rien. `echoStatut` rebranche la causalité : la lecture des
+      // voisins reflète l'écriture qui vient d'avoir lieu, comme dans la vraie transaction, où
+      // le `findMany` suit l'`update`.
+      findMany: vi.fn(async () =>
+        h.echoStatut && h.updated
+          ? [
+              {
+                gamesHome: h.updated.gamesHome ?? null,
+                gamesAway: h.updated.gamesAway ?? null,
+                status: h.updated.status,
+                homeDisplayName: "Tom",
+              },
+            ]
+          : h.siblings,
+      ),
       update: vi.fn(async (args: { data: Record<string, unknown> }) => {
         h.updated = args.data;
         return {};
@@ -127,6 +145,7 @@ beforeEach(() => {
   h.session = { userId: "u1" };
   h.match = freshMatch();
   h.siblings = [{ gamesHome: null, gamesAway: null, status: "live", homeDisplayName: "Tom" }];
+  h.echoStatut = false;
   h.updated = null;
   h.createdGames = null;
   h.deleteCalls = 0;
@@ -368,5 +387,73 @@ describe("PUT .../live — notifications, sur les transitions seulement", () => 
     await PUT(put({ games: WIN }), ctx);
     expect(h.fixtureStatus).toBe("done");
     expect(h.notified).not.toContain("fixtureDone");
+  });
+});
+
+// Un instantané à 0-0 sans aucun jeu, c'est la désignation du premier serveur — faite pendant
+// l'échauffement, souvent une demi-heure avant le premier point. Le serveur en concluait
+// « en direct », avec deux conséquences que `claim/route.ts` dit pourtant avoir écartées.
+describe("PUT .../live — un instantané à 0-0 n'est pas un match commencé", () => {
+  const engage = { current: { home: 0, away: 0 }, serving: "home", servingBox: "right" };
+
+  it("laisse le simple en `pending` quand rien n'a encore été joué", async () => {
+    h.match = freshMatch({ status: "pending", games: [] });
+    const res = await PUT(put({ games: [], live: engage }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.updated?.status).toBe("pending");
+  });
+
+  it("stocke quand même l'instantané : le serveur désigné ne doit pas se perdre", async () => {
+    h.match = freshMatch({ status: "pending", games: [] });
+    await PUT(put({ games: [], live: engage }), ctx);
+    expect(h.updated?.liveJson).toContain("right");
+  });
+
+  it("n'annonce donc PAS le début de la rencontre, et ne consomme pas son marqueur", async () => {
+    // Le marqueur `startNotifiedAt` ne se réarme jamais : le consommer ici, c'est interdire à
+    // tout jamais la notification du vrai début.
+    h.match = freshMatch({
+      status: "pending",
+      games: [],
+      interclub: { ...baseFixture, status: "scheduled", startNotifiedAt: null },
+    });
+    // Le statut de la rencontre se DÉDUIT de ce que la route écrit sur ce simple : c'est la
+    // chaîne entière qu'on éprouve ici, du corps reçu jusqu'au marqueur de notification.
+    h.echoStatut = true;
+    await PUT(put({ games: [], live: engage }), ctx);
+    expect(h.fixtureUpdate?.startNotifiedAt ?? null).toBeNull();
+  });
+
+  it("bascule en direct dès le PREMIER POINT, lui", async () => {
+    h.match = freshMatch({ status: "pending", games: [] });
+    const res = await PUT(
+      put({ games: [], live: { current: { home: 1, away: 0 }, serving: "home", servingBox: "right" } }),
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    expect(h.updated?.status).toBe("live");
+  });
+});
+
+// « Même nombre de jeux » ne veut pas dire « personne n'a écrit ». La garde comparait des
+// longueurs ; une correction à nombre constant passait donc au travers et était écrasée.
+describe("PUT .../live — fraîcheur du CONTENU, pas seulement du nombre", () => {
+  it("refuse un journal qui rejoue un ancien score sous un compte qui tombe juste", async () => {
+    // Le capitaine a corrigé le premier jeu (11-2 → 11-9) pendant que le marqueur avait le dos
+    // tourné ; le journal local du marqueur porte encore l'ancienne version.
+    h.match = freshMatch({ scorerId: null, games: asRows([{ home: 11, away: 9 }]) });
+    const res = await PUT(put({ games: [{ home: 11, away: 2 }], knownGameCount: 1 }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("stale-games");
+    expect(h.deleteCalls).toBe(0);
+  });
+
+  it("laisse passer le même journal quand il concorde vraiment", async () => {
+    h.match = freshMatch({ games: asRows([{ home: 11, away: 9 }]) });
+    const res = await PUT(
+      put({ games: [{ home: 11, away: 9 }, { home: 11, away: 4 }], knownGameCount: 1 }),
+      ctx,
+    );
+    expect(res.status).toBe(200);
   });
 });

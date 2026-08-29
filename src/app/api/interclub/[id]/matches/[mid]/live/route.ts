@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
-import { HttpError, httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
+import { HttpError, httpErrorResponse, readJsonBody, serializableTransaction } from "@/lib/http-tx";
 import { sequenceWinner, validGameSequence, type GameScore } from "@/lib/interclub";
 import {
   derivedStatus,
+  staleGamesReason,
   fixtureScore,
   parseLive,
   scorerIsStale,
@@ -73,7 +74,7 @@ export async function PUT(
   const { session } = access;
   const { id, mid } = await params;
 
-  const body = await req.json().catch(() => ({}));
+  const body = await readJsonBody(req);
   const { live, games, knownGameCount } = body as {
     live?: unknown;
     games?: unknown;
@@ -102,6 +103,23 @@ export async function PUT(
   // et non le corps brut d'un client.
   const hasLive = live !== null && live !== undefined;
   const snapshot = hasLive ? parseLive(JSON.stringify(live)) : null;
+
+  /**
+   * L'instantané porte-t-il un match RÉELLEMENT commencé ?
+   *
+   * Un instantané à 0-0, sans aucun jeu, n'est pas un match qui a démarré : c'est la
+   * désignation du premier serveur, faite pendant l'échauffement. Le marqueur l'envoie parce
+   * que l'écran synchronise tout changement, et le serveur en concluait « en direct ».
+   *
+   * Ce raccourci coûtait cher, et exactement ce que `claim/route.ts` dit avoir écarté : toucher
+   * « Marquer », choisir qui sert, puis « Retour » envoyait « La rencontre commence » à tous les
+   * abonnés, posait `startNotifiedAt` DÉFINITIVEMENT — le vrai début ne notifiait donc plus
+   * jamais — et laissait le simple « en cours » avec un 0-0, sondé toutes les dix secondes.
+   *
+   * Le score de l'instantané est bien stocké dans les deux cas : le serveur désigné ne se perd
+   * pas. Seul le STATUT attend le premier point.
+   */
+  const enJeu = !!snapshot && (snapshot.current.home > 0 || snapshot.current.away > 0);
   if (hasLive && snapshot === null) {
     return NextResponse.json({ error: "Instantané invalide" }, { status: 400 });
   }
@@ -178,30 +196,10 @@ export async function PUT(
       // confirmé au marqueur, pas celui qu'il envoie maintenant : un undo qui défait un jeu
       // gagnant reste donc parfaitement légal (il raccourcit `parsed`, pas `knownGameCount`),
       // et seul un journal calculé sur un état que la base a dépassé est refusé.
-      if (knownGameCount !== undefined) {
-        if ((knownGameCount as number) !== m.games.length) {
-          throw new HttpError(
-            409,
-            "Le score a changé ailleurs — le marquage repart du score enregistré",
-            "stale-games",
-          );
-        }
-      } else if (parsed.length < m.games.length) {
-        // Le champ reste facultatif — sauf pour RETIRER des jeux, ce qu'aucune écriture ne peut
-        // faire sans dire sur quel état elle se fonde.
-        //
-        // Sans cette clause, un corps minimal `{ games: [], live: null }` — que n'importe quel
-        // membre peut poster sur un match `live` que personne ne tient — remettait le simple à
-        // `pending`, effaçait toutes ses lignes `InterclubGame` et annulait `gamesHome/gamesAway`.
-        // Rien ne distinguait « je n'ai encore rien à dire » de « efface tout ». Laisser CROÎTRE
-        // une liste sans base annoncée reste permis : c'est le chemin du marqueur point par
-        // point, et il ne détruit rien.
-        throw new HttpError(
-          409,
-          "Retirer des jeux demande de dire sur quel score on se fonde",
-          "stale-games",
-        );
-      }
+      // Une seule règle, partagée avec la route sœur `PATCH` : elle vivait en double, et les
+      // deux copies avaient divergé (cf. `staleGamesReason`).
+      const perime = staleGamesReason(knownGameCount as number | undefined, m.games, parsed);
+      if (perime) throw new HttpError(409, perime, "stale-games");
 
       if (!validGameSequence(parsed, m.interclub.bestOf)) {
         throw new HttpError(400, "Score impossible pour ce format");
@@ -246,7 +244,7 @@ export async function PUT(
           liveJson: winner || !snapshot ? null : serializeLive(snapshot),
           gamesHome: parsed.length ? home : null,
           gamesAway: parsed.length ? away : null,
-          status: winner ? "done" : parsed.length || snapshot ? "live" : "pending",
+          status: winner ? "done" : parsed.length || enJeu ? "live" : "pending",
         },
       });
 
