@@ -5,7 +5,26 @@
  *  Chargé APRÈS pico.min.css → nos règles l'emportent à spécificité égale.
  * ========================================================================== */
 
-:root {
+/* ⚠️ `:root:root` ET NON `:root` — ce doublement est la seule chose qui fait exister le vert.
+ *
+ * Pico déclare son bleu sous DEUX sélecteurs de spécificité (0,2,0) :
+ *   `:root:not([data-theme=dark])`  → thème clair et thème rose ;
+ *   `:root:not([data-theme])`       → dans une media query `prefers-color-scheme: dark`.
+ * Un simple `:root` ne pèse que (0,1,0) : il perdait contre les deux, quel que soit l'ordre de
+ * chargement. Résultat, le bouton primaire rendait le BLEU DE PICO dans le rendu par défaut de
+ * toute l'appli — et la valeur ci-dessous, approfondie exprès pour tenir 5,00:1 sous du texte
+ * blanc, était écrite sans jamais être appliquée. Elle ne l'était qu'en thème sombre explicite,
+ * où le sélecteur de Pico retombe à (0,1,0) et où l'ordre de chargement suffisait à trancher.
+ *
+ * `:root:root` désigne exactement le même élément, en pesant (0,2,0). À spécificité égale,
+ * globals.css étant chargé après pico.min.css, nous l'emportons. Le thème rose, lui, garde le
+ * sien : `:root[data-theme="rose"]` pèse autant et vient plus loin dans ce fichier.
+ *
+ * NE PAS remplacer par `:root:not([data-theme=dark])` : ce sélecteur attraperait AUSSI le thème
+ * rose, et à égalité de poids avec son propre bloc — le rose se jouerait alors sur l'ordre des
+ * lignes, ce qui n'est pas une façon de tenir une palette.
+ */
+:root:root {
   /* accent = vert « squash » repris comme couleur primaire Pico (identique clair/sombre).
      Approfondi depuis #1f9d57, qui ne donnait que 3,49:1 au texte blanc des boutons (2,72:1
      sur son survol #24b365) — sous le plancher AA de 4,5:1 sur TOUT bouton primaire, dans les
