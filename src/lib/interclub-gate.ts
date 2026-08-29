@@ -146,17 +146,58 @@ async function readLive(): Promise<LiveFixture[]> {
   }));
 }
 
-const liveCached = unstable_cache(readLive, ["interclub-live"], { tags: [TAG], revalidate: TTL_S });
+/**
+ * Enveloppe d'une exception venue de la LECTURE, pour ne pas la confondre avec une panne du
+ * CACHE. Les deux remontaient par le même `catch`, et le repli les traitait pareil.
+ *
+ * Conséquence, exactement au mauvais moment : quand c'est Postgres qui refuse — veille, quota
+ * compute dépassé —, l'exception traversait `liveCached` et le repli relançait aussitôt la même
+ * requête lourde. Dix spectateurs qui sondent produisaient vingt tentatives par cycle au lieu
+ * de dix, sur une base qui venait justement de dire non. Le commentaire promettait « dégradé en
+ * coût » : il l'était du double, et pour rien — une base injoignable ne le devient pas moins
+ * parce qu'on insiste dans la milliseconde.
+ */
+class LectureEchouee extends Error {
+  constructor(readonly cause: unknown) {
+    super("lecture du direct impossible");
+    this.name = "LectureEchouee";
+  }
+}
+
+/**
+ * `instanceof` d'abord ; le nom ensuite, au cas où le cache reconstruirait l'erreur en la
+ * faisant traverser sa frontière. Ce détail d'implémentation ne doit pas décider d'une seconde
+ * requête sur une base en difficulté.
+ */
+function vientDeLaLecture(e: unknown): boolean {
+  return e instanceof LectureEchouee || (e as { name?: string } | null)?.name === "LectureEchouee";
+}
+
+const liveCached = unstable_cache(
+  async () => {
+    try {
+      return await readLive();
+    } catch (e) {
+      throw new LectureEchouee(e);
+    }
+  },
+  ["interclub-live"],
+  { tags: [TAG], revalidate: TTL_S },
+);
 
 /**
  * État des rencontres en cours, servi par le Data Cache. Ne touche Postgres qu'en cas de miss
- * (invalidation par le marqueur, TTL écoulé) — ou de panne du cache, auquel cas on lit
+ * (invalidation par le marqueur, TTL écoulé) — ou de panne du CACHE, auquel cas on lit
  * directement la base : dégradé en coût, jamais en exactitude.
+ *
+ * Une panne de la LECTURE, elle, remonte telle quelle : le repli n'a rien à offrir contre une
+ * base qui ne répond pas, et réessayer sur-le-champ ne ferait que doubler la charge.
  */
 export async function getLiveFixtures(): Promise<LiveFixture[]> {
   try {
     return await liveCached();
-  } catch {
+  } catch (e) {
+    if (vientDeLaLecture(e)) throw (e as LectureEchouee).cause ?? e;
     return readLive();
   }
 }

@@ -14,6 +14,8 @@ const h = vi.hoisted(() => ({
   cacheEnPanne: false,
   tagsInvalides: [] as string[],
   revalidateJette: false,
+  /** La base refuse : Neon en veille, quota compute dépassé. */
+  lectureJette: false,
   /** Le contenu du faux Data Cache : clé → valeur, tags, seconde d'expiration. */
   entrees: new Map<string, { valeur: unknown; tags: string[]; expire: number }>(),
   /** Horloge du faux cache, en SECONDES. Seul le TTL la lit. */
@@ -67,6 +69,7 @@ vi.mock("./db", () => ({
       findMany: vi.fn(async (args: Record<string, unknown>) => {
         h.lecturesDb += 1;
         h.dernierFindMany = args;
+        if (h.lectureJette) throw new Error("Can't reach database server");
         return h.rows;
       }),
     },
@@ -116,6 +119,7 @@ beforeEach(() => {
   h.cacheEnPanne = false;
   h.tagsInvalides = [];
   h.revalidateJette = false;
+  h.lectureJette = false;
   h.entrees.clear();
   h.maintenant = 0;
 });
@@ -206,6 +210,22 @@ describe("getLiveFixtures — panne de cache", () => {
     expect(fixtures).toHaveLength(1);
     expect(h.lecturesDb).toBe(1); // dégradé en coût…
     expect(fixtures[0].opponent).toBe("Massy"); // …jamais en exactitude
+  });
+
+  it("ne REJOUE PAS la requête quand c'est la BASE qui refuse, et non le cache", async () => {
+    // Les deux pannes remontaient par le même `catch`, et le repli les traitait pareil : une
+    // base en veille ou hors quota se voyait redemander la requête lourde dans la milliseconde.
+    // Dix spectateurs → vingt tentatives par cycle, exactement quand il en faudrait moins.
+    h.lectureJette = true;
+    await expect(getLiveFixtures()).rejects.toThrow(/database/i);
+    expect(h.lecturesDb).toBe(1);
+  });
+
+  it("laisse remonter la cause d'origine, et non une enveloppe interne", async () => {
+    // Le message doit rester diagnosticable dans les journaux Vercel : c'est lui qui dit si
+    // c'est la base, le réseau ou autre chose.
+    h.lectureJette = true;
+    await expect(getLiveFixtures()).rejects.toThrow("Can't reach database server");
   });
 });
 
