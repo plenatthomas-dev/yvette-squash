@@ -157,16 +157,35 @@ export default function InterclubLive({
   // arrêté de sonder faute de quoi que ce soit à attendre.
   useEffect(() => onForeground(load), [load]);
 
+  // Une rencontre TERMINÉE n'est plus en direct, et n'a rien à faire sous ce titre. Elle y
+  // restait pourtant jusqu'à minuit, ses matchs avec elle : le bandeau annonçait « En direct »
+  // au-dessus d'un écran entier de scores figés, en doublon de la liste des rencontres juste
+  // en dessous — où la même rencontre porte déjà son score final, sa pastille « Terminée », et
+  // le détail de tous les jeux à un appui.
+  //
+  // Le filtrage est ici, à L'AFFICHAGE, et non dans la requête. La réponse COMPLÈTE est ce qui
+  // permet de distinguer « rien de prévu aujourd'hui » de « c'est fini pour ce soir », et c'est
+  // elle aussi que lit `somethingToWatch` pour décider d'arrêter de sonder ; un serveur qui ne
+  // renverrait que le vivant rendrait ces deux cas indiscernables, vides tous les deux.
+  //
+  // Ce qui est PRÉVU aujourd'hui reste affiché, lui : c'est la raison d'être de la cadence de
+  // veille (`IDLE_POLL_MS`), qui existe précisément pour voir la rencontre démarrer.
+  const shown = (fixtures ?? []).filter((f) => f.status !== "done");
+
   return (
     <section className="ic-live">
       <h4 className="ic-live-title">En direct</h4>
 
       {fixtures === null ? (
         <p className="muted tiny">Chargement…</p>
-      ) : fixtures.length === 0 ? (
-        <p className="muted tiny">Aucune rencontre aujourd&apos;hui.</p>
+      ) : shown.length === 0 ? (
+        <p className="muted tiny">
+          {fixtures.length === 0
+            ? "Aucune rencontre aujourd'hui."
+            : "Les rencontres du jour sont terminées."}
+        </p>
       ) : (
-        fixtures.map((f) => (
+        shown.map((f) => (
           <article key={f.id} className="ic-live-card">
             <header className="ic-live-head">
               <span>
