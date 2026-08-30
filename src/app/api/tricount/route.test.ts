@@ -17,7 +17,7 @@ import type { NextRequest } from "next/server";
 const h = vi.hoisted(() => ({
   session: null as null | { userId: string; displayName: string; resa: unknown },
   tricountOn: true,
-  users: [] as { id: string; displayName: string }[],
+  users: [] as { id: string; displayName: string; disabledAt: Date | null }[],
   rows: [] as Record<string, unknown>[],
   takeDemande: 0,
   whereDemande: null as null | Record<string, unknown>,
@@ -29,7 +29,15 @@ vi.mock("@/lib/features-server", () => ({ getFeatures: async () => ({ tricount: 
 vi.mock("@/lib/tricount-summary", () => ({ tricountSummary: async () => h.summary }));
 vi.mock("@/lib/db", () => ({
   prisma: {
-    user: { findMany: vi.fn(async () => h.users) },
+    // Le mock HONORE un éventuel `where` : la route doit charger TOUS les comptes (pour
+    // nommer les parts déjà écrites) et ne filtrer les désactivés qu'à l'affichage des
+    // sélecteurs. Filtrer dès la requête ferait afficher « ? » sur l'historique — un mock
+    // aveugle au `where` aurait laissé passer cette confusion.
+    user: {
+      findMany: vi.fn(async (a?: { where?: { disabledAt?: unknown } }) =>
+        a?.where?.disabledAt === null ? h.users.filter((u) => u.disabledAt === null) : h.users,
+      ),
+    },
     tricount: {
       // Le mock HONORE la clause `where` : sans cela, retirer le filtre « au moins une
       // dépense » ne ferait tomber aucun test — le mock aurait répondu à la place de la route.
@@ -117,8 +125,8 @@ beforeEach(() => {
   h.session = resaUser;
   h.tricountOn = true;
   h.users = [
-    { id: "u1", displayName: "Alice" },
-    { id: "u2", displayName: "Bob" },
+    { id: "u1", displayName: "Alice", disabledAt: null },
+    { id: "u2", displayName: "Bob", disabledAt: null },
   ];
   h.rows = [];
   h.whereDemande = null;
@@ -382,5 +390,31 @@ describe("GET /api/tricount — ce que la vue décide", () => {
     ];
     const [t] = (await corps()).tricounts as unknown as { totalCents: number }[];
     expect(t.totalCents).toBe(3000);
+  });
+});
+
+describe("GET /api/tricount — qui reste proposable", () => {
+  it("ÉCARTE des sélecteurs un compte désactivé, mais garde son nom sur l'historique", async () => {
+    // Deux besoins que la même requête servait sans les distinguer. Un compte désactivé ne
+    // peut plus se connecter : ni valider, ni rembourser — l'aligner créerait une dette que
+    // personne ne pourra solder. Mais son nom doit rester lisible sur les dépenses passées,
+    // sans quoi l'historique d'argent afficherait « ? » à sa place.
+    h.users = [
+      { id: "u1", displayName: "Alice", disabledAt: null },
+      { id: "u2", displayName: "Bob", disabledAt: new Date("2026-01-01") },
+    ];
+    h.rows = [
+      tricount({
+        id: "t1",
+        date: "2026-09-03",
+        expenses: [depense({ payer: "u1", montant: 1000, entre: ["u1", "u2"] })],
+      }),
+    ];
+
+    const c = await corps();
+
+    expect(c.members.map((m) => m.id)).toEqual(["u1"]);
+    const [t] = c.tricounts as unknown as { balances: { id: string; name: string }[] }[];
+    expect(t.balances.find((b) => b.id === "u2")?.name).toBe("Bob");
   });
 });

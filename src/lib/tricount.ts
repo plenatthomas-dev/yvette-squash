@@ -4,7 +4,11 @@
 /** Bornes de saisie : 1 centime à 100 000 € — largement assez pour une asso. */
 export const MAX_AMOUNT_CENTS = 10_000_000;
 export const MAX_LABEL_LEN = 80;
-// Titre d'un tricount : court (affiché dans l'en-tête de la carte, à côté de la date).
+// Titre d'un tricount. ⚠️ VESTIGE : la colonne `Tricount.title` existe et `/admin/tricounts`
+// l'affiche, mais AUCUNE route ne l'écrit et aucun écran membre ne la rend — elle ne peut donc
+// valoir que `NULL`. Le commentaire d'origine annonçait « affiché dans l'en-tête de la carte,
+// à côté de la date » : cet affichage n'a jamais existé. La borne est conservée pour le jour
+// où un titre servira vraiment ; elle n'est plus appliquée nulle part.
 export const MAX_TITLE_LEN = 40;
 // Commentaire (idée 5a) : un message de fil de discussion attaché à un tricount.
 export const MAX_COMMENT_LEN = 500;
@@ -199,6 +203,37 @@ export interface Transfer {
   fromId: string;
   toId: string;
   amountCents: number;
+}
+
+/**
+ * Les remboursements sont-ils OUVERTS ? Vrai quand tous les payeurs ont donné leur « OK ».
+ *
+ * ⚠️ `payers.length > 0` n'est pas une précaution de style : sans payeur, « tous les payeurs
+ * ont validé » serait vrai par vacuité, et les remboursements s'ouvriraient sur un tricount
+ * qui n'a rien à rembourser.
+ */
+export function isReady(payerIds: string[], approvedUserIds: Iterable<string>): boolean {
+  const approved = new Set(approvedUserIds);
+  return payerIds.length > 0 && payerIds.every((p) => approved.has(p));
+}
+
+/**
+ * Le tricount est-il SOLDÉ ? Remboursements ouverts, et plus aucun virement à faire.
+ *
+ * Cette règle vivait uniquement dans la route de liste, donc uniquement dans l'AFFICHAGE :
+ * l'écran masquait « Modifier » et « Suppr. » sur un tricount soldé, mais ni `PATCH` ni
+ * `DELETE` ne consultaient cet état. Un appel direct rouvrait donc un tricount clos —
+ * recalcul des parts, validations effacées — un état que l'interface présentait comme
+ * impossible. Une règle que seul le client applique n'est pas une règle.
+ */
+export function isSettled(
+  expenses: ExpenseRowForBalance[],
+  approvedUserIds: Iterable<string>,
+): boolean {
+  const keyed = expenses.map(toKeyedExpense);
+  const payers = payersOf(keyed).map((k) => parseKey(k).id);
+  if (!isReady(payers, approvedUserIds)) return false;
+  return settle(computeBalances(keyed)).length === 0;
 }
 
 /**

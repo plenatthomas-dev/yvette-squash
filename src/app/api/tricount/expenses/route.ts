@@ -9,7 +9,6 @@ import {
   guestKey,
   MAX_AMOUNT_CENTS,
   MAX_LABEL_LEN,
-  MAX_TITLE_LEN,
   MAX_PARTS,
 } from "@/lib/tricount";
 import { getFeatures } from "@/lib/features-server";
@@ -19,12 +18,18 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // POST /api/tricount/expenses -> ajoute une dépense au tricount du jour choisi.
-// { date: "YYYY-MM-DD", label, amountCents, payerId, participantIds, guestIds?, title? }
+// { date: "YYYY-MM-DD", label, amountCents, payerId, participantIds, guestIds?, weights? }
 // guestIds référence des TricountGuest déjà créés sur CE tricount (invités hors
 // asso, cf. POST /api/tricount/guests) : ils peuvent porter une part, jamais être
-// payeur. Le tricount de cette date est créé s'il n'existe pas (title optionnel,
-// pris en compte uniquement à la création). Toute modification des dépenses remet
-// à zéro les validations « OK pour rembourser » du tricount.
+// payeur. Le tricount de cette date est créé s'il n'existe pas. Toute modification
+// des dépenses remet à zéro les validations « OK pour rembourser » du tricount.
+//
+// ⚠️ CETTE ROUTE N'ÉCRIT PLUS `Tricount.title`, et le champ n'est plus accepté. Il était
+// validé, borné et stocké — mais aucun écran ne l'envoyait, aucun ne l'affichait, et aucune
+// autre route ne sait l'écrire : la colonne ne pouvait donc être que `NULL`. Rester à
+// valider un champ mort donne à lire une fonctionnalité qui n'existe pas. La colonne, elle,
+// survit : `/admin/tricounts` la lit, et la retirer coûterait une migration pour rien.
+// Le jour où un titre servira, il faudra l'écrire ici ET l'afficher — les deux, ou aucun.
 export async function POST(req: NextRequest) {
   if (!(await getFeatures()).tricount) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
@@ -37,10 +42,9 @@ export async function POST(req: NextRequest) {
   if (blocked) return blocked;
 
   const body = await req.json().catch(() => ({}));
-  const { date, title, label, amountCents, payerId, participantIds, guestIds, weights } =
+  const { date, label, amountCents, payerId, participantIds, guestIds, weights } =
     body as {
       date?: unknown;
-      title?: unknown;
       label?: unknown;
       amountCents?: unknown;
       payerId?: unknown;
@@ -56,14 +60,6 @@ export async function POST(req: NextRequest) {
   if (cleanLabel.length === 0 || cleanLabel.length > MAX_LABEL_LEN) {
     return NextResponse.json({ error: "Libellé invalide (1 à 80 caractères)" }, { status: 400 });
   }
-  const rawTitle = typeof title === "string" ? title.trim() : "";
-  if (rawTitle.length > MAX_TITLE_LEN) {
-    return NextResponse.json(
-      { error: `Titre trop long (${MAX_TITLE_LEN} caractères max)` },
-      { status: 400 },
-    );
-  }
-  const cleanTitle = rawTitle || null;
   if (
     typeof amountCents !== "number" ||
     !Number.isInteger(amountCents) ||
@@ -146,7 +142,7 @@ export async function POST(req: NextRequest) {
   const tricount = await prisma.tricount.upsert({
     where: { date },
     update: {},
-    create: { date, title: cleanTitle },
+    create: { date },
   });
   // Mémoire des arrondis du tricount : qui a déjà « surpayé » d'un centime ? La règle vit
   // dans `roundingCredit` (elle était recopiée ici et dans la route sœur `PATCH`, et les deux

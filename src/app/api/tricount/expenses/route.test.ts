@@ -238,8 +238,14 @@ describe("POST /api/tricount/expenses — la validation du corps", () => {
     await refus({ ...base, label: "x".repeat(81) }, "Libellé invalide");
   });
 
-  it("refuse un titre de plus de 40 caractères", async () => {
-    await refus({ ...base, title: "t".repeat(41) }, "Titre trop long");
+  it("IGNORE un `title`, qu'aucun écran n'envoie et qu'aucun n'affiche", async () => {
+    // Le champ était validé, borné et stocké — mais rien ne l'envoyait, rien ne le rendait, et
+    // aucune autre route ne sait l'écrire : la colonne ne pouvait être que NULL. Valider un
+    // champ mort donne à lire une fonctionnalité qui n'existe pas. La route l'ignore désormais
+    // au lieu de refuser en 400 sur une longueur que personne n'atteindra.
+    const res = await POST(req({ ...base, title: "t".repeat(200) }));
+    expect(res.status).toBe(201);
+    expect(h.upsertArg).toEqual({ where: { date: "2026-09-03" }, update: {}, create: { date: "2026-09-03" } });
   });
 
   it("refuse un montant nul, négatif, non entier ou au-delà de 100 000 €", async () => {

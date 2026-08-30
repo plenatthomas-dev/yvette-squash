@@ -25,6 +25,7 @@ const h = vi.hoisted(() => ({
   othersWhere: null as null | Record<string, unknown>,
   sharesDeleted: vi.fn(),
   updated: null as null | Record<string, unknown>,
+  tricountEtat: null as null | Record<string, unknown>,
 }));
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
@@ -40,6 +41,10 @@ vi.mock("@/lib/features-server", () => ({
 }));
 vi.mock("@/lib/db", () => ({
   prisma: {
+    // L'état du tricount porteur, tel que `refuseSiSolde` le relit. On rend de VRAIES
+    // dépenses et de VRAIES validations : c'est `isSettled` — la vraie fonction — qui décide
+    // s'il est soldé, pas le mock.
+    tricount: { findUnique: vi.fn(async () => h.tricountEtat) },
     expense: {
       findUnique: vi.fn(async () => h.expense),
       findMany: vi.fn(async (a: { where: Record<string, unknown> }) => {
@@ -87,6 +92,26 @@ const ctx = { params: Promise.resolve({ id: "e1" }) };
 const emailOnly = { userId: "u1", displayName: "Membre", resa: null };
 const resaUser = { userId: "u1", displayName: "Membre", resa: { accessToken: "t" } };
 
+/** Une part portée par un membre. */
+const part = (userId: string, amountCents: number) => ({ userId, guestId: null, amountCents });
+
+/** Alice a avancé 10 € pour elle et Bob : Bob doit 5 €. Rien n'est validé → non soldé. */
+const EN_COURS = {
+  expenses: [
+    { payerId: "u1", payerGuestId: null, isRefund: false, shares: [part("u1", 500), part("u2", 500)] },
+  ],
+  approvals: [] as { userId: string }[],
+};
+
+/** Le même, validé par son unique payeur ET remboursé : plus rien n'est dû → soldé. */
+const SOLDE = {
+  expenses: [
+    ...EN_COURS.expenses,
+    { payerId: "u2", payerGuestId: null, isRefund: true, shares: [part("u1", 500)] },
+  ],
+  approvals: [{ userId: "u1" }],
+};
+
 /** Requête avec corps JSON, pour PATCH. */
 const reqBody = (body: unknown) =>
   ({ cookies: { get: () => ({ value: "sid" }) }, json: async () => body }) as unknown as NextRequest;
@@ -105,6 +130,7 @@ beforeEach(() => {
   h.resteVraies = 1;
   h.resteRemboursements = 0;
   h.countWhere = null;
+  h.tricountEtat = EN_COURS;
   h.session = emailOnly;
   h.expense = { tricountId: "t1", isRefund: true, creatorId: "u1", payerId: "u1" };
   h.users = ["u1", "u2", "u3"];
@@ -327,5 +353,64 @@ describe("PATCH /api/tricount/expenses/[id] — ce qui est réécrit", () => {
       expect(res.status).toBe(400);
       expect(h.updated).toBeNull();
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UN TRICOUNT SOLDÉ NE SE RÉÉCRIT PLUS — côté SERVEUR, désormais.
+//
+// La règle n'existait que dans l'écran, qui masque « Modifier » et « Suppr. ». Un appel direct
+// recalculait donc les parts, effaçait les validations et rouvrait un tricount clos — un état
+// que l'interface présentait comme impossible. Une règle que seul le client applique n'est pas
+// une règle.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Un tricount soldé", () => {
+  beforeEach(() => {
+    h.session = resaUser;
+    h.tricountEtat = SOLDE;
+  });
+
+  it("refuse le PATCH d'une vraie dépense, en 409 et sans rien écrire", async () => {
+    h.expense = { tricountId: "t1", isRefund: false, creatorId: "u1", payerId: "u1" };
+    const res = await PATCH(reqBody(corps), ctx);
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({
+      error: expect.stringContaining("soldé"),
+    });
+    expect(h.updated).toBeNull();
+    expect(h.approvalsDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("refuse la SUPPRESSION d'une vraie dépense", async () => {
+    h.expense = { tricountId: "t1", isRefund: false, creatorId: "u1", payerId: "u1" };
+    const res = await DELETE(req(), ctx);
+    expect(res.status).toBe(409);
+    expect(h.del).not.toHaveBeenCalled();
+  });
+
+  it("LAISSE défaire un remboursement — c'est le seul recours contre une saisie erronée", async () => {
+    // Un remboursement mal saisi est précisément ce qui peut faire croire un tricount soldé
+    // alors que l'argent n'a pas bougé. Interdire de le défaire enfermerait le membre dans
+    // son erreur, sans autre recours qu'un admin. La règle protège l'historique ; elle ne
+    // doit pas verrouiller sa correction.
+    h.expense = { tricountId: "t1", isRefund: true, creatorId: "u1", payerId: "u1" };
+    const res = await DELETE(req(), ctx);
+    expect(res.status).toBe(200);
+    expect(h.del).toHaveBeenCalledTimes(1);
+  });
+
+  it("laisse écrire tant qu'il RESTE quelque chose à rembourser", async () => {
+    h.tricountEtat = EN_COURS;
+    h.expense = { tricountId: "t1", isRefund: false, creatorId: "u1", payerId: "u1" };
+    expect((await PATCH(reqBody(corps), ctx)).status).toBe(200);
+  });
+
+  it("laisse écrire quand les payeurs n'ont pas tous validé, même si plus rien n'est dû", async () => {
+    // « Soldé » exige les DEUX : remboursements ouverts ET aucun virement restant. Un tricount
+    // équilibré mais non validé est encore en cours de constitution.
+    h.tricountEtat = { ...SOLDE, approvals: [] };
+    h.expense = { tricountId: "t1", isRefund: false, creatorId: "u1", payerId: "u1" };
+    expect((await PATCH(reqBody(corps), ctx)).status).toBe(200);
   });
 });

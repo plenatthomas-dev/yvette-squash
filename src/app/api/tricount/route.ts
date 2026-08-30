@@ -5,6 +5,7 @@ import {
   computeBalances,
   settle,
   payersOf,
+  isReady,
   toKeyedExpense,
   userKey,
   guestKey,
@@ -42,8 +43,12 @@ export async function GET(req: NextRequest) {
       : DEFAULT_LIMIT;
 
   const [users, rows, summary] = await Promise.all([
+    // TOUS les comptes, y compris désactivés : ils servent à NOMMER les parts déjà écrites.
+    // Un compte désactivé qui disparaîtrait d'ici ferait afficher « ? » à la place de son nom
+    // sur toutes les dépenses passées — on ne réécrit pas l'historique d'argent. Ce sont les
+    // membres PROPOSABLES qui sont filtrés plus bas.
     prisma.user.findMany({
-      select: { id: true, displayName: true },
+      select: { id: true, displayName: true, disabledAt: true },
       orderBy: { createdAt: "asc" },
     }),
     prisma.tricount.findMany({
@@ -105,7 +110,18 @@ export async function GET(req: NextRequest) {
     // premier, le badge € compte le second.
     myGlobalCents: summary.globalCents,
     myOwedCount: summary.owedCount,
-    members: users.map((u) => ({ id: u.id, name: u.displayName, fullName: u.displayName })),
+    // Les membres PROPOSABLES dans « Payé par » et « Pour qui ? ». Un compte désactivé par un
+    // admin n'a plus rien à faire dans un sélecteur : il ne peut plus se connecter, donc ni
+    // valider, ni rembourser — l'y aligner créerait une dette que personne ne pourra solder.
+    //
+    // ⚠️ Le retrait de l'ANNUAIRE ne filtre PAS ici, et c'est un choix : le Tricount affiche
+    // toujours le nom réel (jamais le pseudo) parce qu'il faut savoir sans ambiguïté à qui
+    // rendre l'argent. Se retirer de l'annuaire dit « ne me proposez pas aux autres pour
+    // jouer », pas « ne partagez plus de frais avec moi ». Les deux finalités sont distinctes,
+    // et celle-ci est décrite dans la note de confidentialité (paragraphe « Partage de frais »).
+    members: users
+      .filter((u) => u.disabledAt === null)
+      .map((u) => ({ id: u.id, name: u.displayName, fullName: u.displayName })),
     tricounts: tricounts
       .map((t) => {
       const keyedExpenses = t.expenses.map(toKeyedExpense);
@@ -115,7 +131,9 @@ export async function GET(req: NextRequest) {
       // des clés membre ("u:xxx").
       const payers = payersOf(keyedExpenses).map((k) => parseKey(k).id);
       const approved = new Set(t.approvals.map((a) => a.userId));
-      const ready = payers.length > 0 && payers.every((p) => approved.has(p));
+      // La règle vit dans `isReady` : les routes d'écriture s'en servent aussi, désormais
+      // qu'elles refusent de rouvrir un tricount soldé.
+      const ready = isReady(payers, approved);
       const settled = ready && transfers.length === 0;
       return {
         id: t.id,

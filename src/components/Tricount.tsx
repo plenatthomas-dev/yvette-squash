@@ -756,7 +756,12 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                               Modifier
                             </button>
                           )}
-                          {e.canDelete && !t.settled && !data.emailOnly && (
+                          {/* Un tricount soldé ne se réécrit plus — le serveur l'applique
+                              aussi désormais (409). Mais un REMBOURSEMENT reste effaçable :
+                              c'est justement une saisie erronée qui peut faire croire un
+                              tricount soldé alors que l'argent n'a pas bougé, et sans ce
+                              bouton le membre n'avait aucun recours. */}
+                          {e.canDelete && (!t.settled || e.isRefund) && !data.emailOnly && (
                             <button
                               className="cancel"
                               onClick={() => setConfirmDelete(e)}
