@@ -52,7 +52,7 @@ export function InfoIcon() {
 // comme sur l'appli. La modale réutilise le style .modal existant.
 export function PrivacyNotice() {
   const [open, setOpen] = useState(false);
-  const { directory, ranking, tricount, tournament, delegation } = useFeatures();
+  const { directory, ranking, tricount, tournament, delegation, interclub } = useFeatures();
   return (
     <footer className="app-footer">
       <button
@@ -135,7 +135,11 @@ export function PrivacyNotice() {
                 ou refusée) est <strong>journalisée {MODERATION_RETENTION_LABEL}</strong>, y
                 compris en cas de refus, ainsi que les adresses bloquées pour empêcher une
                 réinscription abusive. C'est le seul endroit où l'appli garde une donnée sur
-                quelqu'un qui n'est pas membre.
+                quelqu'un qui n'est pas membre
+                {tournament || interclub
+                  ? ", en dehors des noms que des membres saisissent eux-mêmes (voir plus bas)"
+                  : ""}
+                .
               </p>
               <p>
                 <strong>Combien de temps.</strong> Tes données de membre vivent
@@ -186,6 +190,31 @@ export function PrivacyNotice() {
                   asso</strong>), matchs et scores sont visibles de <strong>tous les membres
                   connectés</strong>. N'ajoute un invité qu'avec son accord.
                 </p>
+              )}
+              {interclub && (
+                <>
+                <p>
+                  <strong>Interclub.</strong> Les rencontres par équipes enregistrent qui joue,
+                  contre qui, le score jeu par jeu, la date et qui tient le marquage — visibles
+                  de <strong>tous les membres connectés</strong>. Deux noms de personnes sans
+                  compte y figurent : ceux des <strong>adversaires</strong>, saisis à la main, et
+                  ceux des <strong>joueurs de l&apos;équipe qui n&apos;ont pas l&apos;appli</strong>,
+                  inscrits par un administrateur — n&apos;y porte que le nom sous lequel la personne
+                  est déjà annoncée en championnat. C&apos;est aussi un administrateur qui décide de
+                  l&apos;appartenance à une équipe.
+                </p>
+                <p>
+                  <strong>Interclub — ce qui reste après.</strong> Le nom du joueur demeure
+                  attaché à la feuille de match <strong>même si son compte est supprimé</strong> ou
+                  s&apos;il quitte l&apos;équipe : un résultat sportif ne se réécrit pas après coup.
+                  C&apos;est la <strong>seule exception</strong> au « tes données disparaissent avec
+                  ton compte » ci-dessus, et elle ne porte que sur ce nom et ces scores. Le déroulé
+                  point par point d&apos;un match, lui, ne quitte jamais le navigateur de celui qui
+                  marque — seuls les scores de jeux sont enregistrés. Le suivi d&apos;une équipe par
+                  notifications est <em>facultatif</em>, se règle en trois niveaux et se retire à
+                  tout moment depuis l&apos;onglet Interclub.
+                </p>
+                </>
               )}
               {delegation && (
                 <p>

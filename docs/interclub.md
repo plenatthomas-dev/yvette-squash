@@ -304,9 +304,24 @@ code d'erreur qu'on lui a soufflé. C'est lui qui a tranché les deux soupçons 
 
 - **Jamais éprouvé sur une vraie soirée** — la mécanique de concurrence est testée en unitaire,
   pas avec quatre téléphones sur quatre courts.
-- **Note de confidentialité (RGPD)** : l'interclub crée de la donnée nominative (qui joue,
-  contre qui, quel score) et une nouvelle finalité de notification. À documenter dans
-  `PrivacyNotice` **avant** d'activer le flag en prod, comme cela a été fait pour l'annuaire.
+- ~~**Note de confidentialité (RGPD)**~~ — **fait.** `PrivacyNotice` porte deux paragraphes
+  conditionnés par le flag `interclub` : ce qui est enregistré et qui le voit ; puis ce qui
+  **reste après**. Trois points méritaient d'être écrits noir sur blanc :
+  - des **noms de non-membres** figurent en base (les adversaires, saisis à la main ; les
+    joueurs de l'équipe sans compte, inscrits par un admin) — donnée nominative saisie par
+    quelqu'un d'autre que la personne concernée ;
+  - le nom du joueur **survit à la suppression de son compte** (`homeDisplayName` figé,
+    `ON DELETE SET NULL`). C'est la seule exception à la promesse « tes données disparaissent
+    avec ton compte » faite plus haut dans la même note, et une exception tue rendrait cette
+    promesse fausse ;
+  - le **déroulé point par point ne quitte pas le navigateur du marqueur** — une donnée qu'on
+    ne garde pas mérite d'être annoncée autant qu'une donnée qu'on garde.
+
+  La phrase « c'est le seul endroit où l'appli garde une donnée sur quelqu'un qui n'est pas
+  membre » se **nuance** désormais quand l'interclub ou le tournoi sont actifs : sans cela, la
+  note se contredisait d'un paragraphe à l'autre. `PrivacyNotice.dom.test.tsx` tient le
+  couplage dans les deux sens — le paragraphe doit apparaître avec le flag, et disparaître
+  sans lui : une note qui décrit un traitement inexistant est fausse elle aussi.
 - **Les deux soupçons sur `http-tx.ts` ont été tranchés** sur un vrai Postgres
   (`src/lib/http-tx.pg.test.ts`, six mesures — `npm run test:pg`, cf. l'en-tête du fichier pour
   le conteneur jetable). Le premier tombe, le second se précise :
