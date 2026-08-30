@@ -1,17 +1,17 @@
-// TRANCHER LES DEUX SOUPÇONS DE `http-tx.ts` — sur une VRAIE base Postgres.
+// CE QU'UN FAUX CLIENT NE PEUT PAS DIRE — deux transactions concurrentes, sur un vrai Postgres.
 //
-// `http-tx.test.ts` épingle le comportement actuel avec un faux client : il établit que le code
-// ne rejoue que P2034, et qu'aucune borne de temps n'est passée. Ce qu'il ne peut pas dire, par
-// construction, c'est ce que Postgres RÉPOND réellement — et c'est là que vivent les deux
-// questions restées ouvertes dans `docs/interclub.md` :
+// `http-tx.test.ts` décrit la mécanique de la boucle avec un faux client : quels codes elle
+// rejoue, quelles options elle passe. Ce qu'il ne peut pas dire, par construction, c'est ce que
+// Postgres RÉPOND — sur une question de concurrence, un mock rend le code qu'on lui a soufflé.
+// D'où ce fichier. Trois questions y sont posées, toutes venues de `docs/interclub.md` :
 //
 //   A. le motif « supprimer puis réinsérer les jeux » sort-il en P2034 (rejoué) ou en P2002
 //      (violation d'unicité, PAS rejouée, donc 500 pour le marqueur) ?
 //   B. les défauts de Prisma (`timeout`, `maxWait`) sont-ils ceux qu'on croit, et que produisent-
 //      ils quand on les dépasse ?
-//
-// Un faux client ne peut répondre ni à l'une ni à l'autre : il rendrait le code qu'on lui a
-// soufflé. D'où ce fichier, qui ouvre deux transactions CONCURRENTES sur un vrai serveur.
+//   C. « la rencontre commence » ne part-elle vraiment qu'UNE fois quand deux marqueurs
+//      entament leur simple en même temps ? C'est la promesse la plus chère de la branche —
+//      elle se paie en notifications à tout le club.
 //
 // ─── COMMENT LE LANCER ────────────────────────────────────────────────────────
 //
@@ -52,6 +52,7 @@ type TxFn = typeof import("./http-tx").serializableTransaction;
 
 let prisma: Prisma;
 let serializableTransaction: TxFn;
+let derivedStatus: typeof import("./interclub-db").derivedStatus;
 let Serializable: "Serializable";
 
 const MARQUEUR = "PG-TEST-http-tx";
@@ -59,6 +60,7 @@ let userId = "";
 let teamId = "";
 let fixtureId = "";
 let matchId = "";
+let matchId2 = "";
 
 /** Promesse ouverte de l'extérieur : c'est ce qui permet d'ENTRELACER deux transactions. */
 function jalon() {
@@ -86,7 +88,7 @@ async function ecritureMarqueur(tx: Tx, jeux: { home: number; away: number }[]) 
   });
 }
 
-describe.skipIf(!URL_TEST)("SUR VRAIE BASE — les deux soupçons de http-tx", () => {
+describe.skipIf(!URL_TEST)("SUR VRAIE BASE — deux transactions concurrentes", () => {
   beforeAll(async () => {
     if (!estJetable(URL_TEST)) {
       throw new Error(
@@ -103,6 +105,9 @@ describe.skipIf(!URL_TEST)("SUR VRAIE BASE — les deux soupçons de http-tx", (
     Serializable = client.Prisma.TransactionIsolationLevel.Serializable;
     ({ prisma } = await import("./db"));
     ({ serializableTransaction } = await import("./http-tx"));
+    // Le VRAI `derivedStatus`, pas une copie : le cas C reproduit la garde de la route, et une
+    // reproduction qui recalculerait le statut à sa façon ne prouverait rien sur la route.
+    ({ derivedStatus } = await import("./interclub-db"));
 
     const u = await prisma.user.create({ data: { displayName: `${MARQUEUR} joueur` } });
     userId = u.id;
@@ -111,13 +116,20 @@ describe.skipIf(!URL_TEST)("SUR VRAIE BASE — les deux soupçons de http-tx", (
     });
     teamId = t.id;
     const f = await prisma.interclub.create({
-      data: { date: "2026-09-03", teamId, opponent: MARQUEUR, createdById: userId, matchCount: 1 },
+      data: { date: "2026-09-03", teamId, opponent: MARQUEUR, createdById: userId, matchCount: 2 },
     });
     fixtureId = f.id;
-    const m = await prisma.interclubMatch.create({
+    // DEUX simples, et c'est le décor du cas C : une soirée de rencontre, c'est deux marqueurs
+    // sur deux courts, donc deux transactions qui touchent des simples DIFFÉRENTS mais la même
+    // ligne `Interclub`. Les cas A et B n'utilisent que le premier.
+    const m1 = await prisma.interclubMatch.create({
       data: { interclubId: fixtureId, order: 1, homeDisplayName: "Moi", awayName: "Lui" },
     });
-    matchId = m.id;
+    matchId = m1.id;
+    const m2 = await prisma.interclubMatch.create({
+      data: { interclubId: fixtureId, order: 2, homeDisplayName: "L'autre", awayName: "Son adversaire" },
+    });
+    matchId2 = m2.id;
   }, 60_000);
 
   afterAll(async () => {
@@ -451,12 +463,155 @@ describe.skipIf(!URL_TEST)("SUR VRAIE BASE — les deux soupçons de http-tx", (
       await etroit.$disconnect();
     }
   }, 40_000);
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // CAS C — « LA RENCONTRE COMMENCE » NE PART QU'UNE FOIS.
+  //
+  // C'est la promesse la plus coûteuse de la branche quand elle casse : une notification à TOUS
+  // les abonnés de l'équipe. `docs/interclub.md` la fait reposer sur un marqueur persistant
+  // (`Interclub.startNotifiedAt`), lu en début de transaction et posé à la fin — « un marqueur
+  // ne se réarme pas ».
+  //
+  // Mais un marqueur lu puis écrit dans deux transactions CONCURRENTES ne garantit rien par
+  // lui-même : si les deux lisent `null` avant que l'une écrive, les deux annoncent. Or c'est
+  // exactement la situation d'un jeudi soir — deux marqueurs, deux courts, le premier point
+  // marqué à quelques secondes d'intervalle, et la MÊME ligne `Interclub` mise à jour par les
+  // deux transactions. Aucun test à faux client ne peut répondre : la question est de savoir ce
+  // que Postgres laisse passer.
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * La garde de la route `PUT …/live`, reproduite : lire le simple et sa rencontre, écrire le
+   * premier point, dériver le statut de la rencontre, puis ne poser `startNotifiedAt` que s'il
+   * était nul. Rend `true` si CETTE transaction croit devoir annoncer le début.
+   */
+  function premierPoint(tx: Tx, mid: string) {
+    return (async () => {
+      const m = await tx.interclubMatch.findUnique({
+        where: { id: mid },
+        include: { interclub: { select: { id: true, matchCount: true, startNotifiedAt: true } } },
+      });
+      if (!m) throw new Error("simple introuvable");
+
+      await tx.interclubMatch.update({
+        where: { id: mid },
+        data: { status: "live", gamesHome: 0, gamesAway: 0 },
+      });
+
+      const siblings = await tx.interclubMatch.findMany({
+        where: { interclubId: m.interclubId },
+        select: { gamesHome: true, status: true },
+      });
+      const nextStatus = derivedStatus(m.interclub.matchCount, siblings);
+      const fixtureStarted = nextStatus === "live" && m.interclub.startNotifiedAt === null;
+
+      await tx.interclub.update({
+        where: { id: m.interclubId },
+        data: {
+          status: nextStatus,
+          ...(fixtureStarted ? { startNotifiedAt: new Date() } : {}),
+        },
+      });
+      return fixtureStarted;
+    })();
+  }
+
+  /** Remet la rencontre à l'état d'avant la soirée. */
+  async function remiseAZero() {
+    await prisma.interclub.update({
+      where: { id: fixtureId },
+      data: { status: "scheduled", startNotifiedAt: null, doneNotifiedAt: null },
+    });
+    await prisma.interclubMatch.updateMany({
+      where: { interclubId: fixtureId },
+      data: { status: "pending", gamesHome: null, gamesAway: null },
+    });
+  }
+
+  it("C — deux marqueurs entament leur match en même temps : UNE seule annonce", async () => {
+    await remiseAZero();
+
+    const luParA = jalon();
+    const luParB = jalon();
+
+    // Les deux lisent AVANT que l'une ou l'autre n'écrive : c'est le seul entrelacement qui
+    // peut produire la double annonce, donc le seul qui vaille d'être mesuré.
+    const a = serializableTransaction(async (tx) => {
+      const m = await tx.interclub.findUnique({ where: { id: fixtureId } });
+      luParA.ouvrir();
+      await luParB.atteint;
+      void m;
+      return premierPoint(tx, matchId);
+    });
+    const b = serializableTransaction(async (tx) => {
+      const m = await tx.interclub.findUnique({ where: { id: fixtureId } });
+      luParB.ouvrir();
+      await luParA.atteint;
+      void m;
+      return premierPoint(tx, matchId2);
+    });
+
+    const [ra, rb] = await Promise.allSettled([a, b]);
+    // eslint-disable-next-line no-console
+    console.log(
+      `[cas C] A=${ra.status === "fulfilled" ? `annonce=${ra.value}` : codePrisma(ra.reason)} · ` +
+        `B=${rb.status === "fulfilled" ? `annonce=${rb.value}` : codePrisma(rb.reason)}`,
+    );
+
+    // Les deux écritures doivent ABOUTIR — perdre le premier point d'un simple serait un autre
+    // défaut, et la boucle de réessai est là pour ça.
+    expect(ra.status).toBe("fulfilled");
+    expect(rb.status).toBe("fulfilled");
+
+    const annonces = [ra, rb].filter(
+      (r) => r.status === "fulfilled" && r.value === true,
+    ).length;
+    expect(annonces).toBe(1); // ni zéro (personne prévenu), ni deux (tout le club, deux fois)
+
+    // Et le marqueur est bien posé une fois pour toutes.
+    const f = await prisma.interclub.findUnique({ where: { id: fixtureId } });
+    expect(f!.startNotifiedAt).not.toBeNull();
+    expect(f!.status).toBe("live");
+  }, 30_000);
+
+  it("C2 — contre-épreuve : en Read Committed, la même course annonce DEUX fois", async () => {
+    // Ce que le test C mesure vraiment, c'est le niveau d'ISOLATION — pas le marqueur, qui ne
+    // fait que constater. Sans cette contre-épreuve, C passerait tout aussi bien sur un code
+    // qui n'aurait aucune protection, et on croirait le marqueur suffisant. Il ne l'est pas :
+    // c'est `serializableTransaction` qui rend la garde atomique.
+    await remiseAZero();
+
+    const luParA = jalon();
+    const luParB = jalon();
+
+    const lache = (mid: string, moi: ReturnType<typeof jalon>, autre: ReturnType<typeof jalon>) =>
+      prisma.$transaction(
+        async (tx) => {
+          const m = await tx.interclub.findUnique({ where: { id: fixtureId } });
+          moi.ouvrir();
+          await autre.atteint;
+          void m;
+          return premierPoint(tx, mid);
+        },
+        { isolationLevel: "ReadCommitted" },
+      );
+
+    const [ra, rb] = await Promise.allSettled([
+      lache(matchId, luParA, luParB),
+      lache(matchId2, luParB, luParA),
+    ]);
+    const annonces = [ra, rb].filter((r) => r.status === "fulfilled" && r.value === true).length;
+    // eslint-disable-next-line no-console
+    console.log(`[cas C2] ${annonces} annonce(s) en Read Committed`);
+
+    expect(annonces).toBe(2); // la double annonce, obtenue exprès
+  }, 30_000);
 });
 
 // Sans base, la suite doit DIRE qu'elle n'a pas répondu. Un fichier entièrement sauté se lit
 // comme un fichier vert, et c'est précisément ce que ces deux soupçons ne doivent plus être.
 describe.skipIf(!!URL_TEST)("SUR VRAIE BASE — non mesuré", () => {
-  it("les deux soupçons restent ouverts tant qu'aucune base n'est fournie (TEST_DATABASE_URL)", () => {
+  it("rien n'est vérifié sur la concurrence tant qu'aucune base n'est fournie (TEST_DATABASE_URL)", () => {
     expect(URL_TEST).toBe("");
   });
 });

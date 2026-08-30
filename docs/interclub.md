@@ -226,6 +226,15 @@ touchent la même rencontre se renvoient une erreur alors que rien n'est en faut
 s'y trouver. Les notifications sont donc calculées **dans** la transaction (c'est sa valeur de
 retour) et envoyées **après** le commit, hors de la boucle de réessai.
 
+⚠️ **C'est le niveau d'isolation qui rend la garde de notification atomique, pas le marqueur.**
+`Interclub.startNotifiedAt` ne fait que constater : lu en début de transaction, posé à la fin. Si
+deux marqueurs entament leur simple en même temps, rien n'empêche par lui-même les deux de lire
+`null` et d'annoncer. Mesuré (`http-tx.pg.test.ts`, cas C) : en Serializable + réessai, **une
+seule** des deux transactions annonce, et les deux écritures aboutissent. La contre-épreuve C2
+rejoue la même course en `ReadCommitted` et obtient **deux annonces** — la double notification à
+tout le club, reproductible à volonté. Baisser l'isolation d'une de ces routes casserait donc une
+promesse qui n'est écrite nulle part dans leur code.
+
 ⚠️ Un `Serializable` ne protège **pas** de tout : deux écritures qui ne sont pas concurrentes,
 dont la seconde est simplement calculée sur un état périmé, passent sans conflit. C'est le cas
 que `knownGameCount` couvre, et lui seul — sur les **deux** routes d'écriture, `PATCH` comme

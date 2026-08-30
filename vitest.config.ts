@@ -30,7 +30,7 @@ export default defineConfig({
           environment: "node",
           include: ["src/**/*.test.{ts,tsx}"],
           // Les défauts (node_modules, dist…) ne se remplacent pas, ils se complètent.
-          exclude: [...configDefaults.exclude, "src/**/*.dom.test.tsx"],
+          exclude: [...configDefaults.exclude, "src/**/*.dom.test.{ts,tsx}"],
         },
       },
       {
@@ -38,7 +38,11 @@ export default defineConfig({
         test: {
           name: "dom",
           environment: "jsdom",
-          include: ["src/**/*.dom.test.tsx"],
+          // `.ts` autant que `.tsx` : un module peut avoir besoin d'un DOM sans être un
+          // composant — `onForeground` s'abonne à `focus`, `visibilitychange` et `pageshow`,
+          // et n'a pas une ligne de JSX. C'est le suffixe `.dom.` qui dit le monde, pas
+          // l'extension.
+          include: ["src/**/*.dom.test.{ts,tsx}"],
           setupFiles: ["./vitest.setup.dom.ts"],
         },
         // `tsconfig.json` fixe `jsx: "preserve"` — le bon réglage pour la production, où c'est
