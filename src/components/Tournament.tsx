@@ -121,11 +121,26 @@ interface Props {
   onExpired: (status: number) => boolean;
 }
 
-function todayISO(): string {
+/**
+ * La date du jour EN HEURE LOCALE, au format `YYYY-MM-DD`.
+ *
+ * `toLocaleDateString("en-CA")` et non `toISOString().slice(0, 10)` : le second convertit en
+ * UTC d'abord. Un tournoi créé à 1 h du matin un soir d'été à Paris (UTC+2) serait daté de la
+ * VEILLE, et se rangerait au mauvais endroit dans une liste triée par date.
+ *
+ * Exporté pour être éprouvé : c'est une règle de fuseau, invisible à la lecture.
+ */
+export function todayISO(): string {
   return new Date().toLocaleDateString("en-CA");
 }
 
-function prettyDate(date: string): string {
+/**
+ * Affiche `2026-11-14` en « sam. 14 nov. ».
+ *
+ * Le `T12:00:00` compte : `new Date("2026-11-14")` est interprété en UTC minuit, donc affiché
+ * la veille dans tout fuseau négatif. Midi met la journée entière hors de portée du décalage.
+ */
+export function prettyDate(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString("fr-FR", {
     weekday: "short",
     day: "numeric",
@@ -133,8 +148,14 @@ function prettyDate(date: string): string {
   });
 }
 
-/** Lignes de score valides selon le format : bo3 → 2-0/2-1/… ; bo5 → 3-0/3-1/… */
-function scorelines(bestOf: number): [number, number][] {
+/**
+ * Lignes de score valides selon le format : bo3 → 2-0/2-1/… ; bo5 → 3-0/3-1/…
+ *
+ * Ce sont les SEULS scores saisissables : l'écran ne propose pas un champ libre, il propose
+ * cette liste de boutons. Elle doit donc coïncider exactement avec ce que `validScore` accepte
+ * côté serveur — un bouton de trop, et le joueur reçoit un 400 en pleine soirée.
+ */
+export function scorelines(bestOf: number): [number, number][] {
   const w = Math.ceil(bestOf / 2);
   const lines: [number, number][] = [];
   for (let k = w - 1; k >= 0; k--) lines.push([w, k]); // p1 gagne
