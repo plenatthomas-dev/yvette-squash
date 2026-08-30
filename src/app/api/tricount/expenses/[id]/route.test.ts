@@ -12,6 +12,15 @@ const h = vi.hoisted(() => ({
   approvalsDeleteMany: vi.fn(),
   count: vi.fn(async () => 1),
   tricountDelete: vi.fn(),
+  // Pour PATCH : membres et invités connus, autres dépenses du tricount, et ce qui est écrit.
+  users: ["u1", "u2", "u3"] as string[],
+  guests: ["g1"] as string[],
+  /** Le tricount auquel appartient l'invité connu. */
+  guestOwner: "t1",
+  others: [] as { amountCents: number; shares: { userId: string | null; guestId: string | null; amountCents: number }[] }[],
+  othersWhere: null as null | Record<string, unknown>,
+  sharesDeleted: vi.fn(),
+  updated: null as null | Record<string, unknown>,
 }));
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
@@ -27,9 +36,38 @@ vi.mock("@/lib/features-server", () => ({
 }));
 vi.mock("@/lib/db", () => ({
   prisma: {
-    expense: { findUnique: vi.fn(async () => h.expense) },
-    $transaction: async (fn: (tx: unknown) => Promise<void>) =>
-      fn({
+    expense: {
+      findUnique: vi.fn(async () => h.expense),
+      findMany: vi.fn(async (a: { where: Record<string, unknown> }) => {
+        h.othersWhere = a.where;
+        return h.others;
+      }),
+      update: vi.fn(async (a: Record<string, unknown>) => {
+        h.updated = a;
+        return { id: "e1" };
+      }),
+    },
+    expenseShare: { deleteMany: h.sharesDeleted },
+    user: {
+      findMany: vi.fn(async (a: { where: { id: { in: string[] } } }) =>
+        a.where.id.in.filter((id) => h.users.includes(id)).map((id) => ({ id })),
+      ),
+    },
+    tricountGuest: {
+      // Le mock HONORE la clause `tricountId` : sans cela, retirer ce filtre de la route ne
+      // ferait tomber aucun test — un invité d'une autre soirée passerait, et le mock aurait
+      // dit oui à sa place. (Constaté par le contrôle par mutation.)
+      findMany: vi.fn(async (a: { where: { id: { in: string[] }; tricountId?: string } }) => {
+        if (a.where.tricountId !== undefined && a.where.tricountId !== h.guestOwner) return [];
+        return a.where.id.in.filter((id) => h.guests.includes(id)).map((id) => ({ id }));
+      }),
+    },
+    tricountApproval: { deleteMany: h.approvalsDeleteMany },
+    // DELETE passe un CALLBACK, PATCH un TABLEAU d'opérations : le mock accepte les deux.
+    $transaction: async (arg: unknown) =>
+      Array.isArray(arg)
+        ? Promise.all(arg)
+        : (arg as (tx: unknown) => Promise<void>)({
         expense: { delete: h.del, count: h.count },
         tricountApproval: { deleteMany: h.approvalsDeleteMany },
         tricount: { delete: h.tricountDelete },
@@ -37,7 +75,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { DELETE } from "./route";
+import { DELETE, PATCH } from "./route";
 
 const req = () => ({ cookies: { get: () => ({ value: "sid" }) } }) as unknown as NextRequest;
 const ctx = { params: Promise.resolve({ id: "e1" }) };
@@ -45,10 +83,20 @@ const ctx = { params: Promise.resolve({ id: "e1" }) };
 const emailOnly = { userId: "u1", displayName: "Membre", resa: null };
 const resaUser = { userId: "u1", displayName: "Membre", resa: { accessToken: "t" } };
 
+/** Requête avec corps JSON, pour PATCH. */
+const reqBody = (body: unknown) =>
+  ({ cookies: { get: () => ({ value: "sid" }) }, json: async () => body }) as unknown as NextRequest;
+
 beforeEach(() => {
   vi.clearAllMocks();
   h.session = emailOnly;
   h.expense = { tricountId: "t1", isRefund: true, creatorId: "u1", payerId: "u1" };
+  h.users = ["u1", "u2", "u3"];
+  h.guests = ["g1"];
+  h.guestOwner = "t1";
+  h.others = [];
+  h.othersWhere = null;
+  h.updated = null;
 });
 
 describe("DELETE /api/tricount/expenses/[id] — compte « email seul »", () => {
@@ -86,5 +134,144 @@ describe("DELETE /api/tricount/expenses/[id] — compte ResaMania", () => {
     h.session = resaUser;
     await DELETE(req(), ctx);
     expect(h.approvalsDeleteMany).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH — la modification d'une dépense, qui n'avait aucun test.
+//
+// C'est la seule route qui RÉÉCRIT des parts déjà attribuées. Elle porte donc deux règles
+// qu'aucune autre ne porte : le remplacement doit être INTÉGRAL (un participant retiré ne doit
+// pas garder sa part de la version précédente), et la mémoire des arrondis doit s'appuyer sur
+// les AUTRES dépenses — se compenser avec son ancienne valeur reviendrait à corriger une erreur
+// avec elle-même.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Les parts que le PATCH a demandé d'écrire, sous la forme [clé, centimes]. */
+function partsPatchees(): [string, number][] {
+  const data = h.updated!.data as { shares: { create: Record<string, unknown>[] } };
+  return data.shares.create.map((s) => [
+    (s.userId as string) ? `u:${s.userId}` : `g:${s.guestId}`,
+    s.amountCents as number,
+  ]);
+}
+
+const corps = {
+  label: "Repas corrigé",
+  amountCents: 3000,
+  payerId: "u1",
+  participantIds: ["u1", "u2"],
+};
+
+describe("PATCH /api/tricount/expenses/[id] — qui a le droit", () => {
+  beforeEach(() => {
+    h.session = resaUser;
+    h.expense = { tricountId: "t1", isRefund: false, creatorId: "u1", payerId: "u1" };
+  });
+
+  it("répond 404 — et non 403 — à un tiers qui n'est ni créateur ni payeur", async () => {
+    // 404 plutôt que 403 : un tiers n'a pas à apprendre qu'une dépense existe à cet id.
+    h.expense = { tricountId: "t1", isRefund: false, creatorId: "u2", payerId: "u3" };
+    const res = await PATCH(reqBody(corps), ctx);
+    expect(res.status).toBe(404);
+    expect(h.updated).toBeNull();
+  });
+
+  it("autorise le PAYEUR même s'il n'a pas saisi la ligne", async () => {
+    h.expense = { tricountId: "t1", isRefund: false, creatorId: "u2", payerId: "u1" };
+    expect((await PATCH(reqBody(corps), ctx)).status).toBe(200);
+  });
+
+  it("refuse en 400 la modification d'un REMBOURSEMENT, avec la marche à suivre", async () => {
+    h.expense = { tricountId: "t1", isRefund: true, creatorId: "u1", payerId: "u1" };
+    const res = await PATCH(reqBody(corps), ctx);
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: expect.stringContaining("supprime-le et refais-le"),
+    });
+  });
+
+  it("refuse un compte « email seul », comme la création et la suppression", async () => {
+    h.session = emailOnly;
+    const res = await PATCH(reqBody(corps), ctx);
+    expect(res.status).toBe(403);
+    expect(h.updated).toBeNull();
+  });
+});
+
+describe("PATCH /api/tricount/expenses/[id] — ce qui est réécrit", () => {
+  beforeEach(() => {
+    h.session = resaUser;
+    h.expense = { tricountId: "t1", isRefund: false, creatorId: "u1", payerId: "u1" };
+  });
+
+  it("REMPLACE les parts au lieu de les compléter", async () => {
+    // Sans la suppression préalable, un participant retiré garderait sa part : le total des
+    // parts dépasserait le montant, et l'invariant de conservation tomberait en silence.
+    await PATCH(reqBody(corps), ctx);
+    expect(h.sharesDeleted).toHaveBeenCalledWith({ where: { expenseId: "e1" } });
+    const parts = partsPatchees();
+    expect(parts.reduce((s, [, c]) => s + c, 0)).toBe(3000);
+  });
+
+  it("recalcule des parts dont la somme vaut exactement le nouveau montant", async () => {
+    await PATCH(reqBody({ ...corps, amountCents: 1000, participantIds: ["u1", "u2", "u3"] }), ctx);
+    const parts = partsPatchees();
+    expect(parts.reduce((s, [, c]) => s + c, 0)).toBe(1000);
+    expect(parts).toHaveLength(3);
+  });
+
+  it("EXCLUT la ligne éditée de la mémoire des arrondis", async () => {
+    // Le commentaire l'affirme : se compenser avec sa propre valeur d'avant reviendrait à
+    // corriger une erreur d'arrondi avec elle-même, donc à la figer.
+    await PATCH(reqBody(corps), ctx);
+    expect(h.othersWhere).toEqual({ tricountId: "t1", isRefund: false, id: { not: "e1" } });
+  });
+
+  it("remet à zéro les validations du tricount", async () => {
+    await PATCH(reqBody(corps), ctx);
+    expect(h.approvalsDeleteMany).toHaveBeenCalledWith({ where: { tricountId: "t1" } });
+  });
+
+  it("garde les invités dans `guestId` et les membres dans `userId`", async () => {
+    await PATCH(
+      reqBody({ ...corps, amountCents: 3000, participantIds: ["u1"], guestIds: ["g1"], weights: { u1: 1, g1: 2 } }),
+      ctx,
+    );
+    expect(partsPatchees()).toEqual([
+      ["u:u1", 1000],
+      ["g:g1", 2000],
+    ]);
+  });
+
+  it("refuse un invité inconnu", async () => {
+    const res = await PATCH(reqBody({ ...corps, guestIds: ["g404"] }), ctx);
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: "Invité inconnu" });
+  });
+
+  it("refuse un invité qui existe, mais sur UN AUTRE tricount", async () => {
+    // Un invité est attaché à une soirée ; l'accepter ailleurs rattacherait le nom de
+    // quelqu'un à une rencontre où il n'était pas. Le mock honore la clause `tricountId`
+    // exprès : sans cela, retirer ce filtre de la route ne ferait tomber aucun test.
+    h.guestOwner = "AUTRE_TRICOUNT";
+    const res = await PATCH(reqBody({ ...corps, guestIds: ["g1"] }), ctx);
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: "Invité inconnu" });
+    expect(h.updated).toBeNull();
+  });
+
+  it("refuse un montant ou un libellé invalide, sans rien écrire", async () => {
+    for (const mauvais of [
+      { ...corps, amountCents: 0 },
+      { ...corps, amountCents: 1.5 },
+      { ...corps, label: "" },
+      { ...corps, participantIds: [], guestIds: [] },
+      { ...corps, payerId: "u404" },
+    ]) {
+      const res = await PATCH(reqBody(mauvais), ctx);
+      expect(res.status).toBe(400);
+      expect(h.updated).toBeNull();
+    }
   });
 });
