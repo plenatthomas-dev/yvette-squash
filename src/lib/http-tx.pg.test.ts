@@ -13,39 +13,19 @@
 //      entament leur simple en même temps ? C'est la promesse la plus chère de la branche —
 //      elle se paie en notifications à tout le club.
 //
-// ─── COMMENT LE LANCER ────────────────────────────────────────────────────────
-//
-//   docker run --rm -d --name pg-test -e POSTGRES_PASSWORD=test -p 55432:5432 postgres:16
-//   export TEST_DATABASE_URL="postgresql://postgres:test@localhost:55432/postgres"
-//   DATABASE_URL="$TEST_DATABASE_URL" npx prisma db push --skip-generate
-//   npm run test:pg
-//   docker rm -f pg-test
+// Le préambule (garde-fou de base jetable, variables d'environnement, mode d'emploi du
+// conteneur) vit dans `pg-harness.ts` — il est partagé avec les autres tests sur vraie base.
 //
 // Sans `TEST_DATABASE_URL`, le fichier se SAUTE — `npm test` reste rapide et hors-ligne. Il ne
 // se saute pas en silence : le test « non mesuré » en bas de fichier dit à voix haute qu'il n'a
 // rien mesuré, pour qu'une suite verte ne se lise pas comme une suite qui a répondu.
-//
-// ⚠️ Ce fichier ÉCRIT (il crée un membre, une équipe, une rencontre, un simple, des jeux). Il
-// refuse donc de tourner ailleurs que sur `localhost`, sauf `ALLOW_REMOTE_TEST_DB=1` posé en
-// conscience — la base `dev` de Neon est partagée avec Recette, ce n'est pas une base jetable.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-
-const URL_TEST = (process.env.TEST_DATABASE_URL ?? "").trim();
-
-function estJetable(url: string): boolean {
-  if (process.env.ALLOW_REMOTE_TEST_DB === "1") return true;
-  try {
-    const h = new URL(url).hostname;
-    return h === "localhost" || h === "127.0.0.1" || h === "::1";
-  } catch {
-    return false;
-  }
-}
+import { SANS_BASE, URL_TEST, codePrisma, jalon, ouvrirBaseDeTest } from "./pg-harness";
 
 // Types seulement : `@prisma/client` n'est importé qu'À L'EXÉCUTION, une fois `DATABASE_URL`
-// posée. Un import statique construirait le singleton AVANT, donc sur la mauvaise base — ou
-// jetterait « Environment variable not found » sur un poste qui n'en a aucune.
+// posée par le harnais. Un import statique construirait le singleton AVANT, donc sur la
+// mauvaise base — ou jetterait « Environment variable not found » sur un poste sans `.env`.
 type Prisma = import("@prisma/client").PrismaClient;
 type Tx = import("@prisma/client").Prisma.TransactionClient;
 type TxFn = typeof import("./http-tx").serializableTransaction;
@@ -62,18 +42,6 @@ let fixtureId = "";
 let matchId = "";
 let matchId2 = "";
 
-/** Promesse ouverte de l'extérieur : c'est ce qui permet d'ENTRELACER deux transactions. */
-function jalon() {
-  let ouvrir!: () => void;
-  const atteint = new Promise<void>((r) => (ouvrir = r));
-  return { atteint, ouvrir };
-}
-
-function codePrisma(e: unknown): string {
-  const c = (e as { code?: unknown })?.code;
-  return typeof c === "string" ? c : `(sans code) ${String((e as Error)?.message ?? e)}`;
-}
-
 /** Le corps de transaction du marqueur, réduit à ce qui touche `InterclubGame`. */
 async function ecritureMarqueur(tx: Tx, jeux: { home: number; away: number }[]) {
   await tx.interclubGame.deleteMany({ where: { matchId } });
@@ -88,22 +56,11 @@ async function ecritureMarqueur(tx: Tx, jeux: { home: number; away: number }[]) 
   });
 }
 
-describe.skipIf(!URL_TEST)("SUR VRAIE BASE — deux transactions concurrentes", () => {
+describe.skipIf(SANS_BASE)("SUR VRAIE BASE — deux transactions concurrentes", () => {
   beforeAll(async () => {
-    if (!estJetable(URL_TEST)) {
-      throw new Error(
-        "TEST_DATABASE_URL ne pointe pas sur localhost. Ce fichier ÉCRIT en base : vise un " +
-          "Postgres jetable, ou pose ALLOW_REMOTE_TEST_DB=1 si tu sais que celle-ci l'est.",
-      );
-    }
-    process.env.DATABASE_URL = URL_TEST;
-    // Le datasource déclare aussi `directUrl` : sans elle, le client refuse de se construire
-    // sur un poste qui n'a pas de `.env`. Même base, elle ne sert qu'aux migrations.
-    process.env.DIRECT_URL = URL_TEST;
-
+    prisma = await ouvrirBaseDeTest();
     const client = await import("@prisma/client");
     Serializable = client.Prisma.TransactionIsolationLevel.Serializable;
-    ({ prisma } = await import("./db"));
     ({ serializableTransaction } = await import("./http-tx"));
     // Le VRAI `derivedStatus`, pas une copie : le cas C reproduit la garde de la route, et une
     // reproduction qui recalculerait le statut à sa façon ne prouverait rien sur la route.
@@ -610,7 +567,7 @@ describe.skipIf(!URL_TEST)("SUR VRAIE BASE — deux transactions concurrentes", 
 
 // Sans base, la suite doit DIRE qu'elle n'a pas répondu. Un fichier entièrement sauté se lit
 // comme un fichier vert, et c'est précisément ce que ces deux soupçons ne doivent plus être.
-describe.skipIf(!!URL_TEST)("SUR VRAIE BASE — non mesuré", () => {
+describe.skipIf(!SANS_BASE)("SUR VRAIE BASE — non mesuré", () => {
   it("rien n'est vérifié sur la concurrence tant qu'aucune base n'est fournie (TEST_DATABASE_URL)", () => {
     expect(URL_TEST).toBe("");
   });
