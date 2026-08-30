@@ -198,55 +198,67 @@ describe("readJsonBody — un corps valide mais absurde ne doit pas sortir en 50
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DEUX SOUPÇONS, MIS SOUS TEST PLUTÔT QUE CORRIGÉS.
+// LES DEUX SOUPÇONS, ET CE QU'ILS SONT DEVENUS.
 //
-// Ces tests ne prouvent pas qu'il y a un défaut : ils PINGLENT le comportement actuel, pour que
-// la question posée soit vérifiable et que la réponse, quand elle viendra, se voie. Corriger
-// sans savoir serait aussi mal fondé que de ne rien faire.
+// Ces tests-ci décrivent la MÉCANIQUE : quels codes la boucle rejoue, et quelles options elle
+// passe. Ils ne pouvaient pas dire ce que Postgres répond vraiment — un faux client rend le
+// code qu'on lui souffle. C'est `http-tx.pg.test.ts` qui a tranché, sur un vrai serveur, avec
+// deux transactions concurrentes ; les réponses sont recopiées ci-dessous, à leur place.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("SOUPÇON — quels échecs sont rejoués, et lesquels ne le sont pas", () => {
-  // `PUT …/live` justifie sa transaction Serializable par le fait que deux écritures
-  // simultanées « violeraient `@@unique([matchId, number])` ». Or Postgres peut lever la
-  // violation d'unicité (23505 → P2002) AVANT de détecter l'échec de sérialisation
-  // (40001 → P2034) : le motif « supprimer puis réinsérer » peut sortir par l'une ou l'autre.
+describe("quels échecs sont rejoués, et lesquels ne le sont pas", () => {
+  // ✅ TRANCHÉ (Postgres 16, `http-tx.pg.test.ts` cas A et A2). La crainte était que le motif
+  // « supprimer puis réinsérer les jeux » sorte en violation d'unicité (23505 → P2002), qui
+  // n'est pas rejouée, plutôt qu'en échec de sérialisation (40001 → P2034), qui l'est.
   //
-  // Ce que ce test établit : le code ne rejoue QUE P2034. Si Postgres choisit P2002, la route
-  // rend un 500 au lieu de réessayer. Reste à savoir lequel des deux il choisit réellement sur
-  // ce motif — ce qui demande deux transactions concurrentes sur une vraie base.
+  // Mesuré : le second marqueur sort en **P2034**, table vide comme table déjà peuplée. Sous
+  // Serializable, Postgres détecte le conflit avant d'en arriver à l'index unique. Passée par
+  // `serializableTransaction`, la course aboutit des DEUX côtés, au second tour (cas A').
+  // Ne rejouer que P2034 est donc le bon réglage, et non un oubli.
   it("rejoue P2034 — le conflit de sérialisation", async () => {
     h.conflitsRestants = 2;
     await expect(serializableTransaction(async () => "ok")).resolves.toBe("ok");
     expect(h.appels).toBe(3);
   });
 
-  it("ne rejoue PAS P2002 — la violation d'unicité, qu'un delete-then-insert peut produire", async () => {
+  it("ne rejoue PAS P2002 — la violation d'unicité", async () => {
+    // Et c'est sans conséquence connue : le motif qu'on soupçonnait de la produire n'en produit
+    // pas (cf. ci-dessus). Le test reste, parce qu'il dit où passe la frontière.
     h.jette = new FauxPrismaError("P2002");
     await expect(serializableTransaction(async () => "ok")).rejects.toMatchObject({ code: "P2002" });
     expect(h.appels).toBe(1);
   });
 
-  it("ne rejoue PAS P2028 — l'expiration de transaction", async () => {
-    // Conséquence du second soupçon : sans `timeout`, une transaction longue sort en P2028, qui
-    // n'est pas un conflit de sérialisation, donc n'est pas rejouée, donc sort en 500.
+  it("ne rejoue PAS P2028 — la transaction qui n'a pas tenu dans ses bornes", async () => {
+    // ⚠️ Celui-ci, en revanche, EST atteignable — cf. le bloc suivant. Il sort en 500.
+    // Et il n'est pas rejouable en l'état : P2028 recouvre DEUX échecs indiscernables par le
+    // code (« pas pu commencer dans `maxWait` » et « expirée après `timeout` »). Rejouer le
+    // premier serait juste ; rejouer le second rejouerait un travail qui a déjà tourné jusqu'au
+    // bout, quatre fois.
     h.jette = new FauxPrismaError("P2028");
     await expect(serializableTransaction(async () => "ok")).rejects.toMatchObject({ code: "P2028" });
     expect(h.appels).toBe(1);
   });
 });
 
-describe("SOUPÇON — les bornes de temps de la transaction ne sont pas posées", () => {
-  // Le `PATCH` enchaîne jusqu'à huit allers-retours DANS la transaction. Les défauts Prisma
-  // (5 s de `timeout`, 2 s de `maxWait`) ne sont pas relevés, et `interclub-gate.ts` décrit le
-  // cold start Neon comme « visible à l'œil nu ». La première écriture d'une soirée pourrait
-  // donc dépasser la borne par défaut.
+describe("les bornes de temps de la transaction", () => {
+  // ✅ MESURÉ (`http-tx.pg.test.ts`, cas B1 à B4), puis TRANCHÉ. Les deux défauts de Prisma
+  // existent bien, et les voici chiffrés sur un vrai serveur :
   //
-  // Ce test ne dit pas que c'est trop court : il RÉVÈLE que la question n'a jamais été posée.
-  // Le jour où l'on décide d'une valeur, il échoue et force à l'écrire ici.
-  it("ne passe aujourd'hui que le niveau d'isolation, sans timeout ni maxWait", async () => {
+  //   * `maxWait` 2 s — mesuré à 2005 ms. Il court AVANT le premier ordre SQL, sur l'obtention
+  //     de la connexion : c'est là que tombe un réveil de base froide, donc la PREMIÈRE écriture
+  //     d'une soirée. Dépassé ⇒ P2028 ⇒ 500 pour le marqueur. **Relevé à 10 s**, et le cas B4
+  //     vérifie qu'une transaction qui attendait plus de 2 s aboutit désormais ;
+  //   * `timeout` 5 s — laissé au défaut, délibérément : mesuré, ce plafond n'INTERROMPT pas la
+  //     requête (elle est allée au bout de ses 6 s, c'est au retour qu'elle a été refusée). Le
+  //     relever ne ferait gagner de temps à personne, seulement déplacer le moment où l'on jette
+  //     un travail abouti.
+  //
+  // La valeur est ÉCRITE ici pour qu'on ne puisse pas la changer par distraction : c'est un
+  // chiffre qui décide de ce que voit un marqueur un jeudi soir, pas un détail de réglage.
+  it("accorde dix secondes pour OBTENIR une connexion, et laisse `timeout` au défaut", async () => {
     await serializableTransaction(async () => "ok");
-    expect(h.dernieresOptions).toEqual({ isolationLevel: "Serializable" });
+    expect(h.dernieresOptions).toEqual({ isolationLevel: "Serializable", maxWait: 10_000 });
     expect(h.dernieresOptions).not.toHaveProperty("timeout");
-    expect(h.dernieresOptions).not.toHaveProperty("maxWait");
   });
 });

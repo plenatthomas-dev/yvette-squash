@@ -82,6 +82,29 @@ function isSerializationConflict(e: unknown): boolean {
 const BACKOFF_MS = 10;
 
 /**
+ * Temps accordé pour OBTENIR une connexion, avant même le premier ordre SQL.
+ *
+ * Le défaut de Prisma est de 2 s — mesuré à 2005 ms, cf. `http-tx.pg.test.ts` cas B3. Ce
+ * plafond-là ne court pas sur le travail de la transaction : il court AVANT, sur l'ouverture de
+ * la connexion. Or `interclub-gate.ts` décrit le réveil de la base Neon comme « visible à l'œil
+ * nu », et c'est exactement ce que paie la PREMIÈRE écriture d'une soirée — le premier point du
+ * premier jeu, sur un compute endormi depuis la veille. Dépassé, on sort en `P2028`, que la
+ * boucle ne rejoue pas (elle ne peut pas : le même code recouvre aussi « transaction expirée »,
+ * qu'il serait faux de rejouer quatre fois). Le marqueur voit donc un 500, au pire moment.
+ *
+ * Dix secondes, c'est-à-dire « le temps qu'une base froide se réveille », et non « le temps
+ * qu'une écriture se termine » : une fois la connexion obtenue, cette valeur ne coûte plus rien.
+ * Elle n'allonge une attente que là où le défaut rendait une erreur.
+ *
+ * ⚠️ `timeout` (durée de la transaction elle-même) reste au défaut de 5 s, et c'est délibéré :
+ * mesuré, ce plafond N'INTERROMPT PAS la requête en cours — elle va au bout, et c'est au retour
+ * qu'elle est refusée. Le relever ne ferait donc gagner du temps à personne ; il changerait
+ * seulement le moment où l'on jette un travail abouti. Les huit allers-retours du `PATCH` se
+ * comptent en centaines de millisecondes une fois la connexion ouverte.
+ */
+const MAX_WAIT_MS = 10_000;
+
+/**
  * Exporté pour être ÉPROUVÉ, et non par commodité : la borne ci-dessus est un chiffre qu'on lit
  * pour dimensionner un délai côté client, et un chiffre qu'aucun test ne mesure finit toujours
  * par décrire une autre version du code.
@@ -112,6 +135,7 @@ export async function serializableTransaction<T>(
     try {
       return await prisma.$transaction(run, {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        maxWait: MAX_WAIT_MS,
       });
     } catch (e) {
       if (!isSerializationConflict(e)) throw e;

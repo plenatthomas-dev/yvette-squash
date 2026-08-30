@@ -215,7 +215,8 @@ qu'on vient d'écrire (la clause porte alors sur l'index `(userId, createdAt)`).
 
 Trois routes écrivent en parallèle un soir de rencontre. Toutes passent par
 **`serializableTransaction`** (`src/lib/http-tx.ts`) : isolation Serializable + réessai sur
-`P2034`, quatre tentatives.
+`P2034`, quatre tentatives, et **10 s accordées pour obtenir une connexion** (`maxWait`) — le
+défaut de 2 s ne laissait pas à une base froide le temps de se réveiller.
 
 Ce n'est pas facultatif. En Serializable, Postgres ne fait pas patienter les transactions
 concurrentes : il en laisse une aboutir et **annule** l'autre. Sans réessai, deux marqueurs qui
@@ -282,6 +283,12 @@ l'accusé de réception, la question « qui engage ? », et l'abonnement qui sur
 permission. Chacun a été vérifié en réintroduisant le défaut qu'il interdit — un test qui passe
 aussi bien avec que sans le correctif ne mesure rien.
 
+**Un troisième genre, à part** — `src/lib/http-tx.pg.test.ts` ouvre deux transactions
+CONCURRENTES sur un vrai Postgres. Il se **saute** sans `TEST_DATABASE_URL` (`npm test` reste
+rapide et hors-ligne) et refuse de tourner ailleurs que sur `localhost`, puisqu'il écrit. Il
+existe parce qu'un faux client ne peut pas répondre à une question de concurrence : il rend le
+code d'erreur qu'on lui a soufflé. C'est lui qui a tranché les deux soupçons ci-dessous.
+
 ---
 
 ## Ce qui reste ouvert
@@ -291,13 +298,27 @@ aussi bien avec que sans le correctif ne mesure rien.
 - **Note de confidentialité (RGPD)** : l'interclub crée de la donnée nominative (qui joue,
   contre qui, quel score) et une nouvelle finalité de notification. À documenter dans
   `PrivacyNotice` **avant** d'activer le flag en prod, comme cela a été fait pour l'annuaire.
-- **Deux soupçons non tranchés, mis sous test plutôt que corrigés** (cf. `http-tx.test.ts`) :
-  `serializableTransaction` ne rejoue que `P2034`, donc ni `P2002` — la violation d'unicité qu'un
-  `delete`-puis-`insert` concurrent peut produire à la place — ni `P2028` ; et la transaction ne
-  pose ni `timeout` ni `maxWait`, alors que le `PATCH` enchaîne jusqu'à huit allers-retours et
-  qu'un cold start Neon est « visible à l'œil nu ». Les tests épinglent le comportement actuel :
-  ils rendent la question vérifiable, ils n'y répondent pas. Trancher le premier demande deux
-  transactions concurrentes sur une vraie base.
+- **Les deux soupçons sur `http-tx.ts` ont été tranchés** sur un vrai Postgres
+  (`src/lib/http-tx.pg.test.ts`, six mesures — `npm run test:pg`, cf. l'en-tête du fichier pour
+  le conteneur jetable). Le premier tombe, le second se précise :
+
+  - **Ne rejouer que `P2034` est correct.** On craignait que « supprimer puis réinsérer les
+    jeux » sorte en `P2002` (violation d'unicité, non rejouée ⇒ 500). Mesuré sur deux
+    transactions concurrentes : le second marqueur sort en **`P2034`**, que la table soit vide
+    ou déjà peuplée — sous Serializable, Postgres voit le conflit avant d'arriver à l'index
+    unique. Passée par `serializableTransaction`, la course **aboutit des deux côtés**, au
+    second tour. Rien à corriger.
+  - **Les deux bornes par défaut existent, et produisent un `P2028` non rejoué**, donc un 500 :
+    `timeout` à 5 s, `maxWait` mesuré à 2005 ms. Deux précisions ont décidé de la suite. D'abord,
+    `timeout` **n'interrompt rien** : la requête va au bout de son travail, c'est au retour
+    qu'elle est refusée — le relever ne protégerait pas la base, cela déplacerait le moment où
+    l'on jette un travail abouti. Il **reste donc au défaut**. Ensuite, le plafond qui compte est
+    `maxWait`, qui court **avant le premier ordre SQL**, sur l'obtention de la connexion : c'est
+    là que tombe un réveil de base froide, donc la première écriture d'une soirée. Il est
+    **relevé à 10 s** (`MAX_WAIT_MS`), et le cas B4 vérifie qu'une attente de plus de 2 s aboutit
+    désormais au lieu de sortir en 500. Ce qu'aucun Postgres local ne peut dire, et qui reste à
+    observer sur Recette un jour de base froide : combien de temps Neon met réellement à se
+    réveiller.
 - **`Interclub.tsx` fait ~980 lignes** et concentre quatre écrans. Découpage à envisager si un
   cinquième s'ajoute.
 - **Pas de vue « saison »** : ni classement, ni historique par équipe. Volontaire pour un
