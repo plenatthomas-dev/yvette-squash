@@ -33,11 +33,15 @@ vi.mock("@/lib/features-server", () => ({ getFeatures: async () => ({ tricount: 
 vi.mock("@/lib/push", () => ({ pushToUser: h.push }));
 vi.mock("@/lib/db", () => ({
   prisma: {
-    tricount: { findUnique: vi.fn(async () => h.tricount) },
     // `serializableTransaction` (le vrai) passe par ici : le mock exécute le corps sur le
     // stock ci-dessus, donc deux appels successifs se voient l'un l'autre.
+    //
+    // ⚠️ TOUT est lu dans la transaction, y compris le tricount et ses dépenses : la liste des
+    // payeurs et les soldes de la notification venaient d'un instantané pris AVANT, et une
+    // dépense ajoutée au même instant laissait partir un montant calculé sans elle.
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
       fn({
+        tricount: { findUnique: async () => h.tricount },
         tricountApproval: {
           findUnique: async (a: { where: { tricountId_userId: { userId: string } } }) =>
             h.approvals.has(a.where.tricountId_userId.userId)
@@ -149,6 +153,11 @@ describe("POST /api/tricount/[id]/approve — la transition, et elle seule", () 
     );
     h.session = session("u1"); // u1 valide en dernier ET doit de l'argent
     await POST(req(), ctx);
+    // ⚠️ L'absence de notification ne suffit PAS à prouver quoi que ce soit : elle serait
+    // vraie aussi si la transition n'avait pas été détectée. On atteste donc d'abord que le
+    // tricount vient bien de s'ouvrir — les deux validations sont là —, et SEULEMENT ensuite
+    // que personne n'a été prévenu, faute d'autre débiteur que le valideur lui-même.
+    expect([...h.approvals].sort()).toEqual(["u1", "u2"]);
     expect(h.push).not.toHaveBeenCalled();
   });
 

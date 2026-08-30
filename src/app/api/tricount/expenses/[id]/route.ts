@@ -12,7 +12,7 @@ import {
   MAX_PARTS,
 } from "@/lib/tricount";
 import { getFeatures } from "@/lib/features-server";
-import { readJsonBody } from "@/lib/http-tx";
+import { httpErrorResponse, readJsonBody, serializableTransaction } from "@/lib/http-tx";
 import { blockEmailOnlyExpenseWrite, refuseSiSolde } from "@/lib/tricount-guard";
 
 export const runtime = "nodejs";
@@ -226,26 +226,36 @@ export async function PATCH(
     ? splitByWeights(amountCents, allKeys, weightArr)
     : splitWithCredits(amountCents, allKeys, credit);
 
-  await prisma.$transaction([
-    // Remplace intégralement les parts (participants et montants peuvent changer).
-    prisma.expenseShare.deleteMany({ where: { expenseId: id } }),
-    prisma.expense.update({
-      where: { id },
-      data: {
-        label: cleanLabel,
-        amountCents,
-        payerId,
-        shares: {
-          create: rawIdsInOrder.map((pid, i) =>
-            i < uniqueIds.length
-              ? { userId: pid, amountCents: parts[i] }
-              : { guestId: pid, amountCents: parts[i] },
-          ),
+  // ⚠️ SERIALIZABLE, pour la même raison que la route de création : SSI ne protège qu'entre
+  // transactions sérialisables. En Read Committed, une validation concurrente pouvait survivre
+  // au `deleteMany` qui remet les validations à zéro, et le tricount redevenait « prêt » avec
+  // un payeur qui n'avait pas vu les nouveaux montants.
+  try {
+    await serializableTransaction(async (tx) => {
+      // Remplace intégralement les parts (participants et montants peuvent changer).
+      await tx.expenseShare.deleteMany({ where: { expenseId: id } });
+      await tx.expense.update({
+        where: { id },
+        data: {
+          label: cleanLabel,
+          amountCents,
+          payerId,
+          shares: {
+            create: rawIdsInOrder.map((pid, i) =>
+              i < uniqueIds.length
+                ? { userId: pid, amountCents: parts[i] }
+                : { guestId: pid, amountCents: parts[i] },
+            ),
+          },
         },
-      },
-    }),
-    // Montants modifiés : chaque payeur devra re-valider avant remboursements.
-    prisma.tricountApproval.deleteMany({ where: { tricountId: existingExpense.tricountId } }),
-  ]);
+      });
+      // Montants modifiés : chaque payeur devra re-valider avant remboursements.
+      await tx.tricountApproval.deleteMany({ where: { tricountId: existingExpense.tricountId } });
+    }, "Écriture concurrente sur ce tricount, réessaie");
+  } catch (e) {
+    const res = httpErrorResponse(e);
+    if (res) return res;
+    throw e;
+  }
   return NextResponse.json({ ok: true, tricountId: existingExpense.tricountId });
 }

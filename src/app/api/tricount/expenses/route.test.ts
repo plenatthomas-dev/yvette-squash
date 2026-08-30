@@ -75,7 +75,21 @@ vi.mock("@/lib/db", () => ({
       }),
     },
     tricountApproval: { deleteMany: h.approvalsDeleted },
-    $transaction: (ops: Promise<unknown>[]) => Promise.all(ops),
+    // L'écriture est passée en `serializableTransaction` (donc un CALLBACK) pour s'aligner
+    // sur `approve` : SSI ne protège qu'entre transactions sérialisables, et une validation
+    // concurrente pouvait sinon survivre à la remise à zéro. Le mock accepte les deux formes.
+    $transaction: async (arg: unknown) =>
+      Array.isArray(arg)
+        ? Promise.all(arg)
+        : (arg as (tx: unknown) => Promise<unknown>)({
+            expense: {
+              create: vi.fn(async (a: Record<string, unknown>) => {
+                h.created = a;
+                return { id: "e1" };
+              }),
+            },
+            tricountApproval: { deleteMany: h.approvalsDeleted },
+          }),
   },
 }));
 

@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { prisma } from "@/lib/db";
-import { payersOf, computeBalances, toKeyedExpense, parseKey } from "@/lib/tricount";
+import { payersOf, computeBalances, toKeyedExpense, parseKey, isReady } from "@/lib/tricount";
 import { pushToUser } from "@/lib/push";
 import { getFeatures } from "@/lib/features-server";
-import { httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
+import { HttpError, httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
 
 export const runtime = "nodejs";
 
@@ -27,6 +26,12 @@ function fmtEuros(cents: number): string {
   );
 }
 
+/** Ce qu'il reste à annoncer une fois la transaction commise. `null` = rien. */
+interface Annonce {
+  date: string;
+  debtors: { id: string; cents: number }[];
+}
+
 // POST /api/tricount/{id}/approve -> le joueur connecté (qui doit être un payeur
 // du tricount) donne son « OK pour lancer les remboursements ». Quand tous les
 // payeurs ont validé, les remboursements s'ouvrent. À CE MOMENT-LÀ (et seulement à
@@ -44,36 +49,12 @@ export async function POST(
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
   const { id } = await params;
-  const tricount = await prisma.tricount.findUnique({
-    where: { id },
-    include: {
-      expenses: {
-        include: {
-          shares: { select: { userId: true, guestId: true, amountCents: true } },
-        },
-      },
-      approvals: { select: { userId: true } },
-    },
-  });
-  if (!tricount) {
-    return NextResponse.json({ error: "Tricount introuvable" }, { status: 404 });
-  }
-  const keyedExpenses = tricount.expenses.map(toKeyedExpense);
-  // Un invité n'est jamais payeur d'une vraie dépense : payersOf ne renvoie que des
-  // clés membre ("u:xxx"), qu'on dépréfixe pour matcher TricountApproval.userId.
-  const payers = payersOf(keyedExpenses).map((k) => parseKey(k).id);
-  if (!payers.includes(session.userId)) {
-    return NextResponse.json(
-      { error: "Seuls les payeurs de ce tricount valident" },
-      { status: 403 },
-    );
-  }
 
-  // TRANSITION « REMBOURSEMENTS OUVERTS » — décidée sur le RÉSULTAT de l'écriture, dans la
-  // même transaction, et jamais sur une lecture faite avant.
+  // TOUT SE DÉCIDE DANS LA TRANSACTION — la liste des payeurs comprise.
   //
-  // Elle se déduisait de `tricount.approvals`, lu plus haut, hors transaction. Deux exécutions
-  // concurrentes voyaient donc le même état de départ, avec deux issues également fausses :
+  // La transition se déduisait d'une lecture faite AVANT l'écriture, hors transaction. Deux
+  // exécutions concurrentes voyaient donc le même état de départ, avec deux issues également
+  // fausses :
   //
   //   * DEUX PAYEURS QUI VALIDENT AU MÊME INSTANT — chacun lit « aucune validation », et la
   //     transition exige que l'AUTRE soit déjà là : les deux répondent « pas encore prêt ».
@@ -83,9 +64,9 @@ export async function POST(
   //   * UN REJEU (réponse perdue, requête rejouée par le client) — les deux exécutions lisent
   //     le même état d'avant et annoncent deux fois la même ouverture, à tous les débiteurs.
   //
-  // Deux conditions, relues APRÈS l'écriture, dans une transaction Serializable :
+  // Deux conditions, relues APRÈS l'écriture :
   //   1. ma validation n'existait pas avant — sinon c'est un rejeu, il n'ouvre rien ;
-  //   2. toutes les validations sont là.
+  //   2. toutes les validations sont là (`isReady`, la règle partagée avec la liste).
   //
   // Le Serializable est LOAD-BEARING, ce n'est pas une précaution de style. Deux validations
   // simultanées lisent l'ensemble des validations ET y insèrent une ligne : c'est un
@@ -93,20 +74,42 @@ export async function POST(
   // rejoue. Le rejeu voit alors les deux lignes, et la seconde transaction constate que sa
   // propre validation existe déjà — exactement une des deux annonce.
   //
+  // ⚠️ LES DÉPENSES SONT LUES ICI, ET NON PLUS AVANT. Une moitié de la condition venait d'un
+  // instantané pris hors transaction : la liste des payeurs, et les soldes de la notification.
+  // Une dépense ajoutée au même instant (ce qui remet toutes les validations à zéro) laissait
+  // partir un « tu dois X » calculé sans elle, sur un tricount que la liste affichait déjà
+  // « en cours ». Fenêtre étroite, mais c'était le mode de panne que ce commentaire déclarait
+  // éliminé — et une garantie qu'on annonce à moitié ne vaut pas mieux que pas de garantie.
+  //
+  // ⚠️ Le corps est rejoué tel quel en cas de conflit : aucun envoi de notification ne doit
+  // s'y trouver. Il rend ce qu'il faut annoncer ; l'envoi part après le commit.
+  //
   // Le contrôle « existait déjà » remplace un marqueur persistant, et c'est délibéré : un
   // tricount se REFERME légitimement (ajouter une dépense oubliée remet les validations à
   // zéro), et rouvre ensuite sur un MONTANT DIFFÉRENT. Cette seconde ouverture doit être
-  // annoncée, ce qu'un marqueur qui ne se réarme pas aurait interdit. Ici la ligne de
-  // validation a été supprimée avec les autres : la condition redevient vraie d'elle-même.
-  //
-  // ⚠️ Le corps est rejoué tel quel en cas de conflit de sérialisation : aucun envoi de
-  // notification ne doit s'y trouver. Il rend ce qu'il faut annoncer ; l'envoi part après le
-  // commit (même règle que l'interclub, cf. `http-tx.ts`).
-  let doitAnnoncer = false;
+  // annoncée, ce qu'un marqueur qui ne se réarme pas aurait interdit.
+  let annonce: Annonce | null = null;
   try {
-    doitAnnoncer = await serializableTransaction(async (tx) => {
-      // Ma validation existait-elle DÉJÀ ? Si oui, ce clic n'ouvre rien : c'est une
-      // revalidation ou un rejeu, et il ne doit rien annoncer.
+    annonce = await serializableTransaction(async (tx) => {
+      const tricount = await tx.tricount.findUnique({
+        where: { id },
+        include: {
+          expenses: {
+            include: { shares: { select: { userId: true, guestId: true, amountCents: true } } },
+          },
+        },
+      });
+      if (!tricount) throw new HttpError(404, "Tricount introuvable");
+
+      const keyedExpenses = tricount.expenses.map(toKeyedExpense);
+      // Un invité n'est jamais payeur d'une vraie dépense : payersOf ne renvoie que des
+      // clés membre ("u:xxx"), qu'on dépréfixe pour matcher TricountApproval.userId.
+      const payers = payersOf(keyedExpenses).map((k) => parseKey(k).id);
+      if (!payers.includes(session.userId)) {
+        throw new HttpError(403, "Seuls les payeurs de ce tricount valident");
+      }
+
+      // Ma validation existait-elle DÉJÀ ? Si oui, ce clic n'ouvre rien.
       const dejaValide = await tx.tricountApproval.findUnique({
         where: { tricountId_userId: { tricountId: id, userId: session.userId } },
         select: { userId: true },
@@ -120,8 +123,16 @@ export async function POST(
         where: { tricountId: id },
         select: { userId: true },
       });
-      const approuves = new Set(apres.map((a) => a.userId));
-      return !dejaValide && payers.every((p) => approuves.has(p));
+      if (dejaValide || !isReady(payers, apres.map((a) => a.userId))) return null;
+
+      // Débiteurs = solde négatif ; on prévient chacun (sauf soi) du montant à rendre.
+      // Un invité peut être débiteur mais n'a pas de souscription push (pas de compte) :
+      // on ne retient que les clés membre.
+      const debtors = [...computeBalances(keyedExpenses)]
+        .map(([key, cents]) => ({ ...parseKey(key), cents }))
+        .filter((d) => d.kind === "user" && d.cents < 0 && d.id !== session.userId)
+        .map((d) => ({ id: d.id, cents: d.cents }));
+      return { date: tricount.date, debtors };
     }, "Validation concurrente, réessaie");
   } catch (e) {
     const res = httpErrorResponse(e);
@@ -129,19 +140,12 @@ export async function POST(
     throw e;
   }
 
-  if (doitAnnoncer) {
-    // Débiteurs = solde négatif ; on prévient chacun (sauf soi) du montant à rendre.
-    // Un invité peut être débiteur mais n'a pas de souscription push (pas de
-    // compte) : on ne notifie que les clés membre.
-    const balances = computeBalances(keyedExpenses);
-    const debtors = [...balances]
-      .map(([key, cents]) => ({ ...parseKey(key), cents }))
-      .filter((d) => d.kind === "user" && d.cents < 0 && d.id !== session.userId);
+  if (annonce) {
     await Promise.all(
-      debtors.map(({ id: userId, cents }) =>
+      annonce.debtors.map(({ id: userId, cents }) =>
         pushToUser(userId, {
           title: "Remboursements ouverts 💸",
-          body: `Tricount du ${prettyDate(tricount.date)} : tu dois ${fmtEuros(-cents)}.`,
+          body: `Tricount du ${prettyDate(annonce!.date)} : tu dois ${fmtEuros(-cents)}.`,
           url: "/?view=money",
           tag: `tricount-ready-${id}`,
           // Sans `renotify`, une notification qui en REMPLACE une autre de même tag échange

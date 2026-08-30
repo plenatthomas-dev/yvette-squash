@@ -3058,14 +3058,25 @@ body[data-bottombar] .install-banner {
   margin-bottom: 12px;
   overflow: hidden;
 }
-/* Tricount soldé : TOUTE la carte change de couleur (teinte primaire), bien
-   plus repérable que la seule pastille. */
+/* Tricount soldé : TOUTE la carte change de couleur, bien plus repérable que la seule
+   pastille. GRIS, et non plus vert.
+
+   DESIGN.md, Règle du Vert Actionnable : « le vert ne se pose que sur ce qu'on peut toucher…
+   un élément vert non actionnable est une faute ». Un tricount soldé est précisément l'état
+   qui n'appelle plus AUCUNE action — la carte le dit elle-même (« Tout le monde est
+   remboursé »), et l'écran y masque désormais Modifier et Suppr. Il portait pourtant l'aplat
+   le plus large de toute la page, en teinte de marque : le vert y disait « viens » là où le
+   texte disait « c'est fini ».
+
+   La paire `past`/`past-fg` est celle du créneau écoulé, et c'est la même idée — DESIGN.md
+   la prescrit déjà pour la rencontre interclub terminée : « gris plein ». Le repère visuel
+   reste entier, il change seulement de sens. */
 .tri-card.settled {
-  background: color-mix(in srgb, var(--pico-primary) 14%, var(--pico-card-background-color));
-  border-color: color-mix(in srgb, var(--pico-primary) 45%, var(--pico-card-border-color));
+  background: color-mix(in srgb, var(--past) 55%, var(--pico-card-background-color));
+  border-color: color-mix(in srgb, var(--past-fg) 30%, var(--pico-card-border-color));
 }
 .tri-card.settled .tri-card-head:hover {
-  background: color-mix(in srgb, var(--pico-primary) 20%, transparent);
+  background: color-mix(in srgb, var(--past-fg) 12%, transparent);
 }
 
 .tri-card-head {
@@ -3133,9 +3144,12 @@ body[data-bottombar] .install-banner {
   color: var(--primary-fg);
   border-color: var(--pico-primary);
 }
+/* « Équilibré ✅ » : même raison que la carte soldée — c'est un état, pas une action. Gris
+   plein plutôt que teinte de marque (DESIGN.md, Règle du Vert Actionnable). La coche porte
+   déjà le sens ; la couleur n'a pas à promettre un geste qui n'existe plus. */
 .tri-chip.ok {
-  color: var(--primary-fg);
-  background: color-mix(in srgb, var(--pico-primary) 12%, transparent);
+  color: var(--past-fg);
+  background: color-mix(in srgb, var(--past) 60%, transparent);
   border-color: transparent;
 }
 

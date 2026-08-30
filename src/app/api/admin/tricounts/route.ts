@@ -2,12 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
 import { listTricountsAdmin, deleteTricount } from "@/lib/tricount-admin";
 import { readJsonBody } from "@/lib/http-tx";
+import { getFeatures } from "@/lib/features-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // GET /api/admin/tricounts — liste des tricounts (modération, étape 5).
 export async function GET(req: NextRequest) {
+  // Le drapeau D’ABORD : une fonction coupée répond 404, y compris à un admin. Sans lui,
+  // cette route restait la seule porte ouverte sur le tricount quand la fonction est éteinte.
+  if (!(await getFeatures()).tricount) {
+    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
+  }
   if (!(await requireAdmin(req))) {
     return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
   }
@@ -16,6 +22,11 @@ export async function GET(req: NextRequest) {
 
 // POST /api/admin/tricounts  { id, action: "delete" }
 export async function POST(req: NextRequest) {
+  // Le drapeau D’ABORD : une fonction coupée répond 404, y compris à un admin. Sans lui,
+  // cette route restait la seule porte ouverte sur le tricount quand la fonction est éteinte.
+  if (!(await getFeatures()).tricount) {
+    return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
+  }
   if (!(await requireAdmin(req))) {
     return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
   }

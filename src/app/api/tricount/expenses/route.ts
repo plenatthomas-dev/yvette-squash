@@ -12,7 +12,7 @@ import {
   MAX_PARTS,
 } from "@/lib/tricount";
 import { getFeatures } from "@/lib/features-server";
-import { readJsonBody } from "@/lib/http-tx";
+import { httpErrorResponse, readJsonBody, serializableTransaction } from "@/lib/http-tx";
 import { blockEmailOnlyExpenseWrite, refuseSiSolde } from "@/lib/tricount-guard";
 
 export const runtime = "nodejs";
@@ -179,26 +179,45 @@ export async function POST(req: NextRequest) {
   const parts = weightArr
     ? splitByWeights(amountCents, allKeys, weightArr)
     : splitWithCredits(amountCents, allKeys, credit);
-  const [expense] = await prisma.$transaction([
-    prisma.expense.create({
-      data: {
-        tricountId: tricount.id,
-        payerId,
-        creatorId: session.userId,
-        label: cleanLabel,
-        amountCents,
-        spentAt: new Date(`${date}T12:00:00`),
-        shares: {
-          create: rawIdsInOrder.map((id, i) =>
-            i < uniqueIds.length
-              ? { userId: id, amountCents: parts[i] }
-              : { guestId: id, amountCents: parts[i] },
-          ),
+  // ⚠️ SERIALIZABLE, comme `approve` et `refunds` — et pas par symétrie de style.
+  //
+  // Cette écriture faisait un `$transaction([…])` ordinaire, donc en Read Committed. Or SSI ne
+  // garantit la sérialisabilité qu'ENTRE transactions sérialisables : une validation concurrente
+  // (`approve`, elle sérialisable) pouvait s'insérer pendant que ce `deleteMany` effaçait les
+  // validations, et survivre à la remise à zéro. Le tricount redevenait alors « prêt » avec un
+  // payeur qui n'avait jamais vu les nouveaux montants. Aligner les niveaux d'isolation ferme la
+  // question au lieu de la mesurer.
+  //
+  // Le corps est rejouable tel quel : il n'écrit qu'en base, et un rejeu part d'une transaction
+  // annulée — aucune dépense en double.
+  let expense: { id: string };
+  try {
+    expense = await serializableTransaction(async (tx) => {
+      const cree = await tx.expense.create({
+        data: {
+          tricountId: tricount.id,
+          payerId,
+          creatorId: session.userId,
+          label: cleanLabel,
+          amountCents,
+          spentAt: new Date(`${date}T12:00:00`),
+          shares: {
+            create: rawIdsInOrder.map((id, i) =>
+              i < uniqueIds.length
+                ? { userId: id, amountCents: parts[i] }
+                : { guestId: id, amountCents: parts[i] },
+            ),
+          },
         },
-      },
-    }),
-    // Les montants ont changé : chaque payeur devra re-valider avant remboursements.
-    prisma.tricountApproval.deleteMany({ where: { tricountId: tricount.id } }),
-  ]);
+      });
+      // Les montants ont changé : chaque payeur devra re-valider avant remboursements.
+      await tx.tricountApproval.deleteMany({ where: { tricountId: tricount.id } });
+      return cree;
+    }, "Écriture concurrente sur ce tricount, réessaie");
+  } catch (e) {
+    const res = httpErrorResponse(e);
+    if (res) return res;
+    throw e;
+  }
   return NextResponse.json({ id: expense.id, tricountId: tricount.id }, { status: 201 });
 }

@@ -72,15 +72,25 @@ vi.mock("@/lib/db", () => ({
       }),
     },
     tricountApproval: { deleteMany: h.approvalsDeleteMany },
-    // DELETE passe un CALLBACK, PATCH un TABLEAU d'opérations : le mock accepte les deux.
+    // Les deux routes passent désormais un CALLBACK (PATCH est devenu sérialisable comme
+    // DELETE) ; le mock accepte encore la forme tableau, au cas où. Le client de transaction
+    // porte tout ce que les deux corps touchent.
     $transaction: async (arg: unknown) =>
       Array.isArray(arg)
         ? Promise.all(arg)
-        : (arg as (tx: unknown) => Promise<void>)({
-        expense: { delete: h.del, count: h.count },
-        tricountApproval: { deleteMany: h.approvalsDeleteMany },
-        tricount: { delete: h.tricountDelete },
-      }),
+        : (arg as (tx: unknown) => Promise<unknown>)({
+            expense: {
+              delete: h.del,
+              count: h.count,
+              update: vi.fn(async (a: Record<string, unknown>) => {
+                h.updated = a;
+                return { id: "e1" };
+              }),
+            },
+            expenseShare: { deleteMany: h.sharesDeleted },
+            tricountApproval: { deleteMany: h.approvalsDeleteMany },
+            tricount: { delete: h.tricountDelete },
+          }),
   },
 }));
 
@@ -214,6 +224,10 @@ describe("DELETE — la coquille vide, et la dette inversée qu'elle produisait"
     h.resteRemboursements = 0;
     await DELETE(req(), ctx);
     expect(h.tricountDelete).toHaveBeenCalledTimes(1);
+    // ⚠️ Les deux compteurs valant zéro, ce cas passerait AVEC ou SANS le filtre `isRefund` —
+    // il ne distingue rien à lui seul. On vérifie donc que la question posée à la base est
+    // bien la bonne : c'est le test frère qui mesure la différence de comportement.
+    expect(h.countWhere).toEqual({ tricountId: "t1", isRefund: false });
   });
 });
 

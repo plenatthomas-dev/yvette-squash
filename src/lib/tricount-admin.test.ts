@@ -1,11 +1,25 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ rows: [] as unknown[], deleteMany: vi.fn() }));
+const h = vi.hoisted(() => ({
+  rows: [] as unknown[],
+  deleteMany: vi.fn(),
+  /** Les options réellement passées au findMany : tri et borne. */
+  args: null as null | Record<string, unknown>,
+}));
 
 vi.mock("./db", () => ({
   prisma: {
     tricount: {
-      findMany: vi.fn(async () => h.rows),
+      // Le mock HONORE `orderBy` et `take` : rendre les lignes sans les regarder revenait à
+      // trier et borner À LA PLACE de la requête — retirer l'un ou l'autre ne se voyait pas.
+      findMany: vi.fn(async (a: Record<string, unknown>) => {
+        h.args = a;
+        const tri = (a.orderBy as { date?: string } | undefined)?.date;
+        const rows = tri === "desc"
+          ? [...(h.rows as { date: string }[])].sort((x, y) => (x.date < y.date ? 1 : -1))
+          : h.rows;
+        return typeof a.take === "number" ? rows.slice(0, a.take) : rows;
+      }),
       deleteMany: h.deleteMany,
     },
   },
@@ -15,6 +29,7 @@ import { listTricountsAdmin, deleteTricount } from "./tricount-admin";
 
 beforeEach(() => {
   h.rows = [];
+  h.args = null;
   h.deleteMany.mockReset().mockResolvedValue({ count: 1 });
 });
 
@@ -88,5 +103,31 @@ describe("deleteTricount", () => {
   it("supprime par id (cascade côté DB)", async () => {
     await deleteTricount("t1");
     expect(h.deleteMany).toHaveBeenCalledWith({ where: { id: "t1" } });
+  });
+});
+
+describe("listTricountsAdmin — l'ordre et la borne de la lecture", () => {
+  const ligne = (date: string) => ({
+    id: date,
+    date,
+    title: null,
+    createdAt: new Date("2026-01-01"),
+    expenses: [],
+  });
+
+  it("demande les plus RÉCENTS d'abord — le tri est dans la requête, pas dans le test", async () => {
+    // Le mock honore `orderBy` exprès : sans cela, retirer le tri de la requête laissait le
+    // test vert, et « Charger l'historique plus ancien » aurait découpé une fenêtre arbitraire.
+    h.rows = [ligne("2026-08-01"), ligne("2026-09-10"), ligne("2026-08-20")];
+    const rows = await listTricountsAdmin();
+    expect(rows.map((r) => r.date)).toEqual(["2026-09-10", "2026-08-20", "2026-08-01"]);
+    expect(h.args).toMatchObject({ orderBy: { date: "desc" } });
+  });
+
+  it("BORNE la lecture : elle inclut les dépenses et leurs parts, son coût ne peut pas croître sans fin", async () => {
+    h.rows = Array.from({ length: 250 }, (_, i) => ligne(`2026-01-${String((i % 28) + 1).padStart(2, "0")}`));
+    const rows = await listTricountsAdmin();
+    expect(h.args?.take).toBe(100);
+    expect(rows).toHaveLength(100);
   });
 });

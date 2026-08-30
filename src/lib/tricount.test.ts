@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  roundingCredit,
   splitEqually,
   splitWithCredits,
   splitByWeights,
@@ -256,5 +257,80 @@ describe("toKeyedExpense", () => {
     // Un invité n'est jamais payeur d'une vraie dépense : payersOf ne renvoie que
     // des clés membre.
     expect(payersOf(expenses)).toEqual([userKey("payer")]);
+  });
+});
+
+describe("roundingCredit — la mémoire des arrondis, éprouvée directement", () => {
+  // Elle n'était atteinte qu'à travers deux cas de la route de création : le lecteur qui vient
+  // chercher la garantie ici ne trouvait rien, et plusieurs façons de la casser (inverser le
+  // sens du tri, changer le seuil de détection du pondéré) ne faisaient tomber aucun test de
+  // ce fichier — celui qui prétendait la couvrir réimplémentait sa formule au lieu de l'appeler.
+  const part = (userId: string, amountCents: number) => ({ userId, guestId: null, amountCents });
+
+  it("retient qui a surpayé sur un partage égal", () => {
+    // 10 € entre 3 → [334, 333, 333] : le premier a payé un tiers de centime de trop.
+    const credit = roundingCredit([
+      { amountCents: 1000, shares: [part("a", 334), part("b", 333), part("c", 333)] },
+    ]);
+    // exact = 1000/3 = 333,33… : le premier a reçu 334, soit deux tiers de centime de trop ;
+    // les deux autres 333, soit un tiers de trop peu chacun.
+    expect(credit.get("u:a")).toBeCloseTo(2 / 3, 6);
+    expect(credit.get("u:b")).toBeCloseTo(-1 / 3, 6);
+    // La somme des crédits est nulle : personne n'a surpayé sans qu'un autre sous-paie.
+    expect([...credit.values()].reduce((s, c) => s + c, 0)).toBeCloseTo(0, 6);
+  });
+
+  it("IGNORE une dépense pondérée — elle n'a aucune erreur d'arrondi à léguer", () => {
+    // 40 € en [2,1,1] est réparti exactement. La formule `montant / n` y verrait pourtant un
+    // écart de ±6,67 € et ±3,33 € : plus une erreur d'arrondi, mais l'écart de PONDÉRATION,
+    // qui domine ensuite le tri et envoie le centime suivant au plus petit poids.
+    const credit = roundingCredit([
+      { amountCents: 4000, shares: [part("a", 2000), part("b", 1000), part("c", 1000)] },
+    ]);
+    expect(credit.size).toBe(0);
+  });
+
+  it("cumule les dépenses ÉGALES et laisse de côté les pondérées du même tricount", () => {
+    const credit = roundingCredit([
+      { amountCents: 1000, shares: [part("a", 334), part("b", 333), part("c", 333)] },
+      { amountCents: 4000, shares: [part("a", 2000), part("b", 1000), part("c", 1000)] },
+      { amountCents: 1000, shares: [part("a", 334), part("b", 333), part("c", 333)] },
+    ]);
+    expect(credit.get("u:a")).toBeCloseTo(4 / 3, 6); // deux fois les deux tiers de centime
+    expect(credit.get("u:c")).toBeCloseTo(-2 / 3, 6);
+  });
+
+  it("distingue un invité d'un membre de même identifiant", () => {
+    const credit = roundingCredit([
+      {
+        amountCents: 3,
+        shares: [
+          { userId: "x", guestId: null, amountCents: 2 },
+          { userId: null, guestId: "x", amountCents: 1 },
+        ],
+      },
+    ]);
+    expect(credit.get("u:x")).toBeCloseTo(0.5, 6);
+    expect(credit.get("g:x")).toBeCloseTo(-0.5, 6);
+  });
+
+  it("nourrit `splitWithCredits` : 200 € puis 100 € entre 3 font bien 100 € chacun", () => {
+    // La promesse annoncée en toutes lettres dans le commentaire de `splitWithCredits`, mais
+    // vérifiée ici de bout en bout — mémoire construite par `roundingCredit`, pas par le test.
+    const premiere = splitEqually(20000, 3); // [6667, 6667, 6666]
+    const credit = roundingCredit([
+      {
+        amountCents: 20000,
+        shares: [part("a", premiere[0]), part("b", premiere[1]), part("c", premiere[2])],
+      },
+    ]);
+    const seconde = splitWithCredits(10000, ["u:a", "u:b", "u:c"], credit);
+    expect(seconde.reduce((s, c) => s + c, 0)).toBe(10000);
+    // Le centime va à celui qui avait sous-payé, donc chacun aura versé 100,00 € au total.
+    expect(premiere.map((p, i) => p + seconde[i])).toEqual([10000, 10000, 10000]);
+  });
+
+  it("ne jette pas sur une dépense sans part", () => {
+    expect(roundingCredit([{ amountCents: 100, shares: [] }]).size).toBe(0);
   });
 });

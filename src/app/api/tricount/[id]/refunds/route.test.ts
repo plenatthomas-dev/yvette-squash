@@ -7,6 +7,8 @@ import type { NextRequest } from "next/server";
 // la branche { toId } (auto-déclaration classique) est inchangée.
 
 const h = vi.hoisted(() => ({
+  /** Drapeau de fonction : le 404 « coupée » est le premier cas canonique. */
+  tricountOn: true,
   session: { userId: "creditor", displayName: "Créancier", resa: {} as unknown } as {
     userId: string;
   } | null,
@@ -21,7 +23,7 @@ const h = vi.hoisted(() => ({
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
 vi.mock("@/lib/features-server", () => ({
   getFeatures: async () => ({
-    tricount: true,
+    tricount: h.tricountOn,
     emailLogin: false,
     directory: false,
     delegation: false,
@@ -71,6 +73,7 @@ const tricountReady = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  h.tricountOn = true;
   h.session = { userId: "creditor" };
   h.guest = { tricountId: "t1" };
   h.tricount = tricountReady;
@@ -323,5 +326,25 @@ describe("POST /api/tricount/[id]/refunds — { toId } (auto-déclaration)", () 
     h.tricount = null;
     const res = await POST(req({ toId: "alice", amountCents: 100 }), ctx);
     expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /api/tricount/[id]/refunds — les deux cas canoniques", () => {
+  // Liste de contrôle du dépôt : « les deux premiers cas sont 404 si désactivé et 401 si non
+  // authentifié ». Ils manquaient sur cette route, la plus sensible de la fonctionnalité —
+  // retirer sa garde de drapeau n'aurait fait tomber aucun test, et elle aurait répondu sur
+  // une préview où le tricount est coupé.
+  it("répond 404 quand la fonction est coupée, sans rien écrire", async () => {
+    h.tricountOn = false;
+    const res = await POST(req({ toId: "alice", amountCents: 100 }), ctx);
+    expect(res.status).toBe(404);
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it("répond 401 sans session", async () => {
+    h.session = null;
+    const res = await POST(req({ toId: "alice", amountCents: 100 }), ctx);
+    expect(res.status).toBe(401);
+    expect(h.create).not.toHaveBeenCalled();
   });
 });

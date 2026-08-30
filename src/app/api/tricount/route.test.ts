@@ -21,6 +21,7 @@ const h = vi.hoisted(() => ({
   rows: [] as Record<string, unknown>[],
   takeDemande: 0,
   whereDemande: null as null | Record<string, unknown>,
+  orderByDemande: null as null | Record<string, unknown>,
   summary: { globalCents: 0, owedCount: 0 },
 }));
 
@@ -41,14 +42,29 @@ vi.mock("@/lib/db", () => ({
     tricount: {
       // Le mock HONORE la clause `where` : sans cela, retirer le filtre « au moins une
       // dépense » ne ferait tomber aucun test — le mock aurait répondu à la place de la route.
-      findMany: vi.fn(async (a: { take: number; where?: Record<string, unknown> }) => {
-        h.takeDemande = a.take;
-        h.whereDemande = a.where ?? null;
-        const visibles = a.where?.expenses
-          ? h.rows.filter((r) => (r.expenses as unknown[]).length > 0)
-          : h.rows;
-        return visibles.slice(0, a.take);
-      }),
+      // Il honore aussi `orderBy` : rendre les lignes dans l'ordre du tableau revenait à trier
+      // À LA PLACE de la requête. Retirer le tri de la route laissait alors tous les tests
+      // verts, pendant qu'en production `take: limit + 1` découpait une fenêtre arbitraire —
+      // et « Charger l'historique plus ancien » ne chargeait plus rien de plus ancien.
+      findMany: vi.fn(
+        async (a: {
+          take: number;
+          where?: Record<string, unknown>;
+          orderBy?: { date?: string };
+        }) => {
+          h.takeDemande = a.take;
+          h.whereDemande = a.where ?? null;
+          h.orderByDemande = a.orderBy ?? null;
+          const visibles = a.where?.expenses
+            ? h.rows.filter((r) => (r.expenses as unknown[]).length > 0)
+            : h.rows;
+          const triees =
+            a.orderBy?.date === "desc"
+              ? [...visibles].sort((x, y) => ((x.date as string) < (y.date as string) ? 1 : -1))
+              : visibles;
+          return triees.slice(0, a.take);
+        },
+      ),
     },
   },
 }));
@@ -130,6 +146,7 @@ beforeEach(() => {
   ];
   h.rows = [];
   h.whereDemande = null;
+  h.orderByDemande = null;
   h.summary = { globalCents: 0, owedCount: 0 };
 });
 
@@ -416,5 +433,35 @@ describe("GET /api/tricount — qui reste proposable", () => {
     expect(c.members.map((m) => m.id)).toEqual(["u1"]);
     const [t] = c.tricounts as unknown as { balances: { id: string; name: string }[] }[];
     expect(t.balances.find((b) => b.id === "u2")?.name).toBe("Bob");
+  });
+});
+
+describe("GET /api/tricount — la fenêtre est CHOISIE, pas seulement triée", () => {
+  it("demande les plus récents à la base, et non les 25 premiers venus", async () => {
+    // Le tri final (soldés en bas) porte sur la fenêtre REÇUE. Si la requête ne demandait pas
+    // `date: desc`, `take: limit + 1` découperait une fenêtre arbitraire : « Charger
+    // l'historique plus ancien » ne chargerait alors rien de plus ancien, et une dette d'août
+    // resterait invisible quel que soit le nombre de clics.
+    const enCours = (id: string, date: string) =>
+      tricount({
+        id,
+        date,
+        expenses: [depense({ payer: "u1", montant: 1000, entre: ["u1", "u2"] })],
+      });
+    // Volontairement dans le désordre, et plus nombreux que la fenêtre demandée.
+    h.rows = [
+      enCours("vieux", "2026-01-05"),
+      enCours("recent", "2026-09-10"),
+      enCours("moyen", "2026-05-01"),
+    ];
+
+    const c = await corps("limit=2");
+
+    expect(h.orderByDemande).toEqual({ date: "desc" });
+    expect(c.tricounts.map((t) => (t as unknown as { id: string }).id)).toEqual([
+      "recent",
+      "moyen",
+    ]);
+    expect(c.hasMore).toBe(true);
   });
 });
