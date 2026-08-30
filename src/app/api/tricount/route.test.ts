@@ -20,17 +20,26 @@ const h = vi.hoisted(() => ({
   users: [] as { id: string; displayName: string }[],
   rows: [] as Record<string, unknown>[],
   takeDemande: 0,
+  whereDemande: null as null | Record<string, unknown>,
+  summary: { globalCents: 0, owedCount: 0 },
 }));
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
 vi.mock("@/lib/features-server", () => ({ getFeatures: async () => ({ tricount: h.tricountOn }) }));
+vi.mock("@/lib/tricount-summary", () => ({ tricountSummary: async () => h.summary }));
 vi.mock("@/lib/db", () => ({
   prisma: {
     user: { findMany: vi.fn(async () => h.users) },
     tricount: {
-      findMany: vi.fn(async (a: { take: number }) => {
+      // Le mock HONORE la clause `where` : sans cela, retirer le filtre « au moins une
+      // dépense » ne ferait tomber aucun test — le mock aurait répondu à la place de la route.
+      findMany: vi.fn(async (a: { take: number; where?: Record<string, unknown> }) => {
         h.takeDemande = a.take;
-        return h.rows.slice(0, a.take);
+        h.whereDemande = a.where ?? null;
+        const visibles = a.where?.expenses
+          ? h.rows.filter((r) => (r.expenses as unknown[]).length > 0)
+          : h.rows;
+        return visibles.slice(0, a.take);
       }),
     },
   },
@@ -112,6 +121,8 @@ beforeEach(() => {
     { id: "u2", displayName: "Bob" },
   ];
   h.rows = [];
+  h.whereDemande = null;
+  h.summary = { globalCents: 0, owedCount: 0 };
 });
 
 describe("GET /api/tricount — les gardes", () => {
@@ -136,7 +147,11 @@ describe("GET /api/tricount — les gardes", () => {
 describe("GET /api/tricount — la pagination", () => {
   beforeEach(() => {
     h.rows = Array.from({ length: 40 }, (_, i) =>
-      tricount({ id: `t${i}`, date: `2026-08-${String(40 - i).padStart(2, "0")}` }),
+      tricount({
+        id: `t${i}`,
+        date: `2026-08-${String(40 - i).padStart(2, "0")}`,
+        expenses: [depense({ payer: "u1", montant: 1000, entre: ["u1", "u2"] })],
+      }),
     );
   });
 
@@ -203,13 +218,47 @@ describe("GET /api/tricount — l'ordre d'affichage", () => {
 
 describe("GET /api/tricount — ce que la vue décide", () => {
   it("ne déclare pas « prêt » un tricount SANS PAYEUR", async () => {
-    // Le cas du tricount réduit à des remboursements (ou vide) : sans payeur, la condition
-    // « tous les payeurs ont validé » serait vraie par vacuité, et les remboursements
-    // s'ouvriraient sur un tricount qui n'a rien à rembourser.
-    h.rows = [tricount({ id: "t1", date: "2026-09-03" })];
+    // Le cas du tricount réduit à des remboursements : sans payeur, la condition « tous les
+    // payeurs ont validé » serait vraie par vacuité, et les remboursements s'ouvriraient sur
+    // un tricount qui n'a rien à rembourser.
+    h.rows = [
+      tricount({
+        id: "t1",
+        date: "2026-09-03",
+        expenses: [depense({ payer: "u2", montant: 1000, entre: ["u1"], isRefund: true })],
+      }),
+    ];
     const [t] = (await corps()).tricounts as unknown as { ready: boolean; settled: boolean }[];
     expect(t.ready).toBe(false);
     expect(t.settled).toBe(false);
+  });
+
+  it("MASQUE un tricount sans aucune dépense — le brouillon laissé par un invité", async () => {
+    // La route « invités » crée le tricount dès qu'on tape un prénom, avant toute dépense.
+    // Saisir un invité puis renoncer laissait une carte vide « En cours » en tête de liste,
+    // chez tout le monde, que rien ne pouvait effacer : le seul chemin de suppression côté
+    // membre passe par la dernière dépense, et il n'y en avait jamais eu.
+    h.rows = [
+      tricount({ id: "vide", date: "2026-09-10", guests: [{ id: "g1", name: "Marc" }] }),
+      tricount({
+        id: "garni",
+        date: "2026-09-03",
+        expenses: [depense({ payer: "u1", montant: 1000, entre: ["u1", "u2"] })],
+      }),
+    ];
+    const c = await corps();
+    expect(h.whereDemande).toEqual({ expenses: { some: {} } });
+    expect(c.tricounts.map((t) => (t as unknown as { id: string }).id)).toEqual(["garni"]);
+  });
+
+  it("porte le solde global et le compte de dettes du SERVEUR, pas de la fenêtre", async () => {
+    // Les deux chiffres se calculaient sur la liste reçue, donc sur 25 tricounts. Ils viennent
+    // maintenant d'un calcul à part, sur tout l'historique : la liste peut être vide et le
+    // total non nul — c'est exactement le cas d'une dette plus ancienne que la fenêtre.
+    h.summary = { globalCents: -4200, owedCount: 3 };
+    const c = (await corps()) as unknown as { myGlobalCents: number; myOwedCount: number };
+    expect(c.myGlobalCents).toBe(-4200);
+    expect(c.myOwedCount).toBe(3);
   });
 
   it("pose `canDelete` sur le créateur ET sur le payeur, et sur personne d'autre", async () => {
@@ -302,6 +351,7 @@ describe("GET /api/tricount — ce que la vue décide", () => {
       tricount({
         id: "t1",
         date: "2026-09-03",
+        expenses: [depense({ payer: "u1", montant: 1000, entre: ["u1", "u2"] })],
         comments: [
           { id: "c1", body: "à moi", userId: "u1", createdAt: new Date("2026-09-03") },
           { id: "c2", body: "à l'autre", userId: "u2", createdAt: new Date("2026-09-03") },

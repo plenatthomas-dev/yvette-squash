@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import {
   splitWithCredits,
   splitByWeights,
+  roundingCredit,
   userKey,
   guestKey,
   MAX_AMOUNT_CENTS,
@@ -147,8 +148,9 @@ export async function POST(req: NextRequest) {
     update: {},
     create: { date, title: cleanTitle },
   });
-  // Mémoire des arrondis du tricount : qui a déjà « surpayé » d'un centime ?
-  // (part attribuée − part exacte, sommée sur les dépenses existantes)
+  // Mémoire des arrondis du tricount : qui a déjà « surpayé » d'un centime ? La règle vit
+  // dans `roundingCredit` (elle était recopiée ici et dans la route sœur `PATCH`, et les deux
+  // copies faussaient le crédit dès qu'une dépense pondérée traînait dans l'historique).
   const existing = await prisma.expense.findMany({
     where: { tricountId: tricount.id, isRefund: false },
     select: {
@@ -156,14 +158,7 @@ export async function POST(req: NextRequest) {
       shares: { select: { userId: true, guestId: true, amountCents: true } },
     },
   });
-  const credit = new Map<string, number>();
-  for (const e of existing) {
-    const exact = e.amountCents / e.shares.length;
-    for (const s of e.shares) {
-      const key = s.userId ? userKey(s.userId) : guestKey(s.guestId as string);
-      credit.set(key, (credit.get(key) ?? 0) + (s.amountCents - exact));
-    }
-  }
+  const credit = roundingCredit(existing);
   // Mode « parts » → répartition pondérée ; sinon partage égal avec mémoire des arrondis.
   const parts = weightArr
     ? splitByWeights(amountCents, allKeys, weightArr)

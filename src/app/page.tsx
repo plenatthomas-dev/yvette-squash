@@ -416,24 +416,18 @@ export default function Home() {
   }, []);
 
   // Compteur du badge € : tricounts où je dois de l'argent, remboursements ouverts.
+  //
+  // Il appelait `/api/tricount` — l'historique complet, avec ses dépenses, ses parts, ses
+  // validations, ses commentaires et ses invités — pour n'en garder qu'un entier, à CHAQUE
+  // chargement de l'appli et pour chaque membre. Et il ne comptait que la fenêtre paginée :
+  // une dette plus ancienne que les 25 derniers tricounts faisait disparaître le badge.
+  // `/api/tricount/summary` répond les deux chiffres par des requêtes étroites, sur tout
+  // l'historique.
   const loadTriOwed = useCallback(async () => {
-    const r = await fetch("/api/tricount");
+    const r = await fetch("/api/tricount/summary");
     if (!r.ok) return;
-    const d = (await r.json()) as {
-      me: string;
-      tricounts: {
-        ready: boolean;
-        settled: boolean;
-        balances: { id: string; kind: "user" | "guest"; cents: number }[];
-      }[];
-    };
-    const n = d.tricounts.filter(
-      (t) =>
-        t.ready &&
-        !t.settled &&
-        (t.balances.find((b) => b.kind === "user" && b.id === d.me)?.cents ?? 0) < 0,
-    ).length;
-    setTriOwed(n);
+    const d = (await r.json()) as { globalCents: number; owedCount: number };
+    setTriOwed(d.owedCount);
   }, []);
   useEffect(() => {
     if (me && tricount) loadTriOwed();

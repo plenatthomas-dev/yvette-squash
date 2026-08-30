@@ -10,7 +10,11 @@ const h = vi.hoisted(() => ({
   expense: null as null | Record<string, unknown>,
   del: vi.fn(),
   approvalsDeleteMany: vi.fn(),
-  count: vi.fn(async () => 1),
+  /** Ce qu'il reste en base après la suppression : vraies dépenses / remboursements. */
+  resteVraies: 1,
+  resteRemboursements: 0,
+  countWhere: null as null | Record<string, unknown>,
+  count: vi.fn(),
   tricountDelete: vi.fn(),
   // Pour PATCH : membres et invités connus, autres dépenses du tricount, et ce qui est écrit.
   users: ["u1", "u2", "u3"] as string[],
@@ -89,6 +93,18 @@ const reqBody = (body: unknown) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Le compte HONORE la clause : c'est tout l'objet du correctif « dette inversée ». Un mock
+  // qui rendrait le même chiffre avec ou sans `isRefund: false` répondrait à la place de la
+  // route, et le retrait du filtre ne se verrait pas.
+  h.count.mockImplementation(async (a: { where: Record<string, unknown> }) => {
+    h.countWhere = a.where;
+    return a.where.isRefund === false
+      ? h.resteVraies
+      : h.resteVraies + h.resteRemboursements;
+  });
+  h.resteVraies = 1;
+  h.resteRemboursements = 0;
+  h.countWhere = null;
   h.session = emailOnly;
   h.expense = { tricountId: "t1", isRefund: true, creatorId: "u1", payerId: "u1" };
   h.users = ["u1", "u2", "u3"];
@@ -134,6 +150,44 @@ describe("DELETE /api/tricount/expenses/[id] — compte ResaMania", () => {
     h.session = resaUser;
     await DELETE(req(), ctx);
     expect(h.approvalsDeleteMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("DELETE — la coquille vide, et la dette inversée qu'elle produisait", () => {
+  beforeEach(() => {
+    h.session = resaUser;
+    h.expense = { tricountId: "t1", isRefund: false, creatorId: "u1", payerId: "u1" };
+  });
+
+  it("EMPORTE le tricount quand il ne reste plus que des remboursements", async () => {
+    // Le défaut : le compte portait sur TOUTES les lignes, remboursements inclus. Supprimer
+    // la dernière vraie dépense laissait donc vivre un tricount qui n'en portait plus que des
+    // remboursements — et un tel tricount est un piège sans issue. Plus aucun payeur, donc
+    // `ready` faux à jamais : `approve` répond 403 et `refunds` 409. Pire, les soldes
+    // S'INVERSENT (le seul mouvement restant est un remboursement) : celui qui avait été
+    // remboursé voyait « tu dois 15,00 € » pour de l'argent qu'il avait déjà reçu.
+    h.resteVraies = 0;
+    h.resteRemboursements = 1;
+
+    const res = await DELETE(req(), ctx);
+
+    expect(res.status).toBe(200);
+    expect(h.countWhere).toEqual({ tricountId: "t1", isRefund: false });
+    expect(h.tricountDelete).toHaveBeenCalledWith({ where: { id: "t1" } });
+  });
+
+  it("garde le tricount tant qu'il reste une VRAIE dépense", async () => {
+    h.resteVraies = 1;
+    h.resteRemboursements = 3;
+    await DELETE(req(), ctx);
+    expect(h.tricountDelete).not.toHaveBeenCalled();
+  });
+
+  it("supprime le tricount quand sa dernière ligne, tous types confondus, s'en va", async () => {
+    h.resteVraies = 0;
+    h.resteRemboursements = 0;
+    await DELETE(req(), ctx);
+    expect(h.tricountDelete).toHaveBeenCalledTimes(1);
   });
 });
 

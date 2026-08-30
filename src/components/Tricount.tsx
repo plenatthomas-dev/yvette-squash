@@ -92,6 +92,10 @@ interface TricountData {
   emailOnly: boolean;
   // Reste-t-il des tricounts plus anciens au-delà de la fenêtre demandée ?
   hasMore: boolean;
+  // Mon solde et mon nombre de dettes sur TOUT l'historique, calculés par le serveur — donc
+  // indépendants de la fenêtre ci-dessus, contrairement à `tricounts`.
+  myGlobalCents: number;
+  myOwedCount: number;
   members: Member[];
   tricounts: TricountItem[];
 }
@@ -612,27 +616,20 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     }
   };
 
-  // Mon solde global = somme de mes soldes sur tous les tricounts non soldés.
-  const myGlobal = useMemo(() => {
-    if (!data) return 0;
-    return data.tricounts.reduce(
-      (s, t) =>
-        s + (t.balances.find((b) => b.kind === "user" && b.id === data.me)?.cents ?? 0),
-      0,
-    );
-  }, [data]);
+  // Mon solde global, calculé PAR LE SERVEUR sur tout l'historique.
+  //
+  // Il se sommait ici, sur `data.tricounts` — c'est-à-dire sur la fenêtre paginée. Au rythme
+  // du club, 25 tricounts font deux mois : une dette plus ancienne sortait de la fenêtre, et
+  // l'en-tête affichait « Tu es à l'équilibre 👌 » à quelqu'un qui devait toujours 42 €. Le
+  // mot « total » était donc faux, et rien à l'écran ne disait qu'il fallait cliquer sur
+  // « Charger l'historique plus ancien » pour qu'il redevienne vrai.
+  const myGlobal = data?.myGlobalCents ?? 0;
 
-  // Remonte le compteur du badge € : tricounts où je dois de l'argent, remboursements
-  // ouverts. Recalculé à chaque (re)chargement → le badge suit mes remboursements en direct.
+  // Badge € : même remarque, même correction — le compte vient du serveur, sur tout
+  // l'historique. Recalculé à chaque (re)chargement, il suit mes remboursements en direct.
   useEffect(() => {
     if (!data || !onOwedChange) return;
-    const n = data.tricounts.filter(
-      (t) =>
-        t.ready &&
-        !t.settled &&
-        (t.balances.find((b) => b.kind === "user" && b.id === data.me)?.cents ?? 0) < 0,
-    ).length;
-    onOwedChange(n);
+    onOwedChange(data.myOwedCount);
   }, [data, onOwedChange]);
 
   // Invités déjà créés sur LE TRICOUNT de `targetDate` (existant ou pas encore créé,

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import {
   splitWithCredits,
   splitByWeights,
+  roundingCredit,
   userKey,
   guestKey,
   MAX_AMOUNT_CENTS,
@@ -53,7 +54,21 @@ export async function DELETE(
     if (!expense.isRefund) {
       await tx.tricountApproval.deleteMany({ where: { tricountId: expense.tricountId } });
     }
-    const remaining = await tx.expense.count({ where: { tricountId: expense.tricountId } });
+    // ⚠️ ON NE COMPTE QUE LES VRAIES DÉPENSES, jamais les remboursements.
+    //
+    // Compter toutes les lignes laissait survivre un tricount qui n'en portait plus que des
+    // remboursements — et un tel tricount est un piège sans issue. Il n'a plus aucun payeur,
+    // donc `ready` est faux à jamais : `approve` répond 403 (« seuls les payeurs valident »,
+    // la liste est vide) et `refunds` 409 (« tous les payeurs doivent d'abord valider »).
+    // Pire, les soldes s'INVERSENT : la seule ligne restante est un remboursement, celui qui
+    // l'a versé apparaît créancier et son bénéficiaire débiteur. A voyait « tu dois 15,00 € »
+    // pour de l'argent qu'il avait déjà reçu, sans aucun moyen d'en sortir.
+    //
+    // Sans vraie dépense, le tricount n'a plus d'objet : il tombe, et ses remboursements
+    // orphelins avec lui (`onDelete: Cascade`).
+    const remaining = await tx.expense.count({
+      where: { tricountId: expense.tricountId, isRefund: false },
+    });
     if (remaining === 0) {
       await tx.tricount.delete({ where: { id: expense.tricountId } });
     }
@@ -191,14 +206,7 @@ export async function PATCH(
       shares: { select: { userId: true, guestId: true, amountCents: true } },
     },
   });
-  const credit = new Map<string, number>();
-  for (const e of others) {
-    const exact = e.amountCents / e.shares.length;
-    for (const s of e.shares) {
-      const key = s.userId ? userKey(s.userId) : guestKey(s.guestId as string);
-      credit.set(key, (credit.get(key) ?? 0) + (s.amountCents - exact));
-    }
-  }
+  const credit = roundingCredit(others);
   const parts = weightArr
     ? splitByWeights(amountCents, allKeys, weightArr)
     : splitWithCredits(amountCents, allKeys, credit);

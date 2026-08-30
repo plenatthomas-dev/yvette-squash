@@ -11,6 +11,7 @@ import {
   parseKey,
 } from "@/lib/tricount";
 import { getFeatures } from "@/lib/features-server";
+import { tricountSummary } from "@/lib/tricount-summary";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,12 +41,19 @@ export async function GET(req: NextRequest) {
       ? Math.min(Math.floor(rawLimit), MAX_LIMIT)
       : DEFAULT_LIMIT;
 
-  const [users, rows] = await Promise.all([
+  const [users, rows, summary] = await Promise.all([
     prisma.user.findMany({
       select: { id: true, displayName: true },
       orderBy: { createdAt: "asc" },
     }),
     prisma.tricount.findMany({
+      // Un tricount SANS AUCUNE DÉPENSE n'est pas encore une soirée partagée, c'est un
+      // brouillon : la route « invités » en crée un dès qu'on tape un prénom, avant même la
+      // première dépense. Saisir un invité puis renoncer laissait donc une carte vide « En
+      // cours » en tête de liste, chez tout le monde, que rien ne pouvait effacer — le seul
+      // chemin de suppression côté membre passe par la dernière dépense, et il n'y en avait
+      // jamais eu. Elle réapparaît d'elle-même à la première dépense.
+      where: { expenses: { some: {} } },
       include: {
         expenses: {
           include: {
@@ -63,6 +71,11 @@ export async function GET(req: NextRequest) {
       orderBy: { date: "desc" },
       take: limit + 1, // +1 pour savoir s'il reste des tricounts plus anciens
     }),
+    // Mon solde sur TOUT l'historique, et le nombre de tricounts qui attendent un
+    // remboursement de ma part. Calculés à part, par des requêtes étroites : les deux chiffres
+    // se déduisaient de la liste renvoyée, donc des 25 derniers tricounts seulement — une
+    // dette plus ancienne disparaissait du total ET du badge, sans que rien ne le dise.
+    tricountSummary(session.userId),
   ]);
   // S'il y a une ligne de trop, c'est qu'il reste de l'historique : on la retire.
   const hasMore = rows.length > limit;
@@ -87,6 +100,11 @@ export async function GET(req: NextRequest) {
     emailOnly: session.resa === null,
     // Reste-t-il des tricounts plus anciens à charger ? (bouton « Charger plus »)
     hasMore,
+    // Mon solde et mon nombre de dettes sur TOUT l'historique — indépendants de `limit`, donc
+    // justes même quand la dette dort dans un tricount hors fenêtre. L'en-tête affiche le
+    // premier, le badge € compte le second.
+    myGlobalCents: summary.globalCents,
+    myOwedCount: summary.owedCount,
     members: users.map((u) => ({ id: u.id, name: u.displayName, fullName: u.displayName })),
     tricounts: tricounts
       .map((t) => {

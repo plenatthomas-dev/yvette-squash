@@ -300,18 +300,17 @@ describe("POST /api/tricount/expenses — la mémoire des arrondis", () => {
     expect(parts["u:u1"] + parts["u:u2"] + parts["u:u3"]).toBe(10000);
   });
 
-  it("⚠️ DÉFAUT ÉPINGLÉ : une dépense « par parts » fausse la mémoire des arrondis", async () => {
-    // Le crédit est calculé comme `amountCents / shares.length`, c'est-à-dire en supposant
-    // TOUTE dépense passée répartie à parts égales. Pour une dépense pondérée, l'écart n'est
-    // plus une erreur d'arrondi (< 1 centime) mais l'écart de PONDÉRATION, qui se chiffre en
-    // euros et domine ensuite le tri.
+  it("ne se laisse PAS fausser par une dépense « par parts » déjà enregistrée", async () => {
+    // Le crédit se calculait comme `amountCents / shares.length`, c'est-à-dire en supposant
+    // TOUTE dépense passée répartie à parts égales. Pour une dépense pondérée, cet écart n'est
+    // plus une erreur d'arrondi (moins d'un centime) mais l'écart de PONDÉRATION, qui se
+    // chiffre en euros et domine ensuite le tri.
     //
-    // Ici : 40 € en [2,1,1] est réparti exactement, donc la mémoire honnête serait vide et le
-    // centime suivant irait au premier par ordre de clé (u1). Le code en déduit au contraire
-    // un crédit de +6,67 € pour u1 et −3,33 € pour u2 et u3 : le centime part chez u2.
-    //
-    // Ce test FIXE le comportement actuel pour qu'une correction se voie. Attendu après
-    // correction : exclure les dépenses pondérées du crédit, ou stocker le poids.
+    // Ici : 40 € en [2,1,1], réparti exactement. Le code en déduisait un crédit de +6,67 €
+    // pour u1 et −3,33 € pour u2 et u3 — donc le centime de la dépense suivante partait chez
+    // celui qui avait le plus PETIT poids, au lieu d'aller à celui qui avait le moins
+    // surpayé. Une dépense pondérée n'a aucune erreur d'arrondi à léguer : elle est ignorée,
+    // la mémoire reste vide, et le centime va au premier par ordre de clé.
     h.existing = [
       {
         amountCents: 4000,
@@ -324,8 +323,8 @@ describe("POST /api/tricount/expenses — la mémoire des arrondis", () => {
     ];
     await POST(req({ ...base, amountCents: 1000, participantIds: ["u1", "u2", "u3"] }));
     const parts = Object.fromEntries(partsEcrites());
-    expect(parts).toEqual({ "u:u1": 333, "u:u2": 334, "u:u3": 333 });
-    // La conservation, elle, tient dans tous les cas :
+    expect(parts).toEqual({ "u:u1": 334, "u:u2": 333, "u:u3": 333 });
+    // La conservation, elle, tenait déjà dans les deux cas :
     expect(parts["u:u1"] + parts["u:u2"] + parts["u:u3"]).toBe(1000);
   });
 

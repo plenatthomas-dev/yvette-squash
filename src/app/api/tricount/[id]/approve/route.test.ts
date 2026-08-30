@@ -12,6 +12,10 @@ import type { NextRequest } from "next/server";
 // et notifier un invité échoue sans bruit (il n'a pas de compte). Aucune ne se voit dans une
 // réponse HTTP — elles ne se voient que dans ce qui part, ou ne part pas, en notification.
 //
+// LES VALIDATIONS SONT UN VRAI STOCK ici, pas un tableau figé : la transition se décide
+// désormais sur ce que l'écriture a produit, donc un test qui rejouerait toujours le même état
+// de départ ne mesurerait plus rien. Deux appels successifs voient bien le résultat du premier.
+//
 // On utilise le VRAI `computeBalances` et le vrai `payersOf` : ce sont eux qui décident qui est
 // débiteur, et une copie dans le test ne prouverait rien sur la route.
 
@@ -19,7 +23,8 @@ const h = vi.hoisted(() => ({
   session: null as null | { userId: string; displayName: string; resa: unknown },
   tricountOn: true,
   tricount: null as null | Record<string, unknown>,
-  upsert: vi.fn(),
+  /** Les validations réellement en base, par membre. */
+  approvals: new Set<string>(),
   push: vi.fn(async () => {}),
 }));
 
@@ -29,7 +34,22 @@ vi.mock("@/lib/push", () => ({ pushToUser: h.push }));
 vi.mock("@/lib/db", () => ({
   prisma: {
     tricount: { findUnique: vi.fn(async () => h.tricount) },
-    tricountApproval: { upsert: h.upsert },
+    // `serializableTransaction` (le vrai) passe par ici : le mock exécute le corps sur le
+    // stock ci-dessus, donc deux appels successifs se voient l'un l'autre.
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        tricountApproval: {
+          findUnique: async (a: { where: { tricountId_userId: { userId: string } } }) =>
+            h.approvals.has(a.where.tricountId_userId.userId)
+              ? { userId: a.where.tricountId_userId.userId }
+              : null,
+          upsert: async (a: { create: { userId: string } }) => {
+            h.approvals.add(a.create.userId);
+            return a.create;
+          },
+          findMany: async () => [...h.approvals].map((userId) => ({ userId })),
+        },
+      }),
   },
 }));
 
@@ -54,8 +74,9 @@ function depense(payer: string, montant: number, entre: string[]) {
   };
 }
 
-/** Le tricount du 3 septembre, avec ses dépenses et les validations déjà données. */
-function tricount(expenses: unknown[], approvals: string[]) {
+/** Le tricount du 3 septembre, avec ses dépenses. Les validations vivent dans `h.approvals`. */
+function tricount(expenses: unknown[], approvals: string[] = []) {
+  h.approvals = new Set(approvals);
   return {
     id: "t1",
     date: "2026-09-03",
@@ -69,7 +90,7 @@ beforeEach(() => {
   h.session = session("u1");
   h.tricountOn = true;
   // Un seul payeur (u1), un seul débiteur (u2) qui doit 15,00 €.
-  h.tricount = tricount([depense("u1", 3000, ["u1", "u2"])], []);
+  h.tricount = tricount([depense("u1", 3000, ["u1", "u2"])]);
 });
 
 describe("POST /api/tricount/[id]/approve — les gardes", () => {
@@ -93,7 +114,7 @@ describe("POST /api/tricount/[id]/approve — les gardes", () => {
     h.session = session("u2");
     const res = await POST(req(), ctx);
     expect(res.status).toBe(403);
-    expect(h.upsert).not.toHaveBeenCalled();
+    expect(h.approvals.size).toBe(0);
     expect(h.push).not.toHaveBeenCalled();
   });
 });
@@ -110,6 +131,16 @@ describe("POST /api/tricount/[id]/approve — la transition, et elle seule", () 
     expect(payload.url).toBe("/?view=money");
   });
 
+  it("demande à être ENTENDUE : `renotify` sur un tag partagé", async () => {
+    // Le tag regroupe les annonces d'un même tricount pour n'empiler qu'une ligne sur l'écran
+    // verrouillé. Sans `renotify`, la spec impose un remplacement SILENCIEUX : un tricount
+    // rouvert après correction porte un montant différent, et le débiteur ne l'apprendrait pas.
+    await POST(req(), ctx);
+    const [, payload] = h.push.mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(payload.tag).toBe("tricount-ready-t1");
+    expect(payload.renotify).toBe(true);
+  });
+
   it("ne notifie PAS celui qui valide, même s'il est lui-même débiteur", async () => {
     // u2 paie 40 € pour tous, u1 paie 10 € pour tous : les deux sont payeurs, u1 est débiteur.
     h.tricount = tricount(
@@ -122,12 +153,12 @@ describe("POST /api/tricount/[id]/approve — la transition, et elle seule", () 
   });
 
   it("ne notifie PAS tant qu'un payeur n'a pas validé", async () => {
-    h.tricount = tricount(
-      [depense("u1", 3000, ["u1", "u2", "u3"]), depense("u2", 3000, ["u1", "u2", "u3"])],
-      [],
-    );
+    h.tricount = tricount([
+      depense("u1", 3000, ["u1", "u2", "u3"]),
+      depense("u2", 3000, ["u1", "u2", "u3"]),
+    ]);
     await POST(req(), ctx); // u1 valide, u2 manque encore
-    expect(h.upsert).toHaveBeenCalledTimes(1);
+    expect(h.approvals.has("u1")).toBe(true);
     expect(h.push).not.toHaveBeenCalled();
   });
 
@@ -137,13 +168,12 @@ describe("POST /api/tricount/[id]/approve — la transition, et elle seule", () 
     h.tricount = tricount([depense("u1", 3000, ["u1", "u2"])], ["u1"]);
     await POST(req(), ctx);
     expect(h.push).not.toHaveBeenCalled();
-    expect(h.upsert).toHaveBeenCalledTimes(1); // l'upsert reste idempotent
   });
 
   it("ne notifie JAMAIS un invité — il n'a pas de compte, donc pas d'abonnement", async () => {
     // Un invité hors asso peut être débiteur. `pushToUser` l'attendrait comme un `User.id` :
     // l'appel partirait dans le vide, et compterait pour une notification envoyée.
-    h.tricount = tricount([depense("u1", 3000, ["u1", "g7"])], []);
+    h.tricount = tricount([depense("u1", 3000, ["u1", "g7"])]);
     await POST(req(), ctx);
     expect(h.push).not.toHaveBeenCalled();
   });
@@ -151,53 +181,50 @@ describe("POST /api/tricount/[id]/approve — la transition, et elle seule", () 
   it("notifie chaque débiteur du montant qu'il doit, et de lui seul", async () => {
     // 60 € payés par u1 pour quatre : u2, u3 et g1 doivent 15 € chacun ; seuls les deux
     // membres sont joignables.
-    h.tricount = tricount([depense("u1", 6000, ["u1", "u2", "u3", "g1"])], []);
+    h.tricount = tricount([depense("u1", 6000, ["u1", "u2", "u3", "g1"])]);
     await POST(req(), ctx);
     const envois = h.push.mock.calls as unknown as [string, Record<string, string>][];
     expect(envois.map(([u]) => u).sort()).toEqual(["u2", "u3"]);
     for (const [, p] of envois) expect(p.body).toContain("15,00 €");
   });
 
-  it("écrit la validation au nom du membre connecté, sur ce tricount", async () => {
+  it("écrit la validation au nom du membre connecté", async () => {
     await POST(req(), ctx);
-    expect(h.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { tricountId_userId: { tricountId: "t1", userId: "u1" } },
-        create: { tricountId: "t1", userId: "u1" },
-      }),
-    );
+    expect([...h.approvals]).toEqual(["u1"]);
   });
 });
 
-describe("POST /api/tricount/[id]/approve — défauts épinglés", () => {
-  // Ces deux tests FIXENT un comportement que la relecture juge faux, pour qu'une correction
-  // se voie. La cause commune : `wasReady`/`nowReady` sont déduits d'une lecture faite AVANT
-  // l'écriture, hors transaction. La transition devrait se décider sur le RÉSULTAT de
-  // l'écriture (compter les validations après l'upsert, dans la même transaction).
+describe("POST /api/tricount/[id]/approve — ce que la transition ne fait plus", () => {
+  // Ces deux cas fixaient auparavant un DÉFAUT : la transition se déduisait d'une lecture
+  // faite avant l'écriture, hors transaction. Elle se décide maintenant sur le résultat de
+  // l'écriture, dans une transaction Serializable.
 
-  it("⚠️ un rejeu de la même requête renvoie la notification à tout le monde", async () => {
-    // Réponse perdue puis requête rejouée par le client : la base a déjà la validation, mais
-    // la seconde exécution relit le même état d'avant et recalcule la même transition.
-    h.tricount = tricount([depense("u1", 3000, ["u1", "u2"])], []);
+  it("un REJEU de la même requête ne renvoie pas la notification", async () => {
+    // Réponse perdue puis requête rejouée par le client : la validation est déjà en base, ce
+    // clic n'ouvre donc rien. Avant, la seconde exécution relisait le même état d'avant et
+    // réannonçait l'ouverture à tous les débiteurs.
+    h.tricount = tricount([depense("u1", 3000, ["u1", "u2"])]);
     await POST(req(), ctx);
-    await POST(req(), ctx); // même lecture, la validation vient pourtant d'être écrite
-    expect(h.push).toHaveBeenCalledTimes(2); // attendu après correction : 1
+    await POST(req(), ctx);
+    expect(h.push).toHaveBeenCalledTimes(1);
   });
 
-  it("⚠️ deux payeurs qui valident au même instant ne notifient personne", async () => {
-    // Chacun lit `approvals = []` : la transition exige que l'AUTRE y soit déjà, donc les deux
-    // répondent « pas encore prêt ». Les deux écritures passent, le tricount devient prêt, et
-    // aucun débiteur n'est jamais prévenu.
-    const deuxPayeurs = [depense("u1", 3000, ["u1", "u3"]), depense("u2", 3000, ["u2", "u3"])];
-    h.tricount = tricount(deuxPayeurs, []);
+  it("deux payeurs qui valident coup sur coup : UNE annonce, et elle part bien", async () => {
+    // Avant, chacun lisait « aucune validation » et concluait « pas encore prêt » : les deux
+    // écritures passaient, le tricount devenait prêt, et personne n'était jamais prévenu.
+    // Le second entrant voit désormais la validation du premier et annonce.
+    //
+    // (La vraie simultanéité — deux transactions ouvertes en même temps, chacune aveugle à
+    // l'autre — se mesure sur une vraie base : cf. `tricount-approve.pg.test.ts`.)
+    h.tricount = tricount([depense("u1", 3000, ["u1", "u3"]), depense("u2", 3000, ["u2", "u3"])]);
 
     h.session = session("u1");
-    const a = POST(req(), ctx);
+    await POST(req(), ctx);
     h.session = session("u2");
-    const b = POST(req(), ctx);
-    await Promise.all([a, b]);
+    await POST(req(), ctx);
 
-    expect(h.upsert).toHaveBeenCalledTimes(2); // les deux validations sont bien enregistrées
-    expect(h.push).not.toHaveBeenCalled(); // attendu après correction : u3 est prévenu
+    expect([...h.approvals].sort()).toEqual(["u1", "u2"]);
+    expect(h.push).toHaveBeenCalledTimes(1);
+    expect((h.push.mock.calls[0] as unknown as [string])[0]).toBe("u3");
   });
 });
