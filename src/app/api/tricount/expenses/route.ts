@@ -12,7 +12,8 @@ import {
   MAX_PARTS,
 } from "@/lib/tricount";
 import { getFeatures } from "@/lib/features-server";
-import { blockEmailOnlyExpenseWrite } from "@/lib/tricount-guard";
+import { readJsonBody } from "@/lib/http-tx";
+import { blockEmailOnlyExpenseWrite, refuseSiSolde } from "@/lib/tricount-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest) {
   const blocked = blockEmailOnlyExpenseWrite(session);
   if (blocked) return blocked;
 
-  const body = await req.json().catch(() => ({}));
+  const body = await readJsonBody(req);
   const { date, label, amountCents, payerId, participantIds, guestIds, weights } =
     body as {
       date?: unknown;
@@ -118,13 +119,26 @@ export async function POST(req: NextRequest) {
   }
 
   // Payeur + participants doivent être des membres connus (l'IHM liste les mêmes).
+  //
+  // ⚠️ LE PAYEUR, LUI, DOIT AUSSI ÊTRE ACTIF, et cette moitié-là n'existait que dans le
+  // sélecteur. Un compte désactivé ne peut plus se connecter, donc plus jamais valider — et
+  // `isReady` exige la validation de TOUS les payeurs. L'aligner comme payeur créait un
+  // tricount que personne ne pouvait plus ouvrir. Les PARTICIPANTS, eux, restent acceptés
+  // désactivés : porter une part n'engage aucune action de leur part, et refuser bloquerait
+  // la correction d'une dépense ancienne dont un participant a quitté le club depuis.
   const known = await prisma.user.findMany({
     where: { id: { in: [payerId, ...uniqueIds] } },
-    select: { id: true },
+    select: { id: true, disabledAt: true },
   });
   const knownIds = new Set(known.map((u) => u.id));
   if (!knownIds.has(payerId) || uniqueIds.some((p) => !knownIds.has(p))) {
     return NextResponse.json({ error: "Membre inconnu" }, { status: 400 });
+  }
+  if (known.find((u) => u.id === payerId)?.disabledAt) {
+    return NextResponse.json(
+      { error: "Ce compte est désactivé : il ne peut pas être le payeur d'une dépense." },
+      { status: 400 },
+    );
   }
   // Les invités doivent déjà exister sur LE TRICOUNT de cette date (créés via
   // POST /api/tricount/guests) — un invité n'est jamais deviné à la volée ici.
@@ -138,6 +152,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invité inconnu" }, { status: 400 });
     }
   }
+
+  // Un tricount SOLDÉ ne se rouvre pas par la porte de derrière. Sans ce contrôle, la règle
+  // appliquée à l'édition et à la suppression se contournait en trois clics : ajouter une
+  // dépense à un tricount clos remet toutes les validations à zéro, donc le rouvre.
+  const clos = await refuseSiSolde({ date });
+  if (clos) return clos;
 
   const tricount = await prisma.tricount.upsert({
     where: { date },

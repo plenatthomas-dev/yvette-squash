@@ -22,6 +22,50 @@ import { prisma } from "./db";
 // ses soldes à zéro (c'est ce que « soldé » veut dire), il n'ajoute donc rien. On n'a pas besoin
 // de savoir lesquels sont soldés pour que la somme soit juste.
 
+/**
+ * Valide d'office, au nom d'un membre qu'on désactive, tous les tricounts dont il est payeur.
+ *
+ * POURQUOI ÇA EXISTE — L'ÉTAT MORT QU'ELLE ÉVITE
+ * Les remboursements ne s'ouvrent que lorsque TOUS les payeurs ont validé, et seul un payeur
+ * peut donner sa validation (`approve` répond 403 aux autres). Or désactiver un compte supprime
+ * ses sessions : la personne ne peut plus se connecter, donc plus jamais valider. Le tricount
+ * restait alors bloqué à vie — `approve` en 403 pour les autres, `refunds` en 409, et la
+ * dépense inmodifiable si le désactivé en était aussi le créateur. Les seules issues étaient de
+ * réactiver le compte, ou d'effacer toute la soirée depuis l'espace admin, historique compris.
+ *
+ * CE QUE LA VALIDATION D'OFFICE SIGNIFIE
+ * Valider dit « je suis d'accord pour qu'on solde ». Quelqu'un qui ne peut plus se connecter ne
+ * peut plus objecter, et son silence n'a pas à séquestrer l'argent des autres. Son solde, lui,
+ * ne bouge pas : ce qu'on lui doit reste dû, et il reste un bénéficiaire de remboursement
+ * parfaitement valide.
+ *
+ * POURQUOI ICI, ET PAS À LA LECTURE
+ * L'alternative était que chaque lecture traite un payeur désactivé comme validé. Mais la règle
+ * « prêt » est consultée à cinq endroits — la liste, `approve`, `refunds`, `isSettled` et le
+ * résumé —, dont un À L'INTÉRIEUR de la transaction Serializable des remboursements. Il aurait
+ * fallu porter le statut `disabledAt` jusque dans chacun. Écrire la décision une fois, au
+ * moment de l'événement, ne change aucune lecture, ne coûte rien sur les chemins chauds, et
+ * laisse une trace datée qu'on peut relire — plutôt qu'un fait recalculé en silence.
+ *
+ * ⚠️ Une réactivation ne défait PAS ces validations : le membre revient en ayant « validé »
+ * sans avoir cliqué. C'est le prix assumé, et il se corrige à la main ; l'impasse, elle, ne se
+ * corrigeait pas sans détruire une soirée entière.
+ *
+ * Idempotente (`skipDuplicates`) : la rejouer ne crée aucun doublon.
+ */
+export async function approveAsDisabledPayer(userId: string, tx = prisma): Promise<void> {
+  const payes = await tx.expense.findMany({
+    where: { payerId: userId, isRefund: false },
+    select: { tricountId: true },
+    distinct: ["tricountId"],
+  });
+  if (payes.length === 0) return;
+  await tx.tricountApproval.createMany({
+    data: payes.map((e) => ({ tricountId: e.tricountId, userId })),
+    skipDuplicates: true,
+  });
+}
+
 export interface TricountSummary {
   /** Mon solde, tous tricounts confondus. Négatif = je dois. */
   globalCents: number;

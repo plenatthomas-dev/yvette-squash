@@ -28,6 +28,11 @@ const h = vi.hoisted(() => ({
   upsertArg: null as null | Record<string, unknown>,
   approvalsDeleted: vi.fn(),
   guestWhere: null as null | Record<string, unknown>,
+  /** Le tricount de la date visée, ou `null` s'il n'existe pas encore. */
+  tricountEtat: null as null | Record<string, unknown>,
+  soldeWhere: null as null | Record<string, unknown>,
+  /** Comptes desactives, que la route doit refuser comme PAYEUR. */
+  disabled: [] as string[],
 }));
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
@@ -38,7 +43,9 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     user: {
       findMany: vi.fn(async (a: { where: { id: { in: string[] } } }) =>
-        a.where.id.in.filter((id) => h.users.includes(id)).map((id) => ({ id })),
+        a.where.id.in
+          .filter((id) => h.users.includes(id))
+          .map((id) => ({ id, disabledAt: h.disabled.includes(id) ? new Date() : null })),
       ),
     },
     tricountGuest: {
@@ -52,6 +59,12 @@ vi.mock("@/lib/db", () => ({
       upsert: vi.fn(async (a: Record<string, unknown>) => {
         h.upsertArg = a;
         return { id: "t1" };
+      }),
+      // L'état du tricount de cette DATE, tel que `refuseSiSolde` le relit avant d'écrire.
+      // `null` = il n'existe pas encore (première dépense du jour), le cas courant.
+      findUnique: vi.fn(async (a: { where: Record<string, unknown> }) => {
+        h.soldeWhere = a.where;
+        return h.tricountEtat;
       }),
     },
     expense: {
@@ -105,6 +118,9 @@ beforeEach(() => {
   h.created = null;
   h.upsertArg = null;
   h.guestWhere = null;
+  h.tricountEtat = null;
+  h.soldeWhere = null;
+  h.disabled = [];
 });
 
 describe("POST /api/tricount/expenses — les trois gardes d'entrée", () => {
@@ -343,5 +359,51 @@ describe("POST /api/tricount/expenses — la mémoire des arrondis", () => {
     expect(prisma.expense.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { tricountId: "t1", isRefund: false } }),
     );
+  });
+});
+
+describe("POST /api/tricount/expenses — ce que la route refuse en amont", () => {
+  it("refuse d'ajouter une dépense à un tricount SOLDÉ, en 409", async () => {
+    // Sans ce contrôle, la règle appliquée à l'édition et à la suppression se contournait en
+    // trois clics : ajouter une dépense remet toutes les validations à zéro, donc rouvre le
+    // tricount clos. Le mock rend de vraies lignes — c'est `isSettled` qui tranche.
+    h.tricountEtat = {
+      expenses: [
+        {
+          payerId: "u1",
+          payerGuestId: null,
+          isRefund: false,
+          shares: [
+            { userId: "u1", guestId: null, amountCents: 500 },
+            { userId: "u2", guestId: null, amountCents: 500 },
+          ],
+        },
+        { payerId: "u2", payerGuestId: null, isRefund: true, shares: [{ userId: "u1", guestId: null, amountCents: 500 }] },
+      ],
+      approvals: [{ userId: "u1" }],
+    };
+    const res = await POST(req(base));
+    expect(res.status).toBe(409);
+    expect(h.soldeWhere).toEqual({ date: "2026-09-03" });
+    expect(h.created).toBeNull();
+  });
+
+  it("refuse un PAYEUR DÉSACTIVÉ — il ne pourra jamais valider", async () => {
+    // `isReady` exige la validation de tous les payeurs, et un compte désactivé n'a plus de
+    // session : le tricount serait bloqué à vie. La règle n'existait que dans le sélecteur.
+    h.disabled = ["u2"];
+    const res = await POST(req({ ...base, payerId: "u2" }));
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: expect.stringContaining("désactivé") });
+    expect(h.created).toBeNull();
+  });
+
+  it("accepte un PARTICIPANT désactivé — porter une part n'engage aucune action", async () => {
+    // L'inverse enfermerait : une dépense ancienne deviendrait incorrigible dès qu'un joueur
+    // quitte le club, et son nom doit de toute façon rester sur l'historique.
+    h.disabled = ["u2"];
+    const res = await POST(req({ ...base, payerId: "u1", participantIds: ["u1", "u2"] }));
+    expect(res.status).toBe(201);
+    expect(partsEcrites().map(([k]) => k)).toEqual(["u:u1", "u:u2"]);
   });
 });

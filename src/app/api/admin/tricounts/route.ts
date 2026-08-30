@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
 import { listTricountsAdmin, deleteTricount } from "@/lib/tricount-admin";
+import { readJsonBody } from "@/lib/http-tx";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ export async function POST(req: NextRequest) {
   if (!(await requireAdmin(req))) {
     return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
   }
-  const body = (await req.json().catch(() => ({}))) as { id?: unknown; action?: unknown };
+  const body = (await readJsonBody(req)) as { id?: unknown; action?: unknown };
   if (typeof body.id !== "string" || !body.id) {
     return NextResponse.json({ error: "Tricount invalide." }, { status: 400 });
   }

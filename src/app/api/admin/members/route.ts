@@ -6,6 +6,7 @@ import { getFeatures } from "@/lib/features-server";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
 import { createEmailToken, authLinkFor, clientIp } from "@/lib/email-auth";
 import { alertsChanged } from "@/lib/alerts-gate";
+import { approveAsDisabledPayer } from "@/lib/tricount-summary";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -100,10 +101,17 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "disable") {
-    await prisma.user.update({ where: { id: target.id }, data: { disabledAt: new Date() } });
-    // Révoque immédiatement les sessions en cours : sans ça, un cookie déjà émis resterait
-    // valable jusqu'à sa péremption (le refus ne joue qu'à la prochaine connexion).
-    await prisma.session.deleteMany({ where: { userId: target.id } });
+    // Les trois écritures vont ensemble : désactiver sans révoquer laisserait un cookie
+    // valable, et désactiver sans valider d'office bloquerait à vie les tricounts dont ce
+    // membre est payeur (il ne pourra plus se connecter, donc plus jamais valider — cf.
+    // `approveAsDisabledPayer`, qui explique l'état mort que cela produisait).
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: target.id }, data: { disabledAt: new Date() } });
+      // Révoque immédiatement les sessions en cours : sans ça, un cookie déjà émis resterait
+      // valable jusqu'à sa péremption (le refus ne joue qu'à la prochaine connexion).
+      await tx.session.deleteMany({ where: { userId: target.id } });
+      await approveAsDisabledPayer(target.id, tx as unknown as typeof prisma);
+    });
     return NextResponse.json({ ok: true });
   }
 

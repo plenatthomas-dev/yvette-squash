@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { MAX_COMMENT_LEN } from "@/lib/tricount";
 import { getFeatures } from "@/lib/features-server";
+import { readJsonBody } from "@/lib/http-tx";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +33,7 @@ export async function POST(
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
   const { id } = await params;
-  const body = await req.json().catch(() => ({}));
+  const body = await readJsonBody(req);
   const text = typeof body?.body === "string" ? body.body.trim() : "";
   if (text.length === 0 || text.length > MAX_COMMENT_LEN) {
     return NextResponse.json(

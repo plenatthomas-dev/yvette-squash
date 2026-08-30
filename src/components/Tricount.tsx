@@ -254,6 +254,16 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     }
   }, [data, openId]);
 
+  // Membres absents de  mais présents sur la dépense éditée (comptes désactivés
+  // depuis). Vidé à chaque ouverture de la modale en création.
+  const [extraMembers, setExtraMembers] = useState<Member[]>([]);
+  // La liste que la MODALE manipule : proposables + revenants. Une seule source pour les
+  // cases, le sélecteur « Payé par » et l'aperçu de répartition — sinon les trois divergent.
+  const formMembers = useMemo(
+    () => (data ? [...data.members, ...extraMembers] : []),
+    [data, extraMembers],
+  );
+
   const openExpense = () => {
     if (!data) return;
     const today = todayISO();
@@ -265,6 +275,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     setLabel("");
     setAmount("");
     setPayerId(data.me);
+    setExtraMembers([]);
     setSelected(new Set(data.members.map((m) => m.id)));
     setSelectedGuestIds(new Set());
     setGuestDraft("");
@@ -285,13 +296,26 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     setLabel(e.label);
     setAmount((e.amountCents / 100).toFixed(2).replace(".", ","));
     setPayerId(e.payerId);
+    // Une dépense peut porter des membres qui ne sont plus PROPOSABLES — un compte désactivé
+    // depuis. Le serveur les garde dans `participants` et `balances` pour nommer l'historique,
+    // mais ils ne sont plus dans `data.members`. Sans eux, la modale cochait deux personnes,
+    // annonçait « 15,00 € » chacun, et le serveur en écrivait 10,00 € : `participantIds`
+    // renvoie bien les trois. On les réintroduit ici pour que ce que l'écran montre soit ce
+    // qu'il enverra — visibles, décochables, et comptés dans l'aperçu.
+    const inconnus = [
+      ...e.participants.filter((p) => p.kind === "user"),
+      { id: e.payerId, kind: "user" as const, name: e.payerName },
+    ].filter((p) => !data.members.some((m) => m.id === p.id));
+    setExtraMembers(
+      [...new Map(inconnus.map((p) => [p.id, { id: p.id, name: p.name, fullName: p.name }])).values()],
+    );
     setSelected(new Set(e.participants.filter((p) => p.kind === "user").map((p) => p.id)));
     setSelectedGuestIds(
       new Set(e.participants.filter((p) => p.kind === "guest").map((p) => p.id)),
     );
     setGuestDraft("");
     setSplitMode("equal");
-    setWeights(Object.fromEntries(data.members.map((m) => [m.id, 1])));
+    setWeights(Object.fromEntries([...data.members, ...inconnus].map((m) => [m.id, 1])));
     setEditingId(e.id);
     setExpenseOpen(true);
   };
@@ -646,7 +670,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     const map = new Map<string, number>();
     const previewCents = parseEuros(amount);
     if (previewCents === null || previewCents === 0 || !data) return map;
-    const memberIds = data.members.filter((m) => selected.has(m.id)).map((m) => m.id);
+    const memberIds = formMembers.filter((m) => selected.has(m.id)).map((m) => m.id);
     const guestIds = guestsForDate.filter((g) => selectedGuestIds.has(g.id)).map((g) => g.id);
     const selectedIds = [...memberIds, ...guestIds];
     if (selectedIds.length === 0) return map;
@@ -656,7 +680,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
         : splitEqually(previewCents, selectedIds.length);
     selectedIds.forEach((id, i) => map.set(id, parts[i]));
     return map;
-  }, [amount, splitMode, weights, data, selected, selectedGuestIds, guestsForDate]);
+  }, [amount, splitMode, weights, data, formMembers, selected, selectedGuestIds, guestsForDate]);
 
   if (loading && !data) return <p className="muted">Chargement des frais…</p>;
   if (error) return <div className="notice error" role="alert">⚠️ {error}</div>;
@@ -761,7 +785,15 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                               c'est justement une saisie erronée qui peut faire croire un
                               tricount soldé alors que l'argent n'a pas bougé, et sans ce
                               bouton le membre n'avait aucun recours. */}
-                          {e.canDelete && (!t.settled || e.isRefund) && !data.emailOnly && (
+                          {/* Deux exceptions, et toutes deux portent sur le REMBOURSEMENT :
+                              un tricount soldé ne se réécrit plus (le serveur l'applique
+                              aussi, en 409), et un compte « email seul » ne gère pas les
+                              dépenses. Mais il a le droit de DÉCLARER un remboursement — il
+                              doit donc pouvoir le défaire, d'autant que `PATCH` lui répond
+                              « supprime-le et refais-le ». Le serveur l'autorise ; l'écran le
+                              masquait encore, ce qui laissait la consigne impossible à
+                              suivre et le membre enfermé dans sa saisie. */}
+                          {e.canDelete && (!t.settled || e.isRefund) && (!data.emailOnly || e.isRefund) && (
                             <button
                               className="cancel"
                               onClick={() => setConfirmDelete(e)}
@@ -1000,7 +1032,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
               <label className="tri-field">
                 Payé par
                 <select value={payerId} onChange={(e) => setPayerId(e.target.value)}>
-                  {data.members.map((m) => (
+                  {formMembers.map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.name}
                       {m.id === data.me ? " (toi)" : ""}
@@ -1028,7 +1060,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                     Par parts
                   </button>
                 </div>
-                {data.members.map((m) => {
+                {formMembers.map((m) => {
                   const checked = selected.has(m.id);
                   const share = shareByMember.get(m.id);
                   const w = weights[m.id] ?? 1;

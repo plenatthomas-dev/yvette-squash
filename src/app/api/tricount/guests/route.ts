@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { MAX_GUEST_NAME_LEN } from "@/lib/tricount";
 import { getFeatures } from "@/lib/features-server";
+import { readJsonBody } from "@/lib/http-tx";
 import { blockEmailOnlyExpenseWrite } from "@/lib/tricount-guard";
 
 export const runtime = "nodejs";
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
   const blocked = blockEmailOnlyExpenseWrite(session);
   if (blocked) return blocked;
 
-  const body = await req.json().catch(() => ({}));
+  const body = await readJsonBody(req);
   const { date, name } = body as { date?: unknown; name?: unknown };
 
   if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {

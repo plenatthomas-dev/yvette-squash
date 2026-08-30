@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { HttpError, httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
+import { HttpError, httpErrorResponse, serializableTransaction, readJsonBody } from "@/lib/http-tx";
 import {
   computeBalances,
   payersOf,
@@ -41,7 +41,7 @@ export async function POST(
   }
   const { id } = await params;
 
-  const body = await req.json().catch(() => ({}));
+  const body = await readJsonBody(req);
   const { toId, fromGuestId, amountCents } = body as {
     toId?: unknown;
     fromGuestId?: unknown;

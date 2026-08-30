@@ -20,6 +20,9 @@ const h = vi.hoisted(() => ({
   userUpdate: vi.fn(),
   userDelete: vi.fn(),
   sessionDeleteMany: vi.fn(),
+  /** Les tricounts dont le membre visé est payeur d'une vraie dépense. */
+  payePar: [] as { tricountId: string }[],
+  approvalsCreated: vi.fn(),
   passkeyDeleteMany: vi.fn(),
   createEmailToken: vi.fn(),
   alertsChanged: vi.fn(),
@@ -62,6 +65,16 @@ vi.mock("@/lib/db", () => ({
       delete: h.userDelete,
     },
     session: { deleteMany: h.sessionDeleteMany },
+    // La désactivation est ATOMIQUE : poser `disabledAt`, révoquer les sessions et valider
+    // d'office les tricounts dont le membre est payeur vont ensemble. Le mock exécute le
+    // corps sur les mêmes doubles, pour que le test voie les trois écritures.
+    $transaction: async (fn: (tx: unknown) => Promise<void>) =>
+      fn({
+        user: { update: h.userUpdate },
+        session: { deleteMany: h.sessionDeleteMany },
+        expense: { findMany: vi.fn(async () => h.payePar) },
+        tricountApproval: { createMany: h.approvalsCreated },
+      }),
     passkey: { deleteMany: h.passkeyDeleteMany },
     interclubTeam: {
       findMany: vi.fn(async () => h.teams),
@@ -278,5 +291,42 @@ describe("POST /api/admin/members", () => {
   it("set_team : réservé aux admins, comme le reste de la route", async () => {
     h.admin = null;
     expect((await POST(postReq({ id: "u1", action: "set_team", teamId: "t1" }))).status).toBe(403);
+  });
+});
+
+describe("POST /api/admin/members — désactiver, sans laisser de tricount bloqué", () => {
+  beforeEach(() => {
+    h.payePar = [];
+    // Ce fichier réinitialise ses doubles à la main (pas de `clearAllMocks` global) : sans
+    // cette ligne, le second test hériterait de l'appel du premier.
+    h.approvalsCreated.mockReset();
+  });
+
+  it("VALIDE D'OFFICE les tricounts dont le membre désactivé est payeur", async () => {
+    // L'état mort que ça évite : les remboursements n'ouvrent que si TOUS les payeurs ont
+    // validé, et seul un payeur peut le faire. Désactiver un compte supprime ses sessions —
+    // il ne validera donc jamais, et le tricount reste bloqué à vie : `approve` en 403 pour
+    // les autres, `refunds` en 409, et l'unique sortie était d'effacer toute la soirée.
+    h.payePar = [{ tricountId: "t1" }, { tricountId: "t2" }];
+
+    const res = await POST(postReq({ id: "u1", action: "disable" }));
+
+    expect(res.status).toBe(200);
+    expect(h.userUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { disabledAt: expect.any(Date) } }),
+    );
+    expect(h.sessionDeleteMany).toHaveBeenCalled();
+    expect(h.approvalsCreated).toHaveBeenCalledWith({
+      data: [
+        { tricountId: "t1", userId: "u1" },
+        { tricountId: "t2", userId: "u1" },
+      ],
+      skipDuplicates: true, // rejouable sans créer de doublon
+    });
+  });
+
+  it("n'écrit aucune validation quand le membre n'est payeur de rien", async () => {
+    await POST(postReq({ id: "u1", action: "disable" }));
+    expect(h.approvalsCreated).not.toHaveBeenCalled();
   });
 });

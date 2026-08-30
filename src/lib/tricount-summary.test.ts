@@ -19,7 +19,7 @@ const h = vi.hoisted(() => ({
   /** Parts qui portent MON nom. */
   parts: [] as { amountCents: number; expense: { tricountId: string } }[],
   /** Payeurs par tricount, tels que la base les rend (lignes distinctes). */
-  payeurs: [] as { tricountId: string; payerId: string }[],
+  payeurs: [] as { tricountId: string; payerId: string; isRefund?: boolean }[],
   validations: [] as { tricountId: string; userId: string }[],
   /** Les tricounts pour lesquels on est allé chercher payeurs et validations. */
   interroges: null as null | string[],
@@ -31,10 +31,17 @@ vi.mock("./db", () => ({
       // On distingue les deux appels par `tricountId` et non par `payerId` : la requête des
       // payeurs porte elle aussi un `payerId` (`{ not: null }`), et s'en servir renvoyait mes
       // avances à sa place — deux tests tombaient sans que le module soit en cause.
+      //
+      // ⚠️ Le mock HONORE `isRefund: false`. Il l'ignorait, et c'est la règle centrale du
+      // module qui n'était alors mesurée par rien : « un remboursement ne fait de personne un
+      // payeur ». La retirer laissait les sept tests verts, pendant qu'en production l'auteur
+      // du premier remboursement — un DÉBITEUR — était compté comme payeur, ne validait
+      // jamais, et faisait disparaître le badge € précisément sur les tricounts qu'on avait
+      // commencé à solder.
       findMany: vi.fn(async (a: { where: Record<string, unknown> }) => {
         if (!a.where.tricountId) return h.avances;
         h.interroges = (a.where.tricountId as { in: string[] }).in;
-        return h.payeurs;
+        return a.where.isRefund === false ? h.payeurs.filter((p) => !p.isRefund) : h.payeurs;
       }),
     },
     expenseShare: { findMany: vi.fn(async () => h.parts) },
@@ -135,5 +142,25 @@ describe("tricountSummary — le compte de dettes (le badge €)", () => {
     h.avances = [{ tricountId: "t1", amountCents: 1000 }];
     await tricountSummary("moi");
     expect(h.interroges).toBeNull();
+  });
+});
+
+describe("tricountSummary — ce qu'un remboursement ne fait pas", () => {
+  it("l'auteur d'un REMBOURSEMENT n'est pas compté comme payeur", async () => {
+    // La règle centrale du module, et elle tient dans une clause `where`. Sans elle, le
+    // débiteur qui commence à rembourser devient « payeur » du tricount : il ne validera
+    // jamais (au sens d'`approve`, qui lui répondrait 403), donc `owedCount` tombe à zéro et
+    // le badge € disparaît précisément quand on a commencé à solder.
+    //
+    // Ici : je dois 15 € sur t1, dont u1 est le seul VRAI payeur — et u1 a validé. J'ai déjà
+    // remboursé une partie, ce qui fait de moi le payeur d'une ligne `isRefund`.
+    h.parts = [{ amountCents: 1500, expense: { tricountId: "t1" } }];
+    h.payeurs = [
+      { tricountId: "t1", payerId: "u1", isRefund: false },
+      { tricountId: "t1", payerId: "moi", isRefund: true },
+    ];
+    h.validations = [{ tricountId: "t1", userId: "u1" }];
+
+    expect((await tricountSummary("moi")).owedCount).toBe(1);
   });
 });
