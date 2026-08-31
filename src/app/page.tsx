@@ -1562,7 +1562,7 @@ export default function Home() {
                     <span className="jrow-actions">
                       <button
                         type="button"
-                        className="ics"
+                        className="agenda-btn"
                         title="Ajouter à mon agenda (.ics, rappel 1 h avant)"
                         aria-label="Ajouter à mon agenda"
                         onClick={() => downloadIcs(b)}

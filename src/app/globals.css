@@ -1390,7 +1390,11 @@ td.cell.past {
   gap: 8px;
 }
 
-.journal li button.ics {
+/* Pas de classe "ics" ici : ce nom est déjà pris par l'écran de marquage interclub
+   (position: fixed; inset: 0 plus bas dans ce fichier) — un bouton .ics dans le journal
+   héritait de ce fixed/inset/z-index et devenait un overlay plein écran qui bloquait
+   tous les autres clics de la page. */
+.journal li button.agenda-btn {
   margin: 0;
   padding: 6px 9px;
   font-size: 0.95rem;
@@ -1401,7 +1405,7 @@ td.cell.past {
   color: inherit;
 }
 
-.journal li button.ics:hover {
+.journal li button.agenda-btn:hover {
   border-color: var(--pico-primary);
   background: color-mix(in srgb, var(--pico-primary) 10%, transparent);
 }
