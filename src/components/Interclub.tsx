@@ -21,6 +21,7 @@ import {
   colorsTooClose,
   describeSequenceProblem,
   isValidBestOf,
+  lineupComplete,
   playedGames,
   hexToHsv,
   hsvToHex,
@@ -33,6 +34,7 @@ import {
   winGamesFor,
   type GameScore,
 } from "@/lib/interclub";
+import { lineupOrderConflict, type OrderedSlot } from "@/lib/interclub-order";
 
 // Vue « Interclub » : les rencontres de championnat par équipes.
 //
@@ -68,7 +70,13 @@ type Team = { id: string; name: string };
 // est appliquée là-bas, pas ici. Deux populations s'y mêlent — les MEMBRES (compte sur
 // l'appli) et les joueurs sans compte, qu'un admin a inscrits au roster de l'équipe. Le
 // `kind` sert à renvoyer le bon champ au serveur ; à l'écran, un joueur est un joueur.
-type RosterEntry = { kind: "member" | "guest"; id: string; name: string };
+type RosterEntry = {
+  kind: "member" | "guest";
+  id: string;
+  name: string;
+  /** Classement fédéral effectif, ou `null` si inconnu — décide de l'ordre des simples. */
+  clt: string | null;
+};
 
 type FixtureRow = {
   id: string;
@@ -706,6 +714,22 @@ function FixtureDialog({
     if (key) takenBy.set(key, m.order);
   }
 
+  // L'ORDRE des simples doit suivre le classement des joueurs désignés (cf. `interclub-order.ts`
+  // — le mieux classé des joueurs présents joue le simple n° 1). Même logique que `takenBy` :
+  // on grise ici les choix que le serveur refuserait, plutôt que de laisser composer puis
+  // échouer à l'enregistrement.
+  const rosterClt = new Map(fixture.roster.map((r) => [`${r.kind}:${r.id}`, r.clt]));
+  const orderSlots: OrderedSlot[] = fixture.matches
+    .filter((m) => m.homeDisplayName !== UNSET_PLAYER)
+    .map((m) => {
+      const key = m.homeUserId
+        ? `member:${m.homeUserId}`
+        : m.homeGuestId
+          ? `guest:${m.homeGuestId}`
+          : null;
+      return { order: m.order, name: m.homeDisplayName, clt: key ? (rosterClt.get(key) ?? null) : null };
+    });
+
   return (
     <Dialog onClose={onClose} label="Rencontre" className="ic-detail">
       <h3>
@@ -736,6 +760,7 @@ function FixtureDialog({
                 bestOf={fixture.bestOf}
                 roster={fixture.roster}
                 takenBy={takenBy}
+                orderSlots={orderSlots}
                 teamName={fixture.team.name}
                 busy={busy}
                 onCancel={() => setEditing(null)}
@@ -795,7 +820,16 @@ function FixtureDialog({
             )}
             {editing !== m.id && m.status !== "done" && (
               <div className="ic-match-actions">
-                <button className="secondary ic-score-btn" onClick={() => onScore(m.id)}>
+                <button
+                  className="secondary ic-score-btn"
+                  disabled={!lineupComplete(m.homeDisplayName, m.awayName)}
+                  title={
+                    lineupComplete(m.homeDisplayName, m.awayName)
+                      ? undefined
+                      : "Désigne les deux joueurs avant de marquer en direct"
+                  }
+                  onClick={() => onScore(m.id)}
+                >
                   {m.isMine ? "Reprendre le marquage" : "Marquer en direct"}
                 </button>
                 {m.scorerName && !m.isMine && (
@@ -1025,6 +1059,7 @@ function MatchEditor({
   bestOf,
   roster,
   takenBy,
+  orderSlots,
   teamName,
   busy,
   onCancel,
@@ -1035,6 +1070,8 @@ function MatchEditor({
   roster: RosterEntry[];
   /** Joueur déjà aligné → numéro du simple qui le retient, dans CETTE rencontre. */
   takenBy: Map<string, number>;
+  /** Simples déjà désignés (hors CELUI-CI), pour griser un choix qui romprait l'ordre. */
+  orderSlots: OrderedSlot[];
   teamName: string;
   busy: boolean;
   onCancel: () => void;
@@ -1096,6 +1133,17 @@ function MatchEditor({
   // simplement vide, et ne remonte donc aucun message.
   const problem = describeSequenceProblem(nums, bestOf);
 
+  // Un « à désigner » ne doit jamais commencer à jouer : on n'ouvre même pas de nouvelle ligne
+  // de score tant que les deux joueurs de CET écran ne sont pas choisis. Le serveur refuse la
+  // même chose (`lineupComplete`), mais tendre le bouton pour se le faire refuser ensuite serait
+  // un piège — même logique que `takenBy` sur le sélecteur de joueur.
+  const lineupUnready = !pick || !awayName.trim();
+
+  // Les AUTRES simples désignés de la rencontre, celui-ci excepté (on le remplace, pas on
+  // l'ajoute). Sert à griser, dans le sélecteur, le joueur dont l'alignement romprait l'ordre
+  // par classement — même logique que `takenBy` juste au-dessus.
+  const otherOrderSlots = orderSlots.filter((s) => s.order !== match.order);
+
   return (
     <div className="ic-editor">
       <label className="ic-field">
@@ -1109,11 +1157,18 @@ function MatchEditor({
               // simple-ci retient doit rester sélectionnable ici (sinon on ne pourrait plus
               // revenir en arrière après avoir changé d'avis), mais nulle part ailleurs.
               const at = takenBy.get(key);
-              const blocked = at !== undefined && at !== match.order;
+              const taken = at !== undefined && at !== match.order;
+              // Romprait-il l'ordre des simples par classement s'il jouait CELUI-CI ? Même
+              // logique que `taken` : on grise plutôt que de laisser composer pour rien.
+              const orderProblem = taken
+                ? null
+                : lineupOrderConflict([...otherOrderSlots, { order: match.order, name: r.name, clt: r.clt }]);
+              const blocked = taken || !!orderProblem;
               return (
                 <option key={key} value={key} disabled={blocked}>
                   {r.name}
-                  {blocked ? ` — joue déjà le match n° ${at}` : ""}
+                  {r.clt ? ` (${r.clt})` : ""}
+                  {taken ? ` — joue déjà le match n° ${at}` : orderProblem ? " — hors ordre de classement" : ""}
                 </option>
               );
             })}
@@ -1181,10 +1236,18 @@ function MatchEditor({
         <button
           type="button"
           className="secondary ic-add-game"
+          disabled={lineupUnready}
+          title={lineupUnready ? "Désigne les deux joueurs avant de saisir un score" : undefined}
           onClick={() => setGames((prev) => [...prev, { home: "", away: "" }])}
         >
           + Ajouter un jeu
         </button>
+      )}
+
+      {lineupUnready && games.length === 0 && (
+        <p className="notice tiny ic-problem" role="status">
+          Désigne les deux joueurs avant de saisir un score.
+        </p>
       )}
 
       {colorsTooClose(homeColor, awayColor) && (

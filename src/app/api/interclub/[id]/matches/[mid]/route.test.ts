@@ -6,6 +6,11 @@ const h = vi.hoisted(() => ({
   session: null as null | { userId: string },
   match: null as null | Record<string, unknown>,
   siblings: [] as Array<Record<string, unknown>>,
+  /** Voisins tels que lus par `findOrderConflict` (select différent de `siblings` ci-dessus). */
+  orderSiblings: [] as Array<Record<string, unknown>>,
+  /** Classement des voisins désignés, tel que `findOrderConflict` le relit en masse. */
+  orderUsers: [] as Array<Record<string, unknown>>,
+  orderGuests: [] as Array<Record<string, unknown>>,
   user: null as null | Record<string, unknown>,
   guest: null as null | Record<string, unknown>,
   admin: false,
@@ -47,7 +52,13 @@ vi.mock("@/lib/db", () => {
   const tx = {
     interclubMatch: {
       findUnique: vi.fn(async () => h.match),
-      findMany: vi.fn(async () => h.siblings),
+      // Deux appelants distincts partagent `findMany` : le recalcul du statut de la rencontre
+      // (select portant `gamesHome`) et `findOrderConflict` (select portant `order`). On les
+      // distingue par la forme du `select` reçu, comme le ferait vraiment Prisma selon la
+      // requête envoyée.
+      findMany: vi.fn(async (args: { select?: Record<string, unknown> }) =>
+        args?.select && "order" in args.select ? h.orderSiblings : h.siblings,
+      ),
       findFirst: vi.fn(async () => h.alignmentClash),
       update: vi.fn(async (args: { data: Record<string, unknown> }) => {
         h.updated = args.data;
@@ -71,8 +82,11 @@ vi.mock("@/lib/db", () => {
         return {};
       }),
     },
-    user: { findUnique: vi.fn(async () => h.user) },
-    interclubGuest: { findUnique: vi.fn(async () => h.guest) },
+    user: { findUnique: vi.fn(async () => h.user), findMany: vi.fn(async () => h.orderUsers) },
+    interclubGuest: {
+      findUnique: vi.fn(async () => h.guest),
+      findMany: vi.fn(async () => h.orderGuests),
+    },
   };
   return {
     prisma: {
@@ -121,6 +135,9 @@ beforeEach(() => {
   h.session = { userId: "u1" };
   h.match = freshMatch();
   h.siblings = [{ gamesHome: null, status: "pending" }];
+  h.orderSiblings = [];
+  h.orderUsers = [];
+  h.orderGuests = [];
   h.user = { email: "someone@example.com", teamId: "team-1" };
   h.guest = null;
   h.admin = false;
@@ -540,6 +557,61 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
   it("ignore un nom libre envoyé avec un détachement", async () => {
     await PATCH(patch({ homeUserId: null, homeGuestId: null, homeDisplayName: "N'importe qui" }), ctx);
     expect(h.updated).toMatchObject({ homeDisplayName: "À désigner" });
+  });
+
+  // --- Composition incomplète : pas de score, pas de marquage --------------
+
+  it("refuse un score tant que les deux joueurs ne sont pas désignés", async () => {
+    h.match = { ...freshMatch(), homeDisplayName: "À désigner" };
+    const res = await PATCH(patch({ games: [{ home: 11, away: 0 }] }), ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/désigne les deux joueurs/i);
+    expect(h.updated).toBeNull();
+  });
+
+  it("laisse vider les jeux d'un simple pas encore désigné (undo, correction)", async () => {
+    h.match = { ...freshMatch(), homeDisplayName: "À désigner", games: [{ number: 1, pointsHome: 11, pointsAway: 0 }] };
+    const res = await PATCH(patch({ games: [], knownGameCount: 1 }), ctx);
+    expect(res.status).toBe(200);
+  });
+
+  // --- Ordre des simples par classement -------------------------------------
+
+  it("refuse une composition qui romprait l'ordre des simples par classement", async () => {
+    h.match = { ...freshMatch(), order: 2, homeUserId: null, homeDisplayName: "À désigner" };
+    h.user = {
+      id: "u-benoit",
+      displayName: "Benoît",
+      nickname: null,
+      teamId: "team-1",
+      interclubCltOverride: null,
+      squashnetRanking: { clt: "4D" },
+    };
+    // Albert (5A, moins bien classé que 4D) joue déjà le simple 1.
+    h.orderSiblings = [{ order: 1, homeDisplayName: "Albert", homeUserId: "u-albert", homeGuestId: null }];
+    h.orderUsers = [{ id: "u-albert", interclubCltOverride: null, squashnetRanking: { clt: "5A" } }];
+    const res = await PATCH(patch({ homeUserId: "u-benoit" }), ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("Benoît");
+    expect(h.updated).toBeNull();
+  });
+
+  it("accepte une composition qui respecte l'ordre des simples par classement", async () => {
+    h.match = { ...freshMatch(), order: 2, homeUserId: null, homeDisplayName: "À désigner" };
+    h.user = {
+      id: "u-benoit",
+      displayName: "Benoît",
+      nickname: null,
+      teamId: "team-1",
+      interclubCltOverride: null,
+      squashnetRanking: { clt: "5A" },
+    };
+    // Albert (4D, mieux classé) joue déjà le simple 1 : Benoît (5A) peut jouer le simple 2.
+    h.orderSiblings = [{ order: 1, homeDisplayName: "Albert", homeUserId: "u-albert", homeGuestId: null }];
+    h.orderUsers = [{ id: "u-albert", interclubCltOverride: null, squashnetRanking: { clt: "4D" } }];
+    const res = await PATCH(patch({ homeUserId: "u-benoit" }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.updated).toMatchObject({ homeDisplayName: "Benoît" });
   });
 
   // --- Début de rencontre --------------------------------------------------

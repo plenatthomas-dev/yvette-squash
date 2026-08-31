@@ -139,8 +139,8 @@ describe("GET /api/interclub/{id} — roster servi", () => {
     const body = await (await GET(req(), ctx)).json();
     expect(h.rosterWhere).toEqual({ teamId: "t7", disabledAt: null });
     expect(body.roster).toEqual([
-      { kind: "member", id: "u9", name: "Jéjé" },
-      { kind: "guest", id: "g1", name: "Paul Hors-Appli" },
+      { kind: "member", id: "u9", name: "Jéjé", clt: null },
+      { kind: "guest", id: "g1", name: "Paul Hors-Appli", clt: null },
     ]);
   });
 });

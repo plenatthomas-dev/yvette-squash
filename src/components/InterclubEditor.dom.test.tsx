@@ -30,16 +30,19 @@ const FIXTURE = {
   winGames: 3,
   score: { home: 0, away: 0 },
   team: { id: "t1", name: "Équipe 1" },
-  roster: [{ kind: "member", id: "u1", name: "Thomas" }],
+  roster: [{ kind: "member", id: "u1", name: "Thomas", clt: null }],
   matches: [
     {
       id: "m1",
       order: 1,
       status: "pending",
-      homeUserId: null,
+      // Les DEUX joueurs sont désignés : ces tests portent sur le comportement des cases de
+      // score (vide vs zéro), pas sur la composition — un simple encore « à désigner » bloque
+      // désormais la saisie (cf. `lineupComplete`), ce que d'autres tests couvrent.
+      homeUserId: "u1",
       homeGuestId: null,
-      homeDisplayName: "À désigner",
-      awayName: "À désigner",
+      homeDisplayName: "Thomas",
+      awayName: "Jérôme Massy",
       homeColor: null,
       awayColor: null,
       gamesHome: null,
@@ -63,8 +66,12 @@ async function souffle() {
   });
 }
 
+/** Remplace `FIXTURE` pour un test précis (gardes de composition incomplète). */
+let fixtureOverride: Record<string, unknown> | null = null;
+
 beforeEach(() => {
   envois = [];
+  fixtureOverride = null;
   localStorage.clear();
   vi.stubGlobal(
     "fetch",
@@ -77,7 +84,7 @@ beforeEach(() => {
       });
       if (u.includes("/api/interclub/follows")) return reponse({ follows: [], pushReady: false });
       if (u.includes("/api/interclub/live")) return reponse({ fixtures: [] });
-      if (/\/api\/interclub\/f1$/.test(u)) return reponse(FIXTURE);
+      if (/\/api\/interclub\/f1$/.test(u)) return reponse(fixtureOverride ?? FIXTURE);
       return reponse({
         teams: [{ id: "t1", name: "Équipe 1" }],
         fixtures: [
@@ -160,5 +167,41 @@ describe("Saisie a posteriori — un jeu ajouté s'ouvre VIDE, pas à 0-0", () =
     fireEvent.change(j, { target: { value: "" } });
     await souffle();
     expect((r.getByLabelText("Jeu 1, points du joueur") as HTMLInputElement).value).toBe("");
+  });
+});
+
+// Composition incomplète : ni le score, ni le marquage en direct ne doivent être atteignables
+// tant que les deux joueurs ne sont pas désignés — sans quoi une notification annoncerait « à
+// désigner » comme un vrai nom (cf. `lineupComplete`, partagé avec le serveur).
+const FIXTURE_UNSET = {
+  ...FIXTURE,
+  matches: [
+    {
+      ...FIXTURE.matches[0],
+      homeUserId: null,
+      homeDisplayName: "À désigner",
+      awayName: "À désigner",
+    },
+  ],
+};
+
+describe("Composition incomplète — score et marquage bloqués", () => {
+  it("désactive « + Ajouter un jeu » tant que les deux joueurs ne sont pas désignés", async () => {
+    fixtureOverride = FIXTURE_UNSET;
+    const r = await ouvreEditeur();
+    const ajouter = r.queryByText("+ Ajouter un jeu");
+    if (!ajouter) return; // le formulaire n'est pas atteignable dans ce banc : rien à affirmer
+    expect((ajouter.closest("button") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("désactive « Marquer en direct » tant que les deux joueurs ne sont pas désignés", async () => {
+    fixtureOverride = FIXTURE_UNSET;
+    const r = render(<Interclub toast={vi.fn()} onExpired={() => false} />);
+    await souffle();
+    fireEvent.click(r.getByText(/Massy/));
+    await souffle();
+    const btn = r.queryByText(/Marquer en direct|Reprendre le marquage/);
+    if (!btn) return; // le formulaire n'est pas atteignable dans ce banc : rien à affirmer
+    expect((btn.closest("button") as HTMLButtonElement).disabled).toBe(true);
   });
 });

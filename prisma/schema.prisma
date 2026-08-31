@@ -77,6 +77,13 @@ model User {
   // fréquent). Affiché comme colonne de l'annuaire. SetNull à la suppression de l'équipe.
   team                   InterclubTeam?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
   teamId                 String?
+  // Classement forcé par un admin pour l'ORDRE des simples interclub (cf. lib/interclub-order.ts),
+  // quand le rapprochement squashnet (`squashnetRanking`) a échoué ou s'est trompé — nom mal
+  // orthographié côté ResaMania, licence pas encore rapprochée… Même format que `clt`
+  // (« 5A », « NC »), sans rang associé : l'ordre des matchs ne compare que des classements,
+  // jamais des rangs. Prioritaire sur `squashnetRanking.clt` quand renseigné (cf. `effectiveClt`
+  // dans interclub-roster.ts) ; NULL = pas de correction, on se fie au rapprochement automatique.
+  interclubCltOverride   String?
   interclubsCreated      Interclub[]        @relation("InterclubCreator")
   interclubPlayed        InterclubMatch[]   @relation("InterclubHomePlayer")
   interclubScored        InterclubMatch[]   @relation("InterclubScorer")
@@ -599,6 +606,12 @@ model InterclubGuest {
   team      InterclubTeam    @relation(fields: [teamId], references: [id], onDelete: Cascade)
   teamId    String
   name      String // « Prénom Nom », saisi par l'admin — un seul champ, comme TricountGuest
+  // Classement fédéral, saisi À LA MAIN par l'admin (« 5A », « NC »…) : un invité n'a pas de
+  // compte, donc rien à rapprocher sur squashnet. Sert exclusivement à l'ORDRE des simples
+  // interclub (cf. lib/interclub-order.ts) — un joueur mieux classé doit jouer un numéro de
+  // simple antérieur. NULL = classement pas encore saisi ; le joueur reste alignable dans le
+  // roster, mais aucune composition qui l'utilise ne peut valider l'ordre tant qu'il manque.
+  clt       String?
   createdAt DateTime         @default(now())
   matches   InterclubMatch[] @relation("InterclubHomeGuest")
 

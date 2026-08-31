@@ -41,6 +41,8 @@ Les seules restrictions protègent quelqu'un d'un **écrasement**, jamais d'un a
 | Un match **terminé** ne se réécrit pas par un TIERS via le direct — le marqueur en titre, lui, le peut (il doit pouvoir annuler le point décisif) | `PUT …/live` | Qu'un passant inverse un score final |
 | **Supprimer** une rencontre : créateur et admins | `DELETE …/{id}` | L'irréversible |
 | `knownGameCount` : l'écriture doit se fonder sur le même ÉTAT que la base — même nombre de jeux **et mêmes scores** | `PATCH …/matches/{mid}`, `PUT …/live` (règle unique, `staleGamesReason`) | Un écran ouvert dix minutes plus tôt qui efface ce qui a été joué, ou qui rejoue un score corrigé depuis |
+| Un simple **« à désigner »** ne peut ni commencer le marquage en direct ni recevoir un score saisi a posteriori | `POST …/claim`, `PUT …/live`, `PATCH …/matches/{mid}` (règle unique, `lineupComplete`) | Une notification qui annoncerait le placeholder comme un vrai nom de joueur |
+| Une composition qui romprait l'**ordre des simples par classement** (le mieux classé des joueurs présents doit jouer le simple n° 1) est refusée | `POST /api/interclub`, `PATCH …/matches/{mid}` (règle unique, `lineupOrderConflict`) | Une rencontre disputée dans le mauvais ordre, sanctionnable par la fédération |
 
 Deux choses échappent toutefois au membre, et sont réservées à l'**admin** :
 
@@ -59,13 +61,16 @@ c'est le cache du direct.
 
 ## Modèle de données
 
-Six tables (migrations `34_interclub`, `36_interclub_guests`, `37_interclub_notified`), plus
-`AppNotification` (`35_notifications`), qui sert à toute l'appli et pas seulement ici.
+Six tables (migrations `34_interclub`, `36_interclub_guests`, `37_interclub_notified`,
+`38_interclub_order`), plus `AppNotification` (`35_notifications`), qui sert à toute l'appli et
+pas seulement ici. La migration `38_` ajoute aussi `User.interclubCltOverride` — la correction
+admin d'un classement squashnet mal rapproché (cf. « Ordre des simples par classement »
+ci-dessous).
 
 | Table | Rôle |
 |---|---|
 | `InterclubTeam` | Les équipes de l'asso. Une **table**, pas des colonnes `equipe1/equipe2` : une 3ᵉ équipe ne coûtera qu'une ligne. Semées idempotemment par la migration. |
-| `InterclubGuest` | Joueur du championnat **sans compte** sur l'appli. Un seul champ `name`, unique dans son équipe. |
+| `InterclubGuest` | Joueur du championnat **sans compte** sur l'appli. `name`, unique dans son équipe, et `clt` — son classement fédéral, saisi À LA MAIN par l'admin puisqu'il n'y a rien à rapprocher sur squashnet. |
 | `Interclub` | La rencontre. `opponent` est un **texte libre** — on ne tient pas d'annuaire des clubs adverses. `startNotifiedAt` / `doneNotifiedAt` sont des **marqueurs d'annonce**, pas des dates d'affichage : rien ne les lit hors des gardes de notification. |
 | `InterclubMatch` | Un simple. Porte `homeUserId` **ou** `homeGuestId` (contrainte `CHECK`, jamais les deux), la prise de marquage, et l'instantané du direct (`liveJson`). |
 | `InterclubGame` | Un jeu **terminé**. `@@unique([matchId, number])`. |
@@ -151,6 +156,54 @@ et le serveur l'acceptait jadis comme un début — ce qui ramenait les deux eff
 porte de derrière, en consommant DÉFINITIVEMENT `startNotifiedAt` (le vrai début ne notifiait donc
 plus jamais). Le score de l'instantané est stocké dans les deux cas : le serveur désigné ne se
 perd pas, seul le statut attend le premier point.
+
+---
+
+## Ordre des simples par classement
+
+Règle de la compétition FFSquash, pas une préférence de l'appli : **le mieux classé des joueurs
+présents joue le simple n° 1**, et les suivants s'enchaînent en ordre décroissant de classement.
+Concrètement, si Albert (classé `5A`) joue le simple 1, Benoît (classé `4D` — mieux classé que
+`5A` malgré la lettre, le CHIFFRE domine toujours) ne peut jouer **aucun** simple de cette
+rencontre : l'aligner casserait l'ordre quel que soit le numéro qu'on lui donnerait. Deux joueurs
+de même classement sont interchangeables — `RangM` n'intervient jamais ici, contrairement au tri
+de l'annuaire (`directorySort.ts`), qui compare des **rangs**, pas des **classements**.
+
+**`src/lib/interclub-order.ts`** (module pur, sans Prisma) porte deux fonctions :
+- `classementPower(clt)` — le poids d'un classement (`N` > `R1` > `R2` > `1A`…`1D` > `2A`… >
+  `NC`), plus petit = plus fort ;
+- `lineupOrderConflict(slots)` — le premier problème d'une composition, ou `null`. **Moins de
+  deux simples désignés ⇒ rien à vérifier** : composer le tout premier simple d'une rencontre ne
+  doit pas réclamer un classement qui ne servira peut-être jamais. L'exigence n'apparaît qu'au
+  second joueur désigné, quand une comparaison devient possible — et à ce moment-là, un
+  classement **inconnu** bloque autant qu'un ordre effectivement violé : on refuse plutôt que de
+  supposer un ordre qui pourrait être faux.
+
+**D'où vient le classement d'un joueur** (`interclub-roster.ts`, `RosterEntry.clt` /
+`ResolvedPick.clt`) :
+- un **membre** : la correction admin (`User.interclubCltOverride`) si posée, sinon le dernier
+  rapprochement squashnet (`SquashnetRanking.clt`) ;
+- un **invité** (`InterclubGuest`, sans compte) : son champ `clt`, saisi à la main par l'admin —
+  il n'a rien à rapprocher.
+
+**La correction admin existe pour un cas réel** : un rapprochement squashnet qui échoue ou se
+trompe (nom mal orthographié côté ResaMania — ex. « Matthieu Soismier » quand squashnet connaît
+« Matthieu Soisier »). Deux écrans :
+- `/admin/membres`, action `set_clt_override` (`POST /api/admin/members`) — un champ texte par
+  membre, à côté du switch d'équipe interclub ;
+- l'espace admin, section « Équipes interclub », actions `add_guest`/`set_guest_clt`
+  (`POST /api/admin/interclub-teams`) — le classement d'un invité se saisit au même endroit que
+  son inscription au roster.
+
+Les deux valident le format en écrivant (`parseClassementInput`, même module) : une faute de
+frappe se signale à la SAISIE, pas le soir d'une rencontre au moment de composer.
+
+**Vérifié à l'écriture, jamais figé.** Contrairement à `homeDisplayName`, le classement n'est PAS
+stocké sur `InterclubMatch` : `findOrderConflict` (`interclub-roster.ts`) le relit à chaque
+composition, contre les AUTRES simples de la rencontre. Un classement qui change ensuite (le
+rafraîchissement mensuel squashnet) ne revalide donc pas rétroactivement une composition déjà
+enregistrée — exactement le même parti pris que le reste du module (cf. « Le nom du joueur est
+figé » plus haut, pour la raison symétrique).
 
 ---
 
@@ -250,7 +303,12 @@ score enregistré).
 **Moteur pur** (aucune dépendance à Prisma, testable seul)
 - `src/lib/interclub.ts` — règles du jeu, replay d'événements, couleurs de maillot, paliers
   d'abonnement. Un jeu se gagne à 11 points avec 2 d'écart ; **2 min entre les jeux** (règles
-  WSF du 1ᵉʳ septembre 2025, qui alignent l'amateur sur la PSA).
+  WSF du 1ᵉʳ septembre 2025, qui alignent l'amateur sur la PSA). Porte aussi `lineupComplete` —
+  les deux joueurs d'un simple sont-ils désignés ? — partagée par le client et les trois routes
+  d'écriture (claim, live, PATCH).
+- `src/lib/interclub-order.ts` — l'**ordre des simples par classement** : `classementPower`,
+  `lineupOrderConflict`, `parseClassementInput`. Cf. « Ordre des simples par classement »
+  ci-dessus.
 
 **Côté base**
 - `src/lib/interclub-db.ts` — sérialisation, score de rencontre, statut déduit, péremption de la
@@ -258,7 +316,7 @@ score enregistré).
   appliquée par les deux routes d'écriture. Elle a vécu en double, et les deux copies avaient
   divergé — le `PATCH` n'appliquait qu'une moitié de ce que ce document décrivait. Deux
   exemplaires d'une règle finissent toujours par ne plus dire la même chose.
-- `src/lib/interclub-roster.ts` — **qui peut être aligné** (`teamRoster`, `resolveHomePick`, `findAlignmentClash`)
+- `src/lib/interclub-roster.ts` — **qui peut être aligné** (`teamRoster`, `resolveHomePick`, `findAlignmentClash`) et, depuis l'ordre par classement, `findOrderConflict`
 - `src/lib/interclub-gate.ts` — le **cache** du direct
 - `src/lib/interclub-access.ts` — le **contrôle d'accès** (flag + session)
 - `src/lib/interclub-notify.ts` — ciblage des abonnés et rédaction des notifications
@@ -274,7 +332,8 @@ score enregistré).
 | `POST/DELETE …/matches/{mid}/claim` | Prendre / relâcher le marquage |
 | `GET /api/interclub/live` | État des rencontres du jour (servi par le Data Cache) |
 | `GET/PUT /api/interclub/follows` | Mes abonnements |
-| `GET/POST /api/admin/interclub-teams` | Équipes, membres et joueurs sans compte (**admin**) |
+| `GET/POST /api/admin/interclub-teams` | Équipes, membres et joueurs sans compte, dont leur classement (**admin**) |
+| `POST /api/admin/members` (action `set_clt_override`) | Correction admin du classement d'un membre (**admin**) |
 | `GET /api/notifications` | La cloche (pas de flag : elle sert à toute l'appli) |
 
 **Composants** — `Interclub.tsx` (orchestration), `InterclubScorer.tsx` (marquage),

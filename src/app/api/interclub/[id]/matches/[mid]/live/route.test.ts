@@ -184,6 +184,30 @@ describe("PUT .../live — gardes", () => {
     expect((await PUT(put({ games: [{ home: 12, away: 0 }] }), ctx)).status).toBe(400);
   });
 
+  it("refuse de marquer un point tant que le simple n'est pas entièrement désigné", async () => {
+    h.match = freshMatch({ homeDisplayName: "À désigner" });
+    const res = await PUT(put({ games: [{ home: 1, away: 0 }] }), ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/désigne les deux joueurs/i);
+    expect(h.updated).toBeNull();
+  });
+
+  it("refuse même un instantané à 0-0 dès qu'un point y figure, si les joueurs ne sont pas désignés", async () => {
+    h.match = freshMatch({ awayName: "À désigner" });
+    const res = await PUT(put({ games: [], live: liveSnap }), ctx);
+    expect(res.status).toBe(400);
+    expect(h.updated).toBeNull();
+  });
+
+  it("laisse désigner le premier serveur (0-0, sans point) même sur un simple pas encore désigné", async () => {
+    // La désignation du premier serveur, à 0-0, n'est pas encore « jouer » (cf. `enJeu`) :
+    // rien n'empêche l'écran de marquage de s'ouvrir avant que la composition soit finalisée.
+    h.match = freshMatch({ homeDisplayName: "À désigner" });
+    const zeroZero = { current: { home: 0, away: 0 }, serving: "home", servingBox: "right", awaitingServeBox: false };
+    const res = await PUT(put({ games: [], live: zeroZero }), ctx);
+    expect(res.status).toBe(200);
+  });
+
   it("refuse d'écrire si quelqu'un d'autre marque activement", async () => {
     h.match = freshMatch({ scorerId: "u2", scorerClaimedAt: RECENT, updatedAt: RECENT });
     expect((await PUT(put({ games: [] }), ctx)).status).toBe(409);

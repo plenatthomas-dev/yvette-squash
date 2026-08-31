@@ -16,12 +16,21 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { MAX_PLAYER_NAME_LEN, UNSET_PLAYER } from "./interclub-db";
+import { lineupOrderConflict, type OrderedSlot } from "./interclub-order";
 
 /** Une entrée choisissable dans le sélecteur de composition. */
 export interface RosterEntry {
   kind: "member" | "guest";
   id: string;
   name: string;
+  /**
+   * Classement effectif, ou `null` si inconnu. Pour un membre : la correction admin
+   * (`User.interclubCltOverride`) si posée, sinon le dernier classement squashnet rapproché,
+   * sinon `null`. Pour un invité : `InterclubGuest.clt`, saisi à la main (il n'a rien à
+   * rapprocher). Sert à afficher le classement dans le sélecteur ET à faire respecter l'ordre
+   * des simples (cf. `interclub-order.ts`).
+   */
+  clt: string | null;
 }
 
 /**
@@ -39,6 +48,13 @@ export interface ResolvedPick {
   homeGuestId: string | null;
   /** Nom FIGÉ : supprimer un compte ou retirer un invité du roster n'efface pas qui a joué. */
   homeDisplayName: string;
+  /**
+   * Classement effectif au moment de la résolution — PAS figé (contrairement au nom) : il sert
+   * uniquement à valider l'ORDRE des simples à l'écriture, jamais affiché ni stocké sur le
+   * match. `null` pour un simple « à désigner », ou pour un joueur dont le classement n'est
+   * pas connu (cf. `RosterEntry.clt`).
+   */
+  clt: string | null;
 }
 
 export type PickResult = { ok: true; value: ResolvedPick } | { ok: false; error: string };
@@ -75,18 +91,39 @@ export async function teamRoster(teamId: string): Promise<RosterEntry[]> {
   const [members, guests] = await Promise.all([
     prisma.user.findMany({
       where: { teamId, disabledAt: null },
-      select: { id: true, displayName: true, nickname: true },
+      select: {
+        id: true,
+        displayName: true,
+        nickname: true,
+        interclubCltOverride: true,
+        squashnetRanking: { select: { clt: true } },
+      },
     }),
     prisma.interclubGuest.findMany({
       where: { teamId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, clt: true },
     }),
   ]);
 
   return [
-    ...members.map((u) => ({ kind: "member" as const, id: u.id, name: memberName(u) })),
-    ...guests.map((g) => ({ kind: "guest" as const, id: g.id, name: g.name })),
+    ...members.map((u) => ({
+      kind: "member" as const,
+      id: u.id,
+      name: memberName(u),
+      clt: memberClt(u),
+    })),
+    ...guests.map((g) => ({ kind: "guest" as const, id: g.id, name: g.name, clt: g.clt ?? null })),
   ].sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
+}
+
+/**
+ * Classement effectif d'un membre : la correction admin si posée, sinon le dernier
+ * rapprochement squashnet. PRIORITÉ à la correction — c'est tout son objet : corriger un
+ * rapprochement qui s'est trompé (nom mal orthographié côté ResaMania, licence pas encore
+ * rapprochée…) sans attendre que squashnet se corrige de lui-même le mois suivant.
+ */
+function memberClt(u: { interclubCltOverride: string | null; squashnetRanking: { clt: string } | null }): string | null {
+  return u.interclubCltOverride ?? u.squashnetRanking?.clt ?? null;
 }
 
 /**
@@ -143,7 +180,15 @@ export async function resolveHomePick(
   if (want.kind === "member") {
     const u = await db.user.findUnique({
       where: { id: want.id },
-      select: { id: true, displayName: true, nickname: true, teamId: true, disabledAt: true },
+      select: {
+        id: true,
+        displayName: true,
+        nickname: true,
+        teamId: true,
+        disabledAt: true,
+        interclubCltOverride: true,
+        squashnetRanking: { select: { clt: true } },
+      },
     });
     return decideMember(u, teamId);
   }
@@ -151,7 +196,7 @@ export async function resolveHomePick(
   if (want.kind === "guest") {
     const g = await db.interclubGuest.findUnique({
       where: { id: want.id },
-      select: { id: true, name: true, teamId: true },
+      select: { id: true, name: true, teamId: true, clt: true },
     });
     return decideGuest(g, teamId);
   }
@@ -184,13 +229,21 @@ export async function resolveHomePicks(
     userIds.length
       ? db.user.findMany({
           where: { id: { in: userIds } },
-          select: { id: true, displayName: true, nickname: true, teamId: true, disabledAt: true },
+          select: {
+            id: true,
+            displayName: true,
+            nickname: true,
+            teamId: true,
+            disabledAt: true,
+            interclubCltOverride: true,
+            squashnetRanking: { select: { clt: true } },
+          },
         })
       : Promise.resolve([]),
     guestIds.length
       ? db.interclubGuest.findMany({
           where: { id: { in: guestIds } },
-          select: { id: true, name: true, teamId: true },
+          select: { id: true, name: true, teamId: true, clt: true },
         })
       : Promise.resolve([]),
   ]);
@@ -225,7 +278,17 @@ function wanted(pick: HomePick): Wanted {
 }
 
 function decideMember(
-  u: { id: string; displayName: string; nickname: string | null; teamId: string | null; disabledAt: Date | null } | null,
+  u:
+    | {
+        id: string;
+        displayName: string;
+        nickname: string | null;
+        teamId: string | null;
+        disabledAt: Date | null;
+        interclubCltOverride: string | null;
+        squashnetRanking: { clt: string } | null;
+      }
+    | null,
   teamId: string,
 ): PickResult {
   if (!u) return { ok: false, error: "Membre inconnu" };
@@ -235,12 +298,17 @@ function decideMember(
   }
   return {
     ok: true,
-    value: { homeUserId: u.id, homeGuestId: null, homeDisplayName: memberName(u) },
+    value: {
+      homeUserId: u.id,
+      homeGuestId: null,
+      homeDisplayName: memberName(u),
+      clt: memberClt(u),
+    },
   };
 }
 
 function decideGuest(
-  g: { id: string; name: string; teamId: string } | null,
+  g: { id: string; name: string; teamId: string; clt: string | null } | null,
   teamId: string,
 ): PickResult {
   if (!g) return { ok: false, error: "Joueur inconnu" };
@@ -253,6 +321,7 @@ function decideGuest(
       homeUserId: null,
       homeGuestId: g.id,
       homeDisplayName: g.name.slice(0, MAX_PLAYER_NAME_LEN),
+      clt: g.clt,
     },
   };
 }
@@ -265,6 +334,59 @@ function decideGuest(
 function unsetPick(): PickResult {
   return {
     ok: true,
-    value: { homeUserId: null, homeGuestId: null, homeDisplayName: UNSET_PLAYER },
+    value: { homeUserId: null, homeGuestId: null, homeDisplayName: UNSET_PLAYER, clt: null },
   };
+}
+
+/**
+ * L'ORDRE des simples est-il respecté si l'on ajoute `candidate` à la composition actuelle de
+ * la rencontre ?
+ *
+ * Relit les AUTRES simples déjà désignés (leur classement n'est pas stocké sur `InterclubMatch`
+ * — seul le nom l'est, figé — donc on le résout à nouveau ici, au moment de la validation) et
+ * confronte l'ensemble à `lineupOrderConflict`. Un simple « à désigner » (candidat compris)
+ * n'a par construction rien à violer : on inscrit souvent une rencontre avant de savoir qui
+ * joue chaque simple.
+ *
+ * À appeler DANS la transaction qui écrit, comme `findAlignmentClash` : deux capitaines qui
+ * composent au même instant doivent voir le même état.
+ */
+export async function findOrderConflict(
+  db: Db & MatchDb,
+  fixtureId: string,
+  exceptMatchId: string,
+  candidate: OrderedSlot,
+): Promise<string | null> {
+  if (candidate.name === UNSET_PLAYER) return null;
+
+  const siblings = await db.interclubMatch.findMany({
+    where: { interclubId: fixtureId, id: { not: exceptMatchId } },
+    select: { order: true, homeDisplayName: true, homeUserId: true, homeGuestId: true },
+  });
+  const designated = siblings.filter((s) => s.homeDisplayName !== UNSET_PLAYER);
+
+  const userIds = [...new Set(designated.flatMap((s) => (s.homeUserId ? [s.homeUserId] : [])))];
+  const guestIds = [...new Set(designated.flatMap((s) => (s.homeGuestId ? [s.homeGuestId] : [])))];
+  const [users, guests] = await Promise.all([
+    userIds.length
+      ? db.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, interclubCltOverride: true, squashnetRanking: { select: { clt: true } } },
+        })
+      : Promise.resolve([]),
+    guestIds.length
+      ? db.interclubGuest.findMany({ where: { id: { in: guestIds } }, select: { id: true, clt: true } })
+      : Promise.resolve([]),
+  ]);
+  const byUser = new Map(users.map((u) => [u.id, memberClt(u)]));
+  const byGuest = new Map(guests.map((g) => [g.id, g.clt]));
+
+  const slots: OrderedSlot[] = designated.map((s) => ({
+    order: s.order,
+    name: s.homeDisplayName,
+    clt: s.homeUserId ? (byUser.get(s.homeUserId) ?? null) : s.homeGuestId ? (byGuest.get(s.homeGuestId) ?? null) : null,
+  }));
+  slots.push(candidate);
+
+  return lineupOrderConflict(slots);
 }

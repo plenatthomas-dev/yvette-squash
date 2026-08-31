@@ -28,6 +28,8 @@ import {
   type Side,
   hexToHsv,
   hsvToHex,
+  lineupComplete,
+  UNSET_PLAYER,
 } from "./interclub";
 
 /**
@@ -583,5 +585,17 @@ describe("hexToHsv / hsvToHex — l'aller-retour doit se refermer", () => {
   it("refuse ce qui n'est pas un #rrggbb", () => {
     expect(hexToHsv("rouge")).toBeNull();
     expect(hexToHsv("#fff")).toBeNull();
+  });
+});
+
+describe("lineupComplete", () => {
+  it("faux si l'un des deux noms est encore « à désigner »", () => {
+    expect(lineupComplete(UNSET_PLAYER, "Dupont")).toBe(false);
+    expect(lineupComplete("Thomas", UNSET_PLAYER)).toBe(false);
+    expect(lineupComplete(UNSET_PLAYER, UNSET_PLAYER)).toBe(false);
+  });
+
+  it("vrai quand les deux joueurs sont désignés", () => {
+    expect(lineupComplete("Thomas", "Dupont")).toBe(true);
   });
 });

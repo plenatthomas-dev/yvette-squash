@@ -15,6 +15,7 @@ import {
   UNSET_PLAYER,
 } from "@/lib/interclub-db";
 import { resolveHomePicks, type HomePick, type ResolvedPick } from "@/lib/interclub-roster";
+import { lineupOrderConflict, type OrderedSlot } from "@/lib/interclub-order";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -176,6 +177,19 @@ export async function POST(req: NextRequest) {
       homeColor: parsedLines[i].homeColor,
       awayColor: parsedLines[i].awayColor,
     });
+  }
+
+  // L'ORDRE des simples doit suivre le classement des joueurs désignés : le mieux classé des
+  // joueurs présents joue le simple n° 1 (cf. `lineupOrderConflict`). Chaque ligne reçue vaut le
+  // NUMÉRO de simple `i+1` — c'est la position dans le tableau `matches` qui fixe l'ordre de
+  // passage, exactement comme la boucle de création plus bas. Les lignes « à désigner » sont
+  // ignorées : on inscrit souvent une rencontre avant de savoir qui joue chaque simple.
+  const orderSlots: OrderedSlot[] = roster
+    .map((r, i) => ({ order: i + 1, name: r.pick.homeDisplayName, clt: r.pick.clt }))
+    .filter((s) => s.name !== UNSET_PLAYER);
+  const orderProblem = lineupOrderConflict(orderSlots);
+  if (orderProblem) {
+    return NextResponse.json({ error: orderProblem }, { status: 400 });
   }
 
   const created = await prisma.interclub.create({

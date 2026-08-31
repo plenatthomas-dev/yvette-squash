@@ -5,6 +5,7 @@ import { Prisma } from "@prisma/client";
 import { isAdminEmail } from "@/lib/admin";
 import {
   isColorValue,
+  lineupComplete,
   normalizeColor,
   sequenceWinner,
   validGameSequence,
@@ -17,7 +18,7 @@ import {
   scorerIsStale,
   MAX_PLAYER_NAME_LEN,
 } from "@/lib/interclub-db";
-import { findAlignmentClash, resolveHomePick } from "@/lib/interclub-roster";
+import { findAlignmentClash, findOrderConflict, resolveHomePick } from "@/lib/interclub-roster";
 import { interclubChanged } from "@/lib/interclub-gate";
 import {
   notifyFixtureDone,
@@ -243,6 +244,16 @@ export async function PATCH(
             `${p.homeDisplayName} dispute déjà le match n° ${clash} de cette rencontre`,
           );
         }
+        // L'ORDRE des simples doit suivre le classement des joueurs désignés (cf.
+        // `lineupOrderConflict`). Confronté aux AUTRES simples de la rencontre, lus dans la
+        // même transaction : deux capitaines qui composent au même instant doivent voir le
+        // même état.
+        const orderProblem = await findOrderConflict(tx, m.interclubId, mid, {
+          order: m.order,
+          clt: p.clt,
+          name: p.homeDisplayName,
+        });
+        if (orderProblem) throw new HttpError(400, orderProblem);
         data.homeUser = p.homeUserId ? { connect: { id: p.homeUserId } } : { disconnect: true };
         data.homeGuest = p.homeGuestId ? { connect: { id: p.homeGuestId } } : { disconnect: true };
         data.homeDisplayName = p.homeDisplayName;
@@ -252,6 +263,21 @@ export async function PATCH(
       }
       if (homeColor !== undefined) data.homeColor = normalizeColor(homeColor);
       if (awayColor !== undefined) data.awayColor = normalizeColor(awayColor);
+
+      // Noms EFFECTIFS après cette écriture — ceux que la requête vient de poser, pas ceux lus
+      // en début de transaction. Composer l'équipe et saisir le score d'un même geste est le
+      // cas ordinaire (cf. plus bas, pour les notifications) ; c'est aussi ici qu'on doit
+      // regarder pour refuser un score sur un simple encore « à désigner ».
+      const effHome =
+        typeof data.homeDisplayName === "string" ? data.homeDisplayName : m.homeDisplayName;
+      const effAway = typeof data.awayName === "string" ? data.awayName : m.awayName;
+
+      // Un « à désigner » ne doit jamais commencer à jouer : ni marquage en direct (route sœur
+      // `PUT …/live`), ni saisie a posteriori ici. Ne bloque que l'AJOUT de jeux — vider la
+      // liste (undo, correction) reste toujours permis, quel que soit l'état de la composition.
+      if (parsedGames && parsedGames.length > 0 && !lineupComplete(effHome, effAway)) {
+        throw new HttpError(400, "Désigne les deux joueurs avant de saisir un score");
+      }
 
       if (parsedGames) {
         const winner = sequenceWinner(parsedGames, m.interclub.bestOf);
@@ -351,14 +377,9 @@ export async function PATCH(
       // MATCH comparent l'état lu en début de transaction ; celles qui portent sur la RENCONTRE
       // lisent des marqueurs persistants, une comparaison de statut ne pouvant pas tenir (cf.
       // plus haut).
-      // Les noms EFFECTIFS, c'est-à-dire ceux que cette requête vient d'écrire — et non
-      // ceux lus en début de transaction. Composer l'équipe et saisir le score d'un même
-      // geste est le cas ordinaire : la notification annonçait alors « à désigner c. à
-      // désigner » alors que les joueurs venaient d'être choisis.
-      const effHome =
-        typeof data.homeDisplayName === "string" ? data.homeDisplayName : m.homeDisplayName;
-      const effAway = typeof data.awayName === "string" ? data.awayName : m.awayName;
-
+      // `effHome`/`effAway` : calculés plus haut, avant l'écriture des jeux — c'est aussi ce
+      // que la notification doit annoncer (« à désigner c. à désigner » ne s'affichait plus une
+      // fois les joueurs choisis dans le même geste que le score).
       const gamesGrew = !!parsedGames && parsedGames.length > m.games.length;
       const winner = parsedGames ? sequenceWinner(parsedGames, m.interclub.bestOf) : null;
       const matchNewlyDone = !!winner && m.status !== "done";

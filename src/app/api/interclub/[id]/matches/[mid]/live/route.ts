@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
 import { HttpError, httpErrorResponse, readJsonBody, serializableTransaction } from "@/lib/http-tx";
-import { sequenceWinner, validGameSequence, type GameScore } from "@/lib/interclub";
+import { lineupComplete, sequenceWinner, validGameSequence, type GameScore } from "@/lib/interclub";
 import {
   derivedStatus,
   staleGamesReason,
@@ -167,6 +167,14 @@ export async function PUT(
         },
       });
       if (!m || m.interclubId !== id) throw new HttpError(404, "Match introuvable");
+
+      // Un « à désigner » ne doit jamais commencer à jouer. Le CLAIM (route sœur `POST …/claim`)
+      // le refuse déjà à l'entrée de l'écran de marquage, mais cette route reprend un match en
+      // silence quand personne ne le tient (cf. plus bas) — sans cette garde, un simple resté
+      // sans joueurs désignés pourrait quand même recevoir des points.
+      if ((enJeu || parsed.length > 0) && !lineupComplete(m.homeDisplayName, m.awayName)) {
+        throw new HttpError(400, "Désigne les deux joueurs avant de marquer");
+      }
 
       // ⚠️ CE CONTRÔLE N'EST PAS UN CONTRÔLE D'ACCÈS — c'est un contrôle d'EXCLUSION MUTUELLE.
       // Tout membre connecté peut marquer n'importe quel match LIBRE, et c'est voulu : le

@@ -24,7 +24,7 @@ type CronRun = { name: string; lastRunAt: string; ok: boolean; info: string | nu
 /** Équipe interclub et son effectif inscrit sur l'appli (l'affectation se fait page Membres). */
 type IcTeam = { id: string; name: string; memberCount: number };
 /** Joueur d'une équipe SANS compte : il joue le championnat sans utiliser l'appli. */
-type IcGuest = { id: string; teamId: string; name: string };
+type IcGuest = { id: string; teamId: string; name: string; clt: string | null };
 type Dashboard = {
   members: number;
   disabledMembers: number;
@@ -105,6 +105,10 @@ export default function AdminPage() {
   const [icGuests, setIcGuests] = useState<IcGuest[]>([]);
   const [icTeamId, setIcTeamId] = useState("");
   const [icName, setIcName] = useState("");
+  // Classement fédéral du joueur hors appli, pour l'ORDRE des simples interclub (le mieux
+  // classé des joueurs présents joue le simple n° 1) — un invité n'a pas de compte, donc rien
+  // à rapprocher sur squashnet ; c'est ici, et nulle part ailleurs, que ce classement se saisit.
+  const [icClt, setIcClt] = useState("");
 
   useEffect(() => {
     if (!emailLogin) return;
@@ -328,7 +332,7 @@ export default function AdminPage() {
       const res = await fetch("/api/admin/interclub-teams", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "add_guest", teamId: icTeamId, name }),
+        body: JSON.stringify({ action: "add_guest", teamId: icTeamId, name, clt: icClt.trim() }),
       });
       const data = (await res.json().catch(() => ({}))) as { guest?: IcGuest; error?: string };
       if (!res.ok || !data.guest) {
@@ -337,9 +341,36 @@ export default function AdminPage() {
       }
       setIcGuests((prev) => [...prev, data.guest!].sort((a, b) => a.name.localeCompare(b.name, "fr")));
       setIcName("");
+      setIcClt("");
       setIcResult({ ok: true, text: `${data.guest.name} ajouté.` });
     } catch {
       setIcResult({ ok: false, text: "Ajout impossible." });
+    } finally {
+      setIcBusy(false);
+    }
+  };
+
+  // Correction du classement d'un invité déjà inscrit. Enregistrée à la perte de focus, comme
+  // le champ équivalent de la page Membres — retaper la valeur déjà enregistrée n'écrit rien.
+  const setGuestClt = async (g: IcGuest, raw: string) => {
+    const clt = raw.trim();
+    if ((g.clt ?? "") === clt) return;
+    setIcBusy(true);
+    setIcResult(null);
+    try {
+      const res = await fetch("/api/admin/interclub-teams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_guest_clt", guestId: g.id, clt }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { clt?: string | null; error?: string };
+      if (!res.ok) {
+        setIcResult({ ok: false, text: data.error ?? "Enregistrement impossible." });
+        return;
+      }
+      setIcGuests((prev) => prev.map((x) => (x.id === g.id ? { ...x, clt: data.clt ?? null } : x)));
+    } catch {
+      setIcResult({ ok: false, text: "Enregistrement impossible." });
     } finally {
       setIcBusy(false);
     }
@@ -799,15 +830,34 @@ export default function AdminPage() {
                                   }}
                                 >
                                   <span>{g.name}</span>
-                                  <button
-                                    type="button"
-                                    className="secondary tiny"
-                                    disabled={icBusy}
-                                    onClick={() => removeGuest(g)}
-                                    style={{ flex: "0 0 auto" }}
-                                  >
-                                    Retirer
-                                  </button>
+                                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                    {/* Un invité n'a pas de compte, donc rien à rapprocher sur
+                                        squashnet : son classement — qui décide de l'ordre des
+                                        simples interclub — se saisit ici, à la main. Enregistré
+                                        à la perte de focus, comme la correction équivalente sur
+                                        la page Membres. */}
+                                    <input
+                                      key={`clt-${g.id}-${g.clt ?? ""}`}
+                                      type="text"
+                                      defaultValue={g.clt ?? ""}
+                                      placeholder="classement"
+                                      maxLength={8}
+                                      disabled={icBusy}
+                                      onBlur={(e) => setGuestClt(g, e.target.value)}
+                                      aria-label={`Classement interclub de ${g.name}`}
+                                      title="Classement fédéral (ex. 5A, 4D, NC), pour l'ordre des simples interclub."
+                                      style={{ margin: 0, width: "5em" }}
+                                    />
+                                    <button
+                                      type="button"
+                                      className="secondary tiny"
+                                      disabled={icBusy}
+                                      onClick={() => removeGuest(g)}
+                                      style={{ flex: "0 0 auto" }}
+                                    >
+                                      Retirer
+                                    </button>
+                                  </span>
                                 </li>
                               ))}
                             </ul>
@@ -837,6 +887,15 @@ export default function AdminPage() {
                         maxLength={40}
                         aria-label="Prénom et nom du joueur hors appli"
                         style={{ margin: 0, flex: "1 1 140px" }}
+                      />
+                      <input
+                        value={icClt}
+                        onChange={(e) => setIcClt(e.target.value)}
+                        placeholder="classement"
+                        maxLength={8}
+                        aria-label="Classement fédéral du joueur hors appli (facultatif)"
+                        title="Classement fédéral (ex. 5A, 4D, NC) — facultatif, pour l'ordre des simples interclub."
+                        style={{ margin: 0, flex: "0 1 90px" }}
                       />
                       <button
                         type="button"

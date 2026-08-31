@@ -5,8 +5,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // éprouvée qu'à travers les tests de routes ; ici on la vérifie à la source.
 
 const h = vi.hoisted(() => ({
-  membres: [] as Array<{ id: string; displayName: string; nickname: string | null }>,
-  invites: [] as Array<{ id: string; name: string }>,
+  membres: [] as Array<Record<string, unknown>>,
+  invites: [] as Array<Record<string, unknown>>,
   dernierWhereUser: null as null | Record<string, unknown>,
 }));
 
@@ -26,6 +26,7 @@ vi.mock("./db", () => ({
 
 import {
   findAlignmentClash,
+  findOrderConflict,
   resolveHomePick,
   resolveHomePicks,
   teamRoster,
@@ -50,6 +51,8 @@ const membre = (over: Record<string, unknown> = {}) => ({
   nickname: null,
   teamId: "t1",
   disabledAt: null,
+  interclubCltOverride: null,
+  squashnetRanking: null,
   ...over,
 });
 
@@ -86,6 +89,28 @@ describe("teamRoster", () => {
     await teamRoster("t1");
     expect(h.dernierWhereUser).not.toHaveProperty("listed");
   });
+
+  it("classement d'un membre : la correction admin l'emporte sur le rapprochement squashnet", async () => {
+    h.membres = [
+      membre({ id: "u1", displayName: "Zoé", interclubCltOverride: "5B", squashnetRanking: { clt: "3A" } }),
+    ];
+    expect((await teamRoster("t1"))[0].clt).toBe("5B");
+  });
+
+  it("classement d'un membre : à défaut de correction, le rapprochement squashnet", async () => {
+    h.membres = [membre({ id: "u1", displayName: "Zoé", squashnetRanking: { clt: "3A" } })];
+    expect((await teamRoster("t1"))[0].clt).toBe("3A");
+  });
+
+  it("classement d'un membre : `null` si ni correction ni rapprochement", async () => {
+    h.membres = [membre({ id: "u1", displayName: "Zoé" })];
+    expect((await teamRoster("t1"))[0].clt).toBeNull();
+  });
+
+  it("classement d'un invité : celui saisi par l'admin", async () => {
+    h.invites = [{ id: "g1", name: "Émile", clt: "4D" } as never];
+    expect((await teamRoster("t1"))[0].clt).toBe("4D");
+  });
 });
 
 describe("resolveHomePick", () => {
@@ -93,7 +118,7 @@ describe("resolveHomePick", () => {
     const r = await resolveHomePick(db({ u1: membre({ nickname: "Tom" }) }), "t1", { userId: "u1" });
     expect(r).toEqual({
       ok: true,
-      value: { homeUserId: "u1", homeGuestId: null, homeDisplayName: "Tom" },
+      value: { homeUserId: "u1", homeGuestId: null, homeDisplayName: "Tom", clt: null },
     });
   });
 
@@ -133,7 +158,7 @@ describe("resolveHomePick", () => {
     const r = await resolveHomePick(db(), "t1", {});
     expect(r).toEqual({
       ok: true,
-      value: { homeUserId: null, homeGuestId: null, homeDisplayName: "À désigner" },
+      value: { homeUserId: null, homeGuestId: null, homeDisplayName: "À désigner", clt: null },
     });
   });
 
@@ -269,5 +294,121 @@ describe("findAlignmentClash", () => {
     const { client, vu } = matchDb(null);
     await findAlignmentClash(client, "f1", "m1", { homeUserId: null, homeGuestId: "g1" });
     expect(vu.where).toMatchObject({ homeGuestId: "g1" });
+  });
+});
+
+describe("findOrderConflict", () => {
+  /**
+   * Faux client combinant les trois lectures : les simples voisins (`interclubMatch`), et le
+   * classement de ceux d'entre eux qui portent un membre ou un invité.
+   */
+  function orderDb(
+    siblings: { order: number; homeDisplayName: string; homeUserId: string | null; homeGuestId: string | null }[],
+    users: Record<string, { interclubCltOverride: string | null; squashnetRanking: { clt: string } | null }> = {},
+    guests: Record<string, { clt: string | null }> = {},
+  ) {
+    return {
+      interclubMatch: { findMany: async () => siblings },
+      user: {
+        findMany: async ({ where }: { where: { id: { in: string[] } } }) =>
+          where.id.in.filter((id) => id in users).map((id) => ({ id, ...users[id] })),
+      },
+      interclubGuest: {
+        findMany: async ({ where }: { where: { id: { in: string[] } } }) =>
+          where.id.in.filter((id) => id in guests).map((id) => ({ id, ...guests[id] })),
+      },
+    } as never;
+  }
+
+  it("« à désigner » n'a jamais de conflit d'ordre — on ne relit même pas les voisins", async () => {
+    let lu = false;
+    const client = {
+      interclubMatch: {
+        findMany: async () => {
+          lu = true;
+          return [];
+        },
+      },
+      user: { findMany: async () => [] },
+      interclubGuest: { findMany: async () => [] },
+    } as never;
+    const pb = await findOrderConflict(client, "f1", "m1", {
+      order: 1,
+      clt: null,
+      name: "À désigner",
+    });
+    expect(pb).toBeNull();
+    expect(lu).toBe(false);
+  });
+
+  it("accepte un candidat dont le classement respecte l'ordre des voisins", async () => {
+    const client = orderDb(
+      [{ order: 1, homeDisplayName: "Albert", homeUserId: "u1", homeGuestId: null }],
+      { u1: { interclubCltOverride: null, squashnetRanking: { clt: "4D" } } },
+    );
+    const pb = await findOrderConflict(client, "f1", "m2", {
+      order: 2,
+      clt: "5A",
+      name: "Benoît",
+    });
+    expect(pb).toBeNull();
+  });
+
+  it("refuse Benoît (4D) au simple 2 quand Albert (5A) joue déjà le simple 1", async () => {
+    const client = orderDb(
+      [{ order: 1, homeDisplayName: "Albert", homeUserId: "u1", homeGuestId: null }],
+      { u1: { interclubCltOverride: null, squashnetRanking: { clt: "5A" } } },
+    );
+    const pb = await findOrderConflict(client, "f1", "m2", {
+      order: 2,
+      clt: "4D",
+      name: "Benoît",
+    });
+    expect(pb).toContain("Benoît");
+  });
+
+  it("relit le classement des invités voisins comme celui des membres", async () => {
+    const client = orderDb(
+      [{ order: 1, homeDisplayName: "Gabin", homeUserId: null, homeGuestId: "g1" }],
+      {},
+      { g1: { clt: "5A" } },
+    );
+    // Gabin (5A) en simple 1, Benoît (NC, plus faible) en simple 2 : ordre respecté.
+    const ok = await findOrderConflict(client, "f1", "m2", {
+      order: 2,
+      clt: "NC",
+      name: "Benoît",
+    });
+    expect(ok).toBeNull();
+
+    // L'inverse — Benoît (NC) en simple 1 pendant que Gabin (5A, mieux classé) attend au
+    // simple 2 — viole l'ordre, invité compris.
+    const clientInverse = orderDb(
+      [{ order: 1, homeDisplayName: "Benoît", homeUserId: null, homeGuestId: "g1" }],
+      {},
+      { g1: { clt: "NC" } },
+    );
+    const pb = await findOrderConflict(clientInverse, "f1", "m2", {
+      order: 2,
+      clt: "5A",
+      name: "Gabin",
+    });
+    expect(pb).toContain("Gabin");
+  });
+
+  it("exclut le simple qu'on modifie de la liste des voisins", async () => {
+    let vu: Record<string, unknown> | undefined;
+    const client = {
+      interclubMatch: {
+        findMany: async (args: { where: Record<string, unknown> }) => {
+          vu = args.where;
+          return [];
+        },
+      },
+      user: { findMany: async () => [] },
+      interclubGuest: { findMany: async () => [] },
+    } as never;
+    await findOrderConflict(client, "f1", "m1", { order: 1, clt: "5A", name: "Albert" });
+    expect(vu).toEqual({ interclubId: "f1", id: { not: "m1" } });
   });
 });

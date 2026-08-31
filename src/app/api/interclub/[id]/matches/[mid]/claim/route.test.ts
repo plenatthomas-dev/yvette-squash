@@ -53,6 +53,8 @@ const freshMatch = () => ({
   scorerId: null,
   scorerClaimedAt: null,
   updatedAt: OLD,
+  homeDisplayName: "Thomas",
+  awayName: "Dupont",
 });
 
 beforeEach(() => {
@@ -115,6 +117,21 @@ describe("POST .../claim", () => {
     h.match = { ...freshMatch(), status: "live" };
     await POST(req(), ctx);
     expect(h.updated).not.toHaveProperty("status");
+  });
+
+  it("refuse de prendre le marquage tant que le joueur de l'équipe n'est pas désigné", async () => {
+    h.match = { ...freshMatch(), homeDisplayName: "À désigner" };
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/désigne les deux joueurs/i);
+    expect(h.updated).toBeNull();
+  });
+
+  it("refuse de prendre le marquage tant que l'adversaire n'est pas désigné", async () => {
+    h.match = { ...freshMatch(), awayName: "À désigner" };
+    const res = await POST(req(), ctx);
+    expect(res.status).toBe(400);
+    expect(h.updated).toBeNull();
   });
 });
 

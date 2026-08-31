@@ -292,6 +292,48 @@ describe("POST /api/admin/members", () => {
     h.admin = null;
     expect((await POST(postReq({ id: "u1", action: "set_team", teamId: "t1" }))).status).toBe(403);
   });
+
+  // --- Correction admin du classement ---------------------------------------
+  // Sert quand le rapprochement squashnet a échoué ou s'est trompé (nom mal orthographié côté
+  // ResaMania, licence pas encore rapprochée…) : l'ordre des simples interclub (cf.
+  // lib/interclub-order.ts) doit pouvoir continuer à s'appliquer malgré l'erreur.
+
+  it("set_clt_override : force le classement, normalisé en MAJUSCULES", async () => {
+    const res = await POST(postReq({ id: "u1", action: "set_clt_override", clt: "5b" }));
+    expect(res.status).toBe(200);
+    expect(h.userUpdate).toHaveBeenCalledWith({
+      where: { id: "u1" },
+      data: { interclubCltOverride: "5B" },
+    });
+  });
+
+  it("set_clt_override : une chaîne vide retire la correction", async () => {
+    await POST(postReq({ id: "u1", action: "set_clt_override", clt: "" }));
+    expect(h.userUpdate).toHaveBeenCalledWith({
+      where: { id: "u1" },
+      data: { interclubCltOverride: null },
+    });
+  });
+
+  it("set_clt_override : refuse un format non reconnu", async () => {
+    const res = await POST(postReq({ id: "u1", action: "set_clt_override", clt: "cinq" }));
+    expect(res.status).toBe(400);
+    expect(h.userUpdate).not.toHaveBeenCalled();
+  });
+
+  it("set_clt_override : 404 si l'interclub est désactivé", async () => {
+    h.featureInterclub = false;
+    expect(
+      (await POST(postReq({ id: "u1", action: "set_clt_override", clt: "5A" }))).status,
+    ).toBe(404);
+  });
+
+  it("set_clt_override : réservé aux admins, comme le reste de la route", async () => {
+    h.admin = null;
+    expect(
+      (await POST(postReq({ id: "u1", action: "set_clt_override", clt: "5A" }))).status,
+    ).toBe(403);
+  });
 });
 
 describe("POST /api/admin/members — désactiver, sans laisser de tricount bloqué", () => {

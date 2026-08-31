@@ -28,6 +28,14 @@ export type MemberRow = {
   // Équipe interclub, décidée par l'admin depuis cette page (NULL = aucune). Ce n'est pas une
   // préférence du membre : elle décide qui peut être aligné dans une rencontre.
   teamId: string | null;
+  // Classement fédéral EFFECTIF pour l'ordre des simples interclub (cf. lib/interclub-order.ts) :
+  // la correction admin si posée, sinon le dernier rapprochement squashnet. `cltOverride` porte
+  // la correction seule (pour préremplir le champ de saisie) ; `cltSource` dit d'où vient
+  // `clt` — l'admin doit savoir si ce qu'il voit est le rapprochement automatique ou déjà une
+  // correction, avant d'écraser l'un ou l'autre.
+  clt: string | null;
+  cltOverride: string | null;
+  cltSource: "override" | "squashnet" | null;
   // Origine des résas du membre sur 30 j glissants (cf. src/lib/booking-origin.ts pour la
   // mise en mots, qui dépend aussi de `mode` : un compte « email seul » n'est pas mesurable).
   bookingsApp: number;
@@ -70,6 +78,8 @@ export async function listMembers(): Promise<MemberRow[]> {
       disabledAt: true,
       createdAt: true,
       teamId: true,
+      interclubCltOverride: true,
+      squashnetRanking: { select: { clt: true } },
       passkeys: {
         select: { id: true, deviceLabel: true, createdAt: true, lastUsedAt: true },
         orderBy: { createdAt: "desc" },
@@ -95,6 +105,9 @@ export async function listMembers(): Promise<MemberRow[]> {
     disabledAt: u.disabledAt?.toISOString() ?? null,
     createdAt: u.createdAt.toISOString(),
     teamId: u.teamId,
+    clt: u.interclubCltOverride ?? u.squashnetRanking?.clt ?? null,
+    cltOverride: u.interclubCltOverride,
+    cltSource: u.interclubCltOverride ? "override" : u.squashnetRanking ? "squashnet" : null,
     bookingsApp: originByUser.get(u.id)?.app ?? 0,
     bookingsResa: originByUser.get(u.id)?.resa ?? 0,
   }));

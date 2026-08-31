@@ -7,8 +7,10 @@ const h = vi.hoisted(() => ({
   session: null as null | { userId: string },
   teams: [] as Array<Record<string, unknown>>,
   team: null as null | Record<string, unknown>,
-  /** Le membre que `resolveHomePick` trouvera (ou non) — un seul suffit à ces tests. */
+  /** Le membre que `resolveHomePick` trouvera (ou non) — un seul suffit à la plupart des tests. */
   user: null as null | Record<string, unknown>,
+  /** Membres SUPPLÉMENTAIRES, pour les tests qui composent plusieurs simples à la fois. */
+  users: [] as Array<Record<string, unknown>>,
   /** Idem pour un joueur d'équipe sans compte. */
   guest: null as null | Record<string, unknown>,
   fixtures: [] as Array<Record<string, unknown>>,
@@ -39,7 +41,9 @@ vi.mock("@/lib/db", () => ({
     user: {
       findUnique: vi.fn(async () => h.user),
       findMany: vi.fn(async (args: { where: { id: { in: string[] } } }) =>
-        h.user && args.where.id.in.includes(h.user.id as string) ? [h.user] : [],
+        [...(h.user ? [h.user] : []), ...h.users].filter((u) =>
+          args.where.id.in.includes(u.id as string),
+        ),
       ),
     },
     interclubGuest: {
@@ -77,6 +81,7 @@ beforeEach(() => {
   h.teams = [{ id: "t1", name: "Équipe 1" }];
   h.team = { id: "t1", name: "Équipe 1" };
   h.user = null;
+  h.users = [];
   h.guest = null;
   h.fixtures = [];
   h.created = null;
@@ -266,5 +271,70 @@ describe("POST /api/interclub", () => {
   it("refuse plus de joueurs que de matchs", async () => {
     const res = await POST(post({ ...validBody, matchCount: 1, matches: [{}, {}] }));
     expect(res.status).toBe(400);
+  });
+
+  // --- Ordre des simples par classement -------------------------------------
+
+  it("refuse une composition qui romprait l'ordre des simples par classement", async () => {
+    h.users = [
+      {
+        id: "u-albert",
+        displayName: "Albert",
+        nickname: null,
+        teamId: "t1",
+        disabledAt: null,
+        interclubCltOverride: null,
+        squashnetRanking: { clt: "5A" },
+      },
+      {
+        id: "u-benoit",
+        displayName: "Benoît",
+        nickname: null,
+        teamId: "t1",
+        disabledAt: null,
+        interclubCltOverride: null,
+        squashnetRanking: { clt: "4D" },
+      },
+    ];
+    // Albert (5A) au simple 1, Benoît (4D, MIEUX classé) au simple 2 : ordre rompu.
+    const res = await POST(
+      post({ ...validBody, matches: [{ userId: "u-albert" }, { userId: "u-benoit" }] }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("Benoît");
+    expect(h.created).toBeNull();
+  });
+
+  it("accepte une composition qui respecte l'ordre des simples par classement", async () => {
+    h.users = [
+      {
+        id: "u-albert",
+        displayName: "Albert",
+        nickname: null,
+        teamId: "t1",
+        disabledAt: null,
+        interclubCltOverride: null,
+        squashnetRanking: { clt: "4D" },
+      },
+      {
+        id: "u-benoit",
+        displayName: "Benoît",
+        nickname: null,
+        teamId: "t1",
+        disabledAt: null,
+        interclubCltOverride: null,
+        squashnetRanking: { clt: "5A" },
+      },
+    ];
+    const res = await POST(
+      post({ ...validBody, matches: [{ userId: "u-albert" }, { userId: "u-benoit" }] }),
+    );
+    expect(res.status).toBe(201);
+  });
+
+  it("n'exige aucun classement quand un seul simple est composé", async () => {
+    h.user = { id: "u9", displayName: "Jérôme", nickname: null, teamId: "t1", disabledAt: null };
+    const res = await POST(post({ ...validBody, matches: [{ userId: "u9" }] }));
+    expect(res.status).toBe(201);
   });
 });

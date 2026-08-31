@@ -15,6 +15,8 @@ const h = vi.hoisted(() => ({
   deleted: 0,
   /** Force le `create` à échouer comme le ferait la contrainte @@unique([teamId, name]). */
   duplicate: false,
+  updated: null as null | Record<string, unknown>,
+  updatedCount: 1,
 }));
 
 vi.mock("@/lib/features-server", () => ({
@@ -40,6 +42,10 @@ vi.mock("@/lib/db", () => ({
         h.created = args.data;
         return { id: "g-new", ...args.data };
       }),
+      updateMany: vi.fn(async (args: { data: Record<string, unknown> }) => {
+        h.updated = args.data;
+        return { count: h.updatedCount };
+      }),
       deleteMany: vi.fn(async () => ({ count: h.deleted })),
     },
   },
@@ -55,11 +61,13 @@ beforeEach(() => {
   h.interclub = true;
   h.admin = { userId: "admin1", email: "admin@example.com" };
   h.teams = [{ id: "t1", name: "Équipe 1", _count: { members: 3 } }];
-  h.guests = [{ id: "g1", teamId: "t1", name: "Paul Hors-Appli" }];
+  h.guests = [{ id: "g1", teamId: "t1", name: "Paul Hors-Appli", clt: null }];
   h.team = { id: "t1", _count: { guests: 1 } };
   h.created = null;
   h.deleted = 1;
   h.duplicate = false;
+  h.updated = null;
+  h.updatedCount = 1;
 });
 
 describe("GET /api/admin/interclub-teams", () => {
@@ -76,7 +84,7 @@ describe("GET /api/admin/interclub-teams", () => {
   it("rend les équipes avec leur effectif inscrit, et les joueurs hors appli", async () => {
     const body = await (await GET(get())).json();
     expect(body.teams).toEqual([{ id: "t1", name: "Équipe 1", memberCount: 3 }]);
-    expect(body.guests).toEqual([{ id: "g1", teamId: "t1", name: "Paul Hors-Appli" }]);
+    expect(body.guests).toEqual([{ id: "g1", teamId: "t1", name: "Paul Hors-Appli", clt: null }]);
   });
 });
 
@@ -89,7 +97,23 @@ describe("POST /api/admin/interclub-teams", () => {
   it("inscrit un joueur sans compte au roster d'une équipe", async () => {
     const res = await POST(post({ action: "add_guest", teamId: "t1", name: "Jean Dupont" }));
     expect(res.status).toBe(201);
-    expect(h.created).toEqual({ teamId: "t1", name: "Jean Dupont" });
+    expect(h.created).toEqual({ teamId: "t1", name: "Jean Dupont", clt: null });
+  });
+
+  it("inscrit un joueur avec son classement, et le normalise en MAJUSCULES", async () => {
+    const res = await POST(
+      post({ action: "add_guest", teamId: "t1", name: "Jean Dupont", clt: "5b" }),
+    );
+    expect(res.status).toBe(201);
+    expect(h.created).toMatchObject({ clt: "5B" });
+  });
+
+  it("refuse un classement mal formé à l'inscription", async () => {
+    const res = await POST(
+      post({ action: "add_guest", teamId: "t1", name: "Jean Dupont", clt: "cinq" }),
+    );
+    expect(res.status).toBe(400);
+    expect(h.created).toBeNull();
   });
 
   // Sans normalisation, « Jean  Dupont » et « Jean Dupont » seraient deux joueurs distincts
@@ -120,6 +144,31 @@ describe("POST /api/admin/interclub-teams", () => {
     const res = await POST(post({ action: "add_guest", teamId: "t1", name: "Un de trop" }));
     expect(res.status).toBe(400);
     expect(h.created).toBeNull();
+  });
+
+  it("corrige le classement d'un invité déjà inscrit", async () => {
+    const res = await POST(post({ action: "set_guest_clt", guestId: "g1", clt: "4d" }));
+    expect(res.status).toBe(200);
+    expect(h.updated).toEqual({ clt: "4D" });
+  });
+
+  it("efface le classement d'un invité avec une chaîne vide", async () => {
+    const res = await POST(post({ action: "set_guest_clt", guestId: "g1", clt: "" }));
+    expect(res.status).toBe(200);
+    expect(h.updated).toEqual({ clt: null });
+  });
+
+  it("refuse un classement mal formé à la correction", async () => {
+    const res = await POST(post({ action: "set_guest_clt", guestId: "g1", clt: "??" }));
+    expect(res.status).toBe(400);
+    expect(h.updated).toBeNull();
+  });
+
+  it("404 en corrigeant le classement d'un invité qui n'existe pas", async () => {
+    h.updatedCount = 0;
+    expect(
+      (await POST(post({ action: "set_guest_clt", guestId: "gX", clt: "5A" }))).status,
+    ).toBe(404);
   });
 
   it("retire un joueur du roster", async () => {

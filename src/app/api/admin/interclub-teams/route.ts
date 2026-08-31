@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/admin";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
 import { MAX_PLAYER_NAME_LEN } from "@/lib/interclub-db";
+import { parseClassementInput } from "@/lib/interclub-order";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
     }),
     prisma.interclubGuest.findMany({
       orderBy: { name: "asc" },
-      select: { id: true, teamId: true, name: true },
+      select: { id: true, teamId: true, name: true, clt: true },
     }),
   ]);
 
@@ -59,8 +60,10 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/admin/interclub-teams
-//   { action: "add_guest", teamId, name }  → inscrit un joueur sans compte au roster d'une équipe
-//   { action: "remove_guest", guestId }    → l'en retire
+//   { action: "add_guest", teamId, name, clt? } → inscrit un joueur sans compte au roster d'une
+//                                                  équipe, avec son classement fédéral si connu
+//   { action: "set_guest_clt", guestId, clt }   → corrige le classement d'un invité déjà inscrit
+//   { action: "remove_guest", guestId }         → retire un invité du roster
 export async function POST(req: NextRequest) {
   const off = await interclubDisabledResponse();
   if (off) return off;
@@ -73,6 +76,7 @@ export async function POST(req: NextRequest) {
     teamId?: unknown;
     guestId?: unknown;
     name?: unknown;
+    clt?: unknown;
   };
 
   if (body.action === "add_guest") {
@@ -88,6 +92,10 @@ export async function POST(req: NextRequest) {
     if (!name) {
       return NextResponse.json({ error: "Nom manquant" }, { status: 400 });
     }
+    // Un invité n'a pas de compte, donc rien à rapprocher sur squashnet : son classement — qui
+    // décide de l'ordre des simples (cf. `lib/interclub-order.ts`) — se saisit ici, à la main.
+    const clt = parseClassementInput(body.clt);
+    if (!clt.ok) return NextResponse.json({ error: clt.error }, { status: 400 });
 
     const team = await prisma.interclubTeam.findUnique({
       where: { id: body.teamId },
@@ -105,8 +113,8 @@ export async function POST(req: NextRequest) {
 
     try {
       const guest = await prisma.interclubGuest.create({
-        data: { teamId: team.id, name },
-        select: { id: true, teamId: true, name: true },
+        data: { teamId: team.id, name, clt: clt.value },
+        select: { id: true, teamId: true, name: true, clt: true },
       });
       return NextResponse.json({ ok: true, guest }, { status: 201 });
     } catch (e) {
@@ -120,6 +128,23 @@ export async function POST(req: NextRequest) {
       }
       throw e;
     }
+  }
+
+  if (body.action === "set_guest_clt") {
+    if (typeof body.guestId !== "string" || !body.guestId) {
+      return NextResponse.json({ error: "Joueur invalide" }, { status: 400 });
+    }
+    const clt = parseClassementInput(body.clt);
+    if (!clt.ok) return NextResponse.json({ error: clt.error }, { status: 400 });
+
+    const { count } = await prisma.interclubGuest.updateMany({
+      where: { id: body.guestId },
+      data: { clt: clt.value },
+    });
+    if (count === 0) {
+      return NextResponse.json({ error: "Joueur introuvable" }, { status: 404 });
+    }
+    return NextResponse.json({ ok: true, clt: clt.value });
   }
 
   if (body.action === "remove_guest") {

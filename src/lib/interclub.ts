@@ -392,6 +392,21 @@ export function seedEvents(games: readonly GameScore[], bestOf: number): ScoreEv
  */
 export const UNSET_PLAYER = "À désigner";
 
+/**
+ * Les deux joueurs d'un simple sont-ils désignés ?
+ *
+ * Un « à désigner » ne doit jamais commencer à jouer : ni le marquage en direct, ni une saisie
+ * a posteriori. Sans cette garde, une notification annonçait « la rencontre commence » avec
+ * comme nom de joueur le placeholder lui-même — lisible par tous les abonnés, alors que
+ * personne n'a encore été désigné.
+ *
+ * Fonction PARTAGÉE, appelée à l'identique côté client (pour désactiver les boutons plutôt que
+ * de tendre un piège) et côté serveur (la garde qui compte réellement).
+ */
+export function lineupComplete(homeDisplayName: string, awayName: string): boolean {
+  return homeDisplayName !== UNSET_PLAYER && awayName !== UNSET_PLAYER;
+}
+
 export const INK_LIGHT = "#ffffff";
 export const INK_DARK = "#000000";
 

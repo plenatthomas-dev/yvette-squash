@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
 import { HttpError, httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
 import { prisma } from "@/lib/db";
+import { lineupComplete } from "@/lib/interclub";
 import { scorerIsStale } from "@/lib/interclub-db";
 import { interclubChanged } from "@/lib/interclub-gate";
 
@@ -34,10 +35,19 @@ export async function POST(
           scorerId: true,
           scorerClaimedAt: true,
           updatedAt: true,
+          homeDisplayName: true,
+          awayName: true,
         },
       });
       if (!m || m.interclubId !== id) throw new HttpError(404, "Match introuvable");
       if (m.status === "done") throw new HttpError(409, "Ce match est terminé");
+
+      // Un « à désigner » ne doit jamais commencer à jouer : le marquage en direct suppose que
+      // les deux joueurs soient déjà connus, sinon les notifications annonceraient le
+      // placeholder comme un vrai nom.
+      if (!lineupComplete(m.homeDisplayName, m.awayName)) {
+        throw new HttpError(400, "Désigne les deux joueurs avant de marquer en direct");
+      }
 
       const heldByOther = m.scorerId !== null && m.scorerId !== session.userId;
       if (heldByOther && !scorerIsStale(m.scorerClaimedAt)) {

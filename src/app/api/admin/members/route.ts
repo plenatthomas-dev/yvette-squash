@@ -4,6 +4,7 @@ import { requireAdmin, isAdminEmail } from "@/lib/admin";
 import { listMembers, deleteBlockersFor } from "@/lib/members";
 import { getFeatures } from "@/lib/features-server";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
+import { parseClassementInput } from "@/lib/interclub-order";
 import { createEmailToken, authLinkFor, clientIp } from "@/lib/email-auth";
 import { alertsChanged } from "@/lib/alerts-gate";
 import { approveAsDisabledPayer } from "@/lib/tricount-summary";
@@ -47,6 +48,10 @@ export async function GET(req: NextRequest) {
 //   set_team        → rattache le membre à une équipe interclub (body.teamId, null = aucune).
 //                     Décision d'ADMIN et non réglage personnel : l'appartenance à une équipe
 //                     décide qui peut être aligné dans une rencontre.
+//   set_clt_override → force le classement fédéral de ce membre pour l'ordre des simples
+//                     interclub (body.clt, ex. "5B" ; vide = retire la correction). Sert quand
+//                     le rapprochement squashnet a échoué ou s'est trompé — nom mal orthographié
+//                     côté ResaMania, licence pas encore rapprochée…
 export async function POST(req: NextRequest) {
   const admin = await requireAdmin(req);
   if (!admin) {
@@ -57,6 +62,7 @@ export async function POST(req: NextRequest) {
     action?: unknown;
     passkeyId?: unknown;
     teamId?: unknown;
+    clt?: unknown;
   };
   if (typeof body.id !== "string" || !body.id) {
     return NextResponse.json({ error: "Membre invalide." }, { status: 400 });
@@ -163,6 +169,18 @@ export async function POST(req: NextRequest) {
     // garde le lien. Changer d'équipe n'engage que les compositions À VENIR.
     await prisma.user.update({ where: { id: target.id }, data: { teamId } });
     return NextResponse.json({ ok: true, teamId });
+  }
+
+  if (action === "set_clt_override") {
+    const off = await interclubDisabledResponse();
+    if (off) return off;
+    const parsed = parseClassementInput(body.clt);
+    if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+    await prisma.user.update({
+      where: { id: target.id },
+      data: { interclubCltOverride: parsed.value },
+    });
+    return NextResponse.json({ ok: true, clt: parsed.value });
   }
 
   if (action === "delete") {

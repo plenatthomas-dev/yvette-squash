@@ -34,6 +34,13 @@ type Member = {
   // Équipe interclub (null = aucune). Décidée ICI et nulle part ailleurs : elle commande qui
   // peut être aligné dans une rencontre, ce n'est donc pas un réglage que le membre se donne.
   teamId: string | null;
+  // Classement fédéral EFFECTIF pour l'ordre des simples interclub (correction admin si posée,
+  // sinon le rapprochement squashnet). `cltOverride` porte la correction seule, pour préremplir
+  // le champ ; `cltSource` dit d'où vient `clt`, pour distinguer un rapprochement automatique
+  // d'une correction déjà posée avant d'écraser l'un ou l'autre.
+  clt: string | null;
+  cltOverride: string | null;
+  cltSource: "override" | "squashnet" | null;
   // Résas du membre sur 30 j, par origine. Mises en mots par memberOriginLabel, qui tient
   // compte de `mode` : un compte « email seul » n'est pas mesurable côté ResaMania.
   bookingsApp: number;
@@ -49,7 +56,8 @@ type Action =
   | "revoke_passkey"
   | "revoke_passkeys"
   | "delete"
-  | "set_team";
+  | "set_team"
+  | "set_clt_override";
 
 // Petite pastille de statut (pas de classe .badge globale : elle n'existe qu'en scopé).
 const badge: CSSProperties = {
@@ -138,7 +146,7 @@ export default function MembersPage() {
   const postAction = async (
     id: string,
     action: Action,
-    extra?: { passkeyId?: string; teamId?: string | null },
+    extra?: { passkeyId?: string; teamId?: string | null; clt?: string },
   ) => {
     setBusyId(id);
     setMsg(null);
@@ -152,6 +160,7 @@ export default function MembersPage() {
         link?: string;
         error?: string;
         teamId?: string | null;
+        clt?: string | null;
       };
       if (!res.ok) {
         setMsg({ id, text: data.error ?? "Action impossible." });
@@ -169,6 +178,10 @@ export default function MembersPage() {
           prev.map((m) => (m.id === id ? { ...m, teamId: data.teamId ?? null } : m)),
         );
       } else {
+        // set_clt_override compris : contrairement à `set_team`, cette action est rare et ne
+        // se répète pas vingt fois d'affilée. Effacer une correction doit alors réafficher le
+        // rapprochement squashnet éventuel — une donnée que cet écran ne garde pas à part —
+        // donc on recharge plutôt que de reconstruire l'état à la main.
         // disable / enable / delete / révocations : on recharge pour refléter le nouvel état.
         await load();
       }
@@ -196,6 +209,15 @@ export default function MembersPage() {
     const current = members.find((m) => m.id === id)?.teamId ?? null;
     if (current === teamId) return;
     void postAction(id, "set_team", { teamId });
+  };
+
+  // Enregistré à la perte de focus, pas à chaque frappe : c'est un champ texte, pas un switch.
+  // Retaper exactement la valeur déjà enregistrée n'écrit rien, même logique que `setTeam`.
+  const setCltOverride = (id: string, clt: string) => {
+    const current = members.find((m) => m.id === id)?.cltOverride ?? "";
+    const next = clt.trim();
+    if (current === next) return;
+    void postAction(id, "set_clt_override", { clt: next });
   };
 
   const revokePasskey = (id: string, pk: MemberPasskey) => {
@@ -341,6 +363,36 @@ export default function MembersPage() {
                         </button>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {/* Correction du classement fédéral, pour l'ORDRE des simples interclub (le
+                    mieux classé des joueurs présents joue le simple n° 1). Sert quand le
+                    rapprochement squashnet a échoué ou s'est trompé — nom mal orthographié côté
+                    ResaMania, licence pas encore rapprochée. Champ texte : enregistré à la perte
+                    de focus (`setCltOverride`), pas au tap comme le switch d'équipe au-dessus. */}
+                {interclub && m.teamId && (
+                  <div
+                    className="tiny"
+                    style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+                  >
+                    <span className="muted" style={{ flex: "0 0 auto" }}>
+                      Classement interclub&nbsp;:
+                    </span>
+                    <input
+                      key={`clt-${m.id}-${m.cltOverride ?? ""}`}
+                      type="text"
+                      defaultValue={m.cltOverride ?? ""}
+                      placeholder={
+                        m.cltSource === "squashnet" && m.clt ? `${m.clt} (squashnet)` : "ex. 5A"
+                      }
+                      maxLength={8}
+                      disabled={busyId === m.id}
+                      onBlur={(e) => setCltOverride(m.id, e.target.value)}
+                      aria-label={`Classement interclub forcé pour ${m.displayName}`}
+                      title="Écrase le rapprochement squashnet pour l'ordre des simples interclub. Vide = pas de correction."
+                      style={{ width: "6em" }}
+                    />
                   </div>
                 )}
 
