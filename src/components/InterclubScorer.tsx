@@ -555,19 +555,19 @@ export default function InterclubScorer({
         <div className="ics-ask">
           <p>Qui engage&nbsp;?</p>
           <div className="ics-ask-row">
-            <button onClick={() => chooseFirstServer("home", "right")}>
-              {match.homeDisplayName} · droite
-            </button>
             <button onClick={() => chooseFirstServer("home", "left")}>
               {match.homeDisplayName} · gauche
             </button>
+            <button onClick={() => chooseFirstServer("home", "right")}>
+              {match.homeDisplayName} · droite
+            </button>
           </div>
           <div className="ics-ask-row">
-            <button onClick={() => chooseFirstServer("away", "right")}>
-              {match.awayName} · droite
-            </button>
             <button onClick={() => chooseFirstServer("away", "left")}>
               {match.awayName} · gauche
+            </button>
+            <button onClick={() => chooseFirstServer("away", "right")}>
+              {match.awayName} · droite
             </button>
           </div>
         </div>
@@ -580,8 +580,8 @@ export default function InterclubScorer({
             {state.serving === "home" ? match.homeDisplayName : match.awayName} sert&nbsp;:
           </p>
           <div className="ics-ask-row">
-            <button onClick={() => chooseBox("right")}>Carré droit</button>
             <button onClick={() => chooseBox("left")}>Carré gauche</button>
+            <button onClick={() => chooseBox("right")}>Carré droit</button>
           </div>
         </div>
       )}
