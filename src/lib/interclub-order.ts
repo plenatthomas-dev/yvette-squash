@@ -9,13 +9,22 @@
 // que soit le numéro qu'on lui donnerait. Deux joueurs de MÊME classement (deux « 5A », ou deux
 // « NC ») sont interchangeables : rien ne les départage, `RangM` n'intervient jamais ici.
 //
-// LE FORMAT « clt » (« 5A », « NC », « R1 », « N »…) est celui de squashnet.fr, déjà utilisé par
+// LE FORMAT « clt » (« 5A », « NC », « 1N »…) est celui de squashnet.fr, déjà utilisé par
 // `SquashnetRanking.clt` et par le tri de l'annuaire (`directorySort.ts`). Ce module ne le
 // CONFOND JAMAIS avec un rang (`rang`/`rangM`, un entier) : le rang mesure une position dans un
 // classement national qui bouge chaque mois et n'a pas vocation à ordonner une rencontre — deux
 // joueurs du même classement peuvent avoir des rangs très différents sans que l'un doive jouer
 // avant l'autre. C'est explicitement ce que demande la règle du club (« le classement RangM
 // n'intervient pas »).
+//
+// LA LISTE DES CLASSEMENTS RECONNUS EST FERMÉE, et volontairement calée sur le règlement sportif
+// FFSquash en vigueur (« Principes du classement 2025-2026 », art. 3 — pyramide du classement) :
+// 1I, 1N, 2A–2D, 3A–3D, 4A–4D, 5A–5D, NC. Rien d'autre n'existe côté fédération — pas de « N »,
+// « R1 » ni « R2 » isolés (une confusion avec les DIVISIONS d'interclub, `Interclub.division`,
+// texte libre sans rapport avec le classement d'un joueur), pas de série au-delà de 5, pas de
+// lettre au-delà de D. `classementPower` refuse donc explicitement tout le reste : une saisie
+// admin qui invente un classement (`parseClassementInput`, même module) doit être rejetée à
+// l'écran plutôt que de faire semblant d'ordonner une rencontre sur une valeur qui n'existe pas.
 
 /**
  * Un « poids » de classement, PLUS PETIT = PLUS FORT — le sens naturel pour trier « le mieux
@@ -29,36 +38,75 @@ export type ClassementPower = number;
 /**
  * Poids d'un classement fédéral, ou `null` s'il n'est pas reconnu.
  *
- * Formats acceptés, du plus fort au plus faible :
- *   - « N »            (National)
- *   - « R1 », « R2 »    (Régional)
- *   - un chiffre (1 à 2 chiffres) suivi d'une lettre A à D — ex. « 4D », « 5A », « 10B » — où le
- *     CHIFFRE domine TOUJOURS la lettre : « 4D » est plus fort que « 5A », quand bien même D est
- *     la plus faible lettre de sa catégorie et A la plus forte de la sienne. À chiffre égal, A
- *     est la plus forte lettre et D la plus faible (« 5A » plus fort que « 5D »).
+ * Liste FERMÉE (règlement sportif FFSquash, art. 3 — aucun autre libellé n'existe), du plus fort
+ * au plus faible :
+ *   - « 1I »            (1ère série internationale)
+ *   - « 1N »            (1ère série nationale) — la 1ère série est le SEUL palier qui ne se
+ *     décline PAS en A/B/C/D ; c'est volontaire, pas un oubli.
+ *   - une série 2 à 5 suivie d'une lettre A à D — ex. « 4D », « 5A » — où le CHIFFRE domine
+ *     TOUJOURS la lettre : « 4D » est plus fort que « 5A », quand bien même D est la plus
+ *     faible lettre de sa catégorie et A la plus forte de la sienne. À chiffre égal, A est la
+ *     plus forte lettre et D la plus faible (« 5A » plus fort que « 5D »). La pyramide féminine
+ *     s'arrête à « 4D » et la masculine à « 5D » — mais ce module ne connaît pas le genre du
+ *     joueur, donc n'impose pas cette borne : il accepte l'ensemble 2A..5D pour les deux, la
+ *     fédération elle-même ne produisant jamais un « 5x » pour une joueuse.
  *   - « NC »            (non classé) — le plus faible de tous, mais tous les NC sont ÉQUIVALENTS
  *     entre eux (interchangeables), exactement comme deux classements numérotés identiques.
  *
  * `null` couvre aussi bien « pas de classement connu » (le cas ne devrait pas se présenter ici :
  * l'appelant filtre les entrées sans classement avant d'appeler cette fonction) que « chaîne
- * mal formée » — une faute de saisie sur un classement forcé, par exemple. Dans les deux cas,
- * l'appelant ne peut pas ordonner ce joueur et doit le dire plutôt que deviner.
+ * mal formée OU classement qui n'existe pas » — une faute de saisie sur un classement forcé, ou
+ * une valeur inventée (« N », « R1 », « 6A », « 4E »…). Dans tous les cas, l'appelant ne peut
+ * pas ordonner ce joueur et doit le dire plutôt que deviner.
  */
 export function classementPower(clt: string): ClassementPower | null {
   const v = clt.trim().toUpperCase();
-  if (v === "N") return 0;
-  if (v === "R1") return 1;
-  if (v === "R2") return 2;
+  if (v === "1I") return 0;
+  if (v === "1N") return 1;
   if (v === "NC") return Number.POSITIVE_INFINITY;
-  const m = /^(\d{1,2})([A-D])$/.exec(v);
+  const m = /^([2-5])([A-D])$/.exec(v);
   if (!m) return null;
   const numero = Number(m[1]);
-  if (numero < 1) return null;
   const lettre = m[2].charCodeAt(0) - "A".charCodeAt(0); // A=0 (plus fort) … D=3 (plus faible)
-  // ×10 pour que le chiffre domine TOUJOURS la lettre (0..3) : « R2 »=2 doit rester plus fort
-  // que « 1A », donc la catégorie 1 démarre après R2, jamais avant.
+  // ×10 pour que le chiffre domine TOUJOURS la lettre (0..3) : la série 2 doit rester plus
+  // forte que toute série suivante, donc démarrer après « 1N » (poids 1), jamais avant.
   return 2 + numero * 10 + lettre;
 }
+
+/**
+ * La même liste FERMÉE que `classementPower` reconnaît, mais ÉNUMÉRÉE plutôt que devinée depuis
+ * une regex — pour peupler un `<select>` côté admin. Un champ texte libre laissait inventer un
+ * classement qui n'existe pas (`R1`, `6A`…) et ne le disait qu'à l'écriture, opaque, le soir
+ * d'une rencontre ; un menu déroulant l'EMPÊCHE dès la saisie, sans attendre le serveur pour le
+ * refuser — même philosophie que `Interclub.tsx`, qui grise déjà les choix que le serveur
+ * refuserait plutôt que de laisser composer pour rien.
+ *
+ * Ordonnée du plus FAIBLE au plus fort (NC en tête, 1I en dernier) — l'inverse du sens naturel
+ * de `classementPower`, et volontaire : dans un club de loisir, l'écrasante majorité des
+ * corrections portent sur des classements bas (NC, 5D, 5C…), jamais sur un 1I ou 1N. Les mettre
+ * en tête du menu déroulant obligerait à faire défiler toute la pyramide pour le cas courant.
+ */
+export const KNOWN_CLASSEMENTS: readonly string[] = [
+  "NC",
+  "5D",
+  "5C",
+  "5B",
+  "5A",
+  "4D",
+  "4C",
+  "4B",
+  "4A",
+  "3D",
+  "3C",
+  "3B",
+  "3A",
+  "2D",
+  "2C",
+  "2B",
+  "2A",
+  "1N",
+  "1I",
+];
 
 /**
  * Normalise une saisie ADMIN de classement (invité sans compte, ou correction d'un membre) —

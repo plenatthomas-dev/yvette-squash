@@ -10,6 +10,7 @@ import { useFeatures } from "@/components/FeatureProvider";
 import FeatureFlagsPanel from "@/components/FeatureFlagsPanel";
 import { recheckBanner } from "@/components/AnnouncementBanner";
 import { bookingOriginHint } from "@/lib/booking-origin";
+import { KNOWN_CLASSEMENTS } from "@/lib/interclub-order";
 
 type PendingRequest = {
   id: string;
@@ -833,21 +834,27 @@ export default function AdminPage() {
                                   <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                                     {/* Un invité n'a pas de compte, donc rien à rapprocher sur
                                         squashnet : son classement — qui décide de l'ordre des
-                                        simples interclub — se saisit ici, à la main. Enregistré
-                                        à la perte de focus, comme la correction équivalente sur
+                                        simples interclub — se saisit ici, à la main. `<select>`
+                                        plutôt qu'un champ texte libre : la liste des classements
+                                        FFSquash est FERMÉE (`KNOWN_CLASSEMENTS`), un texte libre
+                                        laissait inventer une valeur qui n'existe pas. Enregistré
+                                        au choix (`onChange`), comme la correction équivalente sur
                                         la page Membres. */}
-                                    <input
-                                      key={`clt-${g.id}-${g.clt ?? ""}`}
-                                      type="text"
-                                      defaultValue={g.clt ?? ""}
-                                      placeholder="classement"
-                                      maxLength={8}
+                                    <select
+                                      value={g.clt ?? ""}
                                       disabled={icBusy}
-                                      onBlur={(e) => setGuestClt(g, e.target.value)}
+                                      onChange={(e) => setGuestClt(g, e.target.value)}
                                       aria-label={`Classement interclub de ${g.name}`}
-                                      title="Classement fédéral (ex. 5A, 4D, NC), pour l'ordre des simples interclub."
-                                      style={{ margin: 0, width: "5em" }}
-                                    />
+                                      title="Classement fédéral, pour l'ordre des simples interclub."
+                                      style={{ margin: 0, width: "auto" }}
+                                    >
+                                      <option value="">— aucun —</option>
+                                      {KNOWN_CLASSEMENTS.map((c) => (
+                                        <option key={c} value={c}>
+                                          {c}
+                                        </option>
+                                      ))}
+                                    </select>
                                     <button
                                       type="button"
                                       className="secondary tiny"
@@ -888,15 +895,20 @@ export default function AdminPage() {
                         aria-label="Prénom et nom du joueur hors appli"
                         style={{ margin: 0, flex: "1 1 140px" }}
                       />
-                      <input
+                      <select
                         value={icClt}
                         onChange={(e) => setIcClt(e.target.value)}
-                        placeholder="classement"
-                        maxLength={8}
                         aria-label="Classement fédéral du joueur hors appli (facultatif)"
-                        title="Classement fédéral (ex. 5A, 4D, NC) — facultatif, pour l'ordre des simples interclub."
-                        style={{ margin: 0, flex: "0 1 90px" }}
-                      />
+                        title="Classement fédéral — facultatif, pour l'ordre des simples interclub."
+                        style={{ margin: 0, flex: "0 1 110px" }}
+                      >
+                        <option value="">Classement…</option>
+                        {KNOWN_CLASSEMENTS.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
                       <button
                         type="button"
                         disabled={icBusy || !icTeamId || !icName.trim()}

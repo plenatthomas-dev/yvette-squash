@@ -169,9 +169,20 @@ rencontre : l'aligner casserait l'ordre quel que soit le numéro qu'on lui donne
 de même classement sont interchangeables — `RangM` n'intervient jamais ici, contrairement au tri
 de l'annuaire (`directorySort.ts`), qui compare des **rangs**, pas des **classements**.
 
-**`src/lib/interclub-order.ts`** (module pur, sans Prisma) porte deux fonctions :
-- `classementPower(clt)` — le poids d'un classement (`N` > `R1` > `R2` > `1A`…`1D` > `2A`… >
-  `NC`), plus petit = plus fort ;
+**`src/lib/interclub-order.ts`** (module pur, sans Prisma) porte :
+- `classementPower(clt)` — le poids d'un classement, plus petit = plus fort. **Liste FERMÉE**
+  (2026-09-01, vérifiée contre le règlement sportif FFSquash en vigueur — « Principes du
+  classement 2025-2026 », art. 3) : `1I` > `1N` > `2A`…`2D` > `3A`…`3D` > `4A`…`4D` > `5A`…`5D` >
+  `NC`. Rien d'autre n'existe côté fédération — en particulier ni `N`, `R1`, `R2` isolés (une
+  confusion possible avec `Interclub.division`, texte libre pour la DIVISION d'interclub, sans
+  rapport avec le classement d'un joueur), ni série au-delà de 5, ni la 1ère série déclinée en
+  lettres (elle ne l'est PAS, contrairement aux séries 2 à 5 — seul un format fermé le rend explicite) ;
+- `KNOWN_CLASSEMENTS` — la même liste, énumérée plutôt que devinée depuis une regex, pour peupler
+  un `<select>` admin plutôt qu'un champ texte libre (`/admin/membres`, espace admin « Équipes
+  interclub ») : un texte libre laissait inventer un classement qui n'existe pas et ne le disait
+  qu'à l'écriture ; le sélecteur l'EMPÊCHE dès la saisie. Ordonnée du plus FAIBLE au plus fort
+  (`NC` en tête, `1I` en dernier) — l'INVERSE de `classementPower` : dans un club de loisir, les
+  corrections courantes portent sur des classements bas, pas sur un `1I` ;
 - `lineupOrderConflict(slots)` — le premier problème d'ORDRE entre des simples DÉJÀ DÉSIGNÉS, ou
   `null`. **Moins de deux simples désignés ⇒ rien à comparer**, donc rien à vérifier : c'est une
   règle d'ordre RELATIF, elle n'a par construction rien à dire sur un simple isolé.

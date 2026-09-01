@@ -10,6 +10,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useFeatures } from "@/components/FeatureProvider";
 import { memberOriginLabel } from "@/lib/booking-origin";
+import { KNOWN_CLASSEMENTS } from "@/lib/interclub-order";
 
 type MemberPasskey = {
   id: string;
@@ -369,8 +370,11 @@ export default function MembersPage() {
                 {/* Correction du classement fédéral, pour l'ORDRE des simples interclub (le
                     mieux classé des joueurs présents joue le simple n° 1). Sert quand le
                     rapprochement squashnet a échoué ou s'est trompé — nom mal orthographié côté
-                    ResaMania, licence pas encore rapprochée. Champ texte : enregistré à la perte
-                    de focus (`setCltOverride`), pas au tap comme le switch d'équipe au-dessus. */}
+                    ResaMania, licence pas encore rapprochée. `<select>` plutôt qu'un champ texte
+                    libre : la liste des classements FFSquash est FERMÉE (`KNOWN_CLASSEMENTS`),
+                    un texte libre laissait inventer une valeur qui n'existe pas et ne le disait
+                    qu'à l'écriture — le sélecteur l'empêche dès la saisie. Enregistré au choix
+                    (`onChange`), pas au tap comme le switch d'équipe au-dessus. */}
                 {interclub && m.teamId && (
                   <div
                     className="tiny"
@@ -379,20 +383,25 @@ export default function MembersPage() {
                     <span className="muted" style={{ flex: "0 0 auto" }}>
                       Classement interclub&nbsp;:
                     </span>
-                    <input
-                      key={`clt-${m.id}-${m.cltOverride ?? ""}`}
-                      type="text"
-                      defaultValue={m.cltOverride ?? ""}
-                      placeholder={
-                        m.cltSource === "squashnet" && m.clt ? `${m.clt} (squashnet)` : "ex. 5A"
-                      }
-                      maxLength={8}
+                    <select
+                      value={m.cltOverride ?? ""}
                       disabled={busyId === m.id}
-                      onBlur={(e) => setCltOverride(m.id, e.target.value)}
+                      onChange={(e) => setCltOverride(m.id, e.target.value)}
                       aria-label={`Classement interclub forcé pour ${m.displayName}`}
                       title="Écrase le rapprochement squashnet pour l'ordre des simples interclub. Vide = pas de correction."
-                      style={{ width: "6em" }}
-                    />
+                      style={{ width: "auto", margin: 0 }}
+                    >
+                      <option value="">
+                        {m.cltSource === "squashnet" && m.clt
+                          ? `— aucune (squashnet : ${m.clt}) —`
+                          : "— aucune correction —"}
+                      </option>
+                      {KNOWN_CLASSEMENTS.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 )}
 

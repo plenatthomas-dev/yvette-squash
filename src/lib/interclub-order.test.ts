@@ -2,22 +2,21 @@ import { describe, it, expect } from "vitest";
 import {
   classementPower,
   compareRosterOrder,
+  KNOWN_CLASSEMENTS,
   lineupOrderConflict,
   parseClassementInput,
   type RankableRosterEntry,
 } from "./interclub-order";
 
 describe("classementPower", () => {
-  it("classe N avant R1 avant R2 avant les catégories numérotées avant NC", () => {
-    const n = classementPower("N")!;
-    const r1 = classementPower("R1")!;
-    const r2 = classementPower("R2")!;
-    const cat1 = classementPower("1D")!;
+  it("classe 1I avant 1N avant les catégories numérotées avant NC", () => {
+    const i1 = classementPower("1I")!;
+    const n1 = classementPower("1N")!;
+    const cat2 = classementPower("2D")!;
     const nc = classementPower("NC")!;
-    expect(n).toBeLessThan(r1);
-    expect(r1).toBeLessThan(r2);
-    expect(r2).toBeLessThan(cat1);
-    expect(cat1).toBeLessThan(nc);
+    expect(i1).toBeLessThan(n1);
+    expect(n1).toBeLessThan(cat2);
+    expect(cat2).toBeLessThan(nc);
   });
 
   it("le CHIFFRE domine TOUJOURS la lettre — 4D plus fort que 5A", () => {
@@ -34,15 +33,29 @@ describe("classementPower", () => {
   it("deux classements identiques ont le même poids (interchangeables)", () => {
     expect(classementPower("5A")).toBe(classementPower("5a"));
     expect(classementPower("NC")).toBe(classementPower("nc"));
+    expect(classementPower("1N")).toBe(classementPower("1n"));
   });
 
   it("tolère les espaces et la casse", () => {
     expect(classementPower(" 5a ")).toBe(classementPower("5A"));
+    expect(classementPower(" 1i ")).toBe(classementPower("1I"));
   });
 
-  it("accepte un numéro à deux chiffres", () => {
-    expect(classementPower("10B")).not.toBeNull();
-    expect(classementPower("2C")!).toBeLessThan(classementPower("10B")!);
+  it("la 1ère série ne se décline PAS en lettres — seuls 1I et 1N existent", () => {
+    expect(classementPower("1A")).toBeNull();
+    expect(classementPower("1D")).toBeNull();
+  });
+
+  it("refuse toute série au-delà de 5 ou en-deçà de 2 (avec lettre) — la pyramide FFSquash s'arrête à 5D", () => {
+    expect(classementPower("6A")).toBeNull();
+    expect(classementPower("10B")).toBeNull();
+    expect(classementPower("0A")).toBeNull();
+  });
+
+  it("refuse « N », « R1 », « R2 » — n'existent pas au règlement FFSquash (confusion possible avec une DIVISION d'interclub)", () => {
+    expect(classementPower("N")).toBeNull();
+    expect(classementPower("R1")).toBeNull();
+    expect(classementPower("R2")).toBeNull();
   });
 
   it("refuse un format inconnu", () => {
@@ -50,9 +63,30 @@ describe("classementPower", () => {
     expect(classementPower("5")).toBeNull();
     expect(classementPower("A5")).toBeNull();
     expect(classementPower("5E")).toBeNull();
-    expect(classementPower("0A")).toBeNull();
     expect(classementPower("R3")).toBeNull();
     expect(classementPower("quoi")).toBeNull();
+  });
+});
+
+describe("KNOWN_CLASSEMENTS", () => {
+  // La liste du sélecteur admin (`KNOWN_CLASSEMENTS`) et la fonction qui la VALIDE
+  // (`classementPower`) sont deux endroits distincts qui doivent dire la même chose — sans quoi
+  // le menu déroulant pourrait un jour proposer une valeur que le serveur refuserait, ou
+  // l'inverse. Ce test échoue si l'une évolue sans l'autre.
+  it("chaque entrée est reconnue par classementPower, et 19 valeurs exactement (1I, 1N, 2A..5D, NC)", () => {
+    expect(KNOWN_CLASSEMENTS).toHaveLength(19);
+    for (const clt of KNOWN_CLASSEMENTS) {
+      expect(classementPower(clt)).not.toBeNull();
+    }
+  });
+
+  it("est ordonnée strictement du plus FAIBLE au plus fort (NC en tête) — les corrections courantes en premier", () => {
+    expect(KNOWN_CLASSEMENTS[0]).toBe("NC");
+    expect(KNOWN_CLASSEMENTS[KNOWN_CLASSEMENTS.length - 1]).toBe("1I");
+    const powers = KNOWN_CLASSEMENTS.map((c) => classementPower(c)!);
+    for (let i = 1; i < powers.length; i++) {
+      expect(powers[i]).toBeLessThan(powers[i - 1]);
+    }
   });
 });
 
