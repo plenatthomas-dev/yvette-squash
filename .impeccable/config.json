@@ -1,0 +1,20 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-font-size",
+        "value": "1.1rem",
+        "createdAt": "2026-09-01T15:27:19.265Z",
+        "reason": "Taille intentionnelle : titres de section de l'espace admin (confirme par l'utilisateur)"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "1.4rem",
+        "createdAt": "2026-09-01T15:27:22.117Z",
+        "reason": "Taille intentionnelle : nombre des tuiles de statistiques du tableau de bord admin (confirme par l'utilisateur)"
+      }
+    ]
+  }
+}
