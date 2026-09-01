@@ -9,6 +9,10 @@ const h = vi.hoisted(() => ({
   interclub: true,
   admin: null as null | { userId: string; email: string },
   teams: [] as Array<Record<string, unknown>>,
+  /** Membres rattachés à une équipe, tels que `allTeamMembers` les relit. */
+  members: [] as Array<Record<string, unknown>>,
+  /** Le `where` de la requête des membres — pour vérifier ce qu'elle exclut. */
+  whereMembres: null as null | Record<string, unknown>,
   guests: [] as Array<Record<string, unknown>>,
   team: null as null | Record<string, unknown>,
   created: null as null | Record<string, unknown>,
@@ -25,6 +29,12 @@ vi.mock("@/lib/features-server", () => ({
 vi.mock("@/lib/admin", () => ({ requireAdmin: vi.fn(async () => h.admin) }));
 vi.mock("@/lib/db", () => ({
   prisma: {
+    user: {
+      findMany: vi.fn(async (args: { where: Record<string, unknown> }) => {
+        h.whereMembres = args.where;
+        return h.members;
+      }),
+    },
     interclubTeam: {
       findMany: vi.fn(async () => h.teams),
       findUnique: vi.fn(async () => h.team),
@@ -60,7 +70,18 @@ const post = (body: unknown) =>
 beforeEach(() => {
   h.interclub = true;
   h.admin = { userId: "admin1", email: "admin@example.com" };
-  h.teams = [{ id: "t1", name: "Équipe 1", _count: { members: 3 } }];
+  h.teams = [{ id: "t1", name: "Équipe 1" }];
+  h.members = [
+    {
+      id: "u1",
+      teamId: "t1",
+      displayName: "Jérôme Blanc",
+      nickname: "Jéjé",
+      interclubCltOverride: null,
+      squashnetRanking: { clt: "5A", rangM: 412 },
+    },
+  ];
+  h.whereMembres = null;
   h.guests = [{ id: "g1", teamId: "t1", name: "Paul Hors-Appli", clt: null }];
   h.team = { id: "t1", _count: { guests: 1 } };
   h.created = null;
@@ -83,8 +104,40 @@ describe("GET /api/admin/interclub-teams", () => {
 
   it("rend les équipes avec leur effectif inscrit, et les joueurs hors appli", async () => {
     const body = await (await GET(get())).json();
-    expect(body.teams).toEqual([{ id: "t1", name: "Équipe 1", memberCount: 3 }]);
+    expect(body.teams).toEqual([{ id: "t1", name: "Équipe 1", memberCount: 1 }]);
     expect(body.guests).toEqual([{ id: "g1", teamId: "t1", name: "Paul Hors-Appli", clt: null }]);
+  });
+
+  // L'écran s'appelle « effectif » : un décompte ne dit ni QUI en fait partie, ni à quel
+  // classement il joue — or c'est le classement qui décide de l'ordre des simples. La liste
+  // nominative des membres était pourtant absente de la réponse.
+  it("rend les MEMBRES nominativement, avec leur classement effectif et leur équipe", async () => {
+    const body = await (await GET(get())).json();
+    expect(body.members).toEqual([
+      { kind: "member", id: "u1", teamId: "t1", name: "Jéjé", clt: "5A", rangM: 412 },
+    ]);
+  });
+
+  it("le classement d'un membre suit la correction admin quand il y en a une", async () => {
+    h.members = [
+      {
+        id: "u1",
+        teamId: "t1",
+        displayName: "Jérôme Blanc",
+        nickname: null,
+        interclubCltOverride: "4D",
+        squashnetRanking: { clt: "5A", rangM: 412 },
+      },
+    ];
+    const body = await (await GET(get())).json();
+    // La correction l'emporte sur le rapprochement, comme partout ailleurs (`memberClt`) — mais
+    // le rang, lui, ne peut venir que de squashnet : une correction ne porte qu'un classement.
+    expect(body.members[0]).toMatchObject({ clt: "4D", rangM: 412 });
+  });
+
+  it("exclut les comptes désactivés et les membres sans équipe", async () => {
+    await GET(get());
+    expect(h.whereMembres).toEqual({ teamId: { not: null }, disabledAt: null });
   });
 });
 

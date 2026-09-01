@@ -131,6 +131,50 @@ export async function teamRoster(teamId: string): Promise<RosterEntry[]> {
   ].sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
 }
 
+/** Un membre d'équipe, plus l'équipe qui le retient — ce que l'écran d'admin doit pouvoir grouper. */
+export interface TeamMemberEntry extends RosterEntry {
+  teamId: string;
+}
+
+/**
+ * TOUS les membres rattachés à une équipe, toutes équipes confondues — pour l'écran d'admin
+ * « Équipes interclub », qui montre l'effectif RÉEL de chaque équipe (membres ET invités) avec
+ * son classement, là où il ne montrait qu'un décompte.
+ *
+ * UNE seule requête, pas une par équipe : l'écran les affiche toutes ensemble, et un club a
+ * assez peu d'équipes pour que la boucle passe inaperçue — mais assez de membres pour qu'un
+ * aller-retour Neon par équipe se voie sur un cold start.
+ *
+ * Mêmes règles que `teamRoster` (comptes désactivés exclus, classement effectif via
+ * `memberClt`), et pour la même raison : deux écrans qui répondent à « qui est dans cette
+ * équipe, et à quel classement » ne doivent pas pouvoir diverger.
+ */
+export async function allTeamMembers(): Promise<TeamMemberEntry[]> {
+  const members = await prisma.user.findMany({
+    where: { teamId: { not: null }, disabledAt: null },
+    select: {
+      id: true,
+      teamId: true,
+      displayName: true,
+      nickname: true,
+      interclubCltOverride: true,
+      squashnetRanking: { select: { clt: true, rangM: true } },
+    },
+  });
+
+  return members
+    .map((u) => ({
+      kind: "member" as const,
+      id: u.id,
+      // Non-nul : le `where` ci-dessus exclut les membres sans équipe.
+      teamId: u.teamId as string,
+      name: memberName(u),
+      clt: memberClt(u),
+      rangM: u.squashnetRanking?.rangM ?? null,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
+}
+
 /**
  * Classement effectif d'un membre : la correction admin si posée, sinon le dernier
  * rapprochement squashnet. PRIORITÉ à la correction — c'est tout son objet : corriger un

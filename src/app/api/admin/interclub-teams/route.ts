@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/admin";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
 import { MAX_PLAYER_NAME_LEN } from "@/lib/interclub-db";
 import { parseClassementInput } from "@/lib/interclub-order";
+import { allTeamMembers } from "@/lib/interclub-roster";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +30,12 @@ export const dynamic = "force-dynamic";
 const MAX_GUESTS_PER_TEAM = 40;
 
 // GET /api/admin/interclub-teams — équipes, leurs membres inscrits et leurs joueurs hors appli.
+//
+// Les MEMBRES sont désormais rendus NOMINATIVEMENT, avec leur classement effectif — et plus
+// seulement comptés. L'écran s'appelle « effectif d'une équipe » : un décompte ne dit ni qui en
+// fait partie, ni si la composition tient debout un soir de rencontre (c'est le CLASSEMENT qui
+// décide de l'ordre des simples). Il fallait sinon ouvrir la page « Membres » à côté et
+// reconstituer l'équipe de tête. L'AFFECTATION, elle, reste sur cette page-là : ici on lit.
 export async function GET(req: NextRequest) {
   const off = await interclubDisabledResponse();
   if (off) return off;
@@ -36,25 +43,30 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
   }
 
-  const [teams, guests] = await Promise.all([
+  const [teams, guests, members] = await Promise.all([
     prisma.interclubTeam.findMany({
       orderBy: { order: "asc" },
-      select: {
-        id: true,
-        name: true,
-        // Le décompte des membres suffit à l'écran d'admin : la liste nominative, elle, vit
-        // sur la page « Membres », où l'affectation se fait.
-        _count: { select: { members: true } },
-      },
+      select: { id: true, name: true },
     }),
     prisma.interclubGuest.findMany({
       orderBy: { name: "asc" },
       select: { id: true, teamId: true, name: true, clt: true },
     }),
+    // Le classement effectif (correction admin sinon rapprochement squashnet) est résolu par
+    // `interclub-roster.ts`, comme pour la composition d'une rencontre : une seule définition
+    // de « à quel classement joue ce membre », pas une copie par écran.
+    allTeamMembers(),
   ]);
 
   return NextResponse.json({
-    teams: teams.map((t) => ({ id: t.id, name: t.name, memberCount: t._count.members })),
+    // `memberCount` reste servi : l'en-tête d'équipe l'affiche, et le déduire côté client
+    // obligerait chaque appelant à refaire le même filtre.
+    teams: teams.map((t) => ({
+      id: t.id,
+      name: t.name,
+      memberCount: members.filter((m) => m.teamId === t.id).length,
+    })),
+    members,
     guests,
   });
 }

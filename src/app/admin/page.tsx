@@ -10,7 +10,7 @@ import { useFeatures } from "@/components/FeatureProvider";
 import FeatureFlagsPanel from "@/components/FeatureFlagsPanel";
 import { recheckBanner } from "@/components/AnnouncementBanner";
 import { bookingOriginHint } from "@/lib/booking-origin";
-import { KNOWN_CLASSEMENTS } from "@/lib/interclub-order";
+import { compareRosterOrder, KNOWN_CLASSEMENTS } from "@/lib/interclub-order";
 
 type PendingRequest = {
   id: string;
@@ -24,6 +24,8 @@ type CronRun = { name: string; lastRunAt: string; ok: boolean; info: string | nu
 
 /** Équipe interclub et son effectif inscrit sur l'appli (l'affectation se fait page Membres). */
 type IcTeam = { id: string; name: string; memberCount: number };
+/** Membre inscrit rattaché à une équipe : listé ici en LECTURE (rattachement page Membres). */
+type IcMember = { id: string; teamId: string; name: string; clt: string | null; rangM: number | null };
 /** Joueur d'une équipe SANS compte : il joue le championnat sans utiliser l'appli. */
 type IcGuest = { id: string; teamId: string; name: string; clt: string | null };
 type Dashboard = {
@@ -103,6 +105,7 @@ export default function AdminPage() {
   const [icBusy, setIcBusy] = useState(false);
   const [icResult, setIcResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [icTeams, setIcTeams] = useState<IcTeam[]>([]);
+  const [icMembers, setIcMembers] = useState<IcMember[]>([]);
   const [icGuests, setIcGuests] = useState<IcGuest[]>([]);
   const [icTeamId, setIcTeamId] = useState("");
   const [icName, setIcName] = useState("");
@@ -316,8 +319,9 @@ export default function AdminPage() {
     try {
       const res = await fetch("/api/admin/interclub-teams");
       if (!res.ok) return;
-      const data = (await res.json()) as { teams: IcTeam[]; guests: IcGuest[] };
+      const data = (await res.json()) as { teams: IcTeam[]; members: IcMember[]; guests: IcGuest[] };
       setIcTeams(data.teams);
+      setIcMembers(data.members ?? []);
       setIcGuests(data.guests);
     } catch {
       /* la section reste vide : le reste de l'admin n'a pas à en souffrir */
@@ -805,6 +809,28 @@ export default function AdminPage() {
                   <>
                     {icTeams.map((t) => {
                       const mine = icGuests.filter((g) => g.teamId === t.id);
+                      const siens = icMembers.filter((m) => m.teamId === t.id);
+                      // L'EFFECTIF RÉEL de l'équipe : membres inscrits ET joueurs hors appli
+                      // dans une seule liste, triée du MIEUX au MOINS bien classé
+                      // (`compareRosterOrder`, le même comparateur que le sélecteur de
+                      // composition et que les têtes de série du tournoi). C'est l'ordre dans
+                      // lequel ces joueurs devront disputer les simples : le lire ici, c'est
+                      // voir d'un coup d'œil si l'équipe tient debout. Les deux listes arrivent
+                      // déjà triées par nom du serveur, ce qui fournit le départage alphabétique
+                      // des ex æquo (tri stable).
+                      const effectif = [
+                        ...siens.map((m) => ({ kind: "member" as const, m })),
+                        ...mine.map((g) => ({ kind: "guest" as const, g })),
+                      ].sort((a, b) =>
+                        compareRosterOrder(
+                          a.kind === "member"
+                            ? { name: a.m.name, clt: a.m.clt, rangM: a.m.rangM }
+                            : { name: a.g.name, clt: a.g.clt, rangM: null },
+                          b.kind === "member"
+                            ? { name: b.m.name, clt: b.m.clt, rangM: b.m.rangM }
+                            : { name: b.g.name, clt: b.g.clt, rangM: null },
+                        ),
+                      );
                       return (
                         <div key={t.id} style={{ marginBottom: 10 }}>
                           <div className="tiny">
@@ -815,58 +841,87 @@ export default function AdminPage() {
                               {mine.length > 0 && ` · ${mine.length} hors appli`}
                             </span>
                           </div>
-                          {mine.length > 0 && (
+                          {effectif.length > 0 && (
                             <ul
                               className="tiny"
                               style={{ margin: "4px 0 0", paddingLeft: 0, listStyle: "none" }}
                             >
-                              {mine.map((g) => (
-                                <li
-                                  key={g.id}
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "space-between",
-                                    gap: 8,
-                                  }}
-                                >
-                                  <span>{g.name}</span>
-                                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                    {/* Un invité n'a pas de compte, donc rien à rapprocher sur
-                                        squashnet : son classement — qui décide de l'ordre des
-                                        simples interclub — se saisit ici, à la main. `<select>`
-                                        plutôt qu'un champ texte libre : la liste des classements
-                                        FFSquash est FERMÉE (`KNOWN_CLASSEMENTS`), un texte libre
-                                        laissait inventer une valeur qui n'existe pas. Enregistré
-                                        au choix (`onChange`), comme la correction équivalente sur
-                                        la page Membres. */}
-                                    <select
-                                      value={g.clt ?? ""}
-                                      disabled={icBusy}
-                                      onChange={(e) => setGuestClt(g, e.target.value)}
-                                      aria-label={`Classement interclub de ${g.name}`}
-                                      title="Classement fédéral, pour l'ordre des simples interclub."
-                                      style={{ margin: 0, width: "auto" }}
-                                    >
-                                      <option value="">— aucun —</option>
-                                      {KNOWN_CLASSEMENTS.map((c) => (
-                                        <option key={c} value={c}>
-                                          {c}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    <button
-                                      type="button"
-                                      className="secondary tiny"
-                                      disabled={icBusy}
-                                      onClick={() => removeGuest(g)}
-                                      style={{ flex: "0 0 auto" }}
-                                    >
-                                      Retirer
-                                    </button>
-                                  </span>
-                                </li>
-                              ))}
+                              {effectif.map((e) =>
+                                e.kind === "member" ? (
+                                  // Un MEMBRE se lit ici, il ne s'édite pas : son rattachement et
+                                  // la correction de son classement vivent sur la page Membres,
+                                  // où la liste des comptes existe déjà — deux endroits pour la
+                                  // même décision, c'est un endroit de trop. Sans classement
+                                  // connu, il ne peut disputer AUCUN simple : on le DIT, plutôt
+                                  // que de laisser une ligne muette qui bloquera le soir venu.
+                                  <li
+                                    key={`m${e.m.id}`}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "space-between",
+                                      gap: 8,
+                                    }}
+                                  >
+                                    <span>{e.m.name}</span>
+                                    {e.m.clt ? (
+                                      <span className="directory-clt">{e.m.clt}</span>
+                                    ) : (
+                                      <span className="muted" style={{ flex: "0 0 auto" }}>
+                                        classement inconnu
+                                      </span>
+                                    )}
+                                  </li>
+                                ) : (
+                                  <li
+                                    key={`g${e.g.id}`}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "space-between",
+                                      gap: 8,
+                                    }}
+                                  >
+                                    <span>
+                                      {e.g.name} <span className="muted">· hors appli</span>
+                                    </span>
+                                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                      {/* Un invité n'a pas de compte, donc rien à rapprocher sur
+                                          squashnet : son classement — qui décide de l'ordre des
+                                          simples interclub — se saisit ici, à la main. `<select>`
+                                          plutôt qu'un champ texte libre : la liste des classements
+                                          FFSquash est FERMÉE (`KNOWN_CLASSEMENTS`), un texte libre
+                                          laissait inventer une valeur qui n'existe pas. Enregistré
+                                          au choix (`onChange`), comme la correction équivalente sur
+                                          la page Membres. */}
+                                      <select
+                                        value={e.g.clt ?? ""}
+                                        disabled={icBusy}
+                                        onChange={(ev) => setGuestClt(e.g, ev.target.value)}
+                                        aria-label={`Classement interclub de ${e.g.name}`}
+                                        title="Classement fédéral, pour l'ordre des simples interclub."
+                                        style={{ margin: 0, width: "auto" }}
+                                      >
+                                        <option value="">— aucun —</option>
+                                        {KNOWN_CLASSEMENTS.map((c) => (
+                                          <option key={c} value={c}>
+                                            {c}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      <button
+                                        type="button"
+                                        className="secondary tiny"
+                                        disabled={icBusy}
+                                        onClick={() => removeGuest(e.g)}
+                                        style={{ flex: "0 0 auto" }}
+                                      >
+                                        Retirer
+                                      </button>
+                                    </span>
+                                  </li>
+                                ),
+                              )}
                             </ul>
                           )}
                         </div>

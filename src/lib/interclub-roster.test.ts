@@ -25,6 +25,7 @@ vi.mock("./db", () => ({
 }));
 
 import {
+  allTeamMembers,
   findAlignmentClash,
   findOrderConflict,
   resolveHomePick,
@@ -125,6 +126,49 @@ describe("teamRoster", () => {
   it("rangM d'un invité : toujours `null` — un invité n'a pas de rang, seulement un classement saisi à la main", async () => {
     h.invites = [{ id: "g1", name: "Émile", clt: "4D" } as never];
     expect((await teamRoster("t1"))[0].rangM).toBeNull();
+  });
+});
+
+// L'écran d'admin « Équipes interclub » ne comptait les membres que par leur NOMBRE : il fallait
+// ouvrir la page Membres à côté pour savoir qui compose une équipe, et à quel classement. Cette
+// fonction sert cet écran-là — d'où la lecture de TOUTES les équipes d'un coup.
+describe("allTeamMembers", () => {
+  it("porte l'équipe de chaque membre, son nom d'affichage et son classement effectif", async () => {
+    h.membres = [
+      membre({
+        id: "u1",
+        displayName: "Jérôme Blanc",
+        nickname: "Jéjé",
+        teamId: "t7",
+        squashnetRanking: { clt: "5A", rangM: 412 },
+      }),
+    ];
+    expect(await allTeamMembers()).toEqual([
+      { kind: "member", id: "u1", teamId: "t7", name: "Jéjé", clt: "5A", rangM: 412 },
+    ]);
+  });
+
+  it("applique la MÊME priorité de classement que le reste du module (correction admin d'abord)", async () => {
+    h.membres = [
+      membre({ id: "u1", interclubCltOverride: "4D", squashnetRanking: { clt: "5A", rangM: 412 } }),
+    ];
+    const [m] = await allTeamMembers();
+    // Le rang, lui, reste celui de squashnet : une correction ne porte qu'un classement.
+    expect(m).toMatchObject({ clt: "4D", rangM: 412 });
+  });
+
+  it("ne lit que les membres RATTACHÉS à une équipe, comptes désactivés exclus", async () => {
+    await allTeamMembers();
+    expect(h.dernierWhereUser).toEqual({ teamId: { not: null }, disabledAt: null });
+  });
+
+  it("trie par nom — la base alphabétique stable sur laquelle l'écran retrie par classement", async () => {
+    h.membres = [
+      membre({ id: "u1", displayName: "Zoé" }),
+      membre({ id: "u2", displayName: "Émile" }),
+      membre({ id: "u3", displayName: "Bernard", nickname: "Bébert" }),
+    ];
+    expect((await allTeamMembers()).map((m) => m.name)).toEqual(["Bébert", "Émile", "Zoé"]);
   });
 });
 

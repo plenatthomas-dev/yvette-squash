@@ -208,14 +208,28 @@ dernier ») bloque la désignation.
 **La correction admin existe pour un cas réel** : un rapprochement squashnet qui échoue ou se
 trompe (nom mal orthographié côté ResaMania — ex. « Matthieu Soismier » quand squashnet connaît
 « Matthieu Soisier »). Deux écrans :
-- `/admin/membres`, action `set_clt_override` (`POST /api/admin/members`) — un champ texte par
+- `/admin/membres`, action `set_clt_override` (`POST /api/admin/members`) — un `<select>` par
   membre, à côté du switch d'équipe interclub ;
 - l'espace admin, section « Équipes interclub », actions `add_guest`/`set_guest_clt`
   (`POST /api/admin/interclub-teams`) — le classement d'un invité se saisit au même endroit que
   son inscription au roster.
 
 Les deux valident le format en écrivant (`parseClassementInput`, même module) : une faute de
-frappe se signale à la SAISIE, pas le soir d'une rencontre au moment de composer.
+frappe se signale à la SAISIE, pas le soir d'une rencontre au moment de composer. Et comme la
+liste FFSquash est fermée, ils ne proposent que `KNOWN_CLASSEMENTS` — un classement inventé n'est
+plus saisissable du tout, au lieu d'être refusé après coup.
+
+**L'EFFECTIF d'une équipe se lit en entier dans l'espace admin** (section « Équipes interclub »).
+Cet écran ne montrait qu'un DÉCOMPTE de membres (« 7 membres inscrits ») et la liste des seuls
+invités : savoir qui composait réellement une équipe, et à quel classement, obligeait à ouvrir
+`/admin/membres` à côté et à reconstituer l'équipe de tête. `GET /api/admin/interclub-teams`
+renvoie donc aussi les membres nominativement (`allTeamMembers`, `interclub-roster.ts` — mêmes
+règles que `teamRoster` : comptes désactivés exclus, classement effectif via `memberClt`), et
+l'écran affiche membres ET invités dans UNE liste triée par `compareRosterOrder`, du mieux au
+moins bien classé — c'est-à-dire dans l'ordre où ils devront disputer les simples. Le
+RATTACHEMENT, lui, reste sur `/admin/membres` : ici on lit les membres (badge de classement, ou
+« classement inconnu » qui dit tout de suite qu'ils ne pourront disputer aucun simple), on
+n'édite que les invités.
 
 **La correction admin d'un membre est aussi visible dans l'annuaire** (`GET /api/directory`) :
 `clt` y suit la même priorité qu'en composition (override d'abord, rapprochement squashnet
@@ -342,7 +356,7 @@ score enregistré).
   appliquée par les deux routes d'écriture. Elle a vécu en double, et les deux copies avaient
   divergé — le `PATCH` n'appliquait qu'une moitié de ce que ce document décrivait. Deux
   exemplaires d'une règle finissent toujours par ne plus dire la même chose.
-- `src/lib/interclub-roster.ts` — **qui peut être aligné** (`teamRoster`, `resolveHomePick`, `findAlignmentClash`) et, depuis l'ordre par classement, `findOrderConflict`
+- `src/lib/interclub-roster.ts` — **qui peut être aligné** (`teamRoster`, `resolveHomePick`, `findAlignmentClash`), l'effectif de TOUTES les équipes pour l'écran d'admin (`allTeamMembers`) et, depuis l'ordre par classement, `findOrderConflict`
 - `src/lib/interclub-gate.ts` — le **cache** du direct
 - `src/lib/interclub-access.ts` — le **contrôle d'accès** (flag + session)
 - `src/lib/interclub-notify.ts` — ciblage des abonnés et rédaction des notifications
