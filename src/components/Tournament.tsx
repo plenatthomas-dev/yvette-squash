@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "@/components/Dialog";
 import { MIN_PLAYERS, MAX_PLAYERS } from "@/lib/tournament";
 import { fetchDirectory, type DirectoryMember } from "@/lib/directoryCache";
-import { byRank } from "@/lib/directorySort";
+import { compareRosterOrder } from "@/lib/interclub-order";
 
 // Vue « Tournoi » : liste des tournois, assistant de création (roster annuaire + invités,
 // cible de matchs) → proposition de formule → génération, puis suivi (poules/tableau,
@@ -295,20 +295,27 @@ export default function Tournament({ toast, onExpired }: Props) {
   };
 
   // Construit la liste ordonnée (têtes de série) à partir des joueurs choisis. ORDRE PAR
-  // DÉFAUT = classement fédéral (rang croissant = plus fort en tête), les membres non classés
-  // puis les invités ensuite (ordre alpha). L'utilisateur ré-ordonne à la main.
+  // DÉFAUT = classement fédéral (le mieux classé en tête), les membres non classés puis les
+  // invités ensuite (ordre alpha). L'utilisateur ré-ordonne à la main.
   //
-  // On réutilise `byRank`, LE comparateur de l'annuaire (paliers étanches : rang mixte, puis
-  // rang de genre, puis non classés). Deux écrans qui ordonnent les mêmes membres ne doivent
-  // pas pouvoir diverger — et surtout, mélanger les deux barèmes dans une même soustraction
-  // donnerait la tête de série n°1 (bye + branche facile) à celui dont le rang mixte manque.
+  // On réutilise `compareRosterOrder` (`interclub-order.ts`) : CLASSEMENT d'abord — c'est lui
+  // que la fédération fait foi, pas un rang —, puis rang mixte squashnet SEULEMENT entre deux
+  // classements ÉGAUX (départage un « 5A » contre un autre « 5A »), jamais entre deux classements
+  // différents. Trier par rang mixte SEUL (l'ancien comparateur, celui de l'annuaire) mélangeait
+  // hommes et femmes sur une échelle qui ne suit pas exactement les mêmes paliers de classement
+  // d'un genre à l'autre — deux joueurs au même classement pouvaient s'y retrouver dans le
+  // mauvais ordre. Même comparateur que la composition d'une équipe interclub : deux écrans qui
+  // ordonnent par classement ne doivent pas pouvoir diverger.
   const buildSeeded = () => {
     const memberOf = (id: string) => members?.find((x) => x.id === id);
     const sortedIds = [...picked].sort((a, b) => {
       const ma = memberOf(a);
       const mb = memberOf(b);
       if (!ma || !mb) return 0;
-      const byClassement = byRank(ma, mb);
+      const byClassement = compareRosterOrder(
+        { name: ma.name, clt: ma.clt ?? null, rangM: ma.rangM ?? null },
+        { name: mb.name, clt: mb.clt ?? null, rangM: mb.rangM ?? null },
+      );
       if (byClassement !== 0) return byClassement;
       return ma.name.localeCompare(mb.name, "fr", { sensitivity: "base" });
     });
@@ -920,6 +927,11 @@ export default function Tournament({ toast, onExpired }: Props) {
                       onChange={() => togglePick(m.id)}
                     />
                     {m.name}
+                    {/* Même badge que l'annuaire (`.directory-clt`) : voir le classement ICI,
+                        avant de choisir qui participe, pas seulement à l'étape des têtes de
+                        série qui suit — sans quoi composer un tournoi équilibré demandait
+                        d'ouvrir l'annuaire à côté. */}
+                    {m.clt && <span className="directory-clt">{m.clt}</span>}
                   </label>
                 ))}
               </div>

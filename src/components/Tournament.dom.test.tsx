@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, act, screen, fireEvent, waitFor } from "@testing-library/react";
 import Tournament, { scorelines, prettyDate, todayISO } from "@/components/Tournament";
 import { validScore } from "@/lib/tournament-db";
+import { invalidateDirectory } from "@/lib/directoryCache";
 
 // MILLE CENT LIGNES, ZÉRO TEST — et dedans, deux règles que seul un `&&` dans du JSX énonce :
 // qui voit le bouton « Générer la phase finale », et qui peut corriger un score déjà saisi.
@@ -355,5 +356,79 @@ describe("« Prochains matchs » — ce que la liste laisse passer", () => {
     // pas de liste du tout, et un match sans adversaire ne peut pas être appelé au micro.
     await ouvrir(detail({ pools: [programme(m as Corps)] }));
     expect(screen.queryByText(/Prochains matchs/)).toBeNull();
+  });
+});
+
+// --- Assistant de création — choix des joueurs et têtes de série ------------
+//
+// L'écran affichait le nom des membres au choix des participants, jamais leur classement — il
+// fallait ouvrir l'annuaire à côté pour composer un tournoi équilibré. Et le pré-remplissage des
+// têtes de série triait par RANG MIXTE squashnet (`byRank`, celui de l'annuaire), pas par
+// CLASSEMENT fédéral : correct tant que tout le monde a un rang connu, mais un membre dont le
+// classement vient d'une correction admin (`interclubCltOverride`, sans rapprochement squashnet)
+// n'a pas de rang du tout — `byRank` le reléguait en fin de liste par ordre alphabétique, sans
+// tenir compte de son classement pourtant connu.
+
+describe("Assistant de création — le classement, du choix des joueurs aux têtes de série", () => {
+  // 6 = MIN_PLAYERS : le strict nécessaire pour que « Suivant » ne soit pas désactivé.
+  const MEMBRES = [
+    { id: "u-zoe", name: "Zoé", clt: "3B", rangM: 50 },
+    { id: "u-albert", name: "Albert", clt: "4D", rangM: 300 },
+    // Même classement, rangM différent : Chloé (rang meilleur) doit passer avant Benoît.
+    { id: "u-benoit", name: "Benoît", clt: "5A", rangM: 500 },
+    { id: "u-chloe", name: "Chloé", clt: "5A", rangM: 200 },
+    // Classement inconnu (jamais rapproché, aucune correction admin) : départagés par nom.
+    { id: "u-eve", name: "Eve", clt: null, rangM: null },
+    { id: "u-denis", name: "Denis", clt: null, rangM: null },
+  ];
+
+  beforeEach(() => {
+    invalidateDirectory();
+    vi.stubGlobal("fetch", (input: RequestInfo | URL) => {
+      const url = String(input);
+      const corps = url.endsWith("/api/tournaments")
+        ? { tournaments: [] }
+        : url.endsWith("/api/directory")
+          ? { members: MEMBRES, groupUrl: null }
+          : {};
+      return Promise.resolve(
+        new Response(JSON.stringify(corps), { status: 200, headers: { "Content-Type": "application/json" } }),
+      );
+    });
+  });
+
+  async function ouvrirAssistant() {
+    render(<Tournament {...props} />);
+    await act(async () => {
+      fireEvent.click(await screen.findByText("➕ Nouveau tournoi"));
+    });
+    await waitFor(() => expect(screen.getByText(/Choisis les joueurs/)).toBeTruthy());
+  }
+
+  it("montre le classement de chaque membre dès le choix des joueurs, pas seulement aux têtes de série", async () => {
+    await ouvrirAssistant();
+    expect(screen.getByText("4D")).toBeTruthy();
+    expect(screen.getByText("3B")).toBeTruthy();
+    // Benoît ET Chloé sont tous deux « 5A ».
+    expect(screen.getAllByText("5A")).toHaveLength(2);
+  });
+
+  it("n'affiche aucun badge pour un membre au classement inconnu", async () => {
+    await ouvrirAssistant();
+    const label = screen.getByText("Eve").closest("label");
+    expect(label?.querySelector(".directory-clt")).toBeNull();
+  });
+
+  it("pré-remplit les têtes de série par CLASSEMENT d'abord, rang mixte en départage ensuite", async () => {
+    await ouvrirAssistant();
+    for (const m of MEMBRES) {
+      fireEvent.click(screen.getByText(m.name));
+    }
+    await act(async () => {
+      fireEvent.click(screen.getByText("Suivant"));
+    });
+    const noms = Array.from(document.querySelectorAll(".trn-seed-name")).map((el) => el.textContent);
+    // Zoé (3B) > Albert (4D) > Chloé (5A-200) > Benoît (5A-500) > Denis/Eve (inconnu, alpha).
+    expect(noms).toEqual(["Zoé", "Albert", "Chloé", "Benoît", "Denis", "Eve"]);
   });
 });
