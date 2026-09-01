@@ -149,7 +149,14 @@ describe("POST /api/interclub", () => {
   });
 
   it("fige le nom du membre aligné, pour survivre à une suppression de compte", async () => {
-    h.user = { id: "u9", displayName: "Jérôme Blanc", nickname: "Jéjé", teamId: "t1", disabledAt: null };
+    h.user = {
+      id: "u9",
+      displayName: "Jérôme Blanc",
+      nickname: "Jéjé",
+      teamId: "t1",
+      disabledAt: null,
+      squashnetRanking: { clt: "5A" },
+    };
     await POST(post({ ...validBody, matches: [{ userId: "u9", awayName: "Dupont" }] }));
     const create = (h.created?.matches as { create: Array<Record<string, unknown>> }).create;
     expect(create[0].homeDisplayName).toBe("Jéjé");
@@ -189,7 +196,7 @@ describe("POST /api/interclub", () => {
   });
 
   it("aligne un joueur hors appli inscrit au roster de l'équipe", async () => {
-    h.guest = { id: "g1", name: "Paul Hors-Appli", teamId: "t1" };
+    h.guest = { id: "g1", name: "Paul Hors-Appli", teamId: "t1", clt: "4D" };
     await POST(post({ ...validBody, matches: [{ guestId: "g1" }] }));
     const create = (h.created?.matches as { create: Array<Record<string, unknown>> }).create;
     expect(create[0].homeGuestId).toBe("g1");
@@ -332,9 +339,28 @@ describe("POST /api/interclub", () => {
     expect(res.status).toBe(201);
   });
 
-  it("n'exige aucun classement quand un seul simple est composé", async () => {
-    h.user = { id: "u9", displayName: "Jérôme", nickname: null, teamId: "t1", disabledAt: null };
+  it("n'exige pas de COMPARAISON de classement quand un seul simple est composé, mais exige quand même de le connaître", async () => {
+    // `lineupOrderConflict` seul ne réclame rien tant qu'il n'y a personne à comparer — mais
+    // `resolveHomePicks` (donc `decideMember`) refuse maintenant tout joueur dont le classement
+    // est inconnu, quel que soit le nombre de simples déjà composés : sans classement, il ne
+    // peut disputer AUCUN simple.
+    h.user = {
+      id: "u9",
+      displayName: "Jérôme",
+      nickname: null,
+      teamId: "t1",
+      disabledAt: null,
+      squashnetRanking: { clt: "5A" },
+    };
     const res = await POST(post({ ...validBody, matches: [{ userId: "u9" }] }));
     expect(res.status).toBe(201);
+  });
+
+  it("refuse de composer le tout premier simple avec un joueur sans classement connu", async () => {
+    h.user = { id: "u9", displayName: "Jérôme", nickname: null, teamId: "t1", disabledAt: null };
+    const res = await POST(post({ ...validBody, matches: [{ userId: "u9" }] }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/classement inconnu/);
+    expect(h.created).toBeNull();
   });
 });

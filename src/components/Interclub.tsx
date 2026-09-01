@@ -1158,17 +1158,28 @@ function MatchEditor({
               // revenir en arrière après avoir changé d'avis), mais nulle part ailleurs.
               const at = takenBy.get(key);
               const taken = at !== undefined && at !== match.order;
+              // Sans classement connu, un joueur ne peut disputer AUCUN simple — pas seulement
+              // ceux où une comparaison d'ordre est possible. Même logique que `taken` : on
+              // grise plutôt que de laisser composer pour se faire refuser par le serveur.
+              const noClt = r.clt == null;
               // Romprait-il l'ordre des simples par classement s'il jouait CELUI-CI ? Même
               // logique que `taken` : on grise plutôt que de laisser composer pour rien.
-              const orderProblem = taken
-                ? null
-                : lineupOrderConflict([...otherOrderSlots, { order: match.order, name: r.name, clt: r.clt }]);
-              const blocked = taken || !!orderProblem;
+              const orderProblem =
+                taken || noClt
+                  ? null
+                  : lineupOrderConflict([...otherOrderSlots, { order: match.order, name: r.name, clt: r.clt }]);
+              const blocked = taken || noClt || !!orderProblem;
               return (
                 <option key={key} value={key} disabled={blocked}>
                   {r.name}
                   {r.clt ? ` (${r.clt})` : ""}
-                  {taken ? ` — joue déjà le match n° ${at}` : orderProblem ? " — hors ordre de classement" : ""}
+                  {taken
+                    ? ` — joue déjà le match n° ${at}`
+                    : noClt
+                      ? " — classement inconnu"
+                      : orderProblem
+                        ? " — hors ordre de classement"
+                        : ""}
                 </option>
               );
             })}

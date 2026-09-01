@@ -296,13 +296,20 @@ function decideMember(
   if (u.teamId !== teamId) {
     return { ok: false, error: "Ce membre n'est pas dans l'équipe qui dispute la rencontre" };
   }
+  const clt = memberClt(u);
+  if (clt == null) {
+    return {
+      ok: false,
+      error: `${memberName(u)} : classement inconnu — attribue-lui un classement avant de le désigner`,
+    };
+  }
   return {
     ok: true,
     value: {
       homeUserId: u.id,
       homeGuestId: null,
       homeDisplayName: memberName(u),
-      clt: memberClt(u),
+      clt,
     },
   };
 }
@@ -314,6 +321,12 @@ function decideGuest(
   if (!g) return { ok: false, error: "Joueur inconnu" };
   if (g.teamId !== teamId) {
     return { ok: false, error: "Ce joueur n'est pas dans l'équipe qui dispute la rencontre" };
+  }
+  if (g.clt == null) {
+    return {
+      ok: false,
+      error: `${g.name} : classement inconnu — attribue-lui un classement avant de le désigner`,
+    };
   }
   return {
     ok: true,

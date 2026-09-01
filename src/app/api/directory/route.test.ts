@@ -82,6 +82,32 @@ describe("GET /api/directory", () => {
     expect(members[1].clt).toBeUndefined(); // pas de rapprochement → aucun champ classement
   });
 
+  it("expose la correction admin (interclubCltOverride) quand il n'y a pas de rapprochement squashnet", async () => {
+    h.users = [
+      { id: "a", displayName: "Alice Martin", nickname: null, interclubCltOverride: "4D", squashnetRanking: null },
+    ];
+    const res = await GET(req());
+    const { members } = await res.json();
+    expect(members[0].clt).toBe("4D");
+    expect(members[0].rang).toBeUndefined();
+    expect(members[0].rangM).toBeUndefined();
+  });
+
+  it("priorise la correction admin sur le rapprochement squashnet, mais garde le rang de squashnet", async () => {
+    h.users = [
+      {
+        id: "a",
+        displayName: "Alice Martin",
+        nickname: null,
+        interclubCltOverride: "4D",
+        squashnetRanking: { clt: "3A", rang: 10, rangM: 20, cat: "+45" },
+      },
+    ];
+    const res = await GET(req());
+    const { members } = await res.json();
+    expect(members[0]).toMatchObject({ clt: "4D", rang: 10, rangM: 20, cat: "+45" });
+  });
+
   it("n'expose jamais le classement quand le classement est désactivé", async () => {
     h.flags.ranking = false;
     h.users = [

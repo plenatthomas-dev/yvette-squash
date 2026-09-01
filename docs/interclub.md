@@ -172,12 +172,20 @@ de l'annuaire (`directorySort.ts`), qui compare des **rangs**, pas des **classem
 **`src/lib/interclub-order.ts`** (module pur, sans Prisma) porte deux fonctions :
 - `classementPower(clt)` — le poids d'un classement (`N` > `R1` > `R2` > `1A`…`1D` > `2A`… >
   `NC`), plus petit = plus fort ;
-- `lineupOrderConflict(slots)` — le premier problème d'une composition, ou `null`. **Moins de
-  deux simples désignés ⇒ rien à vérifier** : composer le tout premier simple d'une rencontre ne
-  doit pas réclamer un classement qui ne servira peut-être jamais. L'exigence n'apparaît qu'au
-  second joueur désigné, quand une comparaison devient possible — et à ce moment-là, un
-  classement **inconnu** bloque autant qu'un ordre effectivement violé : on refuse plutôt que de
-  supposer un ordre qui pourrait être faux.
+- `lineupOrderConflict(slots)` — le premier problème d'ORDRE entre des simples DÉJÀ DÉSIGNÉS, ou
+  `null`. **Moins de deux simples désignés ⇒ rien à comparer**, donc rien à vérifier : c'est une
+  règle d'ordre RELATIF, elle n'a par construction rien à dire sur un simple isolé.
+
+⚠️ **Ce n'est PAS la même chose que « avoir le droit de jouer ».** Un joueur dont le classement
+est **inconnu** (`clt === null` — jamais rapproché sur squashnet, et aucune correction admin
+posée) ne peut disputer **aucun** simple, y compris le tout premier composé d'une rencontre, où
+`lineupOrderConflict` seule ne réclamerait rien faute de second joueur à comparer. Cette
+exigence-là vit dans `interclub-roster.ts` (`decideMember`/`decideGuest`, appelées par
+`resolveHomePick`/`resolveHomePicks`) : composer QUELQUE joueur que ce soit passe TOUJOURS par
+elles, avant même que `findOrderConflict`/`lineupOrderConflict` n'aient leur mot à dire — donc
+avant que le nombre de simples déjà désignés entre en jeu. Un classement **connu mais faible**
+(`NC`) reste, lui, un classement valide : seul `clt === null` (rien à comparer, pas même « le
+dernier ») bloque la désignation.
 
 **D'où vient le classement d'un joueur** (`interclub-roster.ts`, `RosterEntry.clt` /
 `ResolvedPick.clt`) :
@@ -197,6 +205,13 @@ trompe (nom mal orthographié côté ResaMania — ex. « Matthieu Soismier » q
 
 Les deux valident le format en écrivant (`parseClassementInput`, même module) : une faute de
 frappe se signale à la SAISIE, pas le soir d'une rencontre au moment de composer.
+
+**La correction admin d'un membre est aussi visible dans l'annuaire** (`GET /api/directory`) :
+`clt` y suit la même priorité qu'en composition (override d'abord, rapprochement squashnet
+sinon) — sans quoi un membre jamais rapproché (pas encore licencié, nom mal orthographié…)
+resterait sans badge de classement dans l'annuaire même après correction admin, alors qu'il en a
+un désormais pour l'interclub. `rang`/`rangM`/`cat`, eux, ne viennent QUE du rapprochement
+squashnet : une correction manuelle ne porte qu'un classement, jamais de rang.
 
 **Vérifié à l'écriture, jamais figé.** Contrairement à `homeDisplayName`, le classement n'est PAS
 stocké sur `InterclubMatch` : `findOrderConflict` (`interclub-roster.ts`) le relit à chaque

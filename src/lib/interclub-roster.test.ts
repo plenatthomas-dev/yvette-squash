@@ -115,10 +115,22 @@ describe("teamRoster", () => {
 
 describe("resolveHomePick", () => {
   it("accepte un membre de l'équipe et fige son nom d'affichage", async () => {
-    const r = await resolveHomePick(db({ u1: membre({ nickname: "Tom" }) }), "t1", { userId: "u1" });
+    const r = await resolveHomePick(
+      db({ u1: membre({ nickname: "Tom", squashnetRanking: { clt: "5A" } }) }),
+      "t1",
+      { userId: "u1" },
+    );
     expect(r).toEqual({
       ok: true,
-      value: { homeUserId: "u1", homeGuestId: null, homeDisplayName: "Tom", clt: null },
+      value: { homeUserId: "u1", homeGuestId: null, homeDisplayName: "Tom", clt: "5A" },
+    });
+  });
+
+  it("refuse un membre sans classement connu — il ne peut disputer AUCUN simple, pas même le seul désigné", async () => {
+    const r = await resolveHomePick(db({ u1: membre({ nickname: "Tom" }) }), "t1", { userId: "u1" });
+    expect(r).toEqual({
+      ok: false,
+      error: "Tom : classement inconnu — attribue-lui un classement avant de le désigner",
     });
   });
 
@@ -140,13 +152,25 @@ describe("resolveHomePick", () => {
   });
 
   it("accepte un invité de l'équipe, et refuse celui d'une autre", async () => {
-    const guests = { g1: { id: "g1", name: "Marc", teamId: "t1" }, g2: { id: "g2", name: "Luc", teamId: "t2" } };
+    const guests = {
+      g1: { id: "g1", name: "Marc", teamId: "t1", clt: "4D" },
+      g2: { id: "g2", name: "Luc", teamId: "t2", clt: "4D" },
+    };
     const ok = await resolveHomePick(db({}, guests), "t1", { guestId: "g1" });
     expect(ok).toEqual({
       ok: true,
-      value: { homeUserId: null, homeGuestId: "g1", homeDisplayName: "Marc" },
+      value: { homeUserId: null, homeGuestId: "g1", homeDisplayName: "Marc", clt: "4D" },
     });
     expect((await resolveHomePick(db({}, guests), "t1", { guestId: "g2" })).ok).toBe(false);
+  });
+
+  it("refuse un invité sans classement connu", async () => {
+    const guests = { g1: { id: "g1", name: "Marc", teamId: "t1", clt: null } };
+    const r = await resolveHomePick(db({}, guests), "t1", { guestId: "g1" });
+    expect(r).toEqual({
+      ok: false,
+      error: "Marc : classement inconnu — attribue-lui un classement avant de le désigner",
+    });
   });
 
   it("refuse de désigner à la fois un membre et un invité", async () => {
@@ -202,7 +226,10 @@ describe("resolveHomePicks", () => {
 
   it("résout huit lignes en deux requêtes au plus", async () => {
     const users = Object.fromEntries(
-      Array.from({ length: 8 }, (_, i) => [`u${i}`, membre({ id: `u${i}` })]),
+      Array.from({ length: 8 }, (_, i) => [
+        `u${i}`,
+        membre({ id: `u${i}`, squashnetRanking: { clt: "5A" } }),
+      ]),
     );
     const { client, calls } = bulkDb(users);
     const res = await resolveHomePicks(
@@ -218,8 +245,11 @@ describe("resolveHomePicks", () => {
 
   it("rend les résultats DANS L'ORDRE reçu, refus compris", async () => {
     const { client } = bulkDb(
-      { u1: membre({ id: "u1" }), u2: membre({ id: "u2", teamId: "t2" }) },
-      { g1: { id: "g1", name: "Paul", teamId: "t1" } },
+      {
+        u1: membre({ id: "u1", squashnetRanking: { clt: "5A" } }),
+        u2: membre({ id: "u2", teamId: "t2" }),
+      },
+      { g1: { id: "g1", name: "Paul", teamId: "t1", clt: "4D" } },
     );
     const res = await resolveHomePicks(client, "t1", [
       { userId: "u1" },

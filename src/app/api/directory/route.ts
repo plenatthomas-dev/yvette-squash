@@ -39,6 +39,10 @@ export async function GET(req: NextRequest) {
       squashnetRanking: ranking
         ? { select: { clt: true, rang: true, rangM: true, cat: true } }
         : false,
+      // Correction admin d'interclub (`interclub-roster.ts`, `memberClt`) : le seul classement
+      // disponible pour un membre jamais rapproché sur squashnet (invité d'un autre club, pas
+      // encore licencié…). Même priorité qu'en composition — voir plus bas.
+      interclubCltOverride: ranking,
       // Équipe interclub où le membre est aligné : jointure seulement si la fonction est active.
       team: interclub ? { select: { id: true, name: true } } : false,
     },
@@ -50,22 +54,32 @@ export async function GET(req: NextRequest) {
   // têtes de série) + rangM (rang MIXTE : le nombre affiché et trié dans l'annuaire, seule
   // échelle comparable entre tous) + cat (info-bulle) ; jamais la licence ni le club
   // (données de traçabilité internes).
+  //
+  // `clt` PRIORISE la correction admin (`interclubCltOverride`) sur le rapprochement squashnet
+  // — même règle qu'en composition d'interclub (`memberClt`, `interclub-roster.ts`) : c'est ce
+  // qui rend visible le classement d'un membre jamais rapproché (pas encore licencié, licence
+  // mal orthographiée côté ResaMania…) sans attendre que squashnet le résolve de lui-même.
+  // `rang`/`rangM`/`cat`, eux, ne viennent QUE du rapprochement : une correction manuelle ne
+  // porte qu'un classement, jamais de rang.
   const members = users
-    .map((u) => ({
-      id: u.id,
-      name: u.nickname ?? u.displayName,
-      ...(ranking && u.squashnetRanking
-        ? {
-            clt: u.squashnetRanking.clt,
-            rang: u.squashnetRanking.rang,
-            rangM: u.squashnetRanking.rangM,
-            cat: u.squashnetRanking.cat,
-          }
-        : {}),
-      // `team` reste absent quand la fonction est coupée ou le membre non aligné : le client
-      // n'affiche la colonne que si au moins un membre en porte une.
-      ...(interclub && u.team ? { team: u.team.name } : {}),
-    }))
+    .map((u) => {
+      const clt = u.interclubCltOverride ?? u.squashnetRanking?.clt ?? null;
+      return {
+        id: u.id,
+        name: u.nickname ?? u.displayName,
+        ...(ranking && clt
+          ? {
+              clt,
+              ...(u.squashnetRanking
+                ? { rang: u.squashnetRanking.rang, rangM: u.squashnetRanking.rangM, cat: u.squashnetRanking.cat }
+                : {}),
+            }
+          : {}),
+        // `team` reste absent quand la fonction est coupée ou le membre non aligné : le client
+        // n'affiche la colonne que si au moins un membre en porte une.
+        ...(interclub && u.team ? { team: u.team.name } : {}),
+      };
+    })
     .sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
 
   return NextResponse.json({ members, groupUrl: whatsappGroupUrl() });

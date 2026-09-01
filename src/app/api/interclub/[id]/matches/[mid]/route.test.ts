@@ -278,9 +278,26 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
   });
 
   it("rattacher un membre fige son nom d'affichage", async () => {
-    h.user = { id: "u9", displayName: "Jérôme Blanc", nickname: "Jéjé", teamId: "team-1" };
+    h.user = {
+      id: "u9",
+      displayName: "Jérôme Blanc",
+      nickname: "Jéjé",
+      teamId: "team-1",
+      squashnetRanking: { clt: "5A" },
+    };
     await PATCH(patch({ homeUserId: "u9" }), ctx);
     expect(h.updated).toMatchObject({ homeDisplayName: "Jéjé" });
+  });
+
+  it("refuse de désigner un membre sans classement connu, même seul de la composition", async () => {
+    // C'était le trou : sans second simple à comparer, `lineupOrderConflict` seul ne
+    // réclamait aucun classement — un joueur jamais rapproché pouvait alors jouer le tout
+    // premier simple composé, quel que soit son numéro.
+    h.user = { id: "u9", displayName: "Jérôme Blanc", nickname: "Jéjé", teamId: "team-1" };
+    const res = await PATCH(patch({ homeUserId: "u9" }), ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/classement inconnu/);
+    expect(h.updated).toBeNull();
   });
 
   it("refuse de rattacher un membre inconnu", async () => {
@@ -301,7 +318,13 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
   });
 
   it("refuse d'aligner un joueur qui dispute déjà un autre simple de la rencontre", async () => {
-    h.user = { id: "u9", displayName: "Jérôme Blanc", nickname: "Jéjé", teamId: "team-1" };
+    h.user = {
+      id: "u9",
+      displayName: "Jérôme Blanc",
+      nickname: "Jéjé",
+      teamId: "team-1",
+      squashnetRanking: { clt: "5A" },
+    };
     h.alignmentClash = { order: 2 };
     const res = await PATCH(patch({ homeUserId: "u9" }), ctx);
     expect(res.status).toBe(400);
@@ -325,7 +348,13 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
   });
 
   it("le nom d'un membre rattaché prime sur un nom envoyé en même temps", async () => {
-    h.user = { id: "u9", displayName: "Jérôme Blanc", nickname: "Jéjé", teamId: "team-1" };
+    h.user = {
+      id: "u9",
+      displayName: "Jérôme Blanc",
+      nickname: "Jéjé",
+      teamId: "team-1",
+      squashnetRanking: { clt: "5A" },
+    };
     await PATCH(patch({ homeUserId: "u9", homeDisplayName: "Truc" }), ctx);
     expect(h.updated).toMatchObject({ homeDisplayName: "Jéjé" });
   });
@@ -351,7 +380,13 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
     // notification lisait les noms d'AVANT la mise à jour et annonçait donc
     // « à désigner c. à désigner » alors que les joueurs venaient d'être renseignés.
     h.match = { ...freshMatch(), homeDisplayName: "À désigner", awayName: "À désigner" };
-    h.user = { id: "u9", displayName: "Laurent Petit", nickname: null, teamId: "team-1" };
+    h.user = {
+      id: "u9",
+      displayName: "Laurent Petit",
+      nickname: null,
+      teamId: "team-1",
+      squashnetRanking: { clt: "5A" },
+    };
     await PATCH(
       patch({ homeUserId: "u9", awayName: "Gégé", games: [{ home: 11, away: 5 }] }),
       ctx,
@@ -534,11 +569,18 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
   // --- Joueurs sans compte -------------------------------------------------
 
   it("aligne un joueur hors appli du roster de l'équipe", async () => {
-    h.guest = { id: "g1", name: "Paul Hors-Appli", teamId: "team-1" };
+    h.guest = { id: "g1", name: "Paul Hors-Appli", teamId: "team-1", clt: "4D" };
     await PATCH(patch({ homeGuestId: "g1" }), ctx);
     expect(h.updated).toMatchObject({ homeDisplayName: "Paul Hors-Appli" });
     expect(h.updated?.homeGuest).toEqual({ connect: { id: "g1" } });
     expect(h.updated?.homeUser).toEqual({ disconnect: true });
+  });
+
+  it("refuse un joueur hors appli sans classement connu", async () => {
+    h.guest = { id: "g1", name: "Paul Hors-Appli", teamId: "team-1", clt: null };
+    const res = await PATCH(patch({ homeGuestId: "g1" }), ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/classement inconnu/);
   });
 
   it("refuse un joueur hors appli d'une autre équipe", async () => {
