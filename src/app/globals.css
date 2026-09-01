@@ -2185,6 +2185,22 @@ td.cell.past {
   margin: 0 0 10px;
 }
 
+/* Filtres classement/catégorie : deux <select> compacts côte à côte, PAS étirés en pleine
+   largeur (contrairement au comportement par défaut de Pico sur un <select> seul) — ce sont
+   des affinages secondaires à la recherche, pas des champs de formulaire. */
+.directory-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+.directory-filters select {
+  width: auto;
+  margin: 0;
+  padding: 4px 28px 4px 10px;
+  font-size: 0.8rem;
+}
+
 /* Bascule d'ordre de l'annuaire (A→Z / Classement) : forme et état actif définis avec
    .tri-switch, plus haut. Ne reste ici que son insertion dans la modale. */
 .directory-sort {

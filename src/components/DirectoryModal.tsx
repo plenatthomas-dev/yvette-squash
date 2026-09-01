@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Dialog } from "@/components/Dialog";
 import { fetchDirectory, getDirectoryGroupUrl, type DirectoryMember } from "@/lib/directoryCache";
 import { byRank } from "@/lib/directorySort";
+import { classementPower } from "@/lib/interclub-order";
 
 // Ordre d'affichage. « name » est celui du serveur (déjà trié) et reste le défaut : on cherche
 // d'abord quelqu'un par son nom. « rank » classe du mieux classé au moins bien (cf. byRank).
@@ -25,6 +26,9 @@ export function DirectoryModal({
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<SortKey>("name");
   const [groupUrl, setGroupUrl] = useState<string | null>(null);
+  // "" = pas de filtre (toutes les catégories / tous les classements).
+  const [filterCat, setFilterCat] = useState("");
+  const [filterClt, setFilterClt] = useState("");
 
   // Charge la liste à l'ouverture. Cache mémoire court (cf. fetchDirectory) : une
   // réouverture rapprochée (ou après passage par Réglages) ne refait pas d'aller-retour.
@@ -52,13 +56,33 @@ export function DirectoryModal({
   }, [open, toast]);
 
   const needle = q.trim().toLowerCase();
-  const found = (members ?? []).filter((m) => m.name.toLowerCase().includes(needle));
+  const found = (members ?? []).filter(
+    (m) =>
+      m.name.toLowerCase().includes(needle) &&
+      (!filterCat || m.cat === filterCat) &&
+      (!filterClt || m.clt === filterClt),
+  );
   // `found` vient déjà trié par nom (serveur) : trier par rang part donc d'une base alpha
   // stable, ce qui range naturellement les ex æquo et les sans-classement par ordre alpha.
   const shown = sort === "rank" ? [...found].sort(byRank) : found;
   // La bascule de tri n'a de sens que si au moins un membre a un classement (flag `ranking`
   // actif ET rapprochement squashnet réussi) — sinon les deux ordres seraient identiques.
   const anyRanked = (members ?? []).some((m) => m.rangM != null);
+
+  // Options des filtres : dérivées des membres RÉELLEMENT chargés, pas d'une liste figée — un
+  // classement (`clt`) peut venir d'un rapprochement squashnet OU d'une correction admin
+  // (`interclubCltOverride`, cf. `/api/directory`), et les catégories d'âge (`cat`) ne suivent
+  // aucun format fixe côté squashnet. Calculées sur la liste NON filtrée : sans quoi choisir une
+  // catégorie ferait disparaître les autres classements de la liste déroulante, empêchant de
+  // revenir en arrière.
+  const catOptions = Array.from(
+    new Set((members ?? []).flatMap((m) => (m.cat ? [m.cat] : []))),
+  ).sort((a, b) => a.localeCompare(b, "fr", { sensitivity: "base" }));
+  // Triées par FORCE du classement (`classementPower`, le mieux classé en tête), pas
+  // alphabétiquement — un tri alpha mettrait « 10B » avant « 2A ».
+  const cltOptions = Array.from(
+    new Set((members ?? []).flatMap((m) => (m.clt ? [m.clt] : []))),
+  ).sort((a, b) => (classementPower(a) ?? Infinity) - (classementPower(b) ?? Infinity));
 
   if (!open) return null;
   return (
@@ -82,6 +106,38 @@ export function DirectoryModal({
               onChange={(e) => setQ(e.target.value)}
               aria-label="Rechercher un membre"
             />
+            {(catOptions.length > 0 || cltOptions.length > 0) && (
+              <div className="directory-filters">
+                {cltOptions.length > 0 && (
+                  <select
+                    value={filterClt}
+                    onChange={(e) => setFilterClt(e.target.value)}
+                    aria-label="Filtrer par classement"
+                  >
+                    <option value="">Tous les classements</option>
+                    {cltOptions.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {catOptions.length > 0 && (
+                  <select
+                    value={filterCat}
+                    onChange={(e) => setFilterCat(e.target.value)}
+                    aria-label="Filtrer par catégorie"
+                  >
+                    <option value="">Toutes les catégories</option>
+                    {catOptions.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
             {anyRanked && (
               <>
                 <div className="directory-sort" role="group" aria-label="Trier l'annuaire">
