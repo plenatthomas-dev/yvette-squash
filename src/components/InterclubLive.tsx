@@ -204,10 +204,21 @@ export default function InterclubLive({
         </p>
       ) : (
         shown.map((f) => (
-          <article key={f.id} className="ic-live-card">
+          <article
+            key={f.id}
+            className={`ic-live-card${f.status === "live" ? " is-live" : ""}`}
+          >
             <header className="ic-live-head">
-              <span>
+              <span className="ic-live-who">
                 {f.teamName} {f.home ? "reçoit" : "chez"} {f.opponent}
+              </span>
+              {/* La pastille d'état du reste de l'interclub, reprise telle quelle. Ce panneau
+                  montre les rencontres du jour, PAS seulement celles qui ont commencé — c'est
+                  ce qui permet de voir la sienne démarrer. Sans état affiché, une rencontre
+                  qui n'a pas commencé et une rencontre à 0–0 étaient le même écran. */}
+              <span className={`ic-status ic-${f.status}`}>
+                <span className="sr-only">État : </span>
+                {f.status === "live" ? "En cours" : "À venir"}
               </span>
               <span className="ic-live-score">
                 {f.score.home}–{f.score.away}

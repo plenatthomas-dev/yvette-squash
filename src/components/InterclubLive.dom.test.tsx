@@ -164,3 +164,36 @@ describe("InterclubLive — le sondage ne dépend que de ce qu'il y a à voir", 
     expect(calls.length).toBe(2);
   });
 });
+
+// CE PANNEAU MONTRE DEUX ÉTATS, PAS UN.
+//
+// Il porte le titre « En direct », mais il liste les rencontres du JOUR — c'est toute la raison
+// d'être de la cadence de veille ci-dessus, qui existe pour voir la sienne démarrer. Une
+// rencontre prévue ce soir y figurait donc avec exactement le même cadre, le même fond et un
+// score 0–0 qu'une rencontre commencée où personne n'a encore marqué : deux états, un seul
+// traitement, ce que DESIGN.md interdit nommément (« Règle des Trois Traitements »).
+//
+// Le vocabulaire existait déjà ailleurs dans l'interclub — pastille `.ic-status` et voile
+// `--live-wash` — et c'est lui qui est repris, plutôt qu'un signal de plus inventé ici.
+describe("InterclubLive — une rencontre en cours ne ressemble pas à une rencontre prévue", () => {
+  it("peint et étiquette « En cours » la rencontre commencée", async () => {
+    charge = { fixtures: [rencontre("live")] };
+    const { container, getByText } = render(<Banc />);
+    await souffle();
+
+    expect(getByText("En cours")).toBeTruthy();
+    expect(container.querySelector(".ic-live-card.is-live")).toBeTruthy();
+  });
+
+  it("laisse la rencontre PRÉVUE sans voile, et le dit", async () => {
+    charge = { fixtures: [rencontre("scheduled")] };
+    const { container, getByText } = render(<Banc />);
+    await souffle();
+
+    expect(getByText("À venir")).toBeTruthy();
+    // C'est l'absence de voile qui compte : la peinture est réservée au seul état qui demande
+    // qu'on regarde maintenant.
+    expect(container.querySelector(".ic-live-card")).toBeTruthy();
+    expect(container.querySelector(".ic-live-card.is-live")).toBeNull();
+  });
+});

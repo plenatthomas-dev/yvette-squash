@@ -119,6 +119,21 @@ vainqueur du jeu précédent) mais lui laisse le côté. Un match repris dont de
 enregistrés ne repose pas la question — leur serveur n'a plus d'importance, et le déroulé que
 `seedEvents` reconstitue est assumé comme inventé.
 
+**Ce que l'écran de marquage doit rendre lisible.** Il se lit à bout de bras : l'arbitre tourne
+le téléphone vers les joueurs. Le score est donc dimensionné pour REMPLIR sa case (requête de
+conteneur, repli en `vmin`) et non pour suivre l'échelle typographique — mesuré de **76 px**
+(téléphone couché, panneau d'engagement ouvert, le pire cas) à **232 px**. Le reste tient aux
+quatre coins pour ne pas lui voler de hauteur.
+
+Les deux cases sont peintes à la **couleur du maillot**, choisie librement : leur encre est donc
+calculée, jamais stockée (`inkFor`, blanc ou noir selon le plus lisible). Le pire fond possible
+pour une encre binaire est celui où les deux se valent — luminance relative 0,179 — et il tient
+encore **4,62:1**. C'est un plancher, pas une moyenne : aucune couleur de maillot ne peut passer
+sous AA. ⚠️ **À condition de ne rien composer par-dessus** : une `opacity: 0.9` posée sur les
+jeux gagnés composait l'encre avec le maillot et ramenait ce plancher sous le seuil (mesuré
+4,49:1 sur `#2e7d32`, 4,22:1 sur `#d81b60`, identique dans les trois thèmes puisque le maillot
+n'en dépend d'aucun). C'est le « Don't » d'`opacity` de `DESIGN.md`, appliqué ici.
+
 **A posteriori** — `MatchEditor` → `PATCH …/matches/{mid}`. Jeu par jeu, pour les soirs où
 personne n'a marqué, et pour corriger. `games` remplace **intégralement** la liste (une double
 soumission ne crée pas deux fois le même jeu), d'où la garde `knownGameCount`.
@@ -266,6 +281,14 @@ figé » plus haut, pour la raison symétrique).
 cache. Dire que « dix spectateurs coûtent une lecture Postgres » serait faux — ils en coûtent
 dix légères au lieu de dix lourdes, et le compute Neon reste éveillé de toute façon puisque le
 marqueur écrit.
+
+**Ce que le panneau montre — deux états, pas un.** Il s'intitule « En direct » mais liste les
+rencontres du JOUR, commencées ou non : c'est la raison d'être de la cadence de veille, qui
+existe précisément pour voir la sienne démarrer. Une rencontre prévue ce soir et une rencontre
+commencée où personne n'a encore marqué s'affichaient donc à l'identique, score 0–0 compris.
+La carte en cours porte désormais le voile `--live-wash` et la pastille `.ic-status` du reste
+du module — le vocabulaire d'état existait déjà (`.ic-row-live`, `.ic-match-live`), on ne l'avait
+pas appliqué ici.
 
 ⚠️ **Pourquoi pas le cache CDN**, contrairement à ce que prévoyait l'étude initiale : un cache
 partagé indexe sur l'URL, pas sur le cookie. La première réponse servie à un membre connecté
