@@ -111,6 +111,21 @@ describe("teamRoster", () => {
     h.invites = [{ id: "g1", name: "Émile", clt: "4D" } as never];
     expect((await teamRoster("t1"))[0].clt).toBe("4D");
   });
+
+  it("rangM d'un membre : celui du rapprochement squashnet — sert à départager le sélecteur, jamais l'ordre des simples", async () => {
+    h.membres = [membre({ id: "u1", displayName: "Zoé", squashnetRanking: { clt: "5A", rangM: 412 } })];
+    expect((await teamRoster("t1"))[0].rangM).toBe(412);
+  });
+
+  it("rangM d'un membre : `null` sans rapprochement", async () => {
+    h.membres = [membre({ id: "u1", displayName: "Zoé" })];
+    expect((await teamRoster("t1"))[0].rangM).toBeNull();
+  });
+
+  it("rangM d'un invité : toujours `null` — un invité n'a pas de rang, seulement un classement saisi à la main", async () => {
+    h.invites = [{ id: "g1", name: "Émile", clt: "4D" } as never];
+    expect((await teamRoster("t1"))[0].rangM).toBeNull();
+  });
 });
 
 describe("resolveHomePick", () => {

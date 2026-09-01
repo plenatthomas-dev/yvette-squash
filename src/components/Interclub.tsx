@@ -34,7 +34,7 @@ import {
   winGamesFor,
   type GameScore,
 } from "@/lib/interclub";
-import { lineupOrderConflict, type OrderedSlot } from "@/lib/interclub-order";
+import { compareRosterOrder, lineupOrderConflict, type OrderedSlot } from "@/lib/interclub-order";
 
 // Vue « Interclub » : les rencontres de championnat par équipes.
 //
@@ -76,6 +76,9 @@ type RosterEntry = {
   name: string;
   /** Classement fédéral effectif, ou `null` si inconnu — décide de l'ordre des simples. */
   clt: string | null;
+  /** Rang national mixte squashnet, ou `null` — départage deux joueurs de même classement dans
+   *  le sélecteur (cf. `compareRosterOrder`) ; toujours `null` pour un invité. */
+  rangM: number | null;
 };
 
 type FixtureRow = {
@@ -1144,6 +1147,13 @@ function MatchEditor({
   // par classement — même logique que `takenBy` juste au-dessus.
   const otherOrderSlots = orderSlots.filter((s) => s.order !== match.order);
 
+  // Le sélecteur liste le roster du MIEUX classé au MOINS bien, pas alphabétiquement : à
+  // classement égal (deux « 5A »), le rang mixte squashnet connu départage, le plus petit en
+  // tête ; à défaut, l'ordre alphabétique reçu du serveur suffit (tri stable, cf.
+  // `compareRosterOrder`). Refait à chaque rendu plutôt que mémoïsé : le roster est une petite
+  // liste, et il change à chaque frappe de `pick`.
+  const sortedRoster = [...roster].sort(compareRosterOrder);
+
   return (
     <div className="ic-editor">
       <label className="ic-field">
@@ -1151,7 +1161,7 @@ function MatchEditor({
         <span className="ic-field-row">
           <select value={pick} onChange={(e) => setPick(e.target.value)}>
             <option value="">— à désigner —</option>
-            {roster.map((r) => {
+            {sortedRoster.map((r) => {
               const key = `${r.kind}:${r.id}`;
               // Comparé au NUMÉRO du simple et non au choix courant : le joueur que ce
               // simple-ci retient doit rester sélectionnable ici (sinon on ne pourrait plus

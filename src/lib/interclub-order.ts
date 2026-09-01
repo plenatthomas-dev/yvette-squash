@@ -148,3 +148,41 @@ export function lineupOrderConflict(slots: readonly OrderedSlot[]): string | nul
 
   return null;
 }
+
+/** Une entrée du roster telle que `RosterEntry` (`interclub-roster.ts`) l'expose au sélecteur. */
+export interface RankableRosterEntry {
+  name: string;
+  clt: string | null;
+  /** Rang national mixte (`SquashnetRanking.rangM`), ou `null` — toujours `null` pour un invité. */
+  rangM: number | null;
+}
+
+/**
+ * Ordre d'AFFICHAGE du sélecteur de composition : le mieux classé en tête. À NE PAS CONFONDRE
+ * avec `lineupOrderConflict`, qui VALIDE l'ordre des simples DÉJÀ DÉSIGNÉS d'une rencontre —
+ * celui-ci ne fait que trier une LISTE de choix possibles, et ne refuse jamais rien.
+ *
+ * Trois paliers, dans cet ordre :
+ *   1. CLASSEMENT (`classementPower`), le plus fort en tête — un classement mal formé ou absent
+ *      compte comme « inconnu » et passe systématiquement après tout classement reconnu, y
+ *      compris `NC` (qui EST un classement, juste le plus faible) ;
+ *   2. à classement égal (deux « 5A », deux `NC`, ou deux inconnus), le RANG MIXTE squashnet
+ *      (`rangM`) le plus PETIT — mais seulement quand les DEUX camarades de palier le connaissent,
+ *      sans quoi comparer un rang à une absence de rang n'aurait aucun sens (cf. `directorySort.ts`,
+ *      même principe : on ne mélange jamais un rang connu et une absence de rang) ;
+ *   3. sinon, ordre ALPHABÉTIQUE (déjà l'ordre reçu du serveur, `localeCompare` FR) — un tri
+ *      stable laisse ce palier intact sans qu'on ait à le refaire ici.
+ */
+export function compareRosterOrder(a: RankableRosterEntry, b: RankableRosterEntry): number {
+  const pa = a.clt != null ? classementPower(a.clt) : null;
+  const pb = b.clt != null ? classementPower(b.clt) : null;
+  if (pa !== pb) {
+    if (pa === null) return 1;
+    if (pb === null) return -1;
+    return pa - pb;
+  }
+  if (a.rangM != null && b.rangM != null && a.rangM !== b.rangM) {
+    return a.rangM - b.rangM;
+  }
+  return 0;
+}

@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { classementPower, lineupOrderConflict, parseClassementInput } from "./interclub-order";
+import {
+  classementPower,
+  compareRosterOrder,
+  lineupOrderConflict,
+  parseClassementInput,
+  type RankableRosterEntry,
+} from "./interclub-order";
 
 describe("classementPower", () => {
   it("classe N avant R1 avant R2 avant les catégories numérotées avant NC", () => {
@@ -159,5 +165,62 @@ describe("parseClassementInput", () => {
   it("refuse un format non reconnu", () => {
     expect(parseClassementInput("cinq A").ok).toBe(false);
     expect(parseClassementInput(42).ok).toBe(false);
+  });
+});
+
+describe("compareRosterOrder", () => {
+  // Ordre d'AFFICHAGE du sélecteur : le mieux classé en tête. Sans rapport avec
+  // `lineupOrderConflict`, qui valide l'ordre des simples déjà désignés d'une rencontre.
+  const p = (name: string, clt: string | null, rangM: number | null = null): RankableRosterEntry => ({
+    name,
+    clt,
+    rangM,
+  });
+
+  it("classe par CLASSEMENT, le mieux classé en tête", () => {
+    const albert = p("Albert", "4D");
+    const benoit = p("Benoît", "5A");
+    expect(compareRosterOrder(albert, benoit)).toBeLessThan(0);
+    expect(compareRosterOrder(benoit, albert)).toBeGreaterThan(0);
+  });
+
+  it("à classement égal, départage par RANG MIXTE — le plus petit en tête", () => {
+    const zoe = p("Zoé", "5A", 300);
+    const albert = p("Albert", "5A", 120);
+    expect(compareRosterOrder(albert, zoe)).toBeLessThan(0);
+    expect(compareRosterOrder(zoe, albert)).toBeGreaterThan(0);
+  });
+
+  it("ne compare jamais un rang mixte connu à un rang inconnu — laisse l'alphabétique trancher", () => {
+    const albert = p("Albert", "5A", 120);
+    const zoe = p("Zoé", "5A", null);
+    expect(compareRosterOrder(albert, zoe)).toBe(0);
+    expect(compareRosterOrder(zoe, albert)).toBe(0);
+  });
+
+  it("un classement inconnu (ou mal formé) passe TOUJOURS après un classement reconnu, NC compris", () => {
+    const nc = p("Zoé", "NC");
+    const inconnu = p("Albert", null);
+    expect(compareRosterOrder(nc, inconnu)).toBeLessThan(0);
+    expect(compareRosterOrder(inconnu, nc)).toBeGreaterThan(0);
+  });
+
+  it("deux classements inconnus sont à égalité — l'alphabétique déjà reçu du serveur tranche", () => {
+    expect(compareRosterOrder(p("Albert", null), p("Zoé", null))).toBe(0);
+  });
+
+  it("trie une liste complète du mieux classé au moins bien, alphabétique en dernier recours", () => {
+    // Reçu du serveur DÉJÀ trié par nom (`teamRoster`) : comme `compareRosterOrder` ne
+    // départage jamais deux ex æquo lui-même (renvoie 0), c'est ce tri stable d'entrée qui
+    // fournit l'ordre alphabétique de repli — exactement le contrat du client réel
+    // (`[...roster].sort(compareRosterOrder)` dans `Interclub.tsx`).
+    const roster = [
+      p("Albert", "5A", 120),
+      p("Chloé", "4D"),
+      p("Denis", null),
+      p("Zoé", "5A", null),
+    ];
+    const sorted = [...roster].sort(compareRosterOrder);
+    expect(sorted.map((r) => r.name)).toEqual(["Chloé", "Albert", "Zoé", "Denis"]);
   });
 });

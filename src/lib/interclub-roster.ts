@@ -31,6 +31,14 @@ export interface RosterEntry {
    * des simples (cf. `interclub-order.ts`).
    */
   clt: string | null;
+  /**
+   * Rang national MIXTE (`SquashnetRanking.rangM`), ou `null` si inconnu — TOUJOURS `null` pour
+   * un invité (`InterclubGuest` n'a pas de rang, seulement un `clt` saisi à la main). Ne sert
+   * PAS à l'ordre des simples (`interclub-order.ts` compare des CLASSEMENTS, jamais des rangs) :
+   * uniquement à départager, dans le sélecteur, deux joueurs de MÊME classement — le mieux
+   * classé au rang mixte le plus PETIT passe en tête (cf. `Interclub.tsx`, tri d'affichage).
+   */
+  rangM: number | null;
 }
 
 /**
@@ -96,7 +104,7 @@ export async function teamRoster(teamId: string): Promise<RosterEntry[]> {
         displayName: true,
         nickname: true,
         interclubCltOverride: true,
-        squashnetRanking: { select: { clt: true } },
+        squashnetRanking: { select: { clt: true, rangM: true } },
       },
     }),
     prisma.interclubGuest.findMany({
@@ -111,8 +119,15 @@ export async function teamRoster(teamId: string): Promise<RosterEntry[]> {
       id: u.id,
       name: memberName(u),
       clt: memberClt(u),
+      rangM: u.squashnetRanking?.rangM ?? null,
     })),
-    ...guests.map((g) => ({ kind: "guest" as const, id: g.id, name: g.name, clt: g.clt ?? null })),
+    ...guests.map((g) => ({
+      kind: "guest" as const,
+      id: g.id,
+      name: g.name,
+      clt: g.clt ?? null,
+      rangM: null,
+    })),
   ].sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
 }
 
