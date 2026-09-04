@@ -48,6 +48,14 @@ type Member = {
   rangM: number | null;
   rangMOverride: number | null;
   rangMSource: "override" | "squashnet" | null;
+  // Nom sous lequel CHERCHER ce membre sur squashnet, quand celui venu de ResaMania ne permet
+  // pas de l'y retrouver. Rien à voir avec les deux corrections ci-dessus : celles-là FIGENT une
+  // valeur, celui-ci répare la recherche et laisse le classement continuer de se rafraîchir.
+  squashnetGivenName: string | null;
+  squashnetFamilyName: string | null;
+  // Faux tant que rien ne l'a jamais retrouvé sur squashnet. C'est le seul signal qui distingue
+  // « pas encore classé » de « on ne le trouve pas » — sans lui, le défaut reste muet.
+  squashnetMatched: boolean;
   // Résas du membre sur 30 j, par origine. Mises en mots par memberOriginLabel, qui tient
   // compte de `mode` : un compte « email seul » n'est pas mesurable côté ResaMania.
   bookingsApp: number;
@@ -64,7 +72,8 @@ type Action =
   | "revoke_passkeys"
   | "delete"
   | "set_team"
-  | "set_clt_override";
+  | "set_clt_override"
+  | "set_squashnet_name";
 
 // Petite pastille de statut (pas de classe .badge globale : elle n'existe qu'en scopé).
 const badge: CSSProperties = {
@@ -124,6 +133,11 @@ export default function MembersPage() {
   const [links, setLinks] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ id: string; text: string } | null>(null);
+  // Verdict du dernier rapprochement squashnet déclenché à la main, pour le membre concerné.
+  const [snStatus, setSnStatus] = useState<{
+    id: string;
+    status: "matched" | "moved" | "unknown";
+  } | null>(null);
 
   const load = async () => {
     try {
@@ -153,7 +167,14 @@ export default function MembersPage() {
   const postAction = async (
     id: string,
     action: Action,
-    extra?: { passkeyId?: string; teamId?: string | null; clt?: string; rangM?: string },
+    extra?: {
+      passkeyId?: string;
+      teamId?: string | null;
+      clt?: string;
+      rangM?: string;
+      givenName?: string;
+      familyName?: string;
+    },
   ) => {
     setBusyId(id);
     setMsg(null);
@@ -169,6 +190,7 @@ export default function MembersPage() {
         teamId?: string | null;
         clt?: string | null;
         rangM?: number | null;
+        status?: "matched" | "moved" | "unknown";
       };
       if (!res.ok) {
         setMsg({ id, text: data.error ?? "Action impossible." });
@@ -185,6 +207,12 @@ export default function MembersPage() {
         setMembers((prev) =>
           prev.map((m) => (m.id === id ? { ...m, teamId: data.teamId ?? null } : m)),
         );
+      } else if (action === "set_squashnet_name") {
+        // Le serveur a retenté le rapprochement dans la foulée : on montre son verdict, sinon
+        // l'admin aurait saisi un nom sans jamais savoir s'il était le bon avant le prochain
+        // passage mensuel du cron. Puis on recharge, pour que le classement retrouvé s'affiche.
+        setSnStatus({ id, status: data.status ?? "unknown" });
+        await load();
       } else {
         // set_clt_override compris : contrairement à `set_team`, cette action est rare et ne
         // se répète pas vingt fois d'affilée. Effacer une correction doit alors réafficher le
@@ -241,6 +269,23 @@ export default function MembersPage() {
     const next = rangM.trim();
     if ((m?.rangMOverride != null ? String(m.rangMOverride) : "") === next) return;
     void postAction(id, "set_clt_override", { clt: m?.cltOverride ?? "", rangM: next });
+  };
+
+  // Les deux moitiés du nom de recherche partent ENSEMBLE (le serveur refuse une identité à
+  // moitié remplie, qui rendrait le rapprochement plus permissif que le comportement par
+  // défaut), mais se tapent séparément : d'où la lecture de l'autre moitié à chaque envoi.
+  // Enregistré à la perte de focus, comme le rang : un nom passe par toutes ses initiales.
+  const setSquashnetName = (id: string, part: "given" | "family", value: string) => {
+    const m = members.find((x) => x.id === id);
+    const next = value.trim().replace(/\s+/g, " ");
+    const given = part === "given" ? next : (m?.squashnetGivenName ?? "");
+    const family = part === "family" ? next : (m?.squashnetFamilyName ?? "");
+    if (given === (m?.squashnetGivenName ?? "") && family === (m?.squashnetFamilyName ?? "")) return;
+    // Une seule moitié tapée : on n'envoie rien et on ne dit rien non plus. L'admin est en
+    // train de remplir l'autre champ ; crier « incomplet » entre deux champs serait du bruit.
+    if (!!given !== !!family) return;
+    setSnStatus(null);
+    void postAction(id, "set_squashnet_name", { givenName: given, familyName: family });
   };
 
   const revokePasskey = (id: string, pk: MemberPasskey) => {
@@ -386,6 +431,79 @@ export default function MembersPage() {
                         </button>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {/* Nom de recherche sur squashnet. À LIRE AVANT le bloc suivant : quand la
+                    fédération ne retrouve pas quelqu'un, le premier réflexe n'est PAS de forcer
+                    son classement à la main, c'est de réparer la recherche — après quoi le
+                    classement se rafraîchit tout seul chaque mois, correction comprise.
+                    Le cas qui a motivé ce champ : ResaMania enregistre « Nom Prénom » ou un nom
+                    mal orthographié, et l'approximation par défaut (« le nom de famille est le
+                    dernier mot du nom affiché ») interroge alors la fédération sur un prénom.
+                    Ce n'est PAS un renommage : `displayName` revient de ResaMania à chaque
+                    connexion du membre, le corriger ici ne tiendrait pas une journée. */}
+                {interclub && m.teamId && (
+                  <div className="tiny" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span className="muted" style={{ flex: "0 0 auto" }}>
+                        Nom sur squashnet&nbsp;:
+                      </span>
+                      {/* `key` indexée sur la valeur enregistrée : après un rechargement, le
+                          champ non contrôlé doit repartir de ce que le serveur a retenu (nom
+                          normalisé, ou vide si la correction a été retirée). */}
+                      <input
+                        key={`sn-given-${m.id}-${m.squashnetGivenName ?? ""}`}
+                        defaultValue={m.squashnetGivenName ?? ""}
+                        disabled={busyId === m.id}
+                        onBlur={(e) => setSquashnetName(m.id, "given", e.target.value)}
+                        aria-label={`Prénom sur squashnet de ${m.displayName}`}
+                        placeholder="Prénom"
+                        maxLength={60}
+                        style={{ width: "8rem", margin: 0 }}
+                      />
+                      <input
+                        key={`sn-family-${m.id}-${m.squashnetFamilyName ?? ""}`}
+                        defaultValue={m.squashnetFamilyName ?? ""}
+                        disabled={busyId === m.id}
+                        onBlur={(e) => setSquashnetName(m.id, "family", e.target.value)}
+                        aria-label={`Nom de famille sur squashnet de ${m.displayName}`}
+                        placeholder="Nom"
+                        maxLength={60}
+                        style={{ width: "9rem", margin: 0 }}
+                      />
+                    </div>
+
+                    {/* Le verdict du rapprochement relancé à l'instant. Il n'est affiché
+                        qu'après une saisie : c'est une RÉPONSE à un geste, pas un état
+                        permanent de la carte.
+                        Le succès y reste à l'encre discrète : le vert est réservé à ce qui est
+                        ACTIONNABLE, et un accusé de réception ne l'est pas. Seul l'échec prend
+                        une couleur, parce que lui appelle un geste de plus. */}
+                    {snStatus?.id === m.id && (
+                      <span
+                        className="muted"
+                        style={
+                          snStatus.status === "matched" ? undefined : { color: "var(--warn-fg)" }
+                        }
+                      >
+                        {snStatus.status === "matched"
+                          ? "✓ Retrouvé sur squashnet, classement à jour."
+                          : snStatus.status === "moved"
+                            ? "⚠️ Trouvé, mais hors du club : classement retiré."
+                            : "⚠️ Toujours introuvable. Vérifie l'orthographe, sinon force le classement ci-dessous."}
+                      </span>
+                    )}
+
+                    {/* Signal PERMANENT, lui : ce membre n'a jamais été retrouvé. C'est
+                        exactement ce silence qui laissait passer le défaut — un joueur qu'on
+                        croyait classé et qu'aucun rapprochement n'avait jamais atteint. Tu ne
+                        l'affiches pas si une correction manuelle couvre déjà le besoin. */}
+                    {!m.squashnetMatched && m.cltSource !== "override" && !snStatus && (
+                      <span className="muted" style={{ color: "var(--warn-fg)" }}>
+                        ⚠️ Jamais retrouvé sur squashnet.
+                      </span>
+                    )}
                   </div>
                 )}
 

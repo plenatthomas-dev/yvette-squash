@@ -1,0 +1,25 @@
+-- Nom sous lequel chercher un membre sur squashnet, quand son `displayName` ne permet pas de le
+-- retrouver.
+--
+-- POURQUOI. Le rapprochement fédéral interroge squashnet avec le DERNIER MOT du `displayName`,
+-- supposé être le nom de famille, puis exige que tous les mots du nom se retrouvent dans la
+-- ligne. Deux situations le mettent en échec, et aucune ne se voit à l'écran :
+--   * une ORTHOGRAPHE divergente entre ResaMania et la fédération ;
+--   * un ORDRE inversé côté ResaMania (« Soismier Matthieu ») : on interroge alors la fédération
+--     sur un PRÉNOM, la réponse compte des centaines de lignes, et le verdict est « introuvable »
+--     tous les mois, en silence.
+--
+-- Corriger `displayName` ne servirait à rien : il vient de ResaMania et y est RÉÉCRIT à chaque
+-- connexion (cf. lib/session.ts, resolveUser). D'où deux colonnes dédiées, qui ne servent QU'À
+-- la recherche fédérale et ne s'affichent nulle part.
+--
+-- Les deux vont ENSEMBLE ou pas du tout — c'est contrôlé à l'écriture (POST /api/admin/members,
+-- action `set_squashnet_name`) et non par une contrainte : une moitié d'identité rendrait le
+-- rapprochement PLUS permissif que le comportement par défaut, donc plus exposé aux homonymes.
+-- NULL des deux côtés = pas de correction, on cherche sous `displayName`.
+--
+-- À NE PAS CONFONDRE avec `interclubCltOverride` / `interclubRangMOverride` (migrations 38 et
+-- 39), qui FIGENT un classement. Ici on répare la RECHERCHE : le classement continue de se
+-- rafraîchir tout seul au passage mensuel du cron.
+ALTER TABLE "User" ADD COLUMN "squashnetGivenName" TEXT;
+ALTER TABLE "User" ADD COLUMN "squashnetFamilyName" TEXT;

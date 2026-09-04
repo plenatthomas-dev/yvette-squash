@@ -4,7 +4,20 @@ import type { RankingRow } from "./client";
 // On mocke la couche réseau (client) et la base (prisma) ; le RAPPROCHEMENT (match.ts) reste
 // le vrai code, pour tester le comportement de bout en bout de refreshRankings().
 const h = vi.hoisted(() => ({
-  members: [] as { id: string; displayName: string }[],
+  members: [] as {
+    id: string;
+    displayName: string;
+    squashnetGivenName?: string | null;
+    squashnetFamilyName?: string | null;
+  }[],
+  /** Le membre que `findUnique` rend à `refreshMemberRanking` (rapprochement d'UN seul). */
+  member: null as null | {
+    id: string;
+    displayName: string;
+    squashnetGivenName?: string | null;
+    squashnetFamilyName?: string | null;
+  },
+  findUnique: vi.fn(),
   // Les joueurs SANS COMPTE sont balayés par la même passe : ils partagent la boucle, le
   // verdict et le disjoncteur. Vide par défaut — la plupart des cas ne parlent que des membres.
   guests: [] as { id: string; name: string }[],
@@ -24,7 +37,7 @@ vi.mock("./client", () => ({
 }));
 vi.mock("@/lib/db", () => ({
   prisma: {
-    user: { findMany: h.findMany },
+    user: { findMany: h.findMany, findUnique: h.findUnique },
     squashnetRanking: { upsert: h.upsert, deleteMany: h.deleteMany },
     interclubGuest: {
       findMany: h.guestFindMany,
@@ -34,7 +47,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { refreshRankings, summarizeRefresh } from "./refresh";
+import { refreshRankings, refreshMemberRanking, summarizeRefresh } from "./refresh";
 import type { RefreshResult } from "./refresh";
 
 // Fabrique une ligne squashnet ; club Yvette par défaut (celui que matchRanking cible).
@@ -63,6 +76,8 @@ beforeEach(() => {
   // suivant et consommait ses `mockResolvedValueOnce`.
   h.members = [];
   h.findMany.mockReset().mockImplementation(async () => h.members);
+  h.member = null;
+  h.findUnique.mockReset().mockImplementation(async () => h.member);
   h.guests = [];
   h.guestFindMany.mockReset().mockImplementation(async () => h.guests);
   h.guestUpdate.mockReset().mockResolvedValue({});
@@ -277,6 +292,95 @@ describe("refreshRankings — qui est balayé", () => {
     expect(h.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { OR: [{ listed: true }, { teamId: { not: null } }] } }),
     );
+  });
+});
+
+// LE NOM DE RECHERCHE CORRIGÉ PAR L'ADMIN.
+//
+// Le rapprochement par défaut suppose « Prénom Nom » et n'interroge la fédération que sur le
+// DERNIER MOT du nom affiché. ResaMania ne garantit ni l'ordre ni l'orthographe : quand il a
+// enregistré « Nom Prénom », on interroge squashnet sur un prénom, la réponse déborde, et le
+// verdict est « introuvable » tous les mois sans que rien ne le signale.
+describe("refreshRankings — nom de recherche corrigé", () => {
+  it("interroge squashnet sur le NOM DE FAMILLE corrigé, pas sur le dernier mot affiché", async () => {
+    // Nom stocké à l'envers côté ResaMania : le défaut chercherait « Matthieu ».
+    h.members = [
+      {
+        id: "u1",
+        displayName: "Soismier Matthieu",
+        squashnetGivenName: "Matthieu",
+        squashnetFamilyName: "Soismier",
+      },
+    ];
+    h.searchRanking.mockResolvedValue([row("SOISMIER MATTHIEU")]);
+    const res = await refreshRankings();
+    expect(h.searchRanking).toHaveBeenCalledWith("Soismier", { month: "2026-07-07" });
+    expect(res.matched).toBe(1);
+  });
+
+  it("ignore une correction à MOITIÉ posée et retombe sur le nom affiché", async () => {
+    // Une identité amputée rendrait la recherche PLUS permissive que le défaut. L'écriture
+    // l'interdit déjà ; on le revérifie ici pour qu'une ligne arrivée par un autre chemin
+    // (import, correction en base) ne dégrade rien en silence.
+    h.members = [
+      { id: "u1", displayName: "Jean Dupont", squashnetFamilyName: "Zzz", squashnetGivenName: null },
+    ];
+    h.searchRanking.mockResolvedValue([row("DUPONT JEAN")]);
+    await refreshRankings();
+    expect(h.searchRanking).toHaveBeenCalledWith("Dupont", { month: "2026-07-07" });
+  });
+
+  it("sans correction, cherche le dernier mot du nom affiché — le comportement d'origine", async () => {
+    h.members = [{ id: "u1", displayName: "Jean Dupont" }];
+    h.searchRanking.mockResolvedValue([row("DUPONT JEAN")]);
+    await refreshRankings();
+    expect(h.searchRanking).toHaveBeenCalledWith("Dupont", { month: "2026-07-07" });
+  });
+});
+
+// Le pendant pour UN membre, déclenché juste après une correction de nom. Sans lui, le mois qui
+// sépare deux passages du cron serait le mois pendant lequel l'admin ne sait pas si sa
+// correction a marché.
+describe("refreshMemberRanking", () => {
+  it("rapproche le membre sur son nom corrigé et écrit son classement", async () => {
+    h.member = {
+      id: "u1",
+      displayName: "Soismier Matthieu",
+      squashnetGivenName: "Matthieu",
+      squashnetFamilyName: "Soismier",
+    };
+    h.searchRanking.mockResolvedValue([row("SOISMIER MATTHIEU")]);
+    expect(await refreshMemberRanking("u1")).toBe("matched");
+    expect(h.searchRanking).toHaveBeenCalledWith("Soismier", { month: "2026-07-07" });
+    expect(h.upsert).toHaveBeenCalled();
+  });
+
+  it("« introuvable » n'efface RIEN — un silence n'est pas une preuve de départ", async () => {
+    h.member = { id: "u1", displayName: "Jean Dupont" };
+    h.searchRanking.mockResolvedValue([]);
+    expect(await refreshMemberRanking("u1")).toBe("unknown");
+    expect(h.deleteMany).not.toHaveBeenCalled();
+    expect(h.upsert).not.toHaveBeenCalled();
+  });
+
+  it("retrouvé UNIQUEMENT hors du club → efface le classement (moved)", async () => {
+    // Signal positif, celui-là : la personne existe à la fédération, sous un autre club.
+    h.member = { id: "u1", displayName: "Jean Dupont" };
+    h.searchRanking.mockResolvedValue([row("DUPONT JEAN", { club: "Squash Club d Ailleurs" })]);
+    expect(await refreshMemberRanking("u1")).toBe("moved");
+    expect(h.deleteMany).toHaveBeenCalled();
+  });
+
+  it("ne LÈVE JAMAIS sur un hoquet réseau : l'enregistrement du nom doit survivre", async () => {
+    h.member = { id: "u1", displayName: "Jean Dupont" };
+    h.searchRanking.mockRejectedValue(new Error("502"));
+    expect(await refreshMemberRanking("u1")).toBe("unknown");
+  });
+
+  it("membre introuvable en base → « unknown », sans écriture", async () => {
+    h.member = null;
+    expect(await refreshMemberRanking("u1")).toBe("unknown");
+    expect(h.searchRanking).not.toHaveBeenCalled();
   });
 });
 

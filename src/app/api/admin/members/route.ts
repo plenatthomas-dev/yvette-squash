@@ -5,6 +5,7 @@ import { listMembers, deleteBlockersFor } from "@/lib/members";
 import { getFeatures } from "@/lib/features-server";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
 import { parseClassementInput, parseRangMInput } from "@/lib/interclub-order";
+import { refreshMemberRanking } from "@/lib/squashnet/refresh";
 import { createEmailToken, authLinkFor, clientIp } from "@/lib/email-auth";
 import { alertsChanged } from "@/lib/alerts-gate";
 import { approveAsDisabledPayer } from "@/lib/tricount-summary";
@@ -35,6 +36,9 @@ export async function GET(req: NextRequest) {
   });
 }
 
+/** Longueur maximale d'un nom de recherche squashnet. Borne de saisie, pas une règle métier. */
+const MAX_SQUASHNET_NAME_LEN = 60;
+
 // POST /api/admin/members  { id, action }
 //   link            → régénère un lien d'accès à transmettre (activation si sans mot de passe,
 //                     sinon réinitialisation) ; mène à /reinitialiser où la personne choisit son mdp ;
@@ -56,6 +60,9 @@ export async function GET(req: NextRequest) {
 //                     de classement par le rang, donc forcer l'un sans l'autre laisserait le
 //                     membre inalignable (cf. lib/interclub-order.ts). Un NC fait exception, la
 //                     fédération ne les ordonnant pas entre eux — `rangM` y reste facultatif.
+//   set_squashnet_name → corrige le NOM sous lequel chercher ce membre sur squashnet
+//                     (body.givenName + body.familyName ; les deux vides = retire la correction),
+//                     puis retente le rapprochement tout de suite. Ne renomme PAS le membre.
 export async function POST(req: NextRequest) {
   const admin = await requireAdmin(req);
   if (!admin) {
@@ -68,6 +75,8 @@ export async function POST(req: NextRequest) {
     teamId?: unknown;
     clt?: unknown;
     rangM?: unknown;
+    givenName?: unknown;
+    familyName?: unknown;
   };
   if (typeof body.id !== "string" || !body.id) {
     return NextResponse.json({ error: "Membre invalide." }, { status: 400 });
@@ -190,6 +199,45 @@ export async function POST(req: NextRequest) {
       data: { interclubCltOverride: parsed.value, interclubRangMOverride: rangM.value },
     });
     return NextResponse.json({ ok: true, clt: parsed.value, rangM: rangM.value });
+  }
+
+  //   set_squashnet_name → corrige le NOM sous lequel chercher ce membre sur squashnet
+  //                     (body.givenName / body.familyName ; les deux vides = retire la
+  //                     correction), puis retente le rapprochement sur-le-champ.
+  //
+  // POURQUOI CE N'EST PAS UN RENOMMAGE. `displayName` vient de ResaMania et y est RÉÉCRIT à
+  // chaque connexion : le corriger localement ne tiendrait pas jusqu'à la prochaine ouverture
+  // de l'appli. Ces deux champs ne servent QU'À la recherche fédérale.
+  //
+  // POURQUOI IL FAUT LES DEUX. Le nom de FAMILLE devient le terme envoyé à squashnet — c'est
+  // le plus discriminant, et c'est ce que l'approximation par défaut (« le dernier mot du nom
+  // affiché ») rate quand ResaMania a enregistré « Nom Prénom ». Le PRÉNOM, lui, sert à
+  // départager les lignes rendues. N'en donner qu'un rendrait le rapprochement PLUS permissif
+  // que le comportement par défaut : l'inverse du but.
+  if (action === "set_squashnet_name") {
+    if (!(await getFeatures()).ranking) {
+      return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
+    }
+    const given = typeof body.givenName === "string" ? body.givenName.trim().replace(/\s+/g, " ") : "";
+    const family = typeof body.familyName === "string" ? body.familyName.trim().replace(/\s+/g, " ") : "";
+    if (!!given !== !!family) {
+      return NextResponse.json(
+        { error: "Donne le prénom ET le nom, ou laisse les deux vides." },
+        { status: 400 },
+      );
+    }
+    if (given.length > MAX_SQUASHNET_NAME_LEN || family.length > MAX_SQUASHNET_NAME_LEN) {
+      return NextResponse.json({ error: "Nom trop long." }, { status: 400 });
+    }
+    await prisma.user.update({
+      where: { id: target.id },
+      data: { squashnetGivenName: given || null, squashnetFamilyName: family || null },
+    });
+    // Rapprochement IMMÉDIAT : sans lui, l'admin saisirait un nom sans savoir s'il est le bon
+    // et devrait attendre le passage mensuel du cron pour l'apprendre. Best-effort — l'échec
+    // réseau ne remet pas en cause l'enregistrement du nom, qui est ce qu'on veut garder.
+    const status = await refreshMemberRanking(target.id);
+    return NextResponse.json({ ok: true, givenName: given || null, familyName: family || null, status });
   }
 
   if (action === "delete") {

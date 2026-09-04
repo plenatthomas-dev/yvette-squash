@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { getLatestMonth, searchRanking } from "./client";
-import { classifyRanking } from "./match";
+import { classifyRanking, searchQuery, type MemberIdentity } from "./match";
 import type { RankingRow } from "./client";
 
 // ============================================================================
@@ -60,11 +60,42 @@ export interface RefreshResult {
 }
 
 /**
- * Un joueur à rapprocher, quelle que soit sa population. Le rapprochement lui-même ne dépend
- * que du NOM : c'est ce qui permet aux deux populations de partager la même boucle, le même
- * verdict et le même disjoncteur — trois choses qu'on ne veut surtout pas voir diverger.
+ * Un joueur à rapprocher, quelle que soit sa population. Le rapprochement ne dépend que du NOM :
+ * c'est ce qui permet aux deux populations de partager la même boucle, le même verdict et le
+ * même disjoncteur — trois choses qu'on ne veut surtout pas voir diverger.
+ *
+ * `query` (le terme envoyé à squashnet) et `identity` (ce que le rapprochement doit retrouver
+ * dans la ligne) sont calculés UNE FOIS, à la construction, et jamais redérivés dans la boucle :
+ * c'est là que se loge la correction admin d'un nom, et l'y appliquer à deux endroits reviendrait
+ * à pouvoir en oublier un.
  */
-type Subject = { kind: "member" | "guest"; id: string; name: string };
+type Subject = {
+  kind: "member" | "guest";
+  id: string;
+  /** Nom affiché, pour les journaux et les messages — jamais utilisé pour rapprocher. */
+  name: string;
+  /** Terme de recherche envoyé à squashnet (idéalement le nom de FAMILLE, le plus discriminant). */
+  query: string;
+  /** Identité que `classifyRanking` doit retrouver dans une ligne du club. */
+  identity: MemberIdentity;
+};
+
+/**
+ * Identité de recherche par DÉFAUT, à partir du seul nom affiché — le comportement historique,
+ * et celui de tout joueur sans correction.
+ *
+ * Deux approximations assumées, et c'est précisément ce que la correction admin répare :
+ *   * le nom de famille est supposé être le DERNIER MOT. Faux dès que ResaMania a enregistré
+ *     « Nom Prénom » : on interroge alors la fédération sur un prénom, la réponse déborde, et le
+ *     verdict est « introuvable » tous les mois sans que rien ne le signale ;
+ *   * le nom entier est passé en `familyName`, `givenName` restant vide. `nameMatches` exigeant
+ *     que TOUS les jetons du nom se retrouvent dans la ligne, cela revient à comparer l'identité
+ *     complète — donc ni plus ni moins strict que de les séparer.
+ */
+function defaultIdentity(name: string): { query: string; identity: MemberIdentity } {
+  const tokens = name.split(/\s+/);
+  return { query: tokens[tokens.length - 1], identity: { givenName: "", familyName: name } };
+}
 
 /** Les joueurs à balayer, dans l'ordre : membres d'abord, joueurs sans compte ensuite. */
 async function subjectsToRefresh(): Promise<Subject[]> {
@@ -74,7 +105,7 @@ async function subjectsToRefresh(): Promise<Subject[]> {
     // mais pour pouvoir être composé.
     prisma.user.findMany({
       where: { OR: [{ listed: true }, { teamId: { not: null } }] },
-      select: { id: true, displayName: true },
+      select: { id: true, displayName: true, squashnetGivenName: true, squashnetFamilyName: true },
     }),
     prisma.interclubGuest.findMany({ select: { id: true, name: true } }),
   ]);
@@ -82,10 +113,34 @@ async function subjectsToRefresh(): Promise<Subject[]> {
   // On matche sur le VRAI nom (`displayName`), jamais le pseudo (`nickname`). On écarte tout de
   // suite les noms vides : ils ne sont pas évaluables et fausseraient le compteur `members`, le
   // ratio du disjoncteur et le critère « tous ignorés » du heartbeat.
+  //
+  // Un joueur SANS COMPTE n'a pas de correction de nom, et n'en a pas besoin : son nom est saisi
+  // par l'admin, qui peut simplement le corriger là où il l'a écrit.
   return [
-    ...users.map((u) => ({ kind: "member" as const, id: u.id, name: u.displayName.trim() })),
-    ...guests.map((g) => ({ kind: "guest" as const, id: g.id, name: g.name.trim() })),
+    ...users.map((u) => ({ kind: "member" as const, id: u.id, name: u.displayName.trim(), ...memberIdentity(u) })),
+    ...guests.map((g) => ({ kind: "guest" as const, id: g.id, name: g.name.trim(), ...defaultIdentity(g.name.trim()) })),
   ].filter((s) => s.name !== "");
+}
+
+/**
+ * Sous quel nom chercher CE membre : la correction admin si elle est posée, sinon le nom
+ * affiché. La correction n'est prise en compte que si ses DEUX moitiés sont là — une identité
+ * amputée rendrait la recherche plus permissive que le défaut, donc plus exposée aux homonymes,
+ * ce qui serait l'inverse du but. L'écriture le contrôle déjà (`set_squashnet_name`) ; on le
+ * revérifie ici, pour qu'une ligne à moitié remplie par un autre chemin ne dégrade rien.
+ */
+function memberIdentity(u: {
+  displayName: string;
+  squashnetGivenName: string | null;
+  squashnetFamilyName: string | null;
+}): { query: string; identity: MemberIdentity } {
+  const given = u.squashnetGivenName?.trim();
+  const family = u.squashnetFamilyName?.trim();
+  if (given && family) {
+    const identity: MemberIdentity = { givenName: given, familyName: family };
+    return { query: searchQuery(identity), identity };
+  }
+  return defaultIdentity(u.displayName.trim());
 }
 
 /** Écrit un rapprochement RÉUSSI, là où cette population le range. */
@@ -199,15 +254,10 @@ export async function refreshRankings(): Promise<RefreshResult> {
   const moved: Subject[] = [];
 
   for (const subject of subjects) {
-    // Le nom est « Prénom Nom » → on interroge squashnet par le dernier mot (≈ nom de famille) ;
-    // la recherche fait un « contient » sur « NOM PRÉNOM », donc l'ordre importe peu.
-    const tokens = subject.name.split(/\s+/);
-    const query = tokens[tokens.length - 1];
-
     // 1) Appel réseau squashnet SEUL sous try : un hoquet (timeout, 5xx) → joueur `skipped`.
     let rows: RankingRow[];
     try {
-      rows = await searchRanking(query, { month });
+      rows = await searchRanking(subject.query, { month });
     } catch {
       skipped++;
       continue;
@@ -215,7 +265,7 @@ export async function refreshRankings(): Promise<RefreshResult> {
 
     // 2) Verdict. On n'EFFACE que sur un signal POSITIF (« moved » : nom retrouvé uniquement
     //    hors du club) ; « pas trouvé » (page 2, ambiguïté, réponse vide) est « unknown » → rien.
-    const verdict = classifyRanking({ givenName: "", familyName: subject.name }, rows);
+    const verdict = classifyRanking(subject.identity, rows);
     if (verdict.status === "matched") {
       try {
         await writeMatch(subject, verdict.match, month);
@@ -262,14 +312,14 @@ export async function matchGuestRanking(guest: {
   id: string;
   name: string;
 }): Promise<"matched" | "moved" | "unknown"> {
-  const subject: Subject = { kind: "guest", id: guest.id, name: guest.name.trim() };
-  if (!subject.name) return "unknown";
+  const name = guest.name.trim();
+  if (!name) return "unknown";
+  const subject: Subject = { kind: "guest", id: guest.id, name, ...defaultIdentity(name) };
   try {
     const month = await getLatestMonth();
     if (!month) return "unknown";
-    const tokens = subject.name.split(/\s+/);
-    const rows = await searchRanking(tokens[tokens.length - 1], { month });
-    const verdict = classifyRanking({ givenName: "", familyName: subject.name }, rows);
+    const rows = await searchRanking(subject.query, { month });
+    const verdict = classifyRanking(subject.identity, rows);
     if (verdict.status === "matched") {
       await writeMatch(subject, verdict.match, month);
       return "matched";
@@ -280,6 +330,44 @@ export async function matchGuestRanking(guest: {
       return "moved";
     }
     await noteAttempt(subject, "unknown");
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * Rapproche UN membre, tout de suite — juste après qu'un admin a corrigé son nom de recherche.
+ *
+ * C'est le pendant de `matchGuestRanking`, et il existe pour la même raison : le mois qui
+ * sépare deux passages du cron est le mois pendant lequel l'admin ne sait pas si sa correction
+ * a marché. Rapprocher sur-le-champ transforme une saisie en aveugle en une réponse.
+ *
+ * NE LÈVE JAMAIS : un hoquet squashnet ne doit pas faire échouer l'enregistrement du nom, qui
+ * est la partie qu'on veut garder. Renvoie le verdict pour que l'écran le dise.
+ */
+export async function refreshMemberRanking(userId: string): Promise<"matched" | "moved" | "unknown"> {
+  try {
+    const u = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, displayName: true, squashnetGivenName: true, squashnetFamilyName: true },
+    });
+    if (!u || !u.displayName.trim()) return "unknown";
+    const subject: Subject = { kind: "member", id: u.id, name: u.displayName.trim(), ...memberIdentity(u) };
+
+    const month = await getLatestMonth();
+    if (!month) return "unknown";
+    const rows = await searchRanking(subject.query, { month });
+    const verdict = classifyRanking(subject.identity, rows);
+    if (verdict.status === "matched") {
+      await writeMatch(subject, verdict.match, month);
+      return "matched";
+    }
+    // Pas de disjoncteur ici : il protège d'un EFFACEMENT EN MASSE, et il n'y a qu'un membre.
+    if (verdict.status === "moved") {
+      await clearMatch(subject);
+      return "moved";
+    }
     return "unknown";
   } catch {
     return "unknown";

@@ -92,6 +92,25 @@ model User {
   // se fie au rapprochement automatique.
   interclubCltOverride   String?
   interclubRangMOverride Int?
+  // NOM SOUS LEQUEL CHERCHER CE MEMBRE SUR SQUASHNET, quand `displayName` ne permet pas de le
+  // retrouver. Les deux vont ENSEMBLE ou pas du tout (contrôlé à l'écriture) : ils remplacent
+  // l'identité entière utilisée par le rapprochement, pas la moitié.
+  //
+  // ⚠️ CE N'EST PAS UN RENOMMAGE. `displayName` vient de ResaMania et y est RÉÉCRIT à chaque
+  // connexion (cf. session.ts, resolveUser) : le corriger localement ne tiendrait pas jusqu'à la
+  // prochaine ouverture de l'appli. Ces deux colonnes ne servent qu'à la RECHERCHE fédérale, et
+  // ne s'affichent nulle part.
+  //
+  // Elles réparent deux pannes distinctes du rapprochement automatique :
+  //   * une ORTHOGRAPHE divergente entre ResaMania et la fédération ;
+  //   * un ORDRE inversé (« Soismier Matthieu » côté ResaMania), qui faisait interroger
+  //     squashnet sur le PRÉNOM — le rapprochement se noyait alors dans des centaines de lignes
+  //     et échouait en silence, mois après mois.
+  //
+  // À distinguer de `interclubCltOverride`/`interclubRangMOverride`, qui FIGENT une valeur :
+  // ici on répare la recherche, et le classement continue de se mettre à jour tout seul.
+  squashnetGivenName     String?
+  squashnetFamilyName    String?
   interclubsCreated      Interclub[]        @relation("InterclubCreator")
   interclubPlayed        InterclubMatch[]   @relation("InterclubHomePlayer")
   interclubScored        InterclubMatch[]   @relation("InterclubScorer")

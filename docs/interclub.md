@@ -67,7 +67,10 @@ sert à toute l'appli et pas seulement ici. La migration `38_` ajoute `User.inte
 — la correction admin d'un classement squashnet mal rapproché ; la `39_` ajoute son pendant pour
 le **rang mixte** (`User.interclubRangMOverride`) et donne aux joueurs sans compte les mêmes
 deux étages que les membres, en renommant leur `clt` manuel en `cltOverride` (cf. « Ordre des
-simples : classement, puis rang mixte » ci-dessous).
+simples : classement, puis rang mixte » ci-dessous). La `40_squashnet_name` ajoute
+`User.squashnetGivenName` / `squashnetFamilyName` : le nom sous lequel **chercher** un membre à
+la fédération, à ne pas confondre avec les deux corrections ci-dessus (cf. « Réparer la
+recherche avant de forcer la valeur »).
 
 | Table | Rôle |
 |---|---|
@@ -253,9 +256,41 @@ moment où le nom est encore sous les yeux de l'admin, donc le seul où « pas t
 actionnable (corriger l'orthographe, ou forcer le classement). Le cron mensuel les rafraîchit
 ensuite comme les membres.
 
+### Réparer la recherche avant de forcer la valeur
+
+Quand la fédération ne retrouve pas un membre, le premier réflexe n'est **pas** de forcer son
+classement à la main : c'est de réparer la **recherche**. Le rapprochement par défaut suppose
+« Prénom Nom » et n'interroge squashnet que sur le **dernier mot** du nom affiché. ResaMania ne
+garantit ni l'ordre ni l'orthographe : là où il a enregistré « Nom Prénom », on interroge la
+fédération sur un prénom, la réponse déborde, et le verdict est « introuvable » **tous les
+mois**, sans que rien ne le signale.
+
+`set_squashnet_name` (`POST /api/admin/members`) pose donc deux champs par membre, sur
+`/admin/membres` : le **prénom** et le **nom de famille** tels que squashnet les connaît. Le
+nom de famille devient le terme envoyé à la fédération ; le prénom sert à départager les lignes
+rendues.
+
+⚠️ **Ce n'est pas un renommage.** `displayName` vient de ResaMania et y est **réécrit à chaque
+connexion** du membre (`lib/session.ts`, `resolveUser`) : le corriger localement ne tiendrait
+pas une journée. Ces deux colonnes ne servent **qu'à** la recherche fédérale.
+
+⚠️ **Les deux moitiés ou aucune.** N'en donner qu'une rendrait le rapprochement *plus permissif*
+que le comportement par défaut — l'inverse du but. La route le refuse, et `refresh.ts` le
+revérifie avant de s'en servir : une ligne à moitié remplie retombe sur le nom affiché.
+
+Et parce qu'un rapprochement ne repasse qu'une fois par mois, l'écriture **relance le
+rapprochement sur-le-champ** (`refreshMemberRanking`) et l'écran rapporte le verdict. Sans cela,
+l'admin saisirait un nom sans savoir s'il est le bon, et l'apprendrait au prochain cron. La
+carte affiche par ailleurs un « jamais retrouvé sur squashnet » **permanent** tant qu'aucun
+rapprochement n'a abouti : c'est ce silence-là qui laissait passer le défaut.
+
+Reste le cas où la fédération ne connaît vraiment pas la personne (pas encore licenciée) : alors
+seulement, on force la valeur.
+
+### Forcer la valeur, en dernier recours
+
 **La correction admin existe pour un cas réel** : un rapprochement squashnet qui échoue ou se
-trompe (nom mal orthographié côté ResaMania — ex. « Matthieu Soismier » quand squashnet connaît
-« Matthieu Soisier »), ou un joueur pas encore licencié. Deux écrans :
+trompe, ou un joueur pas encore licencié. Deux écrans :
 - `/admin/membres`, action `set_clt_override` (`POST /api/admin/members`) — un `<select>` de
   classement et un champ de rang par membre, à côté du switch d'équipe interclub ;
 - l'espace admin, section « Équipes interclub », actions `add_guest` / `rematch_guest` /
@@ -442,7 +477,7 @@ score enregistré).
   divergé — le `PATCH` n'appliquait qu'une moitié de ce que ce document décrivait. Deux
   exemplaires d'une règle finissent toujours par ne plus dire la même chose.
 - `src/lib/interclub-roster.ts` — **qui peut être aligné** (`teamRoster`, `resolveHomePick`, `findAlignmentClash`, `rankingRefusal`), l'effectif de TOUTES les équipes pour l'écran d'admin (`allTeamMembers`, `allTeamGuests`) et, depuis l'ordre par classement, `findOrderConflict`
-- `src/lib/squashnet/refresh.ts` — le **rapprochement fédéral** des DEUX populations en une passe (`refreshRankings`), et d'un joueur sans compte à la demande (`matchGuestRanking`)
+- `src/lib/squashnet/refresh.ts` — le **rapprochement fédéral** des DEUX populations en une passe (`refreshRankings`), et à la demande d'un joueur sans compte (`matchGuestRanking`) ou d'un membre dont on vient de corriger le nom de recherche (`refreshMemberRanking`)
 - `src/lib/interclub-gate.ts` — le **cache** du direct
 - `src/lib/interclub-access.ts` — le **contrôle d'accès** (flag + session)
 - `src/lib/interclub-notify.ts` — ciblage des abonnés et rédaction des notifications
@@ -461,6 +496,7 @@ score enregistré).
 | `GET /api/directory` | Annuaire : membres opt-in ET joueurs sans compte (`kind`), avec équipe et classement |
 | `GET/POST /api/admin/interclub-teams` | Équipes, membres et joueurs sans compte, dont leur classement et leur rang mixte ; rapprochement squashnet à l'ajout et à la demande (**admin**) |
 | `POST /api/admin/members` (action `set_clt_override`) | Correction admin du classement ET du rang mixte d'un membre (**admin**) |
+| `POST /api/admin/members` (action `set_squashnet_name`) | Nom sous lequel chercher un membre sur squashnet, puis rapprochement immédiat (**admin**) |
 | `GET /api/notifications` | La cloche (pas de flag : elle sert à toute l'appli) |
 
 **Composants** — `Interclub.tsx` (orchestration), `InterclubScorer.tsx` (marquage),

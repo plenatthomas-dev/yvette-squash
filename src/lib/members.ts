@@ -43,6 +43,15 @@ export type MemberRow = {
   rangM: number | null;
   rangMOverride: number | null;
   rangMSource: "override" | "squashnet" | null;
+  // Nom sous lequel CHERCHER ce membre sur squashnet, quand son `displayName` (venu de
+  // ResaMania, et y étant réécrit à chaque connexion) ne permet pas de le retrouver. Vides =
+  // pas de correction. À distinguer des deux `*Override` ci-dessus, qui FIGENT une valeur :
+  // ici on répare la recherche, et le classement continue de se rafraîchir tout seul.
+  squashnetGivenName: string | null;
+  squashnetFamilyName: string | null;
+  // Le rapprochement a-t-il abouti ? Sert à ne pas laisser croire qu'un membre est classé
+  // quand rien ne l'a jamais retrouvé — c'est ce silence qui rendait le défaut invisible.
+  squashnetMatched: boolean;
   // Origine des résas du membre sur 30 j glissants (cf. src/lib/booking-origin.ts pour la
   // mise en mots, qui dépend aussi de `mode` : un compte « email seul » n'est pas mesurable).
   bookingsApp: number;
@@ -87,6 +96,8 @@ export async function listMembers(): Promise<MemberRow[]> {
       teamId: true,
       interclubCltOverride: true,
       interclubRangMOverride: true,
+      squashnetGivenName: true,
+      squashnetFamilyName: true,
       squashnetRanking: { select: { clt: true, rangM: true } },
       passkeys: {
         select: { id: true, deviceLabel: true, createdAt: true, lastUsedAt: true },
@@ -126,6 +137,9 @@ export async function listMembers(): Promise<MemberRow[]> {
       : u.squashnetRanking?.rangM != null
         ? "squashnet"
         : null,
+    squashnetGivenName: u.squashnetGivenName,
+    squashnetFamilyName: u.squashnetFamilyName,
+    squashnetMatched: u.squashnetRanking != null,
     bookingsApp: originByUser.get(u.id)?.app ?? 0,
     bookingsResa: originByUser.get(u.id)?.resa ?? 0,
   }));

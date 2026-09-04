@@ -13,6 +13,9 @@ const h = vi.hoisted(() => ({
     disabledAt: Date | null;
   },
   featureInterclub: true,
+  featureRanking: true,
+  /** Verdict que renvoie le rapprochement immédiat déclenché par `set_squashnet_name`. */
+  refreshMember: vi.fn(),
   blockers: { expenses: 0, shares: 0, tournaments: 0, total: 0 },
   members: [{ id: "u1" }] as unknown[],
   teams: [{ id: "t1", name: "Équipe 1" }] as unknown[],
@@ -40,7 +43,7 @@ vi.mock("@/lib/features-server", () => ({
     directory: false,
     delegation: false,
     tournament: false,
-    ranking: false,
+    ranking: h.featureRanking,
     interclub: h.featureInterclub,
   }),
 }));
@@ -57,6 +60,9 @@ vi.mock("@/lib/email-auth", () => ({
 // cron (cf. lib/alerts-gate). `revalidateTag` exige un contexte de requête Next, absent quand on
 // appelle le handler directement : on le mocke, et on vérifie l'appel plus bas.
 vi.mock("@/lib/alerts-gate", () => ({ alertsChanged: h.alertsChanged }));
+// Le rapprochement squashnet sort sur le réseau : il est éprouvé chez lui (lib/squashnet).
+// Ici on vérifie que la route le RELANCE après une correction de nom, et relaie son verdict.
+vi.mock("@/lib/squashnet/refresh", () => ({ refreshMemberRanking: h.refreshMember }));
 vi.mock("@/lib/db", () => ({
   prisma: {
     user: {
@@ -105,6 +111,8 @@ beforeEach(() => {
     disabledAt: null,
   };
   h.featureInterclub = true;
+  h.featureRanking = true;
+  h.refreshMember.mockReset().mockResolvedValue("matched");
   h.blockers = { expenses: 0, shares: 0, tournaments: 0, total: 0 };
   h.members = [{ id: "u1" }];
   h.teams = [{ id: "t1", name: "Équipe 1" }];
@@ -353,6 +361,108 @@ describe("POST /api/admin/members", () => {
     h.admin = null;
     expect(
       (await POST(postReq({ id: "u1", action: "set_clt_override", clt: "5A" }))).status,
+    ).toBe(403);
+  });
+});
+
+// LE NOM DE RECHERCHE SUR SQUASHNET.
+//
+// Le cas réel : ResaMania enregistre quelqu'un sous un nom qui ne permet pas de le retrouver
+// à la fédération (orthographe fautive, ou « Nom Prénom » là où le rapprochement suppose
+// « Prénom Nom » et n'interroge que le dernier mot). Le corriger dans `displayName` ne
+// tiendrait pas : ResaMania le réécrit à chaque connexion du membre. D'où deux colonnes qui ne
+// servent QU'À la recherche, et laissent le classement continuer de se rafraîchir tout seul.
+describe("POST /api/admin/members — set_squashnet_name", () => {
+  it("enregistre les deux moitiés, normalisées, et relance le rapprochement", async () => {
+    const res = await POST(
+      postReq({
+        id: "u1",
+        action: "set_squashnet_name",
+        givenName: "  Matthieu ",
+        familyName: "Soismier",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(h.userUpdate).toHaveBeenCalledWith({
+      where: { id: "u1" },
+      data: { squashnetGivenName: "Matthieu", squashnetFamilyName: "Soismier" },
+    });
+    // Relancé SUR-LE-CHAMP : sans ça l'admin devrait attendre le passage mensuel du cron pour
+    // savoir si le nom qu'il vient de taper était le bon.
+    expect(h.refreshMember).toHaveBeenCalledWith("u1");
+    expect(await res.json()).toMatchObject({ ok: true, status: "matched" });
+  });
+
+  it("relaie un rapprochement resté infructueux, sans annuler l'enregistrement", async () => {
+    // Le nom saisi est conservé même quand il ne donne rien : c'est une hypothèse de l'admin,
+    // et l'écraser lui ferait retaper la même chose au prochain essai.
+    h.refreshMember.mockResolvedValue("unknown");
+    const res = await POST(
+      postReq({ id: "u1", action: "set_squashnet_name", givenName: "Jean", familyName: "Zzz" }),
+    );
+    expect(res.status).toBe(200);
+    expect(h.userUpdate).toHaveBeenCalled();
+    expect((await res.json()).status).toBe("unknown");
+  });
+
+  it("deux champs vides retirent la correction", async () => {
+    const res = await POST(
+      postReq({ id: "u1", action: "set_squashnet_name", givenName: "", familyName: "" }),
+    );
+    expect(res.status).toBe(200);
+    expect(h.userUpdate).toHaveBeenCalledWith({
+      where: { id: "u1" },
+      data: { squashnetGivenName: null, squashnetFamilyName: null },
+    });
+  });
+
+  it("refuse une identité à MOITIÉ remplie, sans rien écrire", async () => {
+    // Ce n'est pas du pointillisme de formulaire. Le nom de famille devient le terme envoyé à
+    // squashnet, le prénom sert à départager les lignes rendues : n'en donner qu'un rendrait
+    // le rapprochement PLUS permissif que le comportement par défaut — l'inverse du but.
+    expect(
+      (await POST(postReq({ id: "u1", action: "set_squashnet_name", familyName: "Soismier" })))
+        .status,
+    ).toBe(400);
+    expect(
+      (await POST(postReq({ id: "u1", action: "set_squashnet_name", givenName: "Matthieu" })))
+        .status,
+    ).toBe(400);
+    expect(h.userUpdate).not.toHaveBeenCalled();
+    expect(h.refreshMember).not.toHaveBeenCalled();
+  });
+
+  it("refuse un nom démesuré", async () => {
+    const res = await POST(
+      postReq({
+        id: "u1",
+        action: "set_squashnet_name",
+        givenName: "Matthieu",
+        familyName: "S".repeat(61),
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(h.userUpdate).not.toHaveBeenCalled();
+  });
+
+  it("404 quand le classement fédéral est coupé", async () => {
+    // Le flag commande la fonction entière : sans rapprochement, ces deux colonnes ne servent
+    // à rien et laisser l'écriture passer ferait croire à un effet qui n'existe pas.
+    h.featureRanking = false;
+    expect(
+      (await POST(
+        postReq({ id: "u1", action: "set_squashnet_name", givenName: "M", familyName: "S" }),
+      )).status,
+    ).toBe(404);
+    expect(h.userUpdate).not.toHaveBeenCalled();
+  });
+
+  it("réservé aux admins", async () => {
+    h.admin = null;
+    expect(
+      (await POST(
+        postReq({ id: "u1", action: "set_squashnet_name", givenName: "M", familyName: "S" }),
+      )).status,
     ).toBe(403);
   });
 });
