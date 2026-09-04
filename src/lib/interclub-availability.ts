@@ -123,12 +123,15 @@ export function isShortHanded(t: AvailabilityTally, matchCount: number): boolean
  * C'est une garantie que personne ne fait disparaître un « non » assumé sans l'avoir vu.
  */
 export function needsOverrideConfirm(
-  existing: { userId: string | null; setById: string } | null,
+  existing: { userId: string | null; setById: string | null } | null,
   subjectUserId: string | null,
   actorUserId: string,
 ): boolean {
   if (!existing) return false;
   if (actorUserId === subjectUserId) return false; // l'intéressé se corrige
+  // `setById` nul = le signataire a supprimé son compte depuis (migration 42). Une telle ligne
+  // ne peut PAS être de première main : celle-là serait partie avec son auteur, par cascade.
+  // C'est donc un relais, et un relais s'écrase sans rien demander.
   return existing.userId !== null && existing.setById === existing.userId;
 }
 

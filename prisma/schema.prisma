@@ -887,9 +887,20 @@ model InterclubAvailability {
   // sans compte) ⇒ réponse RELAYÉE. Pas de booléen `relayed` en plus : il serait déductible de
   // ces deux colonnes, donc capable de les contredire. C'est aussi cette égalité qui décide
   // qu'un relais doit être confirmé avant d'écraser ce que quelqu'un a dit lui-même.
-  // Restrict : on ne supprime pas un compte en laissant des réponses signées par un fantôme.
-  setById     String
-  setBy       User            @relation("AvailabilitySetter", fields: [setById], references: [id], onDelete: Restrict)
+  //
+  // SetNull et NON Restrict (migration 42) : Restrict rendait indélébile tout compte ayant
+  // répondu une seule fois, y compris pour lui-même — et sous PostgreSQL il l'emportait sur le
+  // Cascade de `userId`, qui aurait pourtant emporté la ligne. La suppression d'un compte doit
+  // rester possible, la note de confidentialité la promet.
+  //
+  // Ce que NULL veut dire ici : une ligne où `setById` égalait `userId` part avec son auteur
+  // (Cascade), donc seules survivent celles qu'un TIERS avait saisies. `setById IS NULL` se lit
+  // sans ambiguïté « relais, par quelqu'un qui n'est plus là » — l'information « ce n'est pas
+  // l'intéressé qui a répondu » est conservée, seul le nom du relayeur s'en va.
+  //
+  // ⚠️ Nullable en BASE, jamais à l'écriture : on ne crée pas une réponse sans signataire.
+  setById     String?
+  setBy       User?           @relation("AvailabilitySetter", fields: [setById], references: [id], onDelete: SetNull)
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 

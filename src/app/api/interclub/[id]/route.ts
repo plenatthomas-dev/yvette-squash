@@ -12,6 +12,7 @@ import {
   MAX_DIVISION_LEN,
   MAX_VENUE_LEN,
   MAX_VENUE_ADDRESS_LEN,
+  MAX_ROUND_LEN,
 } from "@/lib/interclub-db";
 import { teamRoster } from "@/lib/interclub-roster";
 import { interclubChanged } from "@/lib/interclub-gate";
@@ -120,6 +121,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.opponent = v;
   }
   if (body.division !== undefined) data.division = parseOptionalText(body.division, MAX_DIVISION_LEN);
+  // La JOURNÉE figurait dans le contrat de cette fonction sans y être traitée : une rencontre
+  // importée dont la ligue renumérote la journée n'était corrigible d'aucune façon.
+  if (body.round !== undefined) data.round = parseOptionalText(body.round, MAX_ROUND_LEN);
   if (body.venue !== undefined) data.venue = parseOptionalText(body.venue, MAX_VENUE_LEN);
   if (body.venueAddress !== undefined) {
     data.venueAddress = parseOptionalText(body.venueAddress, MAX_VENUE_ADDRESS_LEN);

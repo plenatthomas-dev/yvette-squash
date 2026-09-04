@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireInterclubMember } from "@/lib/interclub-access";
+import { httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
 import {
   isAvailabilityStatus,
   parseComment,
@@ -110,6 +111,14 @@ async function readEntries(teamId: string, fixtureId: string): Promise<Availabil
   ]);
 
   const label = (u: { displayName: string; nickname: string | null }) => u.nickname ?? u.displayName;
+  /**
+   * Le nom du RELAYEUR. `setBy` est nul quand son compte a été supprimé depuis (migration 42,
+   * `ON DELETE SET NULL`) : la ligne dit encore que la réponse ne vient pas de l'intéressé, ce
+   * qui est l'information utile, mais plus de qui. On l'écrit plutôt que de laisser un trou —
+   * une réponse dont la provenance a disparu ne doit pas se lire comme une réponse directe.
+   */
+  const relayLabel = (u: { displayName: string; nickname: string | null } | null) =>
+    u ? label(u) : "un compte supprimé";
   const byUser = new Map(answers.filter((a) => a.userId).map((a) => [a.userId as string, a]));
   const byGuest = new Map(answers.filter((a) => a.guestId).map((a) => [a.guestId as string, a]));
 
@@ -123,7 +132,7 @@ async function readEntries(teamId: string, fixtureId: string): Promise<Availabil
       comment: a?.comment ?? null,
       // Renseigné SEULEMENT si quelqu'un d'autre a saisi : sur une réponse de première main,
       // afficher « relayé par Alice » à Alice n'apprendrait rien et sèmerait le doute.
-      relayedBy: a && a.setById !== m.id ? label(a.setBy) : null,
+      relayedBy: a && a.setById !== m.id ? relayLabel(a.setBy) : null,
       reachable: m.pushSubs.length > 0,
     };
   });
@@ -139,7 +148,7 @@ async function readEntries(teamId: string, fixtureId: string): Promise<Availabil
       status: (a?.status as AvailabilityStatus | undefined) ?? null,
       comment: a?.comment ?? null,
       // Toujours relayée : un joueur sans compte ne répond jamais lui-même, par construction.
-      relayedBy: a ? label(a.setBy) : null,
+      relayedBy: a ? relayLabel(a.setBy) : null,
       // Jamais atteignable : pas de compte, donc pas de notification. Il sera dans la liste
       // d'appels du capitaine, ce qui est exactement le traitement qu'il lui faut.
       reachable: false,
@@ -177,6 +186,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!isAvailabilityStatus(body.status)) {
     return NextResponse.json({ error: "Réponse invalide" }, { status: 400 });
   }
+  // ABSENT ≠ VIDE. Les trois boutons de l'écran envoient un statut SANS commentaire : traiter
+  // l'absence comme un effacement supprimait la précision qu'on venait d'écrire dès qu'on
+  // changeait d'avis — « je peux, mais pas avant 20h30 » disparaissait au passage de « dispo »
+  // à « incertain », c'est-à-dire au moment où elle devenait la plus utile. Seul un `comment`
+  // explicitement présent (fût-il vide, pour effacer) touche à la colonne.
+  const commentGiven = Object.prototype.hasOwnProperty.call(body, "comment");
   const comment = parseComment(body.comment);
 
   const guestId = typeof body.guestId === "string" ? body.guestId : null;
@@ -221,15 +236,46 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     );
   }
 
-  const data = { status: body.status, comment, setById: session.userId };
-  if (existing) {
-    await prisma.interclubAvailability.update({ where: { id: existing.id }, data });
-  } else {
-    await prisma.interclubAvailability.create({
-      data: { interclubId: id, userId: subjectUserId, guestId, ...data },
-    });
+  const data = {
+    status: body.status,
+    ...(commentGiven ? { comment } : {}),
+    setById: session.userId,
+  };
+  // La lecture d'`existing` et l'écriture qui en dépend sont deux instants distincts : deux
+  // requêtes concurrentes sur la même personne — un double-clic depuis deux onglets, le
+  // capitaine et l'intéressé en même temps — passaient toutes deux par la branche « création »
+  // et la seconde violait l'unicité, donc un 500. Même parade que les trois autres routes
+  // d'écriture de ce module, plutôt qu'un rattrapage de code d'erreur.
+  try {
+    await serializableTransaction(async (tx) => {
+      if (existing) {
+        await tx.interclubAvailability.update({ where: { id: existing.id }, data });
+      } else {
+        await tx.interclubAvailability.create({
+          data: { interclubId: id, userId: subjectUserId, guestId, comment: null, ...data },
+        });
+      }
+    }, "Deux réponses en même temps, réessaie");
+  } catch (e) {
+    // Le 409 de conflit se rend TEL QUEL, comme dans les trois autres routes d'écriture : c'est
+    // une invitation à réessayer, pas une panne.
+    const res = httpErrorResponse(e);
+    if (res) return res;
+    throw e;
   }
 
   const entries = await readEntries(fixture.teamId, id);
-  return NextResponse.json({ entries, counts: tally(entries), matchCount: fixture.matchCount });
+  // `me` FAIT PARTIE DE LA RÉPONSE, au même titre que dans le GET.
+  //
+  // Il en manquait, et l'écran remplace tout son état par ce corps : après la première réponse
+  // posée, plus aucune ligne n'était « moi », le lien « Ajouter une précision » disparaissait,
+  // et la réponse suivante partait comme un relais sur soi-même. Deux corps différents pour la
+  // même ressource, c'est une invitation à ce genre de trou : les deux verbes rendent désormais
+  // la même forme.
+  return NextResponse.json({
+    entries,
+    counts: tally(entries),
+    matchCount: fixture.matchCount,
+    me: session.userId,
+  });
 }

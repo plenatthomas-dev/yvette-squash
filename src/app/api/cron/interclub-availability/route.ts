@@ -123,6 +123,13 @@ export async function GET(req: NextRequest) {
   let called = 0;
   let reminded = 0;
   let digests = 0;
+  // Les équipes en sous-effectif s'ACCUMULENT au lieu de s'écrire au fil de l'eau.
+  //
+  // `recordCronRun` est un upsert d'UNE ligne par cron : l'appeler dans la boucle puis une
+  // dernière fois en sortie faisait gagner le dernier écrit, et le tableau de bord n'a jamais
+  // montré autre chose que « N appel(s), N relance(s) ». Le message qui compte pour un
+  // capitaine — « il manque du monde » — était écrit puis effacé dans la même requête.
+  const sousEffectif: string[] = [];
 
   for (const f of fixtures) {
     const action = dueAction(f, today);
@@ -144,11 +151,19 @@ export async function GET(req: NextRequest) {
     const { entries, answeredUserIds } = await entriesFor(f.teamId, f.id);
     const counts = tally(entries);
 
-    // Les SEULS non-répondants, et parmi eux les seuls joignables : relancer par notification
-    // quelqu'un qui n'en reçoit pas ne coûte rien mais ne produit rien. Relancer ceux qui ont
-    // déjà répondu punirait exactement ceux qu'on veut garder.
+    // Les SEULS non-répondants — mais TOUS les non-répondants qui ont un compte, joignables par
+    // notification ou non.
+    //
+    // Le filtre sur `reachable` semblait économe : à quoi bon pousser vers un appareil qui ne
+    // reçoit rien ? Il oubliait que dans ce projet la CLOCHE est le repli du push, pas son
+    // doublon — le journal est alimenté depuis le transport, pour tous les destinataires visés.
+    // Écarter les non-joignables les privait donc aussi de la ligne qu'ils auraient lue en
+    // ouvrant l'appli, c'est-à-dire du seul canal qui leur restait.
+    //
+    // Ils restent par ailleurs dans la liste d'appels du capitaine : une entrée dans la cloche
+    // n'est pas une garantie d'avoir été vu.
     const aRelancer = entries
-      .filter((e) => e.isMember && e.status === null && e.reachable && !answeredUserIds.has(e.key))
+      .filter((e) => e.isMember && e.status === null && !answeredUserIds.has(e.key))
       .map((e) => e.key);
     if (aRelancer.length) {
       await notifyAvailabilityReminder(aRelancer, ctx, { date: f.date });
@@ -173,21 +188,20 @@ export async function GET(req: NextRequest) {
       data: { availabilityRemindedAt: new Date() },
     });
 
-    // Le journal du cron dit ce qui compte pour un capitaine qui lirait le tableau de bord :
-    // pas « 3 envois » mais « il manque du monde ».
     if (isShortHanded(counts, f.matchCount)) {
-      await recordCronRun(
-        "interclub-availability",
-        true,
-        `${f.team.name} c. ${f.opponent} : ${counts.yes}/${f.matchCount} dispo à J-${REMIND_DAYS_BEFORE}`,
-      );
+      sousEffectif.push(`${f.team.name} c. ${f.opponent} ${counts.yes}/${f.matchCount}`);
     }
   }
 
+  // Le journal dit ce qui compte pour un capitaine qui lirait le tableau de bord : pas « 3
+  // envois » mais « il manque du monde », et sur quelle rencontre.
+  const alerte = sousEffectif.length
+    ? ` — sous-effectif à J-${REMIND_DAYS_BEFORE} : ${sousEffectif.join(", ")}`
+    : "";
   await recordCronRun(
     "interclub-availability",
     true,
-    `${called} appel(s), ${reminded} relance(s), ${digests} récap(s)`,
+    `${called} appel(s), ${reminded} relance(s), ${digests} récap(s)${alerte}`,
   );
   return NextResponse.json({ examined: fixtures.length, called, reminded, digests });
 }

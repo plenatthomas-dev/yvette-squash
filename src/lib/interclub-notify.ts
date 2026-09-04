@@ -189,14 +189,29 @@ export function notifyFixtureStart(ctx: Ctx, player?: string, opponentName?: str
 // ============================================================================
 
 /** Envoi direct à des destinataires nommés (équipe, capitaine), hors abonnements. */
-async function sendTo(userIds: string[], ctx: Ctx, title: string, body: string): Promise<void> {
+async function sendTo(
+  userIds: string[],
+  ctx: Ctx,
+  title: string,
+  body: string,
+  /**
+   * Suffixe de `tag`, pour les envois qui ne doivent PAS se remplacer entre eux.
+   *
+   * Un tag par rencontre est le bon défaut : le soir du match, dix notifications ne doivent
+   * laisser qu'une ligne sur l'écran verrouillé. Mais à J-3 la relance et le récapitulatif
+   * partent le même jour, et le capitaine — qui est aussi un joueur, donc relançable — ne
+   * voyait que le dernier des deux. Ce sont deux messages différents pour deux gestes
+   * différents ; ils cohabitent.
+   */
+  tagSuffix = "",
+): Promise<void> {
   if (userIds.length === 0) return;
   try {
     await pushToUsers(userIds, {
       title: title.slice(0, MAX_TITLE),
       body: body.slice(0, MAX_BODY),
       url: "/?view=interclub",
-      tag: `interclub-${ctx.fixtureId}`,
+      tag: `interclub-${ctx.fixtureId}${tagSuffix}`,
       renotify: true,
     });
   } catch {
@@ -313,7 +328,13 @@ export async function notifyCaptainDigest(
     : `${counts.yes} dispo pour le ${frenchDate(fixture.date)}`;
   const detail = `${counts.maybe} incertain(s), ${counts.no} absent(s).`;
   const appels = toCall.length ? ` À appeler : ${toCall.join(", ")}.` : "";
-  await sendTo([captainId], ctx, `${ctx.teamName} – ${ctx.opponent}`, `${tete}. ${detail}${appels}`);
+  await sendTo(
+    [captainId],
+    ctx,
+    `${ctx.teamName} – ${ctx.opponent}`,
+    `${tete}. ${detail}${appels}`,
+    "-recap",
+  );
 }
 
 /**

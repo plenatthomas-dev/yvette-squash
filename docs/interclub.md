@@ -460,15 +460,52 @@ pour chaque joueur s'il est **atteignable par notification** (au moins une `Push
 et l'écran regroupe à part les « sans réponse et sans notification » : c'est sa liste d'appels.
 Les joueurs sans compte y tombent d'office.
 
+⚠️ **Injoignable ne veut pas dire exclu de la relance.** La relance part à *tous* les
+non-répondants qui ont un compte, poussables ou non : dans ce projet la cloche est le **repli** du
+push et non son doublon — le journal est alimenté depuis le transport, pour tous les destinataires
+visés. Filtrer sur `reachable` privait les non-poussables de la seule ligne qui leur restait. Ils
+demeurent néanmoins dans la liste d'appels : une entrée dans la cloche n'est pas la preuve qu'on
+l'a vue.
+
+**Supprimer un compte reste possible.** `setById` est en `ON DELETE SET NULL` (migration 42) et
+non en `RESTRICT` : sinon un membre ayant répondu une seule fois devenait indélébile, ce qui
+contredisait la promesse « tes données disparaissent avec ton compte ». La ligne d'un auteur
+supprimé n'est pas perdue pour autant : `setById IS NULL` s'y lit sans ambiguïté « relais, par
+quelqu'un qui n'est plus là » — celle qu'il avait donnée pour lui-même, elle, part avec lui par
+cascade.
+
 ### Les deux crons
 
 | Cron | Rythme | Ce qu'il fait |
 |---|---|---|
 | `/api/cron/interclub-availability` | `0 8 * * *` | Ouvre l'appel à **J-10**, relance les non-répondants à **J-3**, envoie le récap au capitaine à J-3. Idempotence par `availabilityOpenedAt` / `availabilityRemindedAt`. **Silence total sur une date non confirmée.** |
-| `/api/cron/interclub-calendar` | `0 9 * * 1` | Pour chaque équipe ancrée : récupère, compare, met à jour `snCheckedAt`. Alerte capitaine et admins **une seule fois** par écart (empreinte `snCalendarHash`), et **n'écrit aucune rencontre** — l'application reste un geste d'admin. |
+| `/api/cron/interclub-calendar` | `0 9 * * 1` | Pour chaque équipe ancrée : récupère, compare, met à jour `snCheckedAt`. Alerte capitaine et admins **tant que l'écart n'est pas appliqué**, et **n'écrit aucune rencontre** — l'application reste un geste d'admin. |
 
 `snCheckedAt` existe pour répondre à la question que le silence ne tranche pas : « le calendrier
 n'a pas bougé », ou « on n'a pas regardé » ?
+
+**Ce que fait l'empreinte, et ce qu'elle ne fait pas.** `snCalendarHash` évite de reconstruire
+l'écart complet quand rien n'a bougé — c'est tout. Elle **n'est pas** réécrite par le cron, donc
+un écart non appliqué est **re-signalé chaque lundi**, et c'est voulu : la faire taire dès la
+première lecture laisserait un report enterré dans une notification que personne n'a ouverte. La
+relance s'arrête à l'application, ce qui est le moment où elle doit s'arrêter.
+
+**Une journée retirée du calendrier est signalée, jamais supprimée** (`diffCalendar().toDelete`).
+Sans ce quatrième volet, une rencontre annulée par la ligue restait en base et le cron quotidien
+ouvrait consciencieusement son appel de disponibilité pour une soirée qui n'existe plus. On ne la
+supprime pas d'office : elle porte peut-être déjà une composition et des réponses, et « plus rien
+n'est publié » peut n'être qu'un scraping qui a cassé.
+
+**Une rencontre déjà commencée ne se déplace plus**, ni par le `PATCH` (409) ni par l'import (la
+date est gardée, le reste s'applique, et l'écran le dit). Le chemin automatique — celui que
+personne ne regarde — ne doit pas être moins prudent que le chemin humain.
+
+**Les deux angles morts de la date prévisionnelle.** La détection repose sur une signature :
+plusieurs *journées* le même jour. Donc deux vraies journées un même soir (un rattrapage) passent
+pour prévisionnelles et sont coupées de toute notification ; et une *seule* journée non planifiée
+ne produit aucune signature, donc passe pour ferme. Dans les deux cas le rattrapage est le même,
+et c'est pour lui que `dateConfirmed` est modifiable à la main plutôt que déduit à chaque
+lecture : `PATCH /api/interclub/{id}`.
 
 ### Trois populations à ne pas confondre
 
@@ -620,7 +657,7 @@ score enregistré).
 |---|---|
 | `GET/POST /api/interclub` | Liste des rencontres · création (+ les N simples d'un coup) |
 | `GET/PATCH/DELETE /api/interclub/{id}` | Détail (avec le roster de l'équipe) · correction de la date, l'heure, le lieu, l'adversaire · suppression |
-| `GET/PUT …/{id}/availability` | Les réponses de l'équipe · poser la sienne ou celle d'un autre (409 sur une réponse de première main) |
+| `GET/PUT …/{id}/availability` | Les réponses de l'équipe · poser la sienne ou celle d'un autre (409 sur une réponse de première main). Les deux verbes rendent la **même forme**, `me` compris — l'écran remplace son état par ce corps |
 | `PATCH /api/interclub/{id}/matches/{mid}` | Composition, couleurs, jeux (saisie a posteriori) |
 | `PUT …/matches/{mid}/live` | Instantané du marquage en direct — **chemin chaud** |
 | `POST/DELETE …/matches/{mid}/claim` | Prendre / relâcher le marquage |

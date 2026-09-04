@@ -29,12 +29,14 @@ export const maxDuration = 60;
 //  convocation sans que personne ne l'ait voulu. Le cron alerte, un humain
 //  regarde, et applique d'un geste depuis l'espace admin.
 //
-//  L'EMPREINTE (`snCalendarHash`) est ce qui rend cette alerte supportable :
-//  sans elle, un report détecté une fois serait re-signalé tous les lundis
-//  jusqu'à ce qu'un admin l'applique, et l'alerte deviendrait un bruit qu'on
-//  n'ouvre plus. Elle n'est PAS mise à jour ici — seulement à l'application,
-//  sinon le premier passage ferait taire le second sans que rien n'ait été
-//  corrigé.
+//  CE QUE FAIT L'EMPREINTE (`snCalendarHash`), ET CE QU'ELLE NE FAIT PAS.
+//  Elle évite d'alerter quand RIEN n'a bougé : sans elle, il faudrait
+//  reconstruire l'écart complet à chaque passage pour découvrir qu'il est vide.
+//  Elle n'est PAS mise à jour ici — seulement à l'application. Donc un écart
+//  non appliqué est RE-SIGNALÉ chaque lundi, et c'est voulu : la faire taire
+//  dès la première lecture laisserait un report enterré dans une notification
+//  que personne n'a ouverte. La relance s'arrête quand l'admin applique, ce qui
+//  est exactement le moment où elle doit s'arrêter.
 // ============================================================================
 
 /** Le capitaine de l'équipe et les admins : ceux qui peuvent faire quelque chose de l'alerte. */
@@ -116,6 +118,10 @@ export async function GET(req: NextRequest) {
         const d = u.changes.find((c) => c.field === "date");
         return d ? `${u.tie.round} déplacée au ${d.to}` : `${u.tie.round} modifiée`;
       }),
+      // Une journée RETIRÉE du calendrier fédéral. Sans ce signalement, la rencontre restait en
+      // base pour toujours et le cron quotidien ouvrait son appel de disponibilité pour une
+      // soirée qui n'existe plus.
+      ...diff.toDelete.map((d) => `${d.round ?? "?"} retirée du calendrier (${d.date})`),
     ];
     // L'empreinte a bougé mais rien de ce qu'on suit n'a changé (une rencontre saisie à la
     // main couvre déjà la journée, par exemple) : se taire plutôt que d'alerter à vide.

@@ -262,6 +262,26 @@ describe("diffCalendar", () => {
     expect(d.toCreate).toHaveLength(1);
   });
 
+  it("SIGNALE une journée que la ligue ne publie plus", () => {
+    // Sans cette liste, une journée retirée du calendrier restait en base pour toujours, et le
+    // cron quotidien ouvrait consciencieusement son appel de disponibilité pour une soirée qui
+    // n'existe plus. On la signale ; on ne la supprime jamais d'office.
+    const d = diffCalendar([stored({ id: "x", snMatchKey: matchKey(EVENT, "J7") })], [own()], EVENT);
+    expect(d.toDelete).toEqual([
+      { id: "x", round: "J1", date: "2026-10-09", opponent: "Montmartre 1" },
+    ]);
+  });
+
+  it("ne déclare disparue NI une rencontre manuelle, NI celle d'un autre événement", () => {
+    // Les deux se ressemblent à l'écran et ne veulent pas dire la même chose : l'une n'a jamais
+    // été publiée, l'autre l'a été par une saison précédente. Les compter comme retirées
+    // signalerait chaque année tout le calendrier de la précédente.
+    const manuelle = stored({ id: "m", snMatchKey: null });
+    const vieille = stored({ id: "v", snMatchKey: matchKey("ev0", "J9") });
+    const d = diffCalendar([manuelle, vieille], [own()], EVENT);
+    expect(d.toDelete).toEqual([]);
+  });
+
   it("ignore les journées d'un AUTRE événement portant le même numéro", () => {
     // La clé est « événement:journée » : la J1 de la saison passée ne doit pas se faire
     // corriger par la J1 de la nouvelle.

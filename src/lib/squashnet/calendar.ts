@@ -202,6 +202,15 @@ export function ownFixtures(ties: CalendarTie[], snTeamId: string): OwnTie[] {
         // Plusieurs JOURNÉES distinctes le même jour = date de remplissage. Deux rencontres
         // d'une MÊME journée partagent évidemment leur date : c'est bien le nombre de journées
         // qu'on compte, pas le nombre de rencontres.
+        //
+        // ⚠️ DEUX ANGLES MORTS CONNUS, et assumés faute de meilleur signal dans le HTML publié :
+        //   * deux VRAIES journées le même soir (un rattrapage) sont classées prévisionnelles,
+        //     donc coupées de toute notification — l'équipe ne serait pas convoquée ;
+        //   * une SEULE journée non planifiée ne produit aucune signature, donc passe pour
+        //     confirmée — l'équipe serait convoquée sur une date bouchon.
+        // Dans les deux cas le rattrapage est le même et il est à portée de main : l'admin
+        // corrige `dateConfirmed` sur la rencontre (`PATCH /api/interclub/{id}`). C'est
+        // pourquoi ce champ est modifiable à la main et non déduit à chaque lecture.
         dateConfirmed: (roundsByDate.get(t.date)?.size ?? 1) === 1,
       };
     });
@@ -253,6 +262,16 @@ export interface CalendarDiff {
   toCreate: OwnTie[];
   /** Journées connues dont un champ a bougé. */
   toUpdate: { id: string; tie: OwnTie; changes: FieldChange[] }[];
+  /**
+   * Journées qu'on a IMPORTÉES DE CET ÉVÉNEMENT et que la ligue ne publie plus.
+   *
+   * Sans cette liste, une journée retirée du calendrier restait en base pour toujours, et le
+   * cron quotidien ouvrait consciencieusement son appel de disponibilité pour une rencontre
+   * qui n'existe plus. On la SIGNALE ; on ne la supprime jamais d'office — une rencontre peut
+   * déjà porter une composition et des réponses, et un scraping qui casse rendrait « plus rien
+   * n'est publié » sans que ce soit vrai.
+   */
+  toDelete: { id: string; round: string | null; date: string; opponent: string }[];
   /** Journées identiques des deux côtés — comptées, pour dire « rien n'a bougé ». */
   unchanged: number;
 }
@@ -284,7 +303,18 @@ export function diffCalendar(stored: StoredTie[], fetched: OwnTie[], eventId: st
   const byKey = new Map(
     stored.filter((s) => s.snMatchKey !== null).map((s) => [s.snMatchKey as string, s]),
   );
-  const diff: CalendarDiff = { toCreate: [], toUpdate: [], unchanged: 0 };
+  const diff: CalendarDiff = { toCreate: [], toUpdate: [], toDelete: [], unchanged: 0 };
+  const publies = new Set(fetched.map((t) => matchKey(eventId, t.round)));
+
+  // Ce qu'on a importé DE CET ÉVÉNEMENT et qui n'y figure plus. Le préfixe est vérifié : les
+  // rencontres importées d'une AUTRE saison portent une clé d'un autre événement et n'ont rien
+  // à voir avec ce qui se publie aujourd'hui — les compter comme disparues signalerait chaque
+  // année tout le calendrier de la précédente.
+  for (const s of stored) {
+    if (s.snMatchKey === null || !s.snMatchKey.startsWith(`${eventId}:`)) continue;
+    if (publies.has(s.snMatchKey)) continue;
+    diff.toDelete.push({ id: s.id, round: s.round, date: s.date, opponent: s.opponent });
+  }
 
   for (const tie of fetched) {
     const known = byKey.get(matchKey(eventId, tie.round));
@@ -312,10 +342,16 @@ export function diffCalendar(stored: StoredTie[], fetched: OwnTie[], eventId: st
 /**
  * Empreinte du calendrier publié pour une équipe.
  *
- * C'est elle qui rend le contrôle hebdomadaire supportable : sans elle, un report détecté une
- * fois serait re-signalé tous les lundis jusqu'à ce qu'un admin l'applique, et l'alerte
- * deviendrait un bruit qu'on n'ouvre plus. Elle ne couvre que ce qui, en changeant, mérite de
- * réveiller quelqu'un — pas l'ordre des lignes, qui n'est pas garanti.
+ * Elle répond à UNE question, et une seule : « est-ce le même calendrier que la dernière fois
+ * qu'on a appliqué ? ». Égale ⇒ le contrôle hebdomadaire se tait sans avoir à reconstruire
+ * l'écart complet.
+ *
+ * ⚠️ Elle ne fait PAS taire une alerte déjà émise : le cron ne la réécrit pas, seule
+ * l'application le fait. Un écart non appliqué est donc re-signalé chaque semaine, à dessein —
+ * un report enterré dans une notification que personne n'a ouverte serait pire qu'une relance.
+ *
+ * Elle ne couvre que ce qui, en changeant, mérite de réveiller quelqu'un — pas l'ordre des
+ * lignes, qui n'est pas garanti, ni l'adresse postale du club hôte.
  */
 export function calendarFingerprint(ties: OwnTie[]): string {
   return ties

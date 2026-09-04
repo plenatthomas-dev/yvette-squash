@@ -32,6 +32,8 @@ const h = vi.hoisted(() => ({
 vi.mock("@/lib/features-server", () => ({ getFeatures: async () => ({ interclub: h.interclub }) }));
 vi.mock("@/lib/cron-auth", () => ({ cronAuthorized: () => h.authorized }));
 vi.mock("@/lib/cron-run", () => ({ recordCronRun: vi.fn() }));
+// Importé pour être INSPECTÉ : ce cron l'appelait deux fois, et `recordCronRun` étant un upsert
+// d'une seule ligne par cron, le second appel effaçait le premier.
 // Aujourd'hui est FIGÉ : un test qui dépend de la date du jour passe en octobre et échoue en
 // novembre, et on croit alors à une régression.
 vi.mock("@/lib/interclub-gate", () => ({ todayISO: () => "2026-10-01" }));
@@ -62,6 +64,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import { GET } from "./route";
+import { recordCronRun } from "@/lib/cron-run";
 
 const req = () => ({ headers: new Headers() }) as unknown as NextRequest;
 
@@ -89,6 +92,7 @@ const membre = (id: string, name: string, joignable = true) => ({
 });
 
 beforeEach(() => {
+  vi.mocked(recordCronRun).mockClear();
   h.interclub = true;
   h.authorized = true;
   h.fixtures = [];
@@ -162,11 +166,25 @@ describe("relance (J-3) et récapitulatif du capitaine", () => {
     expect(h.reminders[0][0]).toEqual(["u2"]);
   });
 
-  it("ne relance PAS un membre injoignable — la notification n'irait nulle part", async () => {
+  it("relance AUSSI un membre injoignable : la cloche est le repli du push", async () => {
+    // Le contraire semblait économe — à quoi bon pousser vers un appareil qui ne reçoit rien ?
+    // Mais dans ce projet le journal est alimenté depuis le TRANSPORT, pour tous les
+    // destinataires visés : écarter Bob le privait aussi de la ligne qu'il aurait lue en
+    // ouvrant l'appli, c'est-à-dire du seul canal qui lui restait. Il demeure par ailleurs
+    // dans la liste d'appels du capitaine — une entrée dans la cloche n'est pas une preuve
+    // qu'on l'a vue.
     h.fixtures = [ouverte()];
     h.members = [membre("u1", "Alice", true), membre("u2", "Bob", false)];
     await GET(req());
-    expect(h.reminders[0][0]).toEqual(["u1"]);
+    expect(h.reminders[0][0]).toEqual(["u1", "u2"]);
+  });
+
+  it("laisse malgré tout l'injoignable dans la liste d'APPELS du capitaine", async () => {
+    h.fixtures = [ouverte()];
+    h.members = [membre("u1", "Alice", true), membre("u2", "Bob", false)];
+    await GET(req());
+    // 5e argument de notifyCaptainDigest : les noms de ceux qu'aucune notification n'atteint.
+    expect(h.digests[0][4]).toContain("Bob");
   });
 
   it("n'envoie aucune relance quand tout le monde a répondu", async () => {
@@ -217,6 +235,21 @@ describe("relance (J-3) et récapitulatif du capitaine", () => {
     ];
     await GET(req());
     expect(h.updates.at(-1)).toHaveProperty("availabilityRemindedAt");
+  });
+
+  it("n'écrit QU'UN heartbeat, et il porte le sous-effectif", async () => {
+    // `recordCronRun` est un upsert d'UNE ligne par cron. Ce cron l'appelait dans la boucle pour
+    // signaler « il manque du monde », puis une dernière fois en sortie : le dernier écrit
+    // gagnait, et le tableau de bord n'a jamais montré autre chose que le décompte des envois.
+    // Le message qui compte pour un capitaine était écrit puis effacé dans la même requête.
+    h.fixtures = [ouverte()];
+    h.answers = [{ userId: "u1", guestId: null, status: "yes" }];
+    await GET(req());
+
+    const appels = vi.mocked(recordCronRun).mock.calls;
+    expect(appels).toHaveLength(1);
+    expect(String(appels[0][2])).toMatch(/sous-effectif/i);
+    expect(String(appels[0][2])).toMatch(/1\/4/);
   });
 
   it("un « incertain » compte comme une réponse, mais pas comme un présent", async () => {

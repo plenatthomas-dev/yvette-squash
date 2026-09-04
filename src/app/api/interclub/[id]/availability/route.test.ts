@@ -35,8 +35,12 @@ vi.mock("@/lib/session", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/session")>()),
   getSession: vi.fn(async () => h.session),
 }));
-vi.mock("@/lib/db", () => ({
-  prisma: {
+vi.mock("@/lib/db", () => {
+  // `$transaction` passe le MÊME faux client au corps : l'écriture d'une réponse est désormais
+  // sérialisable (deux requêtes concurrentes sur la même personne passaient toutes deux par la
+  // branche « création » et la seconde violait l'unicité). Le faux ne simule pas l'isolation —
+  // ce n'est pas ce que ce fichier mesure —, il rend seulement le chemin exécutable.
+  const prisma: Record<string, unknown> = {
     interclub: { findUnique: vi.fn(async () => h.fixture) },
     user: {
       findMany: vi.fn(async () => h.members),
@@ -58,8 +62,10 @@ vi.mock("@/lib/db", () => ({
         return args.data;
       }),
     },
-  },
-}));
+  };
+  prisma.$transaction = async (run: (tx: unknown) => Promise<unknown>) => run(prisma);
+  return { prisma };
+});
 
 import { GET, PUT } from "./route";
 
@@ -172,6 +178,30 @@ describe("PUT /api/interclub/{id}/availability", () => {
       comment: "je peux",
       setById: "u1",
     });
+  });
+
+  it("rend `me`, comme le GET — deux verbes, une seule forme", async () => {
+    // L'écran remplace tout son état par ce corps. Sans `me`, plus aucune ligne n'était « moi » :
+    // le repère disparaissait et le lien « Ajouter une précision » avec lui, dès la première
+    // réponse posée. Deux corps différents pour la même ressource, c'est l'invitation au trou.
+    const { me } = await (await PUT(req({ status: "yes" }), ctx)).json();
+    expect(me).toBe("u1");
+  });
+
+  it("ne touche PAS au commentaire quand la requête n'en porte pas", async () => {
+    // Les trois boutons de l'écran envoient un statut seul. Traiter l'absence comme un
+    // effacement supprimait « je peux, mais pas avant 20h30 » au passage de « dispo » à
+    // « incertain » — c'est-à-dire au moment précis où la précision devenait utile.
+    h.answers = [{ __existing: true, id: "a1", userId: "u1", setById: "u1", status: "yes", comment: "pas avant 20h30", updatedAt: new Date() }];
+    await PUT(req({ status: "maybe" }), ctx);
+    expect(h.updated?.data).toMatchObject({ status: "maybe" });
+    expect(h.updated?.data).not.toHaveProperty("comment");
+  });
+
+  it("efface le commentaire quand on l'envoie VIDE — absent et vide ne sont pas la même chose", async () => {
+    h.answers = [{ __existing: true, id: "a1", userId: "u1", setById: "u1", status: "yes", comment: "pas avant 20h30", updatedAt: new Date() }];
+    await PUT(req({ status: "yes", comment: "   " }), ctx);
+    expect(h.updated?.data).toMatchObject({ comment: null });
   });
 
   it("refuse un statut inventé", async () => {

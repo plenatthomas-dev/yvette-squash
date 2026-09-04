@@ -75,6 +75,20 @@ function asPayload(v: unknown): Payload | null {
     : null;
 }
 
+/**
+ * Absorbe une réponse serveur SANS PERDRE `me`.
+ *
+ * Le PUT ne le renvoyait pas, et remplacer l'état en bloc effaçait « qui suis-je » : plus aucune
+ * ligne n'était la mienne, et le lien « Ajouter une précision » disparaissait dès la première
+ * réponse posée. Le serveur le rend désormais des deux côtés — cette fusion est la ceinture :
+ * l'identité du lecteur ne change pas d'une requête à l'autre, donc rien ne justifie qu'une
+ * réponse partielle puisse la lui retirer.
+ */
+function merge(prev: Payload | null, next: Payload | null): Payload | null {
+  if (!next) return prev;
+  return { ...next, me: next.me ?? prev?.me ?? "" };
+}
+
 export function InterclubAvailability({
   fixtureId,
   toast,
@@ -95,7 +109,8 @@ export function InterclubAvailability({
       const res = await fetch(`/api/interclub/${fixtureId}/availability`, { cache: "no-store" });
       if (onExpired(res.status)) return;
       if (!res.ok) return;
-      setData(asPayload(await res.json()));
+      const recu = asPayload(await res.json());
+      setData((prev) => merge(prev, recu));
     } catch {
       /* l'écran reste sur ce qu'il montrait : une liste vide ferait croire à une équipe vide */
     }
@@ -137,7 +152,8 @@ export function InterclubAvailability({
         toast("err", ((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Impossible.");
         return;
       }
-      setData(asPayload(await res.json()));
+      const recu = asPayload(await res.json());
+      setData((prev) => merge(prev, recu));
       setOpenFor(null);
       setDraft("");
       setConflict(null);

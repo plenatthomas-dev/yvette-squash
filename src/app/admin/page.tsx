@@ -120,6 +120,11 @@ type CalPreview = {
   published: number;
   toCreate: CalTie[];
   toUpdate: { id: string; tie: CalTie; changes: CalChange[] }[];
+  /** Journées importées de cet événement que la ligue ne publie PLUS. Signalées, jamais
+      supprimées : une rencontre peut déjà porter une composition et des réponses. */
+  toDelete: { id: string; round: string | null; date: string; opponent: string }[];
+  /** Journées dont la date NE BOUGERA PAS : la rencontre est déjà commencée. */
+  frozen: string[];
   unchanged: number;
 };
 
@@ -701,6 +706,8 @@ export default function AdminPage() {
         published: data.published ?? 0,
         toCreate: data.toCreate ?? [],
         toUpdate: data.toUpdate ?? [],
+        toDelete: data.toDelete ?? [],
+        frozen: data.frozen ?? [],
         unchanged: data.unchanged ?? 0,
       });
     } catch {
@@ -723,6 +730,8 @@ export default function AdminPage() {
         created?: number;
         updated?: number;
         moved?: number;
+        vanished?: number;
+        frozen?: string[];
         error?: string;
       };
       if (!res.ok) {
@@ -737,7 +746,16 @@ export default function AdminPage() {
         ok: true,
         text:
           `${t.name} : ${data.created ?? 0} rencontre(s) créée(s), ${data.updated ?? 0} corrigée(s)` +
-          (data.moved ? ` — ${data.moved} déplacée(s), l'équipe est prévenue et leurs disponibilités sont remises à zéro.` : "."),
+          (data.moved
+            ? ` — ${data.moved} déplacée(s), l'équipe est prévenue et leurs disponibilités sont remises à zéro`
+            : "") +
+          (data.frozen?.length
+            ? ` — ${data.frozen.join(", ")} gardée(s) à sa date : la rencontre est commencée`
+            : "") +
+          (data.vanished
+            ? ` — ${data.vanished} journée(s) ne sont plus publiées : à vérifier et à supprimer à la main`
+            : "") +
+          ".",
       });
     } catch {
       setIcResult({ ok: false, text: "Import impossible." });
@@ -1445,7 +1463,9 @@ export default function AdminPage() {
                                     {icCal.unchanged > 1 ? "s" : ""}
                                   </p>
 
-                                  {icCal.toCreate.length === 0 && icCal.toUpdate.length === 0 ? (
+                                  {icCal.toCreate.length === 0 &&
+                                  icCal.toUpdate.length === 0 &&
+                                  icCal.toDelete.length === 0 ? (
                                     <p className="muted tiny">
                                       Rien à changer : la base est à jour.
                                     </p>
@@ -1471,6 +1491,27 @@ export default function AdminPage() {
                                                 `${CAL_FIELDS[c.field] ?? c.field} : ${calValue(c.field, c.from)} → ${calValue(c.field, c.to)}`,
                                             )
                                             .join(" · ")}
+                                          {/* Ce que l'import NE fera PAS : une rencontre déjà
+                                              commencée garde sa date, comme la correction à la
+                                              main le refuse déjà. Le taire ferait croire à un
+                                              report appliqué. */}
+                                          {icCal.frozen.includes(u.tie.round) && (
+                                            <em className="muted">
+                                              {" "}
+                                              — date gardée (rencontre commencée)
+                                            </em>
+                                          )}
+                                        </li>
+                                      ))}
+                                      {/* Une journée RETIRÉE du calendrier fédéral. On la montre
+                                          sans jamais la supprimer : elle porte peut-être déjà une
+                                          composition et des réponses, et « plus rien n'est
+                                          publié » peut n'être qu'un scraping qui a cassé. */}
+                                      {icCal.toDelete.map((d) => (
+                                        <li key={d.id}>
+                                          <strong>{d.round ?? "?"}</strong> n&apos;est plus publiée
+                                          ({d.date} c. {d.opponent}) — à vérifier, puis à supprimer
+                                          à la main si c&apos;est confirmé.
                                         </li>
                                       ))}
                                     </ul>

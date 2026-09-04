@@ -270,6 +270,13 @@ export async function POST(req: NextRequest) {
       );
     }
     // Les relations restantes sont en Cascade/SetNull : la suppression est propre.
+    //
+    // ⚠️ CETTE PHRASE A ÉTÉ FAUSSE UNE FOIS, et ça n'a pas fait de bruit : la migration 41 posait
+    // `InterclubAvailability.setById` en RESTRICT, si bien qu'un membre ayant répondu une seule
+    // fois — y compris pour lui-même — devenait indélébile, et l'admin recevait un 500 nu au lieu
+    // du 409 explicatif ci-dessus, `deleteBlockersFor` ne comptant pas ces lignes. La migration 42
+    // l'a remis en SetNull. Toute nouvelle relation vers `User` doit être vérifiée ici : ce
+    // commentaire est une promesse, pas une observation.
     await prisma.user.delete({ where: { id: target.id } });
     // La cascade emporte aussi ses `SlotAlert` sans passer par la route des alertes : c'est le
     // seul chemin de disparition d'alertes qui contourne l'invalidation. Sans cet appel, le

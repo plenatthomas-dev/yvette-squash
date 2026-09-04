@@ -320,9 +320,14 @@ describe("PATCH /api/interclub/{id}", () => {
       patchReq({ venue: "  SQUASH DE L YVETTE ", venueAddress: "1 rue du squash", round: "J7" }),
       ctx,
     );
+    // ⚠️ `round` était envoyé par ce test SANS être vérifié — et la route ne le traitait pas :
+    // la journée figurait dans le contrat de la fonction sans y être implémentée, et une
+    // rencontre importée dont la ligue renumérote la journée n'était corrigible d'aucune façon.
+    // Un test qui envoie un champ sans l'attendre couvre la ligne sans couvrir la promesse.
     expect(h.patched).toMatchObject({
       venue: "SQUASH DE L YVETTE",
       venueAddress: "1 rue du squash",
+      round: "J7",
     });
   });
 

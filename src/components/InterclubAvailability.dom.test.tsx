@@ -215,6 +215,28 @@ describe("bloc de disponibilité — répondre", () => {
     expect(presses).toEqual(["Incertain"]);
   });
 
+  it("garde le repère « moi » même si la réponse du serveur omet `me`", async () => {
+    // Le défaut qui a motivé ce test : le PUT ne rendait pas `me`, et l'écran remplaçant tout
+    // son état par ce corps, plus aucune ligne n'était la mienne après la première réponse — le
+    // lien « Ajouter une précision » disparaissait. Le serveur le rend désormais des deux
+    // côtés ; cette vérification est la ceinture, sur un PUT qui l'omettrait quand même.
+    const entries = [entree({ key: "u1", name: "Thomas" })];
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (!init || init.method !== "PUT") return json(corps(entries));
+      const { me: _sans, ...ampute } = corps(entries);
+      return json(ampute);
+    });
+    render(<InterclubAvailability fixtureId="f1" toast={toast} onExpired={() => false} />);
+    await souffle();
+
+    await act(async () => {
+      fireEvent.click(within(boutonsDe("Thomas")).getByRole("button", { name: "Dispo" }));
+      await souffle();
+    });
+
+    expect(screen.getAllByRole("button", { name: /précision/i })).toHaveLength(1);
+  });
+
   it("n'offre la précision libre QUE pour soi", async () => {
     // Le commentaire est une parole à la première personne, lue par toute l'équipe. L'écrire
     // au nom d'un autre est un pas de plus que consigner sa disponibilité.

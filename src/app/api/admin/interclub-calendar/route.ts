@@ -13,7 +13,7 @@ import {
   type CalendarDiff,
 } from "@/lib/squashnet/calendar";
 import { interclubChanged } from "@/lib/interclub-gate";
-import { UNSET_PLAYER } from "@/lib/interclub-db";
+import { UNSET_PLAYER, derivedStatus } from "@/lib/interclub-db";
 import { notifyFixtureMoved } from "@/lib/interclub-notify";
 
 export const runtime = "nodejs";
@@ -45,8 +45,16 @@ export const dynamic = "force-dynamic";
  */
 const IMPORTED_MATCH_COUNT = 4;
 
-/** Ce qu'on connaît des rencontres importées d'une équipe, pour les comparer au publié. */
-async function storedTies(teamId: string): Promise<StoredTie[]> {
+/**
+ * Ce qu'on connaît des rencontres importées d'une équipe, pour les comparer au publié — et,
+ * à part, celles qui sont DÉJÀ COMMENCÉES.
+ *
+ * Le `PATCH` refuse depuis toujours de déplacer une rencontre entamée : le déplacement efface
+ * les disponibilités et relance l'appel, ce qui n'a aucun sens sur une soirée déjà jouée. L'import
+ * n'avait pas cette garde, si bien que le chemin AUTOMATIQUE — celui que personne ne regarde —
+ * était moins prudent que le chemin humain. Il l'a maintenant.
+ */
+async function storedTies(teamId: string): Promise<{ ties: StoredTie[]; started: Set<string> }> {
   const rows = await prisma.interclub.findMany({
     where: { teamId },
     select: {
@@ -60,9 +68,14 @@ async function storedTies(teamId: string): Promise<StoredTie[]> {
       venueAddress: true,
       dateConfirmed: true,
       snMatchKey: true,
+      matchCount: true,
+      matches: { select: { gamesHome: true, status: true } },
     },
   });
-  return rows;
+  const started = new Set(
+    rows.filter((r) => derivedStatus(r.matchCount, r.matches) !== "scheduled").map((r) => r.id),
+  );
+  return { ties: rows, started };
 }
 
 /** L'équipe et son ancrage, ou la réponse expliquant pourquoi l'import est impossible. */
@@ -98,6 +111,7 @@ export function describeDiff(diff: CalendarDiff): string[] {
     ...diff.toUpdate.map(
       (u) => `${u.tie.round} : ${u.changes.map((c) => `${c.field} ${c.from ?? "—"} → ${c.to ?? "—"}`).join(", ")}`,
     ),
+    ...diff.toDelete.map((d) => `${d.round ?? "?"} n'est plus publiée (${d.date} c. ${d.opponent})`),
   ];
 }
 
@@ -131,8 +145,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const stored = await storedTies(team.id);
+  const { ties: stored, started } = await storedTies(team.id);
   const diff = diffCalendar(stored, published, team.snEventId);
+
+  // Ce que l'application NE FERA PAS, séparé de ce qu'elle fera : une rencontre entamée garde sa
+  // date. L'annoncer ici évite qu'un admin croie avoir appliqué un report qui n'a pas eu lieu.
+  const frozen = diff.toUpdate.filter(
+    (u) => started.has(u.id) && u.changes.some((c) => c.field === "date"),
+  );
 
   if (body.action === "preview") {
     return NextResponse.json({
@@ -140,6 +160,8 @@ export async function POST(req: NextRequest) {
       published: published.length,
       toCreate: diff.toCreate,
       toUpdate: diff.toUpdate,
+      toDelete: diff.toDelete,
+      frozen: frozen.map((u) => u.tie.round),
       unchanged: diff.unchanged,
       summary: describeDiff(diff),
     });
@@ -182,7 +204,11 @@ export async function POST(req: NextRequest) {
   }
 
   for (const u of diff.toUpdate) {
-    const dateChanged = u.changes.some((c) => c.field === "date");
+    // Même règle que le `PATCH` : une rencontre commencée ne se déplace plus. Le reste de ses
+    // champs (lieu corrigé, adversaire réorthographié) s'applique quand même — ce n'est que la
+    // DATE qui emporte des conséquences.
+    const gele = started.has(u.id);
+    const dateChanged = !gele && u.changes.some((c) => c.field === "date");
     const known = stored.find((s) => s.id === u.id);
     await prisma.$transaction(async (tx) => {
       // Une rencontre DÉPLACÉE perd ses réponses : « je suis dispo le 9 » ne veut pas dire
@@ -195,7 +221,7 @@ export async function POST(req: NextRequest) {
       await tx.interclub.update({
         where: { id: u.id },
         data: {
-          date: u.tie.date,
+          ...(gele ? {} : { date: u.tie.date }),
           time: u.tie.time,
           home: u.tie.home,
           opponent: u.tie.opponent,
@@ -235,5 +261,9 @@ export async function POST(req: NextRequest) {
     updated: diff.toUpdate.length,
     unchanged: diff.unchanged,
     moved: moved.length,
+    // Signalées, jamais supprimées : une rencontre peut déjà porter une composition et des
+    // réponses, et « plus rien n'est publié » peut n'être qu'un scraping qui a cassé.
+    vanished: diff.toDelete.length,
+    frozen: frozen.map((u) => u.tie.round),
   });
 }

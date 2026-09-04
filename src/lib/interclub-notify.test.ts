@@ -26,6 +26,8 @@ vi.mock("./push", () => ({
 }));
 
 import {
+  notifyAvailabilityReminder,
+  notifyCaptainDigest,
   notifyFixtureDone,
   notifyFixtureStart,
   notifyGameDone,
@@ -68,6 +70,17 @@ describe("contenu et garde-fous", () => {
     await notifyFixtureStart(ctx);
     await notifyFixtureDone(ctx, { home: 3, away: 1 });
     expect(h.sent.every((s) => s.payload.tag === "interclub-f1")).toBe(true);
+  });
+
+  it("donne au RÉCAP DU CAPITAINE son propre tag : il ne remplace pas la relance", async () => {
+    // Les deux partent le même jour, à J-3. Le capitaine est aussi un joueur, donc relançable :
+    // avec un tag commun, il n'aurait vu que le dernier des deux — et ce sont deux messages
+    // pour deux gestes différents (réponds / appelle untel).
+    await notifyAvailabilityReminder(["u9"], ctx, { date: "2026-10-09" });
+    await notifyCaptainDigest("u9", ctx, { date: "2026-10-09", matchCount: 4 }, { yes: 2, maybe: 1, no: 0 }, ["Xavier"]);
+    const tags = h.sent.map((s) => s.payload.tag);
+    expect(new Set(tags).size).toBe(2);
+    expect(tags).toContain("interclub-f1-recap");
   });
 
   it("alerte à chaque fois malgré le tag partagé, sinon la soirée serait muette", async () => {
