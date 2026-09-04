@@ -56,21 +56,27 @@ function RankingBadges({
 }) {
   const rangMissing = clt != null && clt !== "NC" && rangM == null;
   return (
-    <span style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto" }}>
+    <span className="ic-ranking">
+      {/* CE QUI EXISTE est un badge plein ; CE QUI MANQUE est un badge en pointillé. Deux
+          FORMES, pas deux nuances de gris : c'est la seule façon de repérer à l'œil, sur une
+          liste de sept joueurs, celui qui ne pourra être aligné nulle part (cf. DESIGN.md,
+          Règle des Trois Traitements). Le mot reste écrit — un pointillé muet serait une
+          devinette. */}
       {clt ? (
         <span className="directory-clt">{clt}</span>
       ) : (
-        <span className="muted">classement inconnu</span>
+        <span className="ic-missing">classement&nbsp;?</span>
       )}
-      {/* Même notation que le sélecteur de composition (« 5A #1200 ») : c'est le même nombre,
-          et deux écrans qui montrent la même chose ne doivent pas l'écrire autrement. Ce qui
-          MANQUE, en revanche, se dit en toutes lettres — « # inconnu » ne serait pas lisible. */}
       {rangM != null ? (
-        <span className="muted">#{rangM}</span>
+        <span className="directory-rang" title="Rang national, toutes catégories">
+          <span className="sr-only">Rang national toutes catégories : </span>
+          <span aria-hidden="true">#</span>
+          {rangM}
+        </span>
       ) : rangMissing ? (
-        <span className="muted">rang inconnu</span>
+        <span className="ic-missing">rang&nbsp;?</span>
       ) : null}
-      {source && <span className="muted">· {source}</span>}
+      {source && <span className="ic-source">{source}</span>}
     </span>
   );
 }
@@ -977,20 +983,23 @@ export default function AdminPage() {
                         ),
                       );
                       return (
-                        <div key={t.id} style={{ marginBottom: 10 }}>
-                          <div className="tiny">
-                            <strong>{t.name}</strong>{" "}
-                            <span className="muted">
-                              · {t.memberCount} membre{t.memberCount > 1 ? "s" : ""} inscrit
-                              {t.memberCount > 1 ? "s" : ""}
+                        <div key={t.id} className="ic-team">
+                          {/* L'en-tête d'équipe porte le nom en poids, le décompte en gris : à
+                              trois équipes empilées, c'est le seul repère qui permet de savoir
+                              où l'on est en défilant. */}
+                          <div className="ic-team-head">
+                            <span className="ic-team-name">{t.name}</span>
+                            <span className="ic-team-count muted">
+                              {t.memberCount} membre{t.memberCount > 1 ? "s" : ""}
                               {mine.length > 0 && ` · ${mine.length} hors appli`}
                             </span>
                           </div>
-                          {effectif.length > 0 && (
-                            <ul
-                              className="tiny"
-                              style={{ margin: "4px 0 0", paddingLeft: 0, listStyle: "none" }}
-                            >
+                          {effectif.length === 0 ? (
+                            <p className="muted tiny ic-roster-empty">
+                              Personne dans cette équipe pour l&apos;instant.
+                            </p>
+                          ) : (
+                            <ul className="ic-roster">
                               {effectif.map((e) =>
                                 e.kind === "member" ? (
                                   // Un MEMBRE se lit ici, il ne s'édite pas : son rattachement et
@@ -999,45 +1008,30 @@ export default function AdminPage() {
                                   // même décision, c'est un endroit de trop. Sans classement
                                   // connu, il ne peut disputer AUCUN simple : on le DIT, plutôt
                                   // que de laisser une ligne muette qui bloquera le soir venu.
-                                  <li
-                                    key={`m${e.m.id}`}
-                                    style={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "space-between",
-                                      gap: 8,
-                                    }}
-                                  >
-                                    <span>{e.m.name}</span>
+                                  <li key={`m${e.m.id}`} className="ic-roster-row">
+                                    <span className="ic-roster-name">{e.m.name}</span>
                                     <RankingBadges clt={e.m.clt} rangM={e.m.rangM} />
                                   </li>
                                 ) : (
-                                  <li
-                                    key={`g${e.g.id}`}
-                                    style={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "space-between",
-                                      gap: 8,
-                                    }}
-                                  >
-                                    <span>
-                                      {e.g.name} <span className="muted">· hors appli</span>
+                                  // Un joueur HORS APPLI s'édite, lui — d'où la surface enfoncée
+                                  // (`--sunken`) : sur une liste où membres et invités se
+                                  // ressemblent par ailleurs, elle dit d'un coup d'œil sur
+                                  // lesquels on peut agir, sans recourir à la couleur. Les
+                                  // contrôles vont sur LEUR PROPRE LIGNE, sous le nom : les
+                                  // mettre au bout de la ligne du nom faisait s'enrouler quatre
+                                  // éléments sur un téléphone, et les badges d'un joueur
+                                  // finissaient à hauteur du nom du précédent.
+                                  <li key={`g${e.g.id}`} className="ic-roster-row is-guest">
+                                    <span className="ic-roster-name">
+                                      {e.g.name}
+                                      <span className="ic-roster-tag">hors appli</span>
                                     </span>
-                                    <span
-                                      style={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: 6,
-                                        flexWrap: "wrap",
-                                        justifyContent: "flex-end",
-                                      }}
-                                    >
-                                      <RankingBadges
-                                        clt={e.g.clt}
-                                        rangM={e.g.rangM}
-                                        source={e.g.cltOverride ? "forcé" : e.g.snStatus === "matched" ? "squashnet" : null}
-                                      />
+                                    <RankingBadges
+                                      clt={e.g.clt}
+                                      rangM={e.g.rangM}
+                                      source={e.g.cltOverride ? "forcé" : e.g.snStatus === "matched" ? "squashnet" : null}
+                                    />
+                                    <span className="ic-roster-actions">
                                       {/* Le rapprochement squashnet est la voie NORMALE ; ce qui
                                           suit est le repli, et l'écran le dit dans cet ordre.
                                           Un joueur retrouvé n'a rien à saisir — on ne montre les
@@ -1053,11 +1047,10 @@ export default function AdminPage() {
                                       {rankingComplete(e.g) && !e.g.cltOverride && !e.g.rangMOverride ? (
                                         <button
                                           type="button"
-                                          className="secondary tiny"
+                                          className="secondary"
                                           disabled={icBusy}
                                           onClick={() => rematchGuest(e.g)}
                                           title="Relit le classement sur squashnet (le cron le fait aussi, une fois par mois)."
-                                          style={{ flex: "0 0 auto" }}
                                         >
                                           Actualiser
                                         </button>
@@ -1073,7 +1066,6 @@ export default function AdminPage() {
                                             onChange={(ev) => setGuestRanking(e.g, { clt: ev.target.value })}
                                             aria-label={`Classement interclub de ${e.g.name}`}
                                             title="Classement fédéral forcé, pour l'ordre des simples interclub."
-                                            style={{ margin: 0, width: "auto" }}
                                           >
                                             <option value="">
                                               {e.g.snClt ? `— squashnet : ${e.g.snClt} —` : "— aucun —"}
@@ -1099,21 +1091,15 @@ export default function AdminPage() {
                                             aria-label={`Rang mixte de ${e.g.name}`}
                                             title="Rang mixte forcé. Départage les joueurs de même classement. Inutile pour un NC."
                                             placeholder={
-                                              e.g.snRangM != null
-                                                ? `squashnet : ${e.g.snRangM}`
-                                                : e.g.clt === "NC"
-                                                  ? "inutile (NC)"
-                                                  : "rang"
+                                              e.g.snRangM != null ? `#${e.g.snRangM}` : e.g.clt === "NC" ? "inutile" : "rang"
                                             }
-                                            style={{ margin: 0, width: "8rem" }}
                                           />
                                           <button
                                             type="button"
-                                            className="secondary tiny"
+                                            className="secondary"
                                             disabled={icBusy}
                                             onClick={() => rematchGuest(e.g)}
                                             title="Retente le rapprochement squashnet — après avoir corrigé une orthographe, par exemple."
-                                            style={{ flex: "0 0 auto" }}
                                           >
                                             Re-rapprocher
                                           </button>
@@ -1121,10 +1107,9 @@ export default function AdminPage() {
                                       )}
                                       <button
                                         type="button"
-                                        className="secondary tiny"
+                                        className="danger"
                                         disabled={icBusy}
                                         onClick={() => removeGuest(e.g)}
-                                        style={{ flex: "0 0 auto" }}
                                       >
                                         Retirer
                                       </button>
@@ -1138,11 +1123,11 @@ export default function AdminPage() {
                       );
                     })}
 
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <div className="ic-add">
+                      <span className="ic-add-title">Ajouter un joueur sans compte</span>
                       <select
                         value={icTeamId}
                         onChange={(e) => setIcTeamId(e.target.value)}
-                        style={{ margin: 0, flex: "1 1 120px" }}
                         aria-label="Équipe du joueur à ajouter"
                       >
                         <option value="">Équipe…</option>
@@ -1158,7 +1143,6 @@ export default function AdminPage() {
                         placeholder="Prénom Nom"
                         maxLength={40}
                         aria-label="Prénom et nom du joueur hors appli"
-                        style={{ margin: 0, flex: "1 1 140px" }}
                       />
                       {/* Plus de classement à saisir ici : il est CHERCHÉ sur squashnet à
                           l'ajout, et la réponse le dit tout de suite. Le demander d'avance
@@ -1168,7 +1152,6 @@ export default function AdminPage() {
                         type="button"
                         disabled={icBusy || !icTeamId || !icName.trim()}
                         onClick={addGuest}
-                        style={{ flex: "0 0 auto" }}
                         title="Le classement est cherché sur squashnet à partir du nom."
                       >
                         Ajouter

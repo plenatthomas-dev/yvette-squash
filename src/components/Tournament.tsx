@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "@/components/Dialog";
 import { MIN_PLAYERS, MAX_PLAYERS } from "@/lib/tournament";
-import { fetchDirectory, type DirectoryMember } from "@/lib/directoryCache";
+import { accountHolders, fetchDirectory, type DirectoryMember } from "@/lib/directoryCache";
 import { compareRosterOrder } from "@/lib/interclub-order";
 
 // Vue « Tournoi » : liste des tournois, assistant de création (roster annuaire + invités,
@@ -268,7 +268,11 @@ export default function Tournament({ toast, onExpired }: Props) {
       // Cache mémoire partagé (cf. fetchDirectory) : dédupliqué avec la modale Annuaire
       // et le panneau Réglages. En cas d'échec réseau, on laisse `members` à null.
       try {
-        setMembers(await fetchDirectory());
+        // `accountHolders` : l'annuaire mêle désormais les joueurs d'une équipe interclub SANS
+        // compte. Un tournoi a déjà sa propre façon d'inscrire quelqu'un qui n'a pas l'appli
+        // (les « invités », saisis au prénom) — les faire entrer par le sélecteur de MEMBRES
+        // créerait un second chemin pour la même chose, et le serveur refuserait leur id.
+        setMembers(accountHolders(await fetchDirectory()));
       } catch {
         /* on retentera à la prochaine ouverture du wizard */
       }

@@ -1959,6 +1959,7 @@ td.cell.past {
    contraste) ne peut plus n'atterrir que sur l'un d'eux. */
 .tri-switch,
 .directory-sort,
+.directory-filters,
 .team-switch {
   display: inline-flex;
   border: 1px solid var(--pico-muted-border-color);
@@ -1967,6 +1968,7 @@ td.cell.past {
 }
 .tri-switch button,
 .directory-sort button,
+.directory-filters button,
 .team-switch button {
   margin: 0;
   width: auto;
@@ -1981,6 +1983,7 @@ td.cell.past {
 }
 .tri-switch button + button,
 .directory-sort button + button,
+.directory-filters button + button,
 .team-switch button + button {
   border-left: 1px solid var(--pico-muted-border-color);
 }
@@ -1995,6 +1998,7 @@ td.cell.past {
 }
 .tri-switch button.tri-auto.active,
 .directory-sort button[aria-pressed="true"],
+.directory-filters button[aria-pressed="true"],
 .team-switch button[aria-pressed="true"] {
   background: var(--accent);
   color: var(--accent-fg);
@@ -2185,20 +2189,27 @@ td.cell.past {
   margin: 0 0 10px;
 }
 
-/* Filtres classement/catégorie : deux <select> compacts côte à côte, PAS étirés en pleine
-   largeur (contrairement au comportement par défaut de Pico sur un <select> seul) — ce sont
-   des affinages secondaires à la recherche, pas des champs de formulaire. */
+/* Filtre par équipe interclub. Contrôle segmenté (forme et état actif définis avec
+   .tri-switch, plus haut) : ne reste ici que son insertion dans la modale, et le fait qu'il
+   défile plutôt que de passer à la ligne — le nombre d'équipes n'est pas borné, et une barre
+   de filtres qui s'enroule pousse la liste hors de l'écran.
+
+   Il a REMPLACÉ deux <select> (classement, catégorie d'âge) qui prenaient toute une ligne pour
+   répondre à des questions qu'on ne se pose pas devant un annuaire de club. */
 .directory-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0 0 10px;
+  /* `inline-flex` hérité de .tri-switch, et gardé : la pilule doit épouser ses libellés, pas
+     s'étirer sur la ligne — étirée, son rayon de 999px se lit comme un champ, plus comme un
+     groupe de choix. `display: flex` la ferait ressembler à la barre de recherche au-dessus. */
+  margin: 0 0 8px;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
-.directory-filters select {
-  width: auto;
-  margin: 0;
-  padding: 4px 28px 4px 10px;
-  font-size: 0.8rem;
+.directory-filters::-webkit-scrollbar {
+  display: none;
+}
+.directory-filters button {
+  white-space: nowrap;
 }
 
 /* Bascule d'ordre de l'annuaire (A→Z / Classement) : forme et état actif définis avec
@@ -2267,6 +2278,213 @@ td.cell.past {
 
 .directory-list li:last-child {
   border-bottom: none;
+}
+
+/* --- Espace admin · effectif d'une équipe interclub ---------------------- */
+/*
+   Le problème corrigé ici, pour qu'il ne revienne pas : chaque joueur tenait sur UNE ligne en
+   `justify-content: space-between` — nom à gauche, badges et boutons à droite. Sur un
+   téléphone, cette droite ne rentre pas : elle s'enroulait sur deux lignes, les badges d'un
+   joueur se retrouvaient à hauteur du nom du précédent, et deux personnes n'en faisaient plus
+   qu'une à la lecture.
+   La règle est donc structurelle et non cosmétique : un joueur est un ENREGISTREMENT, pas une
+   ligne. Une grille à deux colonnes tient le nom et ses badges sur la première rangée ; ce qui
+   ne tient pas — les contrôles — passe sur une rangée à lui, en pleine largeur.
+*/
+
+.ic-team + .ic-team {
+  margin-top: 16px;
+}
+.ic-team-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--pico-card-border-color);
+}
+.ic-team-name {
+  font-size: 0.85rem; /* typography.label */
+  font-weight: 600;
+}
+.ic-team-count {
+  font-size: 0.72rem;
+}
+.ic-roster-empty {
+  margin: 6px 0 0;
+}
+
+.ic-roster {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+/* Deux colonnes : le nom (compressible, `minmax(0,1fr)`) et ses badges (à leur largeur, collés
+   à droite). Les contrôles, eux, prennent `grid-column: 1 / -1` : c'est cette rangée
+   supplémentaire — et non un `flex-wrap` — qui garantit qu'ils ne remontent jamais s'insérer
+   entre le nom et les badges. Alignement sur la LIGNE DE BASE : quand un nom passe sur deux
+   lignes, ses badges restent accrochés à la première, donc au nom, et pas au milieu du bloc. */
+.ic-roster-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 6px;
+  padding: 8px 2px;
+  font-size: 0.85rem; /* typography.label */
+}
+.ic-roster-row + .ic-roster-row {
+  border-top: 1px solid var(--pico-card-border-color);
+}
+.ic-roster-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* « hors appli » : une précision sur le nom, pas une pastille de plus. Elle reste au ras du
+   nom (pas au bout de la ligne) pour que le regard n'ait pas à traverser la ligne pour savoir
+   à qui elle appartient. */
+.ic-roster-tag {
+  margin-left: 6px;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+  white-space: nowrap;
+}
+.ic-roster-tag::before {
+  content: "· ";
+}
+
+/* Un joueur hors appli est le seul qu'on puisse ÉDITER ici. Sa fiche s'ENFONCE (`--sunken`)
+   au lieu de flotter — cf. DESIGN.md, Règle de la Carte sur Carte : une liste posée sur une
+   carte ne se sépare pas en donnant une carte à chacun. La surface dit « on peut agir là »
+   sans recourir à la couleur, qui appartient à l'action elle-même. */
+.ic-roster-row.is-guest {
+  background: var(--sunken);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin: 6px 0;
+}
+/* Le changement de surface sépare déjà : un filet en plus ferait doublon. Il reste déclaré
+   (transparent) pour que la hauteur des lignes ne bouge pas d'un joueur à l'autre. */
+.ic-roster-row.is-guest,
+.ic-roster-row.is-guest + .ic-roster-row {
+  border-top-color: transparent;
+}
+
+/* Les badges de classement, groupés — ils ne se séparent jamais l'un de l'autre. */
+.ic-ranking {
+  justify-self: end;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+/* CE QUI MANQUE : même gabarit que le badge plein (.directory-clt), mais en pointillé et sans
+   fond — la FORME dit le vide, le mot dit lequel. Un simple gris n'aurait donné qu'une nuance
+   de plus dans une ligne qui en compte déjà trois. */
+.ic-missing {
+  padding: 1px 8px;
+  border-radius: 999px; /* rounded.pilule */
+  border: 1px dashed var(--pico-muted-border-color);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--pico-muted-color);
+}
+/* D'où vient le classement (« squashnet » / « forcé »). Texte nu : c'est une provenance, la
+   plus faible des trois informations de la ligne, et lui donner une pastille la mettrait à
+   égalité avec le classement lui-même. */
+.ic-source {
+  font-size: 0.68rem;
+  color: var(--pico-muted-color);
+}
+
+/* Les contrôles d'un joueur hors appli : leur propre rangée, pleine largeur. */
+.ic-roster-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+/* Pico dimensionne boutons et champs pour un formulaire ; ici ce sont les commandes d'une
+   ligne de liste, et à leur taille par défaut elles pesaient plus lourd que la donnée qu'elles
+   corrigent. Réduits, mais pas en dessous d'une cible tactile confortable (~34 px). */
+.ic-roster-actions button,
+.ic-roster-actions select,
+.ic-roster-actions input {
+  margin: 0;
+  width: auto;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  padding: 8px 12px;
+  height: auto;
+}
+.ic-roster-actions select {
+  padding-right: 30px;
+}
+/* CONTOUR, pas aplat. En plein, ces quatre boutons pesaient plus lourd que la liste entière :
+   au test du plissement, on voyait des blocs sombres avant de voir les joueurs. Or ce sont des
+   commandes de correction, sur des lignes qu'on ne touche presque jamais — elles doivent être
+   trouvables, pas premières. */
+.ic-roster-actions button {
+  background: transparent;
+  border-color: var(--pico-muted-border-color);
+  /* `--pico-contrast` et NON `--pico-color` : sur un bouton `.secondary`, Pico redéfinit
+     localement `--pico-color` en BLANC (l'encre de son aplat). Le lire ici donnait un libellé
+     blanc sur fond transparent — le bouton devenait invisible au moment précis où on lui
+     retirait son aplat. `--pico-contrast` est l'encre du THÈME, pas celle du composant. */
+  color: var(--pico-contrast);
+}
+.ic-roster-actions button:not(:disabled):hover {
+  border-color: var(--pico-primary);
+}
+/* « Retirer » retire quelqu'un du roster : il ne doit pas être le sosie d'« Actualiser ».
+   L'encre et le filet portent le rouge, jamais un aplat — cf. DESIGN.md, et même traitement
+   que `.wk-detail-actions button.danger`, qui règle exactement le même problème ailleurs. */
+.ic-roster-actions button.danger {
+  color: var(--danger-fg);
+  border-color: var(--danger-border);
+}
+.ic-roster-actions button.danger:not(:disabled):hover {
+  border-color: var(--danger-hover);
+  background: color-mix(in srgb, var(--danger-hover) 10%, transparent);
+}
+.ic-roster-actions input[type="number"] {
+  width: 7rem;
+  flex: 0 0 auto;
+}
+
+/* Ajout d'un joueur sans compte : détaché de la dernière équipe par un filet, sans quoi il se
+   lisait comme une ligne de l'équipe 2. */
+.ic-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--pico-card-border-color);
+}
+.ic-add-title {
+  flex: 1 0 100%;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--pico-muted-color);
+}
+.ic-add select,
+.ic-add input,
+.ic-add button {
+  margin: 0;
+}
+.ic-add select {
+  flex: 1 1 7rem;
+  width: auto;
+}
+.ic-add input {
+  flex: 2 1 9rem;
+  width: auto;
+}
+.ic-add button {
+  flex: 0 0 auto;
 }
 
 /* --- Pied de page : note confidentialité -------------------------------- */

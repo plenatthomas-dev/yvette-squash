@@ -9,6 +9,7 @@ import { Dialog } from "@/components/Dialog";
 import { useFeatures } from "@/components/FeatureProvider";
 import { DELEGATION_DURATIONS } from "@/lib/delegation-shared";
 import {
+  accountHolders,
   fetchDirectory,
   invalidateDirectory,
   type DirectoryMember,
@@ -394,7 +395,10 @@ export function SettingsButton({
         ]);
         const del = await delRes.json().catch(() => ({}));
         if (cancelled) return;
-        setDelegateMembers(members);
+        // `accountHolders` : l'annuaire mêle désormais les joueurs d'une équipe interclub SANS
+        // compte. On ne peut pas déléguer ses droits à quelqu'un qui n'a pas de compte — le
+        // proposer serait une promesse que le serveur refuserait.
+        setDelegateMembers(accountHolders(members));
         setOutgoingDelegations(delRes.ok ? (del.outgoing ?? []) : []);
         setIncomingDelegations(delRes.ok ? (del.incoming ?? []) : []);
         setSessionExpiresAt(delRes.ok ? (del.sessionExpiresAt ?? null) : null);

@@ -286,6 +286,26 @@ ou « classement inconnu » / « rang inconnu » qui disent tout de suite qu'ils
 disputer aucun simple), on n'édite que les invités. **Ce qui manque se dit**, plutôt que de
 laisser un blanc : une ligne muette ne se découvre bloquante que le soir d'une rencontre.
 
+**LES JOUEURS SANS COMPTE FIGURENT DANS L'ANNUAIRE** (`GET /api/directory`), mêlés aux membres
+dans la même liste triée par nom. Les en tenir dehors donnait une photo fausse de l'effectif :
+on y cherchait quelqu'un vu jouer la veille, et il n'existait pas. Trois conséquences :
+
+- chaque entrée porte un `kind` (`"member"` / `"guest"`), et l'identifiant d'un joueur sans
+  compte est préfixé `guest:` — rien ne garantit qu'il ne ressemble pas à un identifiant de
+  compte, et les deux populations partagent désormais des clés de liste ;
+- `kind` n'est **pas** décoratif. Tout écran qui propose une action supposant un COMPTE — la
+  délégation de droits (`SettingsButton`), les têtes de série d'un tournoi (`Tournament`) — doit
+  écarter ces joueurs via `accountHolders` (`lib/directoryCache.ts`). Leur tendre une action que
+  le serveur refuserait serait une promesse en l'air ;
+- l'annuaire ne les lit **que si le flag interclub est actif** : ils n'existent que par lui, et
+  le flag à `0` doit rendre le roster aussi invisible que l'onglet qui le sert.
+
+L'annuaire ne propose plus qu'UN filtre, l'**équipe** (« Tous · Éq. 1 · Éq. 2 », dérivé des
+joueurs chargés et non d'une liste figée). Les deux filtres précédents — classement et catégorie
+d'âge — ont été retirés : ils occupaient une ligne entière d'un écran de téléphone pour répondre
+à des questions qu'on ne se pose pas devant un annuaire de club, là où la recherche par nom fait
+déjà l'essentiel du travail.
+
 **La correction admin d'un membre est aussi visible dans l'annuaire** (`GET /api/directory`) :
 `clt` ET `rangM` y suivent la même priorité qu'en composition (override d'abord, rapprochement
 squashnet sinon) — sans quoi un membre jamais rapproché (pas encore licencié, nom mal
@@ -438,6 +458,7 @@ score enregistré).
 | `POST/DELETE …/matches/{mid}/claim` | Prendre / relâcher le marquage |
 | `GET /api/interclub/live` | État des rencontres du jour (servi par le Data Cache) |
 | `GET/PUT /api/interclub/follows` | Mes abonnements |
+| `GET /api/directory` | Annuaire : membres opt-in ET joueurs sans compte (`kind`), avec équipe et classement |
 | `GET/POST /api/admin/interclub-teams` | Équipes, membres et joueurs sans compte, dont leur classement et leur rang mixte ; rapprochement squashnet à l'ajout et à la demande (**admin**) |
 | `POST /api/admin/members` (action `set_clt_override`) | Correction admin du classement ET du rang mixte d'un membre (**admin**) |
 | `GET /api/notifications` | La cloche (pas de flag : elle sert à toute l'appli) |

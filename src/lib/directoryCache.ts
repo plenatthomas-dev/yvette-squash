@@ -7,12 +7,35 @@
 
 export interface DirectoryMember {
   id: string;
+  /**
+   * « member » = compte sur l'appli ; « guest » = joueur d'une équipe interclub SANS compte
+   * (`InterclubGuest`), qui joue le championnat sans avoir jamais ouvert l'appli.
+   *
+   * ⚠️ Ce n'est pas une étiquette d'affichage. L'annuaire les MÊLE délibérément — à l'écran un
+   * joueur est un joueur — mais tout écran qui propose une action supposant un COMPTE (déléguer
+   * ses droits, inscrire quelqu'un à un tournoi) doit écarter les seconds : cf.
+   * `accountHolders` ci-dessous, à préférer à un filtre recopié sur place.
+   *
+   * Optionnel pour tolérer une réponse servie par une version antérieure du serveur (cache HTTP,
+   * onglet resté ouvert pendant un déploiement) ; absent, l'entrée est un membre.
+   */
+  kind?: "member" | "guest";
   name: string;
   clt?: string;
   rang?: number | null; // rang dans son genre — sert au tri des têtes de série (tournoi)
   rangM?: number | null; // rang MIXTE toutes catégories — le nombre affiché/trié dans l'annuaire
   cat?: string | null;
   team?: string; // équipe interclub ("Équipe 1"…) — absent si non aligné ou fonction coupée
+}
+
+/**
+ * Les seules entrées à qui l'on peut proposer une action qui suppose un compte : déléguer ses
+ * droits, être inscrit à un tournoi, recevoir une notification. Un joueur sans compte figure
+ * dans l'annuaire pour être TROUVÉ, pas pour être sollicité — lui tendre une action qui
+ * échouerait au serveur serait une promesse en l'air.
+ */
+export function accountHolders(members: DirectoryMember[]): DirectoryMember[] {
+  return members.filter((m) => m.kind !== "guest");
 }
 
 const TTL_MS = 60_000; // 1 min : suffisant pour dédupliquer, sans figer l'annuaire.

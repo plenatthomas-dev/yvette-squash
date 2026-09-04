@@ -221,9 +221,29 @@ export function PrivacyNotice() {
                   classement, le rang, le numéro de licence et le club (vérification du
                   rapprochement). C&apos;est nécessaire pour composer une rencontre&nbsp;: la
                   compétition impose l&apos;ordre du classement, et ces données sont <em>déjà
-                  publiques</em> côté fédération. Elles ne servent qu&apos;à la composition, ne
-                  s&apos;affichent pas dans l&apos;annuaire, et disparaissent dès qu&apos;un
+                  publiques</em> côté fédération. Le numéro de licence et le club ne sont
+                  <strong> jamais affichés</strong>, et tout disparaît dès qu&apos;un
                   administrateur retire la personne du roster.
+                </p>
+                <p>
+                  <strong>Interclub — ces joueurs figurent aussi dans l&apos;annuaire.</strong>{" "}
+                  {directory ? (
+                    <>
+                      Leur nom, leur équipe et leur classement y sont visibles des{" "}
+                      <strong>membres connectés</strong>, au même titre que ceux d&apos;un membre
+                      inscrit — sans quoi l&apos;annuaire donnerait une photo fausse de
+                      l&apos;effectif du club.
+                    </>
+                  ) : (
+                    <>
+                      Leur nom, leur équipe et leur classement y seront visibles des{" "}
+                      <strong>membres connectés</strong> quand l&apos;annuaire sera activé.
+                    </>
+                  )}{" "}
+                  Ils n&apos;y ont en revanche <strong>aucun compte</strong>&nbsp;: on ne peut ni
+                  leur déléguer de droits, ni les inscrire à un tournoi, ni leur envoyer quoi que
+                  ce soit. N&apos;inscris quelqu&apos;un qu&apos;avec son accord — un
+                  administrateur le retire à sa demande.
                 </p>
                 <p>
                   <strong>Interclub — ce qui reste après.</strong> Le nom du joueur demeure
