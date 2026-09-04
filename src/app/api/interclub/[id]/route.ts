@@ -2,9 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
 import { prisma } from "@/lib/db";
 import { isAdminEmail } from "@/lib/admin";
-import { interclubInclude, serializeInterclub } from "@/lib/interclub-db";
+import {
+  interclubInclude,
+  serializeInterclub,
+  parseTimeInput,
+  parseOptionalText,
+  derivedStatus,
+  MAX_OPPONENT_LEN,
+  MAX_DIVISION_LEN,
+  MAX_VENUE_LEN,
+  MAX_VENUE_ADDRESS_LEN,
+} from "@/lib/interclub-db";
 import { teamRoster } from "@/lib/interclub-roster";
 import { interclubChanged } from "@/lib/interclub-gate";
+import { isRealDateISO } from "@/lib/time";
+import { notifyFixtureMoved } from "@/lib/interclub-notify";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,6 +55,113 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       .catch(() => {});
   }
   return NextResponse.json(view);
+}
+
+/**
+ * PATCH /api/interclub/{id} — corriger une rencontre : sa date, son heure, son lieu, son
+ * adversaire, sa journée de championnat.
+ *
+ * POURQUOI CETTE ROUTE EXISTE. Une rencontre créée n'était PAS modifiable : seuls `GET` et
+ * `DELETE` existaient. Tant qu'une rencontre s'inscrivait la veille au soir, on pouvait la
+ * supprimer et la refaire. Depuis qu'un calendrier de championnat entier est saisi en septembre
+ * et que la ligue reporte des journées en cours de saison, supprimer/recréer perdrait la
+ * composition ET les disponibilités déjà recueillies — c'est-à-dire tout le travail.
+ *
+ * Droits : créateur ou admin, exactement comme `DELETE`. Pas de règle nouvelle à retenir.
+ */
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const access = await requireInterclubMember(req);
+  if (!access.ok) return access.response;
+  const { session } = access;
+  const { id } = await params;
+
+  const f = await prisma.interclub.findUnique({
+    where: { id },
+    include: { team: true, matches: { select: { gamesHome: true, status: true } } },
+  });
+  if (!f) return NextResponse.json({ error: "Rencontre introuvable" }, { status: 404 });
+  if (f.createdById !== session.userId && !isAdminEmail(session.email)) {
+    return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
+  }
+
+  const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const data: Record<string, unknown> = {};
+
+  // --- La date, et elle seule, a des conséquences ------------------------------------------
+  let movedFrom: string | null = null;
+  if (body.date !== undefined) {
+    if (typeof body.date !== "string" || !isRealDateISO(body.date)) {
+      return NextResponse.json({ error: "Date invalide" }, { status: 400 });
+    }
+    // Une rencontre COMMENCÉE ne se déplace pas : le déplacement efface les disponibilités et
+    // relance l'appel, ce qui n'a aucun sens sur une soirée déjà en cours ou jouée. Le reste
+    // (lieu mal orthographié, adversaire à corriger) demeure modifiable après coup.
+    if (body.date !== f.date && derivedStatus(f.matchCount, f.matches) !== "scheduled") {
+      return NextResponse.json(
+        { error: "Rencontre déjà commencée : sa date ne peut plus changer." },
+        { status: 409 },
+      );
+    }
+    if (body.date !== f.date) movedFrom = f.date;
+    data.date = body.date;
+  }
+
+  const time = parseTimeInput(body.time);
+  if (body.time !== undefined) {
+    if (!time.ok) return NextResponse.json({ error: "Heure invalide (attendu HH:MM)" }, { status: 400 });
+    data.time = time.value;
+  }
+
+  if (body.opponent !== undefined) {
+    const v = parseOptionalText(body.opponent, MAX_OPPONENT_LEN);
+    // Seul champ NON nullable du lot : une rencontre sans adversaire ne veut rien dire, et la
+    // colonne le refuserait de toute façon — autant le dire ici, en français.
+    if (!v) return NextResponse.json({ error: "Nom du club adverse manquant" }, { status: 400 });
+    data.opponent = v;
+  }
+  if (body.division !== undefined) data.division = parseOptionalText(body.division, MAX_DIVISION_LEN);
+  if (body.venue !== undefined) data.venue = parseOptionalText(body.venue, MAX_VENUE_LEN);
+  if (body.venueAddress !== undefined) {
+    data.venueAddress = parseOptionalText(body.venueAddress, MAX_VENUE_ADDRESS_LEN);
+  }
+  if (typeof body.home === "boolean") data.home = body.home;
+  if (typeof body.dateConfirmed === "boolean") data.dateConfirmed = body.dateConfirmed;
+
+  if (Object.keys(data).length === 0) {
+    return NextResponse.json({ error: "Rien à modifier." }, { status: 400 });
+  }
+
+  // --- DÉPLACER UNE RENCONTRE INVALIDE LES RÉPONSES ------------------------------------------
+  // « Je suis dispo le 9 » ne veut pas dire « je suis dispo le 16 ». Garder les réponses ferait
+  // composer l'équipe sur des « oui » qui ne veulent plus rien dire — et ce sont précisément
+  // les soirs de report qu'on se retrouve à trois. On efface, et on relance l'appel en
+  // remettant les marqueurs à zéro pour que le cron repose la question.
+  if (movedFrom) {
+    data.availabilityOpenedAt = null;
+    data.availabilityRemindedAt = null;
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    if (movedFrom) await tx.interclubAvailability.deleteMany({ where: { interclubId: id } });
+    await tx.interclub.update({ where: { id }, data });
+    return tx.interclub.findUnique({ where: { id }, include: interclubInclude });
+  });
+
+  interclubChanged();
+
+  if (movedFrom && updated) {
+    // Après l'écriture, jamais avant : annoncer un déplacement qui n'a pas eu lieu serait pire
+    // que de ne rien annoncer. Best-effort — `notifyFixtureMoved` ne jette pas.
+    await notifyFixtureMoved(
+      { fixtureId: id, teamId: f.teamId, teamName: f.team.name, opponent: updated.opponent },
+      movedFrom,
+      { date: updated.date, time: updated.time },
+    );
+  }
+
+  return NextResponse.json(
+    updated ? serializeInterclub(updated, session.userId, isAdminEmail(session.email)) : { ok: true },
+  );
 }
 
 // DELETE /api/interclub/{id} : créateur ou admin (supprime matchs et jeux en cascade).

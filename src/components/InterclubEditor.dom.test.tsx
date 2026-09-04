@@ -83,6 +83,12 @@ beforeEach(() => {
         corps: init?.body ? JSON.parse(String(init.body)) : null,
       });
       if (u.includes("/api/interclub/follows")) return reponse({ follows: [], pushReady: false });
+      // La fiche d'une rencontre porte désormais le bloc « qui peut venir ? ». Il n'est pas le
+      // sujet de ce fichier, mais il émet sa propre requête : sans réponse à sa forme, la
+      // réponse fourre-tout ci-dessous lui arrivait et il n'y trouvait pas ses compteurs.
+      if (u.includes("/availability")) {
+        return reponse({ entries: [], counts: { yes: 0, no: 0, maybe: 0, pendingReachable: [], pendingUnreachable: [] }, matchCount: 4, me: "u1" });
+      }
       if (u.includes("/api/interclub/live")) return reponse({ fixtures: [] });
       if (/\/api\/interclub\/f1$/.test(u)) return reponse(fixtureOverride ?? FIXTURE);
       return reponse({

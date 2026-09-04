@@ -25,7 +25,9 @@ Trois choses à couvrir, dans cet ordre d'importance :
 ## Autorisations — un seul rôle, et c'est une décision
 
 **Tout membre connecté peut créer une rencontre, composer une équipe, prendre le marquage d'un
-match et y saisir les points.** Il n'y a pas de rôle « capitaine ».
+match et y saisir les points.** Il y a bien un **capitaine** par équipe depuis le calendrier,
+mais ce n'est pas un rôle : c'est une **désignation**, et il ne peut rien que les autres ne
+puissent (cf. « Calendrier, capitaines et disponibilités »).
 
 Ce n'est pas un oubli. Le club compte quelques dizaines de personnes qui se connaissent ;
 exiger un rôle bloquerait la saisie exactement les soirs où le capitaine joue — c'est-à-dire
@@ -372,6 +374,112 @@ figé » plus haut, pour la raison symétrique).
 
 ---
 
+## Calendrier, capitaines et disponibilités
+
+Jusqu'ici l'appli savait composer une équipe et marquer les points, mais pas **quand on joue**
+ni **qui peut venir** : la rencontre n'avait qu'une date, sans heure ni lieu, et rien nulle part
+ne recueillait une disponibilité. Les capitaines faisaient ce travail sur WhatsApp, à la main,
+et recommençaient à chaque journée.
+
+### Le calendrier vient de la fédération, en un geste
+
+La ligue publie le calendrier d'une saison **en une fois**. Un bouton d'admin le récupère
+(`POST /api/admin/interclub-calendar`), un cron hebdomadaire vérifie ensuite qu'il n'a pas
+bougé. Même mécanique que le classement : un POST sur `https://www.squashnet.fr/index.php`,
+section `ic_a=393986`, qui rend un fragment HTML rendu serveur.
+
+Trois constats du site ont décidé de la conception, et ils se vérifient dans
+`src/lib/squashnet/calendar.test.ts` sur un fragment réel :
+
+1. **`teamid` ne filtre rien.** On reçoit l'événement entier (14 journées × 4 rencontres) ;
+   c'est `ownFixtures()` qui retient les lignes portant notre `data-teamid`. D'où **deux**
+   identifiants à renseigner par équipe, jamais un seul.
+2. **Les journées non planifiées portent une date bouchon**, commune à plusieurs journées.
+   Importée telle quelle, elle convoquerait l'équipe quatre fois le même soir. Plusieurs
+   journées à la même date ⇒ `dateConfirmed: false`, la date s'affiche comme
+   **prévisionnelle**, et **aucune notification ne part** dessus.
+3. **Le jour de la semaine n'est pas garanti** — l'événement d'essai se joue le mardi, pas le
+   jeudi. Rien ne code un jour en dur : la date vient du calendrier fédéral, et les vacances
+   scolaires n'entrent nulle part dans le calcul (la ligue les a déjà retirées).
+
+**L'import se fait en deux temps, `preview` puis `apply`.** Ce qu'il écrit n'est pas une donnée
+d'affichage : c'est la date à laquelle une équipe se déplace. Un scraping qui casse — squashnet
+a déjà changé son rendu du jour au lendemain — ne doit pas pouvoir vider un calendrier tout
+seul. L'admin voit l'écart champ par champ, puis applique.
+
+**Le rapprochement se fait par JOURNÉE (`round`), pas par date** : la date est précisément ce
+qui bouge, et rapprocher par elle créerait une rencontre de plus à chaque report au lieu de
+corriger l'existante. **Une rencontre saisie à la main (`snMatchKey` nul) est intouchable par
+l'import** — même doctrine que les corrections de classement : l'automatique et l'humain ne
+partagent aucune colonne.
+
+**Une date qui change efface les disponibilités de la rencontre** et remet l'appel à zéro.
+« Je suis dispo le 9 » ne veut pas dire « je suis dispo le 16 », et ce sont précisément les
+soirs de report qu'on se retrouve à trois.
+
+### Le capitaine — une désignation, pas un droit
+
+Nommé par un admin (`set_captain`), affiché sur son équipe et sur chaque rencontre. Il **ne
+peut rien de plus** que les autres : composer reste ouvert à tout membre, et verrouiller
+créerait un point de blocage le soir où le capitaine n'est pas là. Ce qu'il apporte est
+ailleurs — l'équipe sait à qui parler, et **lui seul** reçoit le récapitulatif des
+disponibilités et les alertes de calendrier. Diffusées à tous, ces deux-là deviendraient un
+bruit que chacun ignore.
+
+Le serveur **refuse un capitaine qui ne joue pas dans l'équipe** : c'est presque toujours une
+erreur de saisie, et le laisser passer donnerait un destinataire d'alertes qui ne se sent pas
+concerné, donc des alertes que personne ne traite.
+
+### Les disponibilités — et le droit de répondre pour un autre
+
+Trois réponses, `yes` / `maybe` / `no`, plus un commentaire libre de 200 caractères. Le
+décompte se lit en **simples couverts** (`counts.yes` contre `matchCount`) et non en taux de
+réponse : c'est la seule question que le capitaine se pose. Les « incertain » sont dits **à
+part** — les compter comme présents ferait taire l'alerte le jour où elle sert.
+
+**Tout le monde voit tout.** Savoir qu'on n'est que trois est ce qui fait répondre le
+quatrième ; un écran où chacun ne verrait que sa propre réponse laisserait le capitaine seul
+avec le problème.
+
+**N'importe quel membre de l'équipe peut répondre pour un autre**, membre ou joueur sans
+compte. Sans ce chemin, l'outil ne sert à rien pour la moitié du roster : les joueurs sans
+compte ne verront jamais l'appel, et les membres qui n'ont pas activé les notifications non
+plus. `InterclubAvailability.setById` porte **qui a saisi** ; différent du sujet, la ligne
+affiche « relayé par … ». Pas de booléen `relayed` en plus : il serait déductible, donc capable
+de mentir.
+
+**Écraser une réponse de première main se confirme.** Si la réponse existante a été posée par
+l'intéressé lui-même, le `PUT` répond **409** avec ce qu'elle disait ; l'écran l'affiche et
+redemande, et le relais n'aboutit qu'avec `confirmOverride: true`. Le capitaine qui a eu la
+personne au téléphone corrige ; personne ne fait disparaître un « non » assumé sans l'avoir vu.
+**Le sens inverse est libre** : l'intéressé écrase toujours un relais sans confirmation — c'est
+sa réponse.
+
+**Le capitaine doit savoir qui est injoignable**, sinon il relance en aveugle. Le `GET` expose
+pour chaque joueur s'il est **atteignable par notification** (au moins une `PushSubscription`),
+et l'écran regroupe à part les « sans réponse et sans notification » : c'est sa liste d'appels.
+Les joueurs sans compte y tombent d'office.
+
+### Les deux crons
+
+| Cron | Rythme | Ce qu'il fait |
+|---|---|---|
+| `/api/cron/interclub-availability` | `0 8 * * *` | Ouvre l'appel à **J-10**, relance les non-répondants à **J-3**, envoie le récap au capitaine à J-3. Idempotence par `availabilityOpenedAt` / `availabilityRemindedAt`. **Silence total sur une date non confirmée.** |
+| `/api/cron/interclub-calendar` | `0 9 * * 1` | Pour chaque équipe ancrée : récupère, compare, met à jour `snCheckedAt`. Alerte capitaine et admins **une seule fois** par écart (empreinte `snCalendarHash`), et **n'écrit aucune rencontre** — l'application reste un geste d'admin. |
+
+`snCheckedAt` existe pour répondre à la question que le silence ne tranche pas : « le calendrier
+n'a pas bougé », ou « on n'a pas regardé » ?
+
+### Trois populations à ne pas confondre
+
+`InterclubFollow` est un abonnement au **score**, ouvert à tous. L'appel de disponibilité
+s'adresse aux **membres de l'équipe** (`User.teamId`). Le récapitulatif et les alertes de
+calendrier s'adressent au **capitaine seul**. Envoyer une convocation à des spectateurs, ou
+« il manque du monde » à toute l'équipe, viderait les deux de leur sens — d'où `sendTo()` dans
+`interclub-notify.ts`, qui vise des destinataires nommés et non `followersFor`.
+
+---
+
 ## Le direct, et ce qu'il coûte
 
 `PRODUCT.md` proscrit le polling agressif. Le dispositif tient en trois pièces :
@@ -494,14 +602,25 @@ score enregistré).
 - `src/lib/squashnet/refresh.ts` — le **rapprochement fédéral** des DEUX populations en une passe (`refreshRankings`), et à la demande d'un joueur sans compte (`matchGuestRanking`) ou d'un membre dont on vient de corriger le nom de recherche (`refreshMemberRanking`)
 - `src/lib/interclub-gate.ts` — le **cache** du direct
 - `src/lib/interclub-access.ts` — le **contrôle d'accès** (flag + session)
-- `src/lib/interclub-notify.ts` — ciblage des abonnés et rédaction des notifications
+- `src/lib/squashnet/calendar.ts` — le **calendrier fédéral** : parsing pur
+  (`parseTeamCalendar`, `ownFixtures`), écart (`diffCalendar`, rapproché par JOURNÉE) et
+  empreinte (`calendarFingerprint`). Une seule définition de « ce qui a changé », partagée par
+  la prévisualisation, l'application et le contrôle hebdomadaire — pour que l'alerte et l'écran
+  ne puissent pas se contredire
+- `src/lib/interclub-availability.ts` — les trois réponses, le décompte en **simples couverts**
+  (`tally`, `isShortHanded`), la règle de confirmation d'un relais (`needsOverrideConfirm`) et
+  les fenêtres d'appel / relance (`dueAction`)
+- `src/lib/interclub-notify.ts` — ciblage des abonnés et rédaction des notifications, dont
+  l'appel de disponibilité, la relance des seuls non-répondants, le report de date, le récap au
+  capitaine et l'alerte de dérive du calendrier
 - `src/lib/http-tx.ts` — transaction Serializable partagée (sert aussi au tournoi et au tricount)
 
 **Routes**
 | Route | Ce qu'elle fait |
 |---|---|
 | `GET/POST /api/interclub` | Liste des rencontres · création (+ les N simples d'un coup) |
-| `GET/DELETE /api/interclub/{id}` | Détail (avec le roster de l'équipe) · suppression |
+| `GET/PATCH/DELETE /api/interclub/{id}` | Détail (avec le roster de l'équipe) · correction de la date, l'heure, le lieu, l'adversaire · suppression |
+| `GET/PUT …/{id}/availability` | Les réponses de l'équipe · poser la sienne ou celle d'un autre (409 sur une réponse de première main) |
 | `PATCH /api/interclub/{id}/matches/{mid}` | Composition, couleurs, jeux (saisie a posteriori) |
 | `PUT …/matches/{mid}/live` | Instantané du marquage en direct — **chemin chaud** |
 | `POST/DELETE …/matches/{mid}/claim` | Prendre / relâcher le marquage |
@@ -509,13 +628,23 @@ score enregistré).
 | `GET/PUT /api/interclub/follows` | Mes abonnements |
 | `GET /api/directory` | Annuaire : membres opt-in ET joueurs sans compte (`kind`), avec équipe et classement |
 | `GET/POST /api/admin/interclub-teams` | Équipes, membres et joueurs sans compte, dont leur classement et leur rang mixte ; rapprochement squashnet à l'ajout et à la demande (**admin**) |
+| `POST /api/admin/interclub-teams` (actions `set_captain`, `set_squashnet_event`) | Capitaine de l'équipe · ancrage sur le championnat fédéral (**admin**) |
+| `POST /api/admin/interclub-calendar` | Import du calendrier : `preview` puis `apply` (**admin**) |
+| `GET /api/cron/interclub-availability` | Appel J-10, relance J-3, récap au capitaine |
+| `GET /api/cron/interclub-calendar` | Contrôle hebdomadaire de dérive — alerte, n'écrit rien |
 | `POST /api/admin/members` (action `set_clt_override`) | Correction admin du classement ET du rang mixte d'un membre (**admin**) |
 | `POST /api/admin/members` (action `set_squashnet_name`) | Nom sous lequel chercher un membre sur squashnet, puis rapprochement immédiat (**admin**) |
 | `POST /api/admin/members` (action `rematch_squashnet`) | Retente le rapprochement d'un membre, sans rien modifier (**admin**) |
 | `GET /api/notifications` | La cloche (pas de flag : elle sert à toute l'appli) |
 
 **Composants** — `Interclub.tsx` (orchestration), `InterclubScorer.tsx` (marquage),
-`InterclubLive.tsx` (bandeau direct), `InterclubFollow.tsx` (abonnement).
+`InterclubLive.tsx` (bandeau direct), `InterclubFollow.tsx` (abonnement),
+`InterclubAvailability.tsx` (le bloc « qui peut venir ? » d'une rencontre).
+
+**Pas de composant « calendrier ».** La liste des rencontres **est** déjà cette liste : elle
+porte désormais la journée, l'heure, le lieu et la mention « prévisionnelle », et elle range les
+rencontres à venir en tête. En créer une seconde des mêmes objets recréerait à l'écran la double
+vérité que le modèle évite.
 
 **Tests de composant** — `vitest.config.ts` définit DEUX projets : `node` pour les tests de
 modules (la grande majorité, aucun DOM à toucher) et `dom` pour les fichiers `*.dom.test.tsx`,
@@ -582,5 +711,9 @@ code d'erreur qu'on lui a soufflé. C'est lui qui a tranché les deux soupçons 
     réveiller.
 - **`Interclub.tsx` fait ~980 lignes** et concentre quatre écrans. Découpage à envisager si un
   cinquième s'ajoute.
-- **Pas de vue « saison »** : ni classement, ni historique par équipe. Volontaire pour un
-  premier jet — la liste des rencontres suffit tant qu'on en compte une dizaine par an.
+- **Pas de classement de division** : le calendrier de la saison est là, l'historique par
+  équipe aussi, mais la position au classement n'est pas récupérée (squashnet la publie sous
+  `ic_a=394242`).
+- **Hors périmètre du premier lot de disponibilités** : la convocation officielle (le capitaine
+  retient N joueurs, chacun reçoit la sienne), l'export ICS / l'abonnement webcal, l'application
+  automatique des dérives de calendrier, et le covoiturage.

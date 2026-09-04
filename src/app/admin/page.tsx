@@ -82,7 +82,65 @@ function RankingBadges({
 }
 
 /** Équipe interclub et son effectif inscrit sur l'appli (l'affectation se fait page Membres). */
-type IcTeam = { id: string; name: string; memberCount: number };
+type IcTeam = {
+  id: string;
+  name: string;
+  memberCount: number;
+  /** Le capitaine : une désignation, pas un droit. Il est le DESTINATAIRE du récapitulatif
+      des disponibilités et des alertes de calendrier — deux choses qui, envoyées à tous,
+      deviendraient un bruit que chacun ignore. */
+  captainId: string | null;
+  captainName: string | null;
+  /** L'ancrage fédéral. Les deux vont ENSEMBLE : `snEventId` dit quoi télécharger, `snTeamId`
+      dit lesquelles des ~56 rencontres publiées sont les nôtres. */
+  snEventId: string | null;
+  snTeamId: string | null;
+  /** Dernier contrôle du calendrier. Il répond à la question que le silence ne tranche pas :
+      « rien n'a bougé », ou « on n'a pas regardé » ? */
+  snCheckedAt: string | null;
+};
+
+/** Un champ du calendrier qui a bougé, dans ses deux versions. */
+type CalChange = { field: string; from: string | null; to: string | null };
+/** Une rencontre telle que la ligue la publie. */
+type CalTie = {
+  round: string;
+  date: string;
+  time: string | null;
+  home: boolean;
+  opponent: string;
+  venue: string | null;
+  venueAddress: string | null;
+  dateConfirmed: boolean;
+};
+/** Ce que rend la PRÉVISUALISATION : ce qui serait écrit, avant de l'écrire. */
+type CalPreview = {
+  teamId: string;
+  teamName: string;
+  published: number;
+  toCreate: CalTie[];
+  toUpdate: { id: string; tie: CalTie; changes: CalChange[] }[];
+  unchanged: number;
+};
+
+/** Les champs du calendrier, en français : l'écran ne parle pas le nom de colonne. */
+const CAL_FIELDS: Record<string, string> = {
+  date: "date",
+  time: "heure",
+  home: "réception",
+  opponent: "adversaire",
+  venue: "lieu",
+  venueAddress: "adresse",
+  dateConfirmed: "statut de la date",
+};
+
+/** Une valeur d'écart, rendue lisible — un booléen brut ne dit rien à personne. */
+function calValue(field: string, v: string | null): string {
+  if (v === null || v === "") return "—";
+  if (field === "home") return v === "true" ? "à domicile" : "à l'extérieur";
+  if (field === "dateConfirmed") return v === "true" ? "confirmée" : "prévisionnelle";
+  return v;
+}
 /** Membre inscrit rattaché à une équipe : listé ici en LECTURE (rattachement page Membres). */
 type IcMember = { id: string; teamId: string; name: string; clt: string | null; rangM: number | null };
 /**
@@ -188,6 +246,15 @@ export default function AdminPage() {
   const [icMembers, setIcMembers] = useState<IcMember[]>([]);
   const [icGuests, setIcGuests] = useState<IcGuest[]>([]);
   const [icTeamId, setIcTeamId] = useState("");
+  // L'ancrage se saisit en BROUILLON, une entrée par équipe, et ne part qu'au bouton.
+  //
+  // Ce n'est pas de la prudence d'écran mais une leçon déjà payée : les deux identifiants
+  // partent ENSEMBLE ou pas du tout (le serveur refuse un seul des deux), et une comparaison
+  // à l'état SERVEUR pour décider quoi envoyer ne peut jamais être vraie — rien n'a encore
+  // été écrit. Le même raisonnement avait rendu inerte la saisie du nom squashnet d'un membre.
+  const [icAnchor, setIcAnchor] = useState<Record<string, { eventId: string; snTeamId: string }>>({});
+  const [icCal, setIcCal] = useState<CalPreview | null>(null);
+  const [icCalBusy, setIcCalBusy] = useState(false);
   const [icName, setIcName] = useState("");
 
   useEffect(() => {
@@ -521,6 +588,161 @@ export default function AdminPage() {
       setIcResult({ ok: false, text: "Rapprochement impossible." });
     } finally {
       setIcBusy(false);
+    }
+  };
+
+  /**
+   * Nomme (ou retire, `userId` vide) le capitaine. Le serveur refuse un membre qui ne joue pas
+   * dans l'équipe : c'est presque toujours une erreur de saisie, et le laisser passer donnerait
+   * un destinataire d'alertes qui ne se sent pas concerné — donc des alertes que personne ne
+   * traite. On se contente ici de RAPPORTER ce refus.
+   */
+  const setCaptain = async (t: IcTeam, userId: string) => {
+    setIcBusy(true);
+    setIcResult(null);
+    try {
+      const res = await fetch("/api/admin/interclub-teams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_captain", teamId: t.id, userId: userId || null }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setIcResult({ ok: false, text: data.error ?? "Désignation impossible." });
+        return;
+      }
+      const name = userId ? (icMembers.find((m) => m.id === userId)?.name ?? null) : null;
+      setIcTeams((prev) =>
+        prev.map((x) => (x.id === t.id ? { ...x, captainId: userId || null, captainName: name } : x)),
+      );
+      setIcResult({
+        ok: true,
+        text: name ? `${name} est capitaine de ${t.name}.` : `${t.name} n'a plus de capitaine.`,
+      });
+    } catch {
+      setIcResult({ ok: false, text: "Désignation impossible." });
+    } finally {
+      setIcBusy(false);
+    }
+  };
+
+  /** Les deux identifiants du brouillon, ou l'ancrage enregistré tant qu'on n'a rien tapé. */
+  const anchorFields = (t: IcTeam) =>
+    icAnchor[t.id] ?? { eventId: t.snEventId ?? "", snTeamId: t.snTeamId ?? "" };
+
+  const editAnchor = (t: IcTeam, patch: { eventId?: string; snTeamId?: string }) =>
+    setIcAnchor((prev) => ({ ...prev, [t.id]: { ...anchorFields(t), ...patch } }));
+
+  const saveAnchor = async (t: IcTeam) => {
+    const { eventId, snTeamId } = anchorFields(t);
+    setIcBusy(true);
+    setIcResult(null);
+    try {
+      const res = await fetch("/api/admin/interclub-teams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_squashnet_event", teamId: t.id, eventId, snTeamId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setIcResult({ ok: false, text: data.error ?? "Enregistrement impossible." });
+        return;
+      }
+      setIcTeams((prev) =>
+        prev.map((x) =>
+          x.id === t.id
+            ? { ...x, snEventId: eventId || null, snTeamId: snTeamId || null, snCheckedAt: null }
+            : x,
+        ),
+      );
+      // Le brouillon est repris par l'état serveur : le garder ferait diverger silencieusement
+      // les deux le jour où le serveur normalise une valeur.
+      setIcAnchor((prev) => {
+        const next = { ...prev };
+        delete next[t.id];
+        return next;
+      });
+      // Changer d'ancrage périme l'aperçu affiché : il porte sur l'ancien championnat.
+      if (icCal?.teamId === t.id) setIcCal(null);
+      setIcResult({
+        ok: true,
+        text: eventId ? `${t.name} est rattachée à son championnat.` : `${t.name} n'est plus rattachée.`,
+      });
+    } catch {
+      setIcResult({ ok: false, text: "Enregistrement impossible." });
+    } finally {
+      setIcBusy(false);
+    }
+  };
+
+  /**
+   * L'import se fait en DEUX TEMPS. Ce qu'il écrit n'est pas une donnée d'affichage : c'est la
+   * date à laquelle une équipe se déplace, et appliquer un écart de date efface les
+   * disponibilités déjà recueillies. On regarde d'abord, on applique ensuite.
+   */
+  const previewCalendar = async (t: IcTeam) => {
+    setIcCalBusy(true);
+    setIcResult(null);
+    setIcCal(null);
+    try {
+      const res = await fetch("/api/admin/interclub-calendar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "preview", teamId: t.id }),
+      });
+      const data = (await res.json().catch(() => ({}))) as Partial<CalPreview> & { error?: string };
+      if (!res.ok) {
+        setIcResult({ ok: false, text: data.error ?? "Récupération impossible." });
+        return;
+      }
+      setIcCal({
+        teamId: t.id,
+        teamName: data.teamName ?? t.name,
+        published: data.published ?? 0,
+        toCreate: data.toCreate ?? [],
+        toUpdate: data.toUpdate ?? [],
+        unchanged: data.unchanged ?? 0,
+      });
+    } catch {
+      setIcResult({ ok: false, text: "Récupération impossible." });
+    } finally {
+      setIcCalBusy(false);
+    }
+  };
+
+  const applyCalendar = async (t: IcTeam) => {
+    setIcCalBusy(true);
+    setIcResult(null);
+    try {
+      const res = await fetch("/api/admin/interclub-calendar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "apply", teamId: t.id }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        created?: number;
+        updated?: number;
+        moved?: number;
+        error?: string;
+      };
+      if (!res.ok) {
+        setIcResult({ ok: false, text: data.error ?? "Import impossible." });
+        return;
+      }
+      setIcCal(null);
+      setIcTeams((prev) =>
+        prev.map((x) => (x.id === t.id ? { ...x, snCheckedAt: new Date().toISOString() } : x)),
+      );
+      setIcResult({
+        ok: true,
+        text:
+          `${t.name} : ${data.created ?? 0} rencontre(s) créée(s), ${data.updated ?? 0} corrigée(s)` +
+          (data.moved ? ` — ${data.moved} déplacée(s), l'équipe est prévenue et leurs disponibilités sont remises à zéro.` : "."),
+      });
+    } catch {
+      setIcResult({ ok: false, text: "Import impossible." });
+    } finally {
+      setIcCalBusy(false);
     }
   };
 
@@ -1119,6 +1341,176 @@ export default function AdminPage() {
                               )}
                             </ul>
                           )}
+
+                          {/* --- Capitaine et calendrier fédéral ---------------------------
+                              Deux réglages qui appartiennent à l'ÉQUIPE et non à un joueur :
+                              ils vivent donc sous son effectif, une fois qu'on sait de qui
+                              elle est faite. Le capitaine se voit toujours — c'est une
+                              information, et son absence en est une aussi ; la machinerie
+                              d'import se replie, parce qu'on la règle une fois par saison. */}
+                          <div className="ic-team-admin">
+                            <label className="ic-cap">
+                              <span className="ic-cap-label">Capitaine</span>
+                              <select
+                                value={t.captainId ?? ""}
+                                disabled={icBusy || siens.length === 0}
+                                onChange={(ev) => setCaptain(t, ev.target.value)}
+                                title="Il reçoit le récapitulatif des disponibilités et les alertes de calendrier. Il n'a aucun droit de plus."
+                              >
+                                <option value="">— aucun —</option>
+                                {siens.map((m) => (
+                                  <option key={m.id} value={m.id}>
+                                    {m.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            {/* Le capitaine doit JOUER dans l'équipe : le serveur refuse un
+                                membre extérieur. Quand la liste est vide, on le DIT plutôt que
+                                de laisser un sélecteur inerte dont on cherche la panne. */}
+                            {siens.length === 0 && (
+                              <p className="muted tiny">
+                                Rattache d&apos;abord des membres à cette équipe depuis la{" "}
+                                <Link href="/admin/membres">page Membres</Link>.
+                              </p>
+                            )}
+
+                            <details className="ic-sn">
+                              <summary>
+                                Calendrier fédéral
+                                <span className="muted tiny">
+                                  {t.snEventId
+                                    ? t.snCheckedAt
+                                      ? ` · contrôlé le ${new Date(t.snCheckedAt).toLocaleDateString("fr-FR")}`
+                                      : " · jamais importé"
+                                    : " · non rattaché"}
+                                </span>
+                              </summary>
+
+                              <p className="muted tiny">
+                                Les deux identifiants se lisent dans l&apos;URL de la page
+                                « équipes » du championnat sur squashnet
+                                (<code>?eventid=…&amp;teamid=…</code>). Ils vont ensemble :{" "}
+                                <strong>eventid</strong> dit quoi télécharger,{" "}
+                                <strong>teamid</strong> lesquelles des rencontres publiées sont
+                                les nôtres.
+                              </p>
+
+                              <div className="ic-sn-fields">
+                                <input
+                                  value={anchorFields(t).eventId}
+                                  disabled={icBusy}
+                                  onChange={(ev) => editAnchor(t, { eventId: ev.target.value })}
+                                  placeholder="eventid"
+                                  aria-label={`Identifiant d'épreuve squashnet de ${t.name}`}
+                                />
+                                <input
+                                  value={anchorFields(t).snTeamId}
+                                  disabled={icBusy}
+                                  onChange={(ev) => editAnchor(t, { snTeamId: ev.target.value })}
+                                  placeholder="teamid"
+                                  inputMode="numeric"
+                                  aria-label={`Identifiant d'équipe squashnet de ${t.name}`}
+                                />
+                                <button type="button" disabled={icBusy} onClick={() => saveAnchor(t)}>
+                                  Enregistrer
+                                </button>
+                              </div>
+
+                              <button
+                                type="button"
+                                className="secondary"
+                                disabled={icCalBusy || !t.snEventId || !t.snTeamId}
+                                onClick={() => previewCalendar(t)}
+                                title={
+                                  t.snEventId
+                                    ? "Télécharge le calendrier publié et montre l'écart, sans rien écrire."
+                                    : "Renseigne d'abord les deux identifiants."
+                                }
+                              >
+                                {icCalBusy && icCal?.teamId !== t.id ? "…" : "Prévisualiser l'import"}
+                              </button>
+
+                              {/* L'APERÇU. Il montre ce qui serait écrit, en français et champ
+                                  par champ — un scraping qui casse ne doit pas pouvoir vider un
+                                  calendrier ni déplacer une convocation tout seul. */}
+                              {icCal?.teamId === t.id && (
+                                <div className="ic-cal-preview">
+                                  <p className="ic-cal-sum">
+                                    <strong>{icCal.published}</strong> rencontre
+                                    {icCal.published > 1 ? "s" : ""} publiée
+                                    {icCal.published > 1 ? "s" : ""} pour nous ·{" "}
+                                    {icCal.toCreate.length} à créer · {icCal.toUpdate.length} à
+                                    corriger · {icCal.unchanged} inchangée
+                                    {icCal.unchanged > 1 ? "s" : ""}
+                                  </p>
+
+                                  {icCal.toCreate.length === 0 && icCal.toUpdate.length === 0 ? (
+                                    <p className="muted tiny">
+                                      Rien à changer : la base est à jour.
+                                    </p>
+                                  ) : (
+                                    <ul className="ic-cal-list">
+                                      {icCal.toCreate.map((c) => (
+                                        <li key={`c${c.round}`}>
+                                          <strong>{c.round}</strong> à créer — {c.date}
+                                          {c.time && ` à ${c.time}`} ·{" "}
+                                          {c.home ? "à domicile" : "à l'extérieur"} contre{" "}
+                                          {c.opponent}
+                                          {!c.dateConfirmed && (
+                                            <span className="ic-provisoire-tag">prévisionnelle</span>
+                                          )}
+                                        </li>
+                                      ))}
+                                      {icCal.toUpdate.map((u) => (
+                                        <li key={u.id}>
+                                          <strong>{u.tie.round}</strong> —{" "}
+                                          {u.changes
+                                            .map(
+                                              (c) =>
+                                                `${CAL_FIELDS[c.field] ?? c.field} : ${calValue(c.field, c.from)} → ${calValue(c.field, c.to)}`,
+                                            )
+                                            .join(" · ")}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+
+                                  {/* Ce que l'application COÛTE, dit avant de cliquer : une
+                                      date qui bouge efface des réponses déjà données. Le
+                                      découvrir après serait le découvrir trop tard. */}
+                                  {icCal.toUpdate.some((u) => u.changes.some((c) => c.field === "date")) && (
+                                    <p className="ic-cal-warn">
+                                      ⚠️ Une date qui change efface les disponibilités déjà
+                                      recueillies pour cette rencontre, et l&apos;équipe est
+                                      prévenue du report.
+                                    </p>
+                                  )}
+
+                                  <div className="ic-cal-actions">
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        icCalBusy ||
+                                        (icCal.toCreate.length === 0 && icCal.toUpdate.length === 0)
+                                      }
+                                      onClick={() => applyCalendar(t)}
+                                    >
+                                      {icCalBusy ? "Import…" : "Appliquer"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="secondary"
+                                      disabled={icCalBusy}
+                                      onClick={() => setIcCal(null)}
+                                    >
+                                      Fermer
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </details>
+                          </div>
                         </div>
                       );
                     })}

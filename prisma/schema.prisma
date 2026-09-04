@@ -14,23 +14,23 @@ datasource db {
 
 // Un joueur de l'appli, identifié par son compte ResaMania (contactId).
 model User {
-  id                     String             @id @default(cuid())
-  contactId              String?            @unique // ResaMania (nullable : un compte « email seul » n'en a pas encore)
-  displayName            String
-  nickname               String? // pseudonyme choisi par le joueur (affiché à la place du prénom)
-  email                  String?            @unique // normalisé (trim+lowercase) — CLÉ D'IDENTITÉ commune ResaMania/email
+  id                       String                  @id @default(cuid())
+  contactId                String?                 @unique // ResaMania (nullable : un compte « email seul » n'en a pas encore)
+  displayName              String
+  nickname                 String? // pseudonyme choisi par le joueur (affiché à la place du prénom)
+  email                    String?                 @unique // normalisé (trim+lowercase) — CLÉ D'IDENTITÉ commune ResaMania/email
   // Connexion « email seul » par mot de passe (remplace l'OTP). Haché avec scrypt
   // (cf. crypto.hashPassword) — JAMAIS en clair. NULL = compte sans mot de passe (un membre
   // qui n'utilise que ResaMania, ou un compte email pas encore activé).
-  passwordHash           String?
+  passwordHash             String?
   // Date où la possession de l'email a été prouvée : lien d'inscription/réinitialisation
   // cliqué, OU connexion ResaMania (qui fait autorité sur l'email). NULL = non vérifié →
   // la connexion par mot de passe est refusée tant que c'est NULL.
-  emailVerifiedAt        DateTime?
+  emailVerifiedAt          DateTime?
   // Annuaire (idée 6) : visibilité OPT-OUT — visible par défaut, le joueur peut se retirer
   // depuis ses paramètres. Base légale = intérêt légitime (entraide asso) + retrait facile.
   // Seuls `id` + nom/pseudo sont exposés par /api/directory (jamais email ni contactId).
-  listed                 Boolean            @default(true)
+  listed                   Boolean                 @default(true)
   // Gestion des membres (espace admin, étape 1) :
   //  - lastLoginAt : horodaté à chaque AUTHENTIFICATION réussie (login ResaMania, lien email ou
   //    biométrie) — repère les comptes inactifs. NULL = jamais authentifié depuis l'ajout de la
@@ -42,41 +42,41 @@ model User {
   //    sessions en cours révoquées. Alternative NON destructive à la suppression, seule option
   //    pour un membre ResaMania (qui se recréerait à la prochaine connexion) ou porteur d'un
   //    historique financier (dépenses Tricount `Restrict`).
-  lastLoginAt            DateTime?
-  lastSeenAt             DateTime?
-  disabledAt             DateTime?
+  lastLoginAt              DateTime?
+  lastSeenAt               DateTime?
+  disabledAt               DateTime?
   // Annonce (bannière + modale, étape 2) : la `version` de l'annonce que ce membre a masquée /
   // dont il a déjà vu la modale. Rattaché au COMPTE et non au navigateur : `localStorage` est
   // lié à l'appareil, donc il fuitait d'un membre à l'autre sur un téléphone partagé, et
   // s'oubliait à chaque reconnexion. Stocker la VERSION (= AppSetting.updatedAt ISO) et non un
   // booléen : une NOUVELLE annonce (version différente) repasse naturellement devant les yeux.
   // Les deux sont indépendants : on peut fermer la modale et garder le bandeau.
-  bannerDismissedVersion String?
-  bannerModalSeenVersion String?
-  createdAt              DateTime           @default(now())
-  sessions               Session[]
-  passkeys               Passkey[] // connexion biométrique (WebAuthn / passkeys) — comptes « email seul »
-  bookings               Booking[]
-  attendances            Attendance[]
-  pushSubs               PushSubscription[]
-  slotAlerts             SlotAlert[]
-  expensesPaid           Expense[]          @relation("ExpensePayer")
-  expensesCreated        Expense[]          @relation("ExpenseCreator")
-  expenseShares          ExpenseShare[]
-  tricountApprovals      TricountApproval[]
-  tricountComments       TricountComment[]
+  bannerDismissedVersion   String?
+  bannerModalSeenVersion   String?
+  createdAt                DateTime                @default(now())
+  sessions                 Session[]
+  passkeys                 Passkey[] // connexion biométrique (WebAuthn / passkeys) — comptes « email seul »
+  bookings                 Booking[]
+  attendances              Attendance[]
+  pushSubs                 PushSubscription[]
+  slotAlerts               SlotAlert[]
+  expensesPaid             Expense[]               @relation("ExpensePayer")
+  expensesCreated          Expense[]               @relation("ExpenseCreator")
+  expenseShares            ExpenseShare[]
+  tricountApprovals        TricountApproval[]
+  tricountComments         TricountComment[]
   // Délégation temporaire de droits (idée 4) : ce que je donne / ce qu'on me donne.
-  delegationsGiven       Delegation[]       @relation("DelegationGiven")
-  delegationsReceived    Delegation[]       @relation("DelegationReceived")
+  delegationsGiven         Delegation[]            @relation("DelegationGiven")
+  delegationsReceived      Delegation[]            @relation("DelegationReceived")
   // Tournois (idée 3) : ceux que j'ai créés + les participations où je suis membre.
-  tournamentsCreated     Tournament[]       @relation("TournamentCreator")
-  tournamentPlayers      TournamentPlayer[]
+  tournamentsCreated       Tournament[]            @relation("TournamentCreator")
+  tournamentPlayers        TournamentPlayer[]
   // Classement fédéral (idée squashnet) : dernier classement rapproché, source publique.
-  squashnetRanking       SquashnetRanking?
+  squashnetRanking         SquashnetRanking?
   // Interclub : équipe de l'asso où ce membre est aligné (NULL = non aligné, cas le plus
   // fréquent). Affiché comme colonne de l'annuaire. SetNull à la suppression de l'équipe.
-  team                   InterclubTeam?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  teamId                 String?
+  team                     InterclubTeam?          @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  teamId                   String?
   // Classement ET rang mixte forcés par un admin pour l'ORDRE des simples interclub
   // (cf. lib/interclub-order.ts), quand le rapprochement squashnet (`squashnetRanking`) a
   // échoué ou s'est trompé — nom mal orthographié côté ResaMania, licence pas encore
@@ -90,8 +90,8 @@ model User {
   // Chacun est prioritaire sur son homologue de `squashnetRanking` quand il est renseigné
   // (cf. `memberClt` / `memberRangM` dans interclub-roster.ts) ; NULL = pas de correction, on
   // se fie au rapprochement automatique.
-  interclubCltOverride   String?
-  interclubRangMOverride Int?
+  interclubCltOverride     String?
+  interclubRangMOverride   Int?
   // NOM SOUS LEQUEL CHERCHER CE MEMBRE SUR SQUASHNET, quand `displayName` ne permet pas de le
   // retrouver. Les deux vont ENSEMBLE ou pas du tout (contrôlé à l'écriture) : ils remplacent
   // l'identité entière utilisée par le rapprochement, pas la moitié.
@@ -109,13 +109,21 @@ model User {
   //
   // À distinguer de `interclubCltOverride`/`interclubRangMOverride`, qui FIGENT une valeur :
   // ici on répare la recherche, et le classement continue de se mettre à jour tout seul.
-  squashnetGivenName     String?
-  squashnetFamilyName    String?
-  interclubsCreated      Interclub[]        @relation("InterclubCreator")
-  interclubPlayed        InterclubMatch[]   @relation("InterclubHomePlayer")
-  interclubScored        InterclubMatch[]   @relation("InterclubScorer")
-  interclubFollows       InterclubFollow[]
-  notifications          AppNotification[]
+  squashnetGivenName       String?
+  squashnetFamilyName      String?
+  interclubsCreated        Interclub[]             @relation("InterclubCreator")
+  interclubPlayed          InterclubMatch[]        @relation("InterclubHomePlayer")
+  interclubScored          InterclubMatch[]        @relation("InterclubScorer")
+  interclubFollows         InterclubFollow[]
+  // Équipes dont ce membre est capitaine. Une liste et non un booléen : rien n'interdit de
+  // tenir deux équipes, et le capitanat appartient à l'ÉQUIPE, pas à la personne.
+  interclubCaptainOf       InterclubTeam[]         @relation("InterclubCaptain")
+  // Disponibilités : celles qui me concernent, puis celles que J'AI SAISIES — la mienne comme
+  // celle d'un coéquipier injoignable. Deux relations distinctes parce que ce sont deux rôles
+  // distincts : être concerné par une réponse, et l'avoir consignée.
+  interclubAvailability    InterclubAvailability[] @relation("AvailabilitySubject")
+  interclubAvailabilitySet InterclubAvailability[] @relation("AvailabilitySetter")
+  notifications            AppNotification[]
 }
 
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
@@ -607,16 +615,40 @@ model SquashnetRanking {
 // Une équipe de l'asso ("Équipe 1", "Équipe 2"). Un modèle plutôt qu'une colonne figée :
 // une 3e équipe un jour ne coûte alors qu'une ligne, pas une migration.
 model InterclubTeam {
-  id        String            @id @default(cuid())
-  name      String            @unique // "Équipe 1", "Équipe 2"
-  order     Int               @default(0) // ordre d'affichage
-  createdAt DateTime          @default(now())
-  members   User[]
-  guests    InterclubGuest[]
-  fixtures  Interclub[]
-  followers InterclubFollow[]
+  id             String            @id @default(cuid())
+  name           String            @unique // "Équipe 1", "Équipe 2"
+  order          Int               @default(0) // ordre d'affichage
+  createdAt      DateTime          @default(now())
+  // LE CAPITAINE. Une DÉSIGNATION, pas un droit : il ne peut rien que les autres ne puissent
+  // (composer une équipe reste ouvert à tout membre, cf. lib/interclub-access.ts — verrouiller
+  // créerait un point de blocage le soir où le capitaine n'est pas là). Ce qu'il apporte est
+  // ailleurs : l'équipe sait à qui parler, et LUI SEUL reçoit le récapitulatif des
+  // disponibilités et les alertes de calendrier, que personne d'autre n'a à recevoir.
+  // SetNull : perdre son compte ne doit pas emporter l'équipe.
+  captain        User?             @relation("InterclubCaptain", fields: [captainId], references: [id], onDelete: SetNull)
+  captainId      String?
+  // --- Ancrage du championnat sur squashnet -------------------------------------------------
+  // De quel ÉVÉNEMENT fédéral cette équipe joue le calendrier, et sous quel identifiant elle y
+  // figure. Les deux sont nécessaires : l'événement dit quoi télécharger, `snTeamId` dit
+  // lesquelles des ~56 rencontres rendues sont les nôtres (le paramètre `teamid` de squashnet
+  // ne filtre RIEN, il rend tout l'événement). NULL = pas d'import possible pour cette équipe.
+  snEventId      String?
+  snTeamId       String?
+  // Empreinte du dernier calendrier téléchargé, et date du dernier contrôle.
+  //
+  // L'empreinte est ce qui rend le contrôle hebdomadaire SUPPORTABLE : sans elle, un report
+  // détecté une fois serait re-signalé tous les lundis jusqu'à ce qu'un admin l'applique, et
+  // l'alerte deviendrait un bruit qu'on n'ouvre plus. `snCheckedAt` répond à l'autre question,
+  // celle que le silence ne tranche pas : « rien n'a bougé », ou « on n'a pas regardé » ?
+  snCalendarHash String?
+  snCheckedAt    DateTime?
+  members        User[]
+  guests         InterclubGuest[]
+  fixtures       Interclub[]
+  followers      InterclubFollow[]
 
   @@index([order])
+  @@index([captainId])
 }
 
 /// Joueur d'une équipe qui n'a PAS de compte sur l'appli.
@@ -637,10 +669,10 @@ model InterclubTeam {
 /// le rafraîchissement mensuel écraserait la correction de l'admin — ou, symétriquement, une
 /// correction ancienne figerait un classement que la fédération a fait bouger depuis.
 model InterclubGuest {
-  id             String           @id @default(cuid())
-  team           InterclubTeam    @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  teamId         String
-  name           String // « Prénom Nom », saisi par l'admin — un seul champ, comme TricountGuest
+  id            String                  @id @default(cuid())
+  team          InterclubTeam           @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId        String
+  name          String // « Prénom Nom », saisi par l'admin — un seul champ, comme TricountGuest
   // --- Correction ADMIN (prioritaire) ---
   // Classement fédéral (« 5A », « NC »…) et rang mixte forcés à la main, pour l'ORDRE des
   // simples interclub (cf. lib/interclub-order.ts) : un joueur mieux classé doit jouer un
@@ -649,26 +681,27 @@ model InterclubGuest {
   // joueur pas encore licencié). NULL = on se fie au rapprochement.
   // ⚠️ Cette colonne s'appelait `clt` : elle portait DÉJÀ une saisie manuelle, d'où le renommage
   // plutôt qu'une colonne de plus (cf. migration 39_interclub_rangm).
-  cltOverride    String?
-  rangMOverride  Int?
+  cltOverride   String?
+  rangMOverride Int?
   // --- Rapprochement SQUASHNET (automatique, jamais écrasé par l'admin et réciproquement) ---
   // Mêmes champs que `SquashnetRanking` pour un membre, à plat : un invité n'a pas de `User`
   // à qui accrocher la relation, et une table polymorphe coûterait plus qu'elle ne rapporte
   // pour six colonnes.
-  snClt          String? // classement lu sur squashnet, ex. « 5A »
-  snRangM        Int? // rang national MIXTE (« M » = mixte, pas masculin) — départage les ex æquo
-  snLicence      String? // n° de licence FFSquash (traçabilité du rapprochement)
-  snClub         String? // libellé du club rapproché (audit)
-  snMonth        String? // période de classement, « YYYY-MM-DD »
+  snClt         String? // classement lu sur squashnet, ex. « 5A »
+  snRangM       Int? // rang national MIXTE (« M » = mixte, pas masculin) — départage les ex æquo
+  snLicence     String? // n° de licence FFSquash (traçabilité du rapprochement)
+  snClub        String? // libellé du club rapproché (audit)
+  snMonth       String? // période de classement, « YYYY-MM-DD »
   // Verdict de la DERNIÈRE tentative (cf. `classifyRanking`) : « matched » (rapproché),
   // « moved » (retrouvé, mais dans un autre club) ou « unknown » (introuvable ou homonymes
   // ambigus). C'est ce que l'écran d'admin affiche pour dire « pas trouvable sur squashnet »
   // au lieu de laisser une ligne muette, et donc pour savoir quand l'override est nécessaire.
   // NULL = jamais tenté.
-  snStatus       String?
-  snCheckedAt    DateTime? // dernière TENTATIVE (réussie ou non), pas le dernier succès
-  createdAt      DateTime         @default(now())
-  matches        InterclubMatch[] @relation("InterclubHomeGuest")
+  snStatus      String?
+  snCheckedAt   DateTime? // dernière TENTATIVE (réussie ou non), pas le dernier succès
+  createdAt     DateTime                @default(now())
+  matches       InterclubMatch[]        @relation("InterclubHomeGuest")
+  availability  InterclubAvailability[]
 
   // Deux fois le même nom dans la même équipe est une faute de saisie, pas un cas d'usage.
   @@unique([teamId, name])
@@ -679,17 +712,41 @@ model InterclubGuest {
 // adverses (décision produit). `matchCount` et `bestOf` sont configurables car le format
 // varie d'une division à l'autre.
 model Interclub {
-  id              String           @id @default(cuid())
-  date            String // "YYYY-MM-DD" (comme Tricount et Tournament)
-  team            InterclubTeam    @relation(fields: [teamId], references: [id], onDelete: Restrict)
-  teamId          String
-  season          String? // ex. "2026/2027"
-  division        String? // ex. "D2 Hommes"
-  opponent        String // nom du club adverse, saisi à la main
-  home            Boolean          @default(true) // true = on reçoit
-  matchCount      Int              @default(4) // nombre de simples de la rencontre
-  bestOf          Int              @default(5) // 3 => 2 jeux gagnants ; 5 => 3 jeux gagnants
-  status          String           @default("scheduled") // scheduled | live | done
+  id                     String                  @id @default(cuid())
+  date                   String // "YYYY-MM-DD" (comme Tricount et Tournament)
+  team                   InterclubTeam           @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  teamId                 String
+  // Heure de début, « HH:MM ». Chaîne et non `DateTime`, pour la même raison que `date` : tout
+  // le module raisonne en heure locale du club, et introduire un instant absolu ici ne
+  // produirait que des soirées décalées d'une heure deux fois par an.
+  // NULL = heure inconnue (rencontre saisie avant publication du calendrier).
+  time                   String?
+  // Où l'on joue, tel que la fédération le publie : le club hôte, puis son adresse postale.
+  // Recopié à l'import, saisissable à la main. Ce n'est pas déductible de `home` : à
+  // l'extérieur on ne sait pas d'avance chez qui l'on va.
+  venue                  String?
+  venueAddress           String?
+  // La JOURNÉE de championnat (« J1 »). C'est la clé stable d'un import à l'autre : la date
+  // est précisément ce qui bouge, donc rapprocher deux calendriers par la date reviendrait à
+  // créer une rencontre de plus à chaque report au lieu de corriger l'existante.
+  round                  String?
+  // La date est-elle FERME ? Faux = prévisionnelle. Indispensable, et pas théorique : la
+  // fédération publie les journées non encore planifiées avec une date bouchon commune (sur
+  // l'événement d'essai, J11 à J14 tombent toutes le même jour). Convoquer l'équipe quatre
+  // fois le même soir sur cette base serait pire que ne rien afficher — d'où la règle tenue
+  // par le cron : AUCUNE notification, aucune relance sur une rencontre non confirmée.
+  dateConfirmed          Boolean                 @default(true)
+  // « <eventid>:<round> ». Non NULL = rencontre créée par l'IMPORT, donc modifiable par lui.
+  // NULL = saisie à la main, et l'import n'y touche jamais : même doctrine que les corrections
+  // de classement, où l'automatique et l'humain ne partagent aucune colonne.
+  snMatchKey             String?
+  season                 String? // ex. "2026/2027"
+  division               String? // ex. "D2 Hommes"
+  opponent               String // nom du club adverse, saisi à la main
+  home                   Boolean                 @default(true) // true = on reçoit
+  matchCount             Int                     @default(4) // nombre de simples de la rencontre
+  bestOf                 Int                     @default(5) // 3 => 2 jeux gagnants ; 5 => 3 jeux gagnants
+  status                 String                  @default("scheduled") // scheduled | live | done
   // Horodatage des DEUX annonces qui ne doivent partir qu'une fois par rencontre : « la
   // rencontre commence » et le résultat final. Ce sont des MARQUEURS, pas des dates
   // d'affichage — rien ne les lit hors des gardes de notification.
@@ -699,13 +756,22 @@ model Interclub {
   // le ramène de `done` à `live`), et chaque redescente réarmait les deux transitions. Corriger
   // un score en deux temps annonçait donc « la rencontre commence » sur une rencontre jouée
   // deux heures plus tôt, puis renvoyait le résultat final à tous les abonnés.
-  startNotifiedAt DateTime?
-  doneNotifiedAt  DateTime?
-  createdById     String
-  createdBy       User             @relation("InterclubCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  createdAt       DateTime         @default(now())
-  matches         InterclubMatch[]
+  startNotifiedAt        DateTime?
+  doneNotifiedAt         DateTime?
+  // Mêmes MARQUEURS, pour l'appel de disponibilité et sa relance. Ils sont ce qui distingue
+  // « personne n'a encore été prévenu » de « tout le monde l'a été » : sans eux, un cron
+  // quotidien redemanderait chaque matin à la même équipe si elle est disponible.
+  availabilityOpenedAt   DateTime?
+  availabilityRemindedAt DateTime?
+  createdById            String
+  createdBy              User                    @relation("InterclubCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt              DateTime                @default(now())
+  matches                InterclubMatch[]
+  availability           InterclubAvailability[]
 
+  // Une journée fédérale ne peut exister qu'une fois par équipe : c'est ce qui permet de
+  // ré-importer le calendrier autant de fois qu'on veut sans jamais dupliquer une rencontre.
+  @@unique([teamId, snMatchKey])
   @@index([date])
   @@index([teamId, date])
 }
@@ -786,6 +852,51 @@ model InterclubFollow {
 
   @@unique([userId, teamId])
   @@index([teamId, level])
+}
+
+/// Disponibilité d'un joueur pour UNE rencontre — « je peux venir jeudi ».
+///
+/// Ce que ça remplace : un fil WhatsApp où le capitaine repose la même question chaque semaine,
+/// compte les réponses à la main, et relance ceux qui n'ont rien dit. Trois états et non deux :
+/// « incertain » évite les faux « oui » et se relance tout seul, sans compter comme un présent.
+///
+/// DEUX POPULATIONS, comme partout ailleurs dans ce module : un MEMBRE (`userId`) ou un joueur
+/// SANS COMPTE (`guestId`), jamais les deux. L'exclusivité est tenue par le code, comme pour
+/// `InterclubMatch.homeUserId` / `homeGuestId` — Prisma ne sait pas exprimer un XOR.
+///
+/// ⚠️ UNE RÉPONSE PEUT ÊTRE RELAYÉE. Une partie de l'équipe ne verra jamais l'appel : ceux qui
+/// n'ont pas de compte, et ceux qui en ont un sans avoir activé les notifications. Si seule la
+/// personne concernée pouvait répondre, l'outil serait inutile pour la moitié du roster et le
+/// capitaine retournerait à son fil de discussion. N'importe quel membre de l'équipe peut donc
+/// consigner la réponse d'un autre — mais `setById` garde QUI l'a fait, et l'écran l'affiche.
+/// C'est la trace, et non la restriction, qui rend le relais sûr : on sait toujours si
+/// l'information vient de l'intéressé ou d'un tiers.
+model InterclubAvailability {
+  id          String          @id @default(cuid())
+  interclub   Interclub       @relation(fields: [interclubId], references: [id], onDelete: Cascade)
+  interclubId String
+  user        User?           @relation("AvailabilitySubject", fields: [userId], references: [id], onDelete: Cascade)
+  userId      String?
+  guest       InterclubGuest? @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  guestId     String?
+  status      String // yes | no | maybe
+  // Commentaire libre, tronqué à l'écriture. « Je peux, mais pas avant 20h30 », « je conduis ».
+  // Lu par toute l'équipe : c'est dit dans la note de confidentialité.
+  comment     String?
+  // QUI a saisi. Égal à `userId` ⇒ réponse de PREMIÈRE MAIN ; différent (ou réponse d'un joueur
+  // sans compte) ⇒ réponse RELAYÉE. Pas de booléen `relayed` en plus : il serait déductible de
+  // ces deux colonnes, donc capable de les contredire. C'est aussi cette égalité qui décide
+  // qu'un relais doit être confirmé avant d'écraser ce que quelqu'un a dit lui-même.
+  // Restrict : on ne supprime pas un compte en laissant des réponses signées par un fantôme.
+  setById     String
+  setBy       User            @relation("AvailabilitySetter", fields: [setById], references: [id], onDelete: Restrict)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  // Une seule réponse par personne et par rencontre — la dernière remplace la précédente.
+  @@unique([interclubId, userId])
+  @@unique([interclubId, guestId])
+  @@index([interclubId, status])
 }
 
 // Journal des notifications envoyées à un membre.

@@ -164,3 +164,183 @@ export function notifyFixtureStart(ctx: Ctx, player?: string, opponentName?: str
     `La rencontre commence.${who}`,
   );
 }
+
+// ============================================================================
+//  CALENDRIER ET DISPONIBILITÉS — un autre public, donc un autre envoi.
+//
+//  ⚠️ TROIS POPULATIONS À NE PAS CONFONDRE, et c'est la seule chose difficile
+//  de ce fichier :
+//
+//   * les ABONNÉS (`InterclubFollow`) suivent le SCORE. N'importe qui peut
+//     s'abonner à n'importe quelle équipe : ce sont des spectateurs. Tout ce
+//     qui précède dans ce fichier s'adresse à eux.
+//   * l'ÉQUIPE (`User.teamId`) est convoquée. On lui demande si elle est
+//     disponible, on la prévient quand la date bouge. Envoyer cela aux
+//     abonnés convoquerait des spectateurs ; l'envoyer aux seuls abonnés
+//     laisserait sans nouvelle un joueur qui ne suit pas les scores.
+//   * le CAPITAINE reçoit ce que personne d'autre n'a à recevoir : l'état des
+//     réponses, l'alerte « il manque du monde », les dérives de calendrier.
+//     Diffusé à toute l'équipe, cela deviendrait un bruit que chacun ignore,
+//     et le seul qui doit agir n'agirait pas.
+//
+//  D'où `sendTo`, jumeau de `send` mais sur une liste de destinataires DONNÉE
+//  plutôt que déduite des abonnements. Même troncature, même `tag`, même
+//  best-effort : ce qui change est le carnet d'adresses, pas la mécanique.
+// ============================================================================
+
+/** Envoi direct à des destinataires nommés (équipe, capitaine), hors abonnements. */
+async function sendTo(userIds: string[], ctx: Ctx, title: string, body: string): Promise<void> {
+  if (userIds.length === 0) return;
+  try {
+    await pushToUsers(userIds, {
+      title: title.slice(0, MAX_TITLE),
+      body: body.slice(0, MAX_BODY),
+      url: "/?view=interclub",
+      tag: `interclub-${ctx.fixtureId}`,
+      renotify: true,
+    });
+  } catch {
+    /* best-effort : une notification perdue ne doit rien faire échouer */
+  }
+}
+
+/** Les membres rattachés à l'équipe — ceux qu'on peut aligner, donc ceux qu'on convoque. */
+export async function teamMemberIds(teamId: string): Promise<string[]> {
+  const rows = await prisma.user.findMany({
+    // `disabledAt` exclu : un compte désactivé ne joue plus, et le relancer chaque semaine
+    // serait le seul signe de vie que l'appli lui donnerait encore.
+    where: { teamId, disabledAt: null },
+    select: { id: true },
+  });
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Date lisible : « jeudi 9 octobre ». L'année est tue — une rencontre annoncée se joue dans les
+ * semaines qui viennent, et « 2026 » n'apprend rien à personne dans une notification courte.
+ */
+export function frenchDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  });
+}
+
+/** Un lieu en une ligne : « à domicile » / « chez X », plus l'heure si on la connaît. */
+function whereWhen(home: boolean, opponent: string, time: string | null): string {
+  const lieu = home ? "à domicile" : `chez ${opponent}`;
+  return time ? `${lieu} à ${time}` : lieu;
+}
+
+/**
+ * « Dis si tu es dispo » — à TOUTE L'ÉQUIPE, une fois par rencontre.
+ *
+ * Cette notification est la seule raison pour laquelle le reste existe : sans elle, personne
+ * ne va spontanément ouvrir un écran pour déclarer une disponibilité qu'on ne lui a pas
+ * demandée.
+ */
+export async function notifyAvailabilityCall(
+  ctx: Ctx,
+  fixture: { date: string; time: string | null; home: boolean },
+): Promise<void> {
+  const ids = await teamMemberIds(ctx.teamId);
+  await sendTo(
+    ids,
+    ctx,
+    `${ctx.teamName} – ${ctx.opponent}`,
+    `Rencontre le ${frenchDate(fixture.date)} ${whereWhen(fixture.home, ctx.opponent, fixture.time)}. Dis si tu es disponible.`,
+  );
+}
+
+/**
+ * Relance — aux SEULS non-répondants.
+ *
+ * Relancer tout le monde punirait ceux qui ont répondu vite, qui sont exactement ceux qu'on
+ * veut garder. La liste est donc calculée par l'appelant, qui sait qui a répondu.
+ */
+export async function notifyAvailabilityReminder(
+  ids: string[],
+  ctx: Ctx,
+  fixture: { date: string },
+): Promise<void> {
+  await sendTo(
+    ids,
+    ctx,
+    `${ctx.teamName} – ${ctx.opponent}`,
+    `Rencontre le ${frenchDate(fixture.date)} : tu n'as pas encore dit si tu étais disponible.`,
+  );
+}
+
+/** La rencontre a été déplacée — à toute l'équipe, y compris ceux qui avaient déjà répondu. */
+export async function notifyFixtureMoved(
+  ctx: Ctx,
+  from: string,
+  to: { date: string; time: string | null },
+): Promise<void> {
+  const ids = await teamMemberIds(ctx.teamId);
+  await sendTo(
+    ids,
+    ctx,
+    `${ctx.teamName} – ${ctx.opponent}`,
+    // On répète l'ancienne date : « déplacée au 16 » ne dit pas laquelle des trois rencontres
+    // à venir a bougé, et c'est justement ce que le lecteur cherche.
+    `Déplacée du ${frenchDate(from)} au ${frenchDate(to.date)}${to.time ? ` à ${to.time}` : ""}. Ta réponse est à redonner.`,
+  );
+}
+
+/**
+ * Récapitulatif au CAPITAINE, à l'approche de la rencontre.
+ *
+ * Deux informations qu'il est le seul à devoir traiter : combien de joueurs fermes il a, et
+ * QUI il doit appeler parce qu'aucune relance ne l'atteindra (joueurs sans compte, membres sans
+ * notifications). Sans cette seconde liste, il relance en aveugle des gens qui ne verront rien.
+ */
+export async function notifyCaptainDigest(
+  captainId: string,
+  ctx: Ctx,
+  fixture: { date: string; matchCount: number },
+  counts: { yes: number; maybe: number; no: number },
+  toCall: string[],
+): Promise<void> {
+  const manque = counts.yes < fixture.matchCount;
+  const tete = manque
+    ? `⚠️ ${counts.yes}/${fixture.matchCount} dispo pour le ${frenchDate(fixture.date)}`
+    : `${counts.yes} dispo pour le ${frenchDate(fixture.date)}`;
+  const detail = `${counts.maybe} incertain(s), ${counts.no} absent(s).`;
+  const appels = toCall.length ? ` À appeler : ${toCall.join(", ")}.` : "";
+  await sendTo([captainId], ctx, `${ctx.teamName} – ${ctx.opponent}`, `${tete}. ${detail}${appels}`);
+}
+
+/**
+ * Le calendrier fédéral a bougé — au capitaine et aux admins.
+ *
+ * On NE MODIFIE RIEN ici : on prévient, et l'écart s'applique d'un geste dans l'espace admin.
+ * Un scraping qui casse ne doit pas pouvoir déplacer une convocation tout seul.
+ */
+export async function notifyCalendarDrift(
+  userIds: string[],
+  teamName: string,
+  changes: string[],
+): Promise<void> {
+  if (userIds.length === 0) return;
+  const head = changes.slice(0, 3).join(" · ");
+  const rest = changes.length > 3 ? ` (+${changes.length - 3})` : "";
+  try {
+    await pushToUsers(userIds, {
+      title: `${teamName} : le calendrier a changé`.slice(0, MAX_TITLE),
+      body: `${head}${rest}. À vérifier dans l'espace admin avant d'appliquer.`.slice(0, MAX_BODY),
+      url: "/admin",
+      // Un tag par ÉQUIPE et non par rencontre : la dérive porte sur le calendrier entier,
+      // et deux alertes successives doivent se remplacer l'une l'autre.
+      tag: `interclub-calendrier-${teamName}`,
+      renotify: true,
+    });
+  } catch {
+    /* best-effort */
+  }
+}

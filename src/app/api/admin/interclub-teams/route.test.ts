@@ -24,6 +24,10 @@ const h = vi.hoisted(() => ({
   /** Verdict que le rapprochement squashnet doit rendre — la couche réseau est mockée. */
   matchStatus: "matched" as "matched" | "moved" | "unknown",
   matchGuestRanking: vi.fn(),
+  /** Le membre que `user.findUnique` rend — sujet de `set_captain`. */
+  user: null as null | { teamId: string | null; displayName: string; nickname: string | null },
+  /** Ce qu'un `interclubTeam.update` a reçu, ou null s'il n'a pas eu lieu. */
+  teamUpdated: null as null | { where: unknown; data: Record<string, unknown> },
 }));
 
 vi.mock("@/lib/features-server", () => ({
@@ -40,10 +44,15 @@ vi.mock("@/lib/db", () => ({
         h.whereMembres = args.where;
         return h.members;
       }),
+      findUnique: vi.fn(async () => h.user),
     },
     interclubTeam: {
       findMany: vi.fn(async () => h.teams),
       findUnique: vi.fn(async () => h.team),
+      update: vi.fn(async (args: { where: unknown; data: Record<string, unknown> }) => {
+        h.teamUpdated = args;
+        return args.data;
+      }),
     },
     interclubGuest: {
       findMany: vi.fn(async () => h.guests),
@@ -79,7 +88,19 @@ const post = (body: unknown) =>
 beforeEach(() => {
   h.interclub = true;
   h.admin = { userId: "admin1", email: "admin@example.com" };
-  h.teams = [{ id: "t1", name: "Équipe 1" }];
+  h.teams = [
+    {
+      id: "t1",
+      name: "Équipe 1",
+      captainId: null,
+      captain: null,
+      snEventId: null,
+      snTeamId: null,
+      snCheckedAt: null,
+    },
+  ];
+  h.user = null;
+  h.teamUpdated = null;
   h.members = [
     {
       id: "u1",
@@ -127,7 +148,21 @@ describe("GET /api/admin/interclub-teams", () => {
 
   it("rend les équipes avec leur effectif inscrit, et les joueurs hors appli", async () => {
     const body = await (await GET(get())).json();
-    expect(body.teams).toEqual([{ id: "t1", name: "Équipe 1", memberCount: 1 }]);
+    // Exhaustif À DESSEIN : cet objet est le contrat de l'écran d'admin. Le capitaine et
+    // l'ancrage fédéral s'y règlent, donc s'y lisent — et un champ ajouté sans être affiché
+    // doit faire échouer ce test plutôt que passer inaperçu.
+    expect(body.teams).toEqual([
+      {
+        id: "t1",
+        name: "Équipe 1",
+        memberCount: 1,
+        captainId: null,
+        captainName: null,
+        snEventId: null,
+        snTeamId: null,
+        snCheckedAt: null,
+      },
+    ]);
     // `clt`/`rangM` EFFECTIFS, plus les deux étages qui les produisent : l'écran doit pouvoir
     // dire d'où vient le classement, et préremplir la correction avec la CORRECTION existante
     // (jamais avec la valeur rapprochée, qu'il figerait sinon au premier enregistrement).
@@ -327,5 +362,105 @@ describe("POST /api/admin/interclub-teams", () => {
 
   it("refuse une action inconnue", async () => {
     expect((await POST(post({ action: "fill" }))).status).toBe(400);
+  });
+});
+
+// LE CAPITAINE — une désignation, pas un droit.
+//
+// Il ne peut rien que les autres ne puissent : composer reste ouvert à tout membre, et
+// verrouiller créerait un point de blocage le soir où le capitaine n'est pas là. Ce qu'il
+// apporte est ailleurs : l'équipe sait à qui parler, et lui seul reçoit le récapitulatif des
+// disponibilités et les alertes de calendrier.
+describe("POST set_captain", () => {
+  it("nomme un membre de l'équipe", async () => {
+    h.user = { teamId: "t1", displayName: "Thomas", nickname: null };
+    const res = await POST(post({ action: "set_captain", teamId: "t1", userId: "u1" }));
+    expect(res.status).toBe(200);
+    expect(h.teamUpdated).toMatchObject({ where: { id: "t1" }, data: { captainId: "u1" } });
+  });
+
+  it("REFUSE un membre qui n'est pas dans cette équipe", async () => {
+    // Nommer quelqu'un d'extérieur est presque toujours une faute de saisie, et le laisser
+    // passer donnerait un destinataire d'alertes qui ne se sent pas concerné — donc des
+    // alertes que personne ne traite.
+    h.user = { teamId: "t2", displayName: "Autre", nickname: null };
+    const res = await POST(post({ action: "set_captain", teamId: "t1", userId: "u9" }));
+    expect(res.status).toBe(400);
+    expect(h.teamUpdated).toBeNull();
+  });
+
+  it("404 sur un membre inconnu", async () => {
+    h.user = null;
+    expect((await POST(post({ action: "set_captain", teamId: "t1", userId: "u9" }))).status).toBe(404);
+    expect(h.teamUpdated).toBeNull();
+  });
+
+  it("retire le capitaine avec un userId vide", async () => {
+    const res = await POST(post({ action: "set_captain", teamId: "t1", userId: "" }));
+    expect(res.status).toBe(200);
+    expect(h.teamUpdated?.data).toMatchObject({ captainId: null });
+  });
+
+  it("403 si l'appelant n'est pas admin", async () => {
+    h.admin = null;
+    expect((await POST(post({ action: "set_captain", teamId: "t1", userId: "u1" }))).status).toBe(403);
+  });
+});
+
+// L'ANCRAGE FÉDÉRAL — de quel championnat cette équipe joue le calendrier.
+describe("POST set_squashnet_event", () => {
+  const EVENT = "879981be57df0005cac674dce4378296";
+
+  it("enregistre les deux identifiants", async () => {
+    const res = await POST(
+      post({ action: "set_squashnet_event", teamId: "t1", eventId: EVENT, snTeamId: "161092" }),
+    );
+    expect(res.status).toBe(200);
+    expect(h.teamUpdated?.data).toMatchObject({ snEventId: EVENT, snTeamId: "161092" });
+  });
+
+  it("efface l'empreinte en changeant d'ancrage", async () => {
+    // La garder ferait passer le premier contrôle du NOUVEAU championnat pour « rien n'a
+    // bougé », et l'écart resterait invisible jusqu'à la saison suivante.
+    await POST(post({ action: "set_squashnet_event", teamId: "t1", eventId: EVENT, snTeamId: "161092" }));
+    expect(h.teamUpdated?.data).toMatchObject({ snCalendarHash: null, snCheckedAt: null });
+  });
+
+  it("REFUSE une moitié d'ancrage", async () => {
+    // Les deux sont nécessaires : l'épreuve dit quoi télécharger, l'équipe dit lesquelles des
+    // ~56 rencontres rendues sont les nôtres. N'en poser qu'un rendrait l'import impossible
+    // tout en donnant l'impression d'être configuré.
+    expect(
+      (await POST(post({ action: "set_squashnet_event", teamId: "t1", eventId: EVENT }))).status,
+    ).toBe(400);
+    expect(
+      (await POST(post({ action: "set_squashnet_event", teamId: "t1", snTeamId: "161092" }))).status,
+    ).toBe(400);
+    expect(h.teamUpdated).toBeNull();
+  });
+
+  it("refuse des identifiants malformés", async () => {
+    // Les contrôler ici évite un import qui échoue plus tard sans qu'on sache lequel des deux
+    // champs était fautif.
+    expect(
+      (await POST(post({ action: "set_squashnet_event", teamId: "t1", eventId: "pas-un-hash", snTeamId: "161092" }))).status,
+    ).toBe(400);
+    expect(
+      (await POST(post({ action: "set_squashnet_event", teamId: "t1", eventId: EVENT, snTeamId: "abc" }))).status,
+    ).toBe(400);
+    expect(h.teamUpdated).toBeNull();
+  });
+
+  it("accepte de tout effacer avec deux champs vides", async () => {
+    const res = await POST(post({ action: "set_squashnet_event", teamId: "t1", eventId: "", snTeamId: "" }));
+    expect(res.status).toBe(200);
+    expect(h.teamUpdated?.data).toMatchObject({ snEventId: null, snTeamId: null });
+  });
+
+  it("404 quand l'interclub est coupé", async () => {
+    h.interclub = false;
+    expect(
+      (await POST(post({ action: "set_squashnet_event", teamId: "t1", eventId: EVENT, snTeamId: "1" }))).status,
+    ).toBe(404);
   });
 });

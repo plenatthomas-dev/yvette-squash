@@ -15,6 +15,7 @@ import { EmptyState, Skeleton } from "@/components/Placeholders";
 import InterclubScorer from "@/components/InterclubScorer";
 import InterclubFollow from "@/components/InterclubFollow";
 import InterclubLive from "@/components/InterclubLive";
+import { InterclubAvailability } from "@/components/InterclubAvailability";
 import { CLUB_TZ } from "@/lib/time";
 import {
   COLOR_PRESETS,
@@ -64,7 +65,12 @@ import { compareRosterOrder, isNC, lineupOrderConflict, type OrderedSlot } from 
 // chaque écriture. Le direct, lui, sonde — mais c'est `InterclubLive` qui s'en charge, et
 // seulement quand il y a quelque chose à regarder.
 
-type Team = { id: string; name: string };
+/**
+ * Une équipe, telle que la liste et la fiche la rendent. `captainName` n'accompagne que la
+ * FICHE d'une rencontre (`serializeInterclub`) : la liste des équipes du sélecteur n'en a pas
+ * besoin, d'où un champ facultatif plutôt que deux types presque identiques.
+ */
+type Team = { id: string; name: string; captainName?: string | null };
 
 // Le serveur ne renvoie QUE le roster de l'équipe qui dispute la rencontre : la restriction
 // est appliquée là-bas, pas ici. Deux populations s'y mêlent — les MEMBRES (compte sur
@@ -89,6 +95,20 @@ type RosterEntry = {
 type FixtureRow = {
   id: string;
   date: string;
+  // Ce qui fait d'une rencontre un RENDEZ-VOUS et pas seulement une ligne de résultat. Tous
+  // nullables : une rencontre inscrite avant la publication du calendrier fédéral n'en sait
+  // rien encore.
+  time: string | null;
+  venue: string | null;
+  venueAddress: string | null;
+  /** Journée de championnat, « J1 ». */
+  round: string | null;
+  /**
+   * Faux = date PRÉVISIONNELLE. La fédération publie les journées non planifiées avec une date
+   * bouchon commune ; l'afficher comme une date ferme est ce qui ferait déplacer quelqu'un
+   * pour rien, d'où une mention explicite à l'écran.
+   */
+  dateConfirmed: boolean;
   team: Team;
   opponent: string;
   home: boolean;
@@ -454,7 +474,22 @@ export default function Interclub({
   // Une équipe retirée pendant que son onglet était actif ne doit pas vider l'écran sans
   // explication : on retombe sur « Toutes ».
   const activeTab = tab !== "all" && !teams.some((t) => t.id === tab) ? "all" : tab;
-  const visibleRows = activeTab === "all" ? rows : rows.filter((f) => f.team.id === activeTab);
+  const filtered = activeTab === "all" ? rows : rows.filter((f) => f.team.id === activeTab);
+
+  // LES RENCONTRES À VENIR D'ABORD, DE LA PLUS PROCHE À LA PLUS LOINTAINE, puis les passées de
+  // la plus récente à la plus ancienne.
+  //
+  // Le serveur rend tout par date décroissante, ce qui convenait tant que cet écran servait
+  // l'historique et le direct. Depuis qu'un calendrier de saison entier y figure, cet ordre
+  // ouvrait sur la dernière journée de mars — la question qu'on se pose en ouvrant l'écran est
+  // « c'est quand, la prochaine ? », et il fallait faire défiler pour y répondre.
+  const aujourdhui = todayISO();
+  const visibleRows = [...filtered].sort((a, b) => {
+    const aVenirA = a.date >= aujourdhui;
+    const aVenirB = b.date >= aujourdhui;
+    if (aVenirA !== aVenirB) return aVenirA ? -1 : 1;
+    return aVenirA ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date);
+  });
 
   return (
     <section className="interclub">
@@ -494,7 +529,17 @@ export default function Interclub({
               <button className={`ic-row ic-row-${f.status}`} onClick={() => setOpenId(f.id)}>
                 <span className="ic-row-head">
                   <span className="ic-date" title={`Date de la rencontre : ${shortDate(f.date)}`}>
+                    {f.round && <span className="ic-round">{f.round}</span>}
                     {shortDate(f.date)}
+                    {f.time && <span className="ic-hour">{f.time}</span>}
+                    {/* Une date prévisionnelle porte sa mention SUR LA LIGNE : c'est là qu'on
+                        la lit quand on planifie sa semaine, pas dans la fiche qu'on n'ouvrira
+                        peut-être jamais. */}
+                    {!f.dateConfirmed && (
+                      <span className="ic-provisoire-tag" title="La ligue n'a pas encore fixé cette date">
+                        prévisionnelle
+                      </span>
+                    )}
                   </span>
                   <span className={`ic-status ic-${f.status}`}>
                     <span className="sr-only">État : </span>
@@ -549,6 +594,8 @@ export default function Interclub({
           onSaveMatch={saveMatch}
           onDelete={() => deleteFixture(fixture.id)}
           onScore={startScoring}
+          toast={stableToast}
+          onExpired={stableExpired}
         />
       )}
     </section>
@@ -695,6 +742,8 @@ function FixtureDialog({
   onSaveMatch,
   onDelete,
   onScore,
+  toast,
+  onExpired,
 }: {
   fixture: Fixture;
   busy: boolean;
@@ -702,6 +751,11 @@ function FixtureDialog({
   onSaveMatch: (matchId: string, body: Record<string, unknown>) => void;
   onDelete: () => void;
   onScore: (matchId: string) => void;
+  // Les deux rappels descendent au bloc de disponibilité, sous leur forme STABLE (cf. le long
+  // commentaire sur `stableToast` / `stableExpired` plus haut) : ce bloc les met en dépendance
+  // d'un `useCallback` qui émet une requête.
+  toast: (type: "ok" | "err" | "info", msg: string) => void;
+  onExpired: (status: number) => boolean;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   // Confirmation en deux temps plutot qu'un confirm() natif : la suppression emporte tous les
@@ -754,14 +808,42 @@ function FixtureDialog({
         {fixture.team.name} {fixture.home ? "–" : "chez"} {fixture.opponent}
       </h3>
       <p className="muted tiny">
+        {fixture.round && `${fixture.round} · `}
         {shortDate(fixture.date)}
+        {fixture.time && ` à ${fixture.time}`}
         {fixture.division && ` · ${fixture.division}`} · au meilleur des {fixture.bestOf} jeux (
         {fixture.winGames} gagnants)
       </p>
+      {/* La date prévisionnelle SE DIT. La fédération publie les journées non planifiées avec
+          une date bouchon commune : l'afficher comme une date ferme est ce qui ferait déplacer
+          quelqu'un pour rien. */}
+      {!fixture.dateConfirmed && (
+        <p className="ic-provisoire">⚠️ Date prévisionnelle — la ligue ne l'a pas encore fixée.</p>
+      )}
+      {/* Le lieu, quand on le connaît. À l'extérieur, c'est l'information la plus utile de tout
+          l'écran : on ne sait pas d'avance chez qui l'on va. */}
+      {fixture.venue && (
+        <p className="muted tiny ic-venue">
+          {fixture.home ? "Chez nous : " : "Déplacement : "}
+          <strong>{fixture.venue}</strong>
+          {fixture.venueAddress && <span className="ic-venue-addr">{fixture.venueAddress}</span>}
+        </p>
+      )}
+      {fixture.team.captainName && (
+        <p className="muted tiny">Capitaine&nbsp;: {fixture.team.captainName}</p>
+      )}
       <p className="ic-total">
         {fixture.score.home}–{fixture.score.away}{" "}
         <span className="muted tiny">{STATUS_LABEL[fixture.status]}</span>
       </p>
+
+      {/* LES DISPONIBILITÉS AVANT LA COMPOSITION, et c'est l'ordre du geste réel : on demande
+          qui peut venir, PUIS on compose avec ceux qui peuvent. Les placer sous les simples
+          aurait laissé composer d'abord et découvrir ensuite qu'il manque deux joueurs.
+          Rien à afficher sur une rencontre terminée : la question ne se pose plus. */}
+      {fixture.status !== "done" && (
+        <InterclubAvailability fixtureId={fixture.id} toast={toast} onExpired={onExpired} />
+      )}
 
       <ul className="ic-matches">
         {fixture.matches.map((m) => (

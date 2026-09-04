@@ -65,6 +65,22 @@ describe("note de confidentialité — le paragraphe interclub", () => {
     expect(t).toMatch(/administrateur/i);
   });
 
+  it("annonce qu'une disponibilité est vue de TOUTE l'équipe", () => {
+    // Une disponibilité est une donnée personnelle, et le choix de la rendre visible de tous
+    // est assumé — c'est ce qui fait qu'on voit qu'il manque du monde. Assumé veut dire ÉCRIT.
+    const t = texteDeLaNote({ interclub: true });
+    expect(t).toMatch(/disponibilité/i);
+    expect(t).toMatch(/visibles de toute ton équipe/i);
+  });
+
+  it("annonce qu'un COÉQUIPIER peut répondre à ta place", () => {
+    // Le point le plus important de ce paragraphe : c'est une donnée te concernant, saisie par
+    // quelqu'un d'autre. Le taire rendrait la note fausse, pas seulement incomplète.
+    const t = texteDeLaNote({ interclub: true });
+    expect(t).toMatch(/un coéquipier peut consigner ta réponse à ta place/i);
+    expect(t).toMatch(/son nom s'affiche/i);
+  });
+
   it("prévient que le nom SURVIT à la suppression du compte", () => {
     // C'est l'exception à la promesse « tes données disparaissent avec ton compte », faite plus
     // haut dans la même note. Une exception non écrite rendrait la promesse fausse.

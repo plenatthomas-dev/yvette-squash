@@ -16,6 +16,14 @@
     {
       "path": "/api/cron/warm-rankings",
       "schedule": "0 4 8 * *"
+    },
+    {
+      "path": "/api/cron/interclub-availability",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/interclub-calendar",
+      "schedule": "0 9 * * 1"
     }
   ]
 }

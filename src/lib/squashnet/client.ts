@@ -6,7 +6,9 @@
 //  `div-rank-*` sont stables). Le parsing est isolé + testé sur fixture réelle.
 // ============================================================================
 
-const RANKING_URL = "https://www.squashnet.fr/index.php";
+// Point d'entrée AJAX unique de squashnet : toutes les sections passent par cette URL, seul
+// `ic_a` dit laquelle. D'où un nom qui ne parle pas du classement.
+const AJAX_URL = "https://www.squashnet.fr/index.php";
 const RANKING_ACTION = "131079";
 const UA = "Mozilla/5.0 (compatible; YvetteSquash/1.0; +https://squash-yvette.vercel.app)";
 const TIMEOUT_MS = 10_000;
@@ -100,8 +102,8 @@ export function parseLatestMonth(html: string): string | null {
 
 // --- Réseau ----------------------------------------------------------------
 
-function body(name: string, month: string | null): string {
-  const params = new URLSearchParams({
+function body(name: string, month: string | null): Record<string, string> {
+  const params: Record<string, string> = {
     ic_a: RANKING_ACTION,
     mustache: "1",
     name,
@@ -112,16 +114,25 @@ function body(name: string, month: string | null): string {
     assimilated: "0",
     integrated: "0",
     ic_ajax: "1",
-  });
-  if (month) params.set("month", month);
-  return params.toString();
+  };
+  if (month) params.month = month;
+  return params;
 }
 
-async function post(name: string, month: string | null): Promise<string> {
+/**
+ * Le POST « AJAX » de squashnet, brut : mêmes en-têtes, même délai de garde, même URL pour
+ * TOUTES les sections du site — seul `ic_a` change (131079 = classements, 393986 = calendrier
+ * d'un championnat par équipes). Exporté pour que le calendrier n'ait pas à recopier ces
+ * quinze lignes : deux copies du même appel dériveraient, et c'est l'en-tête ou le délai de
+ * l'une des deux qu'on oublierait de corriger le jour où squashnet change d'avis.
+ *
+ * Ne fait AUCUN parsing : rend le fragment HTML tel quel. Jette sur statut non-2xx ou timeout.
+ */
+export async function postAjax(params: Record<string, string>): Promise<string> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(RANKING_URL, {
+    const res = await fetch(AJAX_URL, {
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
@@ -129,7 +140,7 @@ async function post(name: string, month: string | null): Promise<string> {
         accept: "text/html, */*; q=0.01",
         "user-agent": UA,
       },
-      body: body(name, month),
+      body: new URLSearchParams(params).toString(),
       signal: ctrl.signal,
     });
     if (!res.ok) throw new Error(`squashnet POST -> ${res.status}`);
@@ -137,6 +148,10 @@ async function post(name: string, month: string | null): Promise<string> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+function post(name: string, month: string | null): Promise<string> {
+  return postAjax(body(name, month));
 }
 
 /** Période de classement courante (une requête légère, sans résultat). */

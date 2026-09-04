@@ -246,6 +246,20 @@ export function PrivacyNotice() {
                   administrateur le retire à sa demande.
                 </p>
                 <p>
+                  <strong>Interclub &mdash; calendrier et disponibilités.</strong> Le calendrier
+                  du championnat est récupéré sur <strong>squashnet.fr</strong> (source publique)
+                  et n&apos;enregistre rien sur toi. Ta réponse à un match, elle, en dit
+                  quelque chose&nbsp;: ta disponibilité et le commentaire libre que tu peux y
+                  joindre sont visibles de <strong>toute ton équipe</strong> — c&apos;est
+                  volontaire, voir qu&apos;il manque du monde est précisément ce qui fait
+                  répondre le suivant. Et <strong>un coéquipier peut consigner ta réponse à ta
+                  place</strong>, pour les joueurs qui n&apos;ont pas l&apos;appli ou ne
+                  reçoivent pas les notifications&nbsp;: son nom s&apos;affiche alors à côté de
+                  la réponse, et tu peux toujours la corriger toi-même. Le capitaine d&apos;une
+                  équipe est désigné par un administrateur&nbsp;; il reçoit le récapitulatif des
+                  disponibilités, et rien de plus que les autres.
+                </p>
+                <p>
                   <strong>Interclub — ce qui reste après.</strong> Le nom du joueur demeure
                   attaché à la feuille de match <strong>même si son compte est supprimé</strong> ou
                   s&apos;il quitte l&apos;équipe : un résultat sportif ne se réécrit pas après coup.

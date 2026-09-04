@@ -4899,3 +4899,363 @@ body[data-bottombar] .install-banner {
 }
 .notif-actions > span:first-child { flex: 1; min-width: 0; }
 .notif-actions button { margin: 0; width: auto; padding: 3px 10px; font-size: 0.72rem; }
+
+/* ===================== Interclub — calendrier et disponibilités =====================
+ *
+ * Deux ajouts au vocabulaire existant, et aucune couleur nouvelle : tout est repris des
+ * paires déjà prouvées (--live-edge pour l'incertain, --danger-* pour le refus, --sunken
+ * pour ce qui est posé sur une carte).
+ *
+ * ⚠️ RÈGLE DU VERT ACTIONNABLE, appliquée ici à la lettre : « dispo » est un ÉTAT, pas un
+ * geste. Il ne prend donc PAS de vert, même si c'est l'issue heureuse — il prend le filet
+ * le plus appuyé (l'encre du thème). Le seul vert de ce bloc est celui que Pico met sur
+ * les boutons, c'est-à-dire sur ce qu'on touche.
+ * ================================================================================== */
+
+/* --- La ligne de la liste : journée, heure, date prévisionnelle ------------------- */
+
+/* `.ic-date` portait une seule date et pouvait rester `nowrap` en largeur fixe. Elle porte
+   désormais jusqu'à quatre fragments : elle devient une boîte qui se replie, chaque
+   fragment restant insécable pour lui-même. Sans ça, « J12 · jeu. 5 mars · 20:00 ·
+   prévisionnelle » poussait la pastille d'état hors de la ligne sur un écran de téléphone. */
+.ic-date {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 7px;
+  white-space: normal;
+}
+.ic-date > * { white-space: nowrap; }
+
+/* La journée de championnat est un REPÈRE DE CALENDRIER, pas une donnée de plus : c'est par
+   elle qu'on se parle (« on a raté la J3 »). Encre du thème pour qu'elle ouvre la ligne. */
+.ic-round {
+  font-weight: 700;
+  color: var(--pico-contrast);
+}
+.ic-hour {
+  font-variant-numeric: tabular-nums;
+}
+/* Le point médian est posé par le CSS et non par le JSX : les fragments sont facultatifs,
+   et un séparateur écrit en dur laisserait un « · » orphelin dès qu'il manque une heure. */
+.ic-hour::before {
+  content: "· ";
+  color: var(--pico-muted-color);
+  font-weight: 400;
+}
+
+/* « prévisionnelle » : le mot qui empêche quelqu'un de poser une soirée pour rien. Ambre,
+   comme tout ce qui demande de regarder à deux fois dans ce produit — et en contour, parce
+   que ce n'est pas un état en cours mais une réserve sur une date. */
+.ic-provisoire-tag {
+  padding: 1px 7px;
+  border: 1px solid var(--live-edge);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--warn-fg);
+}
+
+/* La même réserve, dite en toutes lettres dans la fiche : là, on a la place de dire
+   pourquoi la date n'est pas ferme. */
+.ic-provisoire {
+  margin: 6px 0 0;
+  padding: 8px 12px;
+  background: var(--live-wash);
+  border: 1px solid var(--live-edge);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  color: var(--warn-fg);
+}
+
+/* Le lieu. En déplacement c'est l'information la plus utile de l'écran ; l'adresse passe à
+   la ligne parce qu'elle se lit d'un coup, pas au milieu d'une phrase. */
+.ic-venue {
+  margin: 6px 0 0;
+}
+.ic-venue-addr {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+/* --- Le bloc « Qui peut venir ? » ------------------------------------------------- */
+
+.ic-dispo {
+  margin: 16px 0;
+}
+.ic-dispo-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.ic-dispo-head h4 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+/* Le compte se lit en SIMPLES COUVERTS. Sourdine tant que le compte est fait — c'est
+   l'ordinaire ; l'encre d'alerte n'apparaît que s'il manque du monde, sinon elle ne
+   voudrait plus rien dire le jour où elle compte. */
+.ic-dispo-count {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--pico-muted-color);
+  white-space: nowrap;
+}
+.ic-dispo-count.is-short {
+  font-weight: 700;
+  color: var(--danger-fg);
+}
+
+.ic-dispo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Règle de la Carte sur Carte : ces lignes sont ENFONCÉES dans la fiche, elles n'ont pas
+   de carte à elles. Le filet de gauche porte l'état, et il se distingue EN NIVEAUX DE GRIS
+   — appuyé / ambre / pâle — parce qu'on compose une équipe en trois secondes, à l'œil. */
+.ic-dispo-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 7px 10px;
+  background: var(--sunken);
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-sm);
+}
+.ic-dispo-row.is-yes { border-left-color: var(--pico-contrast); }
+.ic-dispo-row.is-maybe { border-left-color: var(--live-edge); }
+.ic-dispo-row.is-no { border-left-color: var(--danger-border); }
+/* Un absent reste LISIBLE mais recule : c'est le seul état dont on n'a plus rien à faire
+   au moment de composer. */
+.ic-dispo-row.is-no .ic-dispo-name { color: var(--pico-muted-color); }
+
+.ic-dispo-name {
+  min-width: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+/* « moi », « hors appli » : des précisions, pas des étiquettes de statut. Elles se lisent
+   après le nom et ne doivent jamais peser autant que lui. */
+.ic-dispo-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--pico-muted-color);
+  white-space: nowrap;
+}
+
+.ic-dispo-buttons {
+  display: flex;
+  gap: 4px;
+}
+.ic-dispo-buttons button {
+  margin: 0;
+  width: auto;
+  padding: 4px 9px;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  background: var(--pico-card-background-color);
+  border-color: var(--pico-card-border-color);
+  color: var(--pico-muted-color);
+}
+.ic-dispo-buttons button:not(:disabled):hover {
+  border-color: var(--grid-line);
+  color: var(--pico-contrast);
+}
+/* Le choix retenu est PLEIN, les deux autres en contour. La différence tient sans la
+   couleur : c'est `aria-pressed` qui la porte, et le lecteur d'écran l'annonce déjà. */
+.ic-dispo-buttons button[aria-pressed="true"] {
+  background: var(--pico-contrast);
+  border-color: var(--pico-contrast);
+  color: var(--pico-background-color);
+  font-weight: 600;
+}
+
+/* Commentaire et provenance passent sous la ligne, sur toute la largeur : ce sont des
+   phrases, et les serrer dans la colonne du nom les couperait en accordéon. */
+.ic-dispo-note,
+.ic-dispo-comment {
+  grid-column: 1 / -1;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+.ic-dispo-relay {
+  font-style: normal;
+  color: var(--pico-muted-color);
+}
+.ic-dispo-comment {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.ic-dispo-comment input {
+  flex: 1 1 140px;
+  min-width: 0;
+  margin: 0;
+  padding: 4px 8px;
+  height: auto;
+  font-size: 0.8rem;
+}
+.ic-dispo-comment button {
+  margin: 0;
+  width: auto;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+}
+/* Un lien, pas un bouton : ajouter une précision est facultatif, et lui donner l'allure
+   d'un bouton le mettrait au même rang que les trois réponses. */
+.ic-dispo-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary-fg);
+  font-size: 0.8rem;
+  text-decoration: underline;
+}
+
+/* La liste d'appels du capitaine. Encadrée et non simplement grise : elle demande un geste
+   hors de l'appli — décrocher son téléphone — et c'est la seule chose de ce bloc que
+   l'appli ne peut pas faire toute seule. */
+.ic-dispo-call {
+  margin: 10px 0 0;
+  padding: 9px 12px;
+  background: var(--notice-bg);
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+
+/* Sous 380 px, trois boutons et un nom ne tiennent plus sur une ligne sans hacher le nom.
+   Les réponses passent alors dessous, pleine largeur, et gagnent au passage une cible
+   tactile plus franche. */
+@media (max-width: 380px) {
+  .ic-dispo-row { grid-template-columns: 1fr; }
+  .ic-dispo-buttons { grid-column: 1 / -1; }
+  .ic-dispo-buttons button { flex: 1; padding: 6px 4px; }
+}
+
+/* --- Admin : capitaine et calendrier fédéral d'une équipe ------------------------------
+ *
+ * Ces deux réglages appartiennent à l'ÉQUIPE et non à un joueur : ils se posent donc sous
+ * son effectif, séparés par un filet — sans quoi le sélecteur de capitaine se lisait comme
+ * une ligne de roster de plus. */
+.ic-team-admin {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--pico-card-border-color);
+}
+.ic-cap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.ic-cap-label {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--pico-muted-color);
+}
+.ic-cap select {
+  flex: 1 1 auto;
+  width: auto;
+  margin: 0;
+}
+
+/* Repliée par défaut : on règle l'ancrage UNE FOIS par saison, alors que l'effectif se
+   consulte toute l'année. Le résumé porte l'état — rattachée ou non, contrôlée quand —
+   pour qu'on n'ait pas à déplier juste pour savoir où l'on en est. */
+.ic-sn {
+  margin-top: 10px;
+}
+.ic-sn > summary {
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ic-sn > summary > .muted {
+  font-weight: 400;
+}
+.ic-sn-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.ic-sn-fields input {
+  flex: 1 1 8rem;
+  width: auto;
+  margin: 0;
+}
+.ic-sn-fields button {
+  flex: 0 0 auto;
+  margin: 0;
+  width: auto;
+}
+.ic-sn > button {
+  margin: 0;
+  width: auto;
+}
+
+/* L'aperçu de l'import. Enfoncé plutôt qu'encadré (Règle de la Carte sur Carte) : il vit
+   DANS la carte de l'équipe, il n'en est pas une deuxième. */
+.ic-cal-preview {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--sunken);
+  border-radius: var(--radius-sm);
+}
+.ic-cal-sum {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+}
+.ic-cal-list {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  font-size: 0.8rem;
+}
+.ic-cal-list li + li {
+  margin-top: 3px;
+}
+.ic-cal-list .ic-provisoire-tag {
+  margin-left: 6px;
+}
+
+/* Ce que l'application COÛTE, dit avant le clic et non après : une date qui bouge efface des
+   réponses déjà données. Ambre, comme toute réserve dans ce produit. */
+.ic-cal-warn {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  background: var(--live-wash);
+  border: 1px solid var(--live-edge);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  color: var(--warn-fg);
+}
+.ic-cal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ic-cal-actions button {
+  margin: 0;
+  width: auto;
+}

@@ -54,7 +54,19 @@ export async function GET(req: NextRequest) {
   const [teams, guests, members] = await Promise.all([
     prisma.interclubTeam.findMany({
       orderBy: { order: "asc" },
-      select: { id: true, name: true },
+      select: {
+        id: true,
+        name: true,
+        // Le capitaine, et l'ancrage du championnat sur squashnet : les deux se règlent sur cet
+        // écran, donc les deux se lisent ici.
+        captainId: true,
+        captain: { select: { id: true, displayName: true, nickname: true } },
+        snEventId: true,
+        snTeamId: true,
+        // `snCheckedAt` répond à la question que le silence ne tranche pas : « le calendrier
+        // n'a pas bougé », ou « on n'a pas regardé » ?
+        snCheckedAt: true,
+      },
     }),
     // Le classement effectif (correction admin sinon rapprochement squashnet) est résolu par
     // `interclub-roster.ts` des DEUX côtés du roster, comme pour la composition d'une
@@ -72,6 +84,11 @@ export async function GET(req: NextRequest) {
       id: t.id,
       name: t.name,
       memberCount: members.filter((m) => m.teamId === t.id).length,
+      captainId: t.captainId,
+      captainName: t.captain ? (t.captain.nickname ?? t.captain.displayName) : null,
+      snEventId: t.snEventId,
+      snTeamId: t.snTeamId,
+      snCheckedAt: t.snCheckedAt?.toISOString() ?? null,
     })),
     members,
     guests,
@@ -86,6 +103,10 @@ export async function GET(req: NextRequest) {
 //        d'un invité que squashnet ne sait pas retrouver (les deux ensemble : ils forment un
 //        seul geste, « voilà où joue ce joueur »)
 //   { action: "remove_guest", guestId }                    → retire un invité du roster
+//   { action: "set_captain", teamId, userId }              → nomme (ou retire, userId null) le
+//        capitaine de l'équipe
+//   { action: "set_squashnet_event", teamId, eventId, snTeamId } → ancre l'équipe sur son
+//        championnat fédéral, ce qui rend l'import de calendrier possible
 export async function POST(req: NextRequest) {
   const off = await interclubDisabledResponse();
   if (off) return off;
@@ -100,7 +121,83 @@ export async function POST(req: NextRequest) {
     name?: unknown;
     clt?: unknown;
     rangM?: unknown;
+    userId?: unknown;
+    eventId?: unknown;
+    snTeamId?: unknown;
   };
+
+  // LE CAPITAINE — une désignation, pas un droit.
+  //
+  // Il ne peut rien que les autres ne puissent : composer une équipe reste ouvert à tout membre
+  // (cf. lib/interclub-access.ts), et verrouiller créerait un point de blocage le soir où le
+  // capitaine n'est pas là. Ce qu'il apporte est ailleurs : l'équipe sait à qui parler, et lui
+  // seul reçoit le récapitulatif des disponibilités et les alertes de calendrier — deux choses
+  // qui, diffusées à tous, deviendraient un bruit que chacun ignore.
+  if (body.action === "set_captain") {
+    if (typeof body.teamId !== "string" || !body.teamId) {
+      return NextResponse.json({ error: "Équipe invalide" }, { status: 400 });
+    }
+    const userId = typeof body.userId === "string" && body.userId ? body.userId : null;
+    if (userId) {
+      const u = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { teamId: true, displayName: true, nickname: true },
+      });
+      // Le capitaine doit JOUER dans l'équipe. Nommer quelqu'un d'extérieur est presque
+      // toujours une erreur de saisie, et le laisser passer donnerait un destinataire d'alertes
+      // qui ne se sent pas concerné — donc des alertes que personne ne traite.
+      if (!u) return NextResponse.json({ error: "Membre introuvable." }, { status: 404 });
+      if (u.teamId !== body.teamId) {
+        return NextResponse.json(
+          { error: "Ce membre n'est pas dans cette équipe." },
+          { status: 400 },
+        );
+      }
+    }
+    await prisma.interclubTeam.update({ where: { id: body.teamId }, data: { captainId: userId } });
+    return NextResponse.json({ ok: true, captainId: userId });
+  }
+
+  // L'ANCRAGE FÉDÉRAL — de quel championnat cette équipe joue le calendrier.
+  //
+  // Les DEUX identifiants sont nécessaires et vont ensemble : `eventId` dit quoi télécharger,
+  // `snTeamId` dit lesquelles des ~56 rencontres rendues sont les nôtres — le paramètre `teamid`
+  // de squashnet ne filtre RIEN, il rend l'événement entier. N'en poser qu'un rendrait l'import
+  // impossible tout en donnant l'impression d'être configuré.
+  if (body.action === "set_squashnet_event") {
+    if (typeof body.teamId !== "string" || !body.teamId) {
+      return NextResponse.json({ error: "Équipe invalide" }, { status: 400 });
+    }
+    const eventId = typeof body.eventId === "string" ? body.eventId.trim() : "";
+    const snTeamId = typeof body.snTeamId === "string" ? body.snTeamId.trim() : "";
+    if (!!eventId !== !!snTeamId) {
+      return NextResponse.json(
+        { error: "Donne l'identifiant de l'épreuve ET celui de l'équipe, ou laisse les deux vides." },
+        { status: 400 },
+      );
+    }
+    // Formes vérifiées sur le site : l'épreuve est un hachage hexadécimal, l'équipe un entier.
+    // Les contrôler ici évite un import qui échoue plus tard sans qu'on sache lequel des deux
+    // champs était fautif.
+    if (eventId && !/^[0-9a-f]{16,64}$/i.test(eventId)) {
+      return NextResponse.json({ error: "Identifiant d'épreuve invalide." }, { status: 400 });
+    }
+    if (snTeamId && !/^\d{1,12}$/.test(snTeamId)) {
+      return NextResponse.json({ error: "Identifiant d'équipe invalide." }, { status: 400 });
+    }
+    await prisma.interclubTeam.update({
+      where: { id: body.teamId },
+      data: {
+        snEventId: eventId || null,
+        snTeamId: snTeamId || null,
+        // Changer d'ancrage rend l'ancienne empreinte caduque : la garder ferait passer le
+        // premier contrôle du nouveau championnat pour « rien n'a bougé ».
+        snCalendarHash: null,
+        snCheckedAt: null,
+      },
+    });
+    return NextResponse.json({ ok: true, snEventId: eventId || null, snTeamId: snTeamId || null });
+  }
 
   if (body.action === "add_guest") {
     if (typeof body.teamId !== "string" || !body.teamId) {

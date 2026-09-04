@@ -11,7 +11,10 @@ import {
 } from "./interclub";
 
 export const interclubInclude = {
-  team: true,
+  // Le CAPITAINE vient avec l'équipe : la fiche d'une rencontre l'affiche pour que chacun sache
+  // à qui parler sans avoir à demander. C'est une jointure de plus sur une requête déjà faite,
+  // pas une requête de plus.
+  team: { include: { captain: { select: { id: true, displayName: true, nickname: true } } } },
   matches: {
     orderBy: { order: "asc" },
     include: {
@@ -30,6 +33,37 @@ export const MAX_OPPONENT_LEN = 60;
 export const MAX_PLAYER_NAME_LEN = 40;
 export const MAX_SEASON_LEN = 12;
 export const MAX_DIVISION_LEN = 30;
+/** Lieu de la rencontre : nom du club hôte, puis son adresse postale, tels que publiés. */
+export const MAX_VENUE_LEN = 80;
+export const MAX_VENUE_ADDRESS_LEN = 200;
+/** Journée de championnat (« J1 », « J14 »). Court par nature. */
+export const MAX_ROUND_LEN = 8;
+
+/**
+ * Heure de début, « HH:MM ». Chaîne vide ⇒ null (« on ne sait pas encore »), ce qui est un cas
+ * NORMAL : une rencontre s'inscrit souvent avant que la ligue ait publié les horaires.
+ *
+ * Lecture stricte des DEUX bornes, et pas seulement de la forme : `29:70` a la bonne allure,
+ * s'écrirait tel quel dans une colonne `String`, et s'afficherait à l'équipe. C'est la même
+ * leçon que `isRealDateISO` pour la date — la forme ne suffit jamais.
+ */
+export function parseTimeInput(v: unknown): { ok: true; value: string | null } | { ok: false } {
+  if (v === undefined || v === null || v === "") return { ok: true, value: null };
+  if (typeof v !== "string") return { ok: false };
+  const m = /^(\d{1,2}):(\d{2})$/.exec(v.trim());
+  if (!m) return { ok: false };
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return { ok: false };
+  return { ok: true, value: `${String(h).padStart(2, "0")}:${m[2]}` };
+}
+
+/** Champ texte facultatif : compacté, tronqué, vide ⇒ null. */
+export function parseOptionalText(v: unknown, max: number): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim().replace(/\s+/g, " ").slice(0, max);
+  return t || null;
+}
 
 /**
  * Réexport de commodité pour le code serveur : la définition vit dans le moteur pur
@@ -199,7 +233,23 @@ export function serializeInterclub(f: FullInterclub, userId: string | null, isAd
   return {
     id: f.id,
     date: f.date,
-    team: { id: f.team.id, name: f.team.name },
+    // Heure, lieu et journée de championnat : tout ce qui fait qu'une rencontre est un
+    // RENDEZ-VOUS et pas seulement une ligne de résultat. Nullables — une rencontre inscrite
+    // avant la publication du calendrier n'en sait rien encore.
+    time: f.time,
+    venue: f.venue,
+    venueAddress: f.venueAddress,
+    round: f.round,
+    // Faux = date prévisionnelle (la fédération publie les journées non planifiées avec une
+    // date bouchon commune). L'écran doit le DIRE : afficher une date qu'on sait fausse comme
+    // une date ferme est ce qui ferait déplacer quelqu'un pour rien.
+    dateConfirmed: f.dateConfirmed,
+    team: {
+      id: f.team.id,
+      name: f.team.name,
+      captainId: f.team.captainId,
+      captainName: f.team.captain ? (f.team.captain.nickname ?? f.team.captain.displayName) : null,
+    },
     season: f.season,
     division: f.division,
     opponent: f.opponent,

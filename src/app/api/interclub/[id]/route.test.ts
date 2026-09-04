@@ -16,6 +16,12 @@ const h = vi.hoisted(() => ({
   members: [] as Array<Record<string, unknown>>,
   guests: [] as Array<Record<string, unknown>>,
   rosterWhere: null as null | Record<string, unknown>,
+  /** Ce que le PATCH a écrit sur la rencontre. */
+  patched: null as null | Record<string, unknown>,
+  /** Les disponibilités effacées (le `where` du deleteMany), ou null s'il n'a pas eu lieu. */
+  availabilityCleared: null as null | Record<string, unknown>,
+  /** Arguments de `notifyFixtureMoved`, ou null : l'équipe a-t-elle été prévenue ? */
+  moved: null as null | unknown[],
 }));
 
 vi.mock("@/lib/features-server", () => ({
@@ -28,6 +34,14 @@ vi.mock("@/lib/session", async (importOriginal) => ({
   getSession: vi.fn(async () => h.session),
 }));
 vi.mock("@/lib/interclub-gate", () => ({ interclubChanged: vi.fn() }));
+// Le déplacement d'une rencontre PRÉVIENT l'équipe. On mocke l'envoi (réseau) mais on vérifie
+// qu'il part, et avec quoi : une rencontre déplacée en silence est exactement ce qui fait
+// venir quelqu'un le mauvais jour.
+vi.mock("@/lib/interclub-notify", () => ({
+  notifyFixtureMoved: vi.fn(async (...args: unknown[]) => {
+    h.moved = args;
+  }),
+}));
 vi.mock("@/lib/db", () => ({
   prisma: {
     interclub: {
@@ -42,7 +56,39 @@ vi.mock("@/lib/db", () => ({
         h.deleted = args.where.id;
         return {};
       }),
+      update: vi.fn(async (args: { data: Record<string, unknown> }) => {
+        h.patched = args.data;
+        // La rencontre relue après écriture reflète la modification : c'est elle que la route
+        // renvoie et qui alimente la notification de déplacement.
+        h.fixture = { ...(h.fixture as Record<string, unknown>), ...args.data };
+        return h.fixture;
+      }),
     },
+    interclubAvailability: {
+      deleteMany: vi.fn(async (args: { where: Record<string, unknown> }) => {
+        h.availabilityCleared = args.where;
+        return { count: 2 };
+      }),
+    },
+    // Le PATCH écrit dans une transaction : effacer les réponses et déplacer la rencontre
+    // vont ensemble. Le mock exécute le corps sur les mêmes doubles.
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        interclub: {
+          update: vi.fn(async (args: { data: Record<string, unknown> }) => {
+            h.patched = args.data;
+            h.fixture = { ...(h.fixture as Record<string, unknown>), ...args.data };
+            return h.fixture;
+          }),
+          findUnique: vi.fn(async () => h.fixture),
+        },
+        interclubAvailability: {
+          deleteMany: vi.fn(async (args: { where: Record<string, unknown> }) => {
+            h.availabilityCleared = args.where;
+            return { count: 2 };
+          }),
+        },
+      }),
     user: {
       findMany: vi.fn(async (args: { where: Record<string, unknown> }) => {
         h.rosterWhere = args.where;
@@ -53,10 +99,13 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { GET, DELETE } from "./route";
+import { GET, PATCH, DELETE } from "./route";
 
 const ctx = { params: Promise.resolve({ id: "f1" }) };
 const req = () => ({ cookies: { get: () => undefined } }) as unknown as NextRequest;
+/** Requête PATCH : même session, plus un corps JSON. */
+const patchReq = (body: unknown) =>
+  ({ cookies: { get: () => undefined }, json: async () => body }) as unknown as NextRequest;
 
 /** Une rencontre telle que `interclubInclude` la rend : équipe, matchs, jeux, marqueur. */
 const fixture = (over: Record<string, unknown> = {}) => ({
@@ -108,6 +157,9 @@ beforeEach(() => {
   h.members = [];
   h.guests = [];
   h.rosterWhere = null;
+  h.patched = null;
+  h.availabilityCleared = null;
+  h.moved = null;
 });
 
 describe("GET /api/interclub/{id} — gardes", () => {
@@ -210,5 +262,130 @@ describe("DELETE /api/interclub/{id}", () => {
   it("reconnaît l'admin quelle que soit la casse de son adresse", async () => {
     h.session = { userId: "autre", email: "CHEF@Example.com" };
     expect((await DELETE(req(), ctx)).status).toBe(200);
+  });
+});
+
+// LE PATCH — la route qui manquait.
+//
+// Une rencontre créée n'était pas modifiable : seuls GET et DELETE existaient. Tant qu'on
+// inscrivait une rencontre la veille au soir, supprimer et refaire suffisait. Depuis qu'un
+// calendrier de saison entier est saisi en septembre et que la ligue reporte des journées,
+// supprimer/recréer perdrait la composition ET les disponibilités déjà recueillies.
+describe("PATCH /api/interclub/{id}", () => {
+  it("404 si la fonction est désactivée", async () => {
+    h.interclub = false;
+    expect((await PATCH(patchReq({ date: "2026-10-16" }), ctx)).status).toBe(404);
+  });
+
+  it("403 pour qui n'est ni créateur ni admin", async () => {
+    // Mêmes droits que DELETE, exactement : pas de règle nouvelle à retenir.
+    h.session = { userId: "autre", email: "autre@example.com" };
+    expect((await PATCH(patchReq({ opponent: "Massy 2" }), ctx)).status).toBe(403);
+    expect(h.patched).toBeNull();
+  });
+
+  it("autorise un admin qui n'est pas le créateur", async () => {
+    h.session = { userId: "autre", email: "chef@example.com" };
+    expect((await PATCH(patchReq({ opponent: "Massy 2" }), ctx)).status).toBe(200);
+    expect(h.patched).toMatchObject({ opponent: "Massy 2" });
+  });
+
+  it("404 sur une rencontre inconnue", async () => {
+    h.fixture = null;
+    expect((await PATCH(patchReq({ opponent: "X" }), ctx)).status).toBe(404);
+  });
+
+  it("refuse une date qui a la bonne FORME mais n'existe pas", async () => {
+    // `2026-13-45` satisfait la forme, s'écrirait tel quel dans la colonne `String` et
+    // remonterait en tête d'un tri lexicographique.
+    expect((await PATCH(patchReq({ date: "2026-13-45" }), ctx)).status).toBe(400);
+    expect(h.patched).toBeNull();
+  });
+
+  it("refuse une heure impossible, pas seulement mal formée", async () => {
+    expect((await PATCH(patchReq({ time: "29:70" }), ctx)).status).toBe(400);
+    expect((await PATCH(patchReq({ time: "20h30" }), ctx)).status).toBe(400);
+    expect(h.patched).toBeNull();
+  });
+
+  it("normalise l'heure et accepte de l'effacer", async () => {
+    await PATCH(patchReq({ time: "9:05" }), ctx);
+    expect(h.patched).toMatchObject({ time: "09:05" });
+    await PATCH(patchReq({ time: "" }), ctx);
+    expect(h.patched).toMatchObject({ time: null });
+  });
+
+  it("enregistre lieu, adresse et journée", async () => {
+    await PATCH(
+      patchReq({ venue: "  SQUASH DE L YVETTE ", venueAddress: "1 rue du squash", round: "J7" }),
+      ctx,
+    );
+    expect(h.patched).toMatchObject({
+      venue: "SQUASH DE L YVETTE",
+      venueAddress: "1 rue du squash",
+    });
+  });
+
+  it("refuse un adversaire vidé — une rencontre sans adversaire ne veut rien dire", async () => {
+    expect((await PATCH(patchReq({ opponent: "   " }), ctx)).status).toBe(400);
+    expect(h.patched).toBeNull();
+  });
+
+  it("refuse un corps qui ne demande rien", async () => {
+    expect((await PATCH(patchReq({}), ctx)).status).toBe(400);
+  });
+
+  it("DÉPLACER efface les réponses, réarme l'appel et prévient l'équipe", async () => {
+    // « Je suis dispo le 9 » ne veut pas dire « je suis dispo le 16 ». Garder les réponses
+    // ferait composer l'équipe sur des « oui » qui ne veulent plus rien dire — et ce sont
+    // précisément les soirs de report qu'on se retrouve à trois.
+    const res = await PATCH(patchReq({ date: "2026-10-16" }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.availabilityCleared).toEqual({ interclubId: "f1" });
+    expect(h.patched).toMatchObject({
+      date: "2026-10-16",
+      availabilityOpenedAt: null,
+      availabilityRemindedAt: null,
+    });
+    expect(h.moved).not.toBeNull();
+    // L'ANCIENNE date part avec : « déplacée au 16 » ne dit pas laquelle des trois rencontres
+    // à venir a bougé, et c'est justement ce que le lecteur cherche.
+    expect(h.moved?.[1]).toBe("2026-09-03");
+  });
+
+  it("ne touche NI aux réponses NI aux marqueurs quand la date ne bouge pas", async () => {
+    await PATCH(patchReq({ date: "2026-09-03", venue: "Ailleurs" }), ctx);
+    expect(h.availabilityCleared).toBeNull();
+    expect(h.moved).toBeNull();
+    expect(h.patched).not.toHaveProperty("availabilityOpenedAt");
+  });
+
+  it("ne prévient personne pour une simple correction de lieu", async () => {
+    // Une notification par correction d'orthographe est le plus court chemin vers des
+    // notifications coupées.
+    await PATCH(patchReq({ venue: "Bon nom du club" }), ctx);
+    expect(h.moved).toBeNull();
+  });
+
+  it("REFUSE de déplacer une rencontre déjà commencée", async () => {
+    // Le déplacement efface les disponibilités et relance l'appel : cela n'a aucun sens sur
+    // une soirée en cours ou jouée.
+    h.fixture = fixture({ matches: [match({ status: "done", gamesHome: 3, gamesAway: 0 })] });
+    const res = await PATCH(patchReq({ date: "2026-10-16" }), ctx);
+    expect(res.status).toBe(409);
+    expect(h.availabilityCleared).toBeNull();
+    expect(h.patched).toBeNull();
+  });
+
+  it("laisse corriger le LIEU d'une rencontre commencée", async () => {
+    // Ce qui est interdit, c'est de la déplacer — pas de réparer une faute de frappe.
+    h.fixture = fixture({ matches: [match({ status: "done", gamesHome: 3, gamesAway: 0 })] });
+    expect((await PATCH(patchReq({ venue: "Vrai club" }), ctx)).status).toBe(200);
+    expect(h.patched).toMatchObject({ venue: "Vrai club" });
+  });
+
+  it("bascule une date prévisionnelle en date ferme", async () => {
+    await PATCH(patchReq({ dateConfirmed: true }), ctx);
+    expect(h.patched).toMatchObject({ dateConfirmed: true });
   });
 });

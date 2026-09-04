@@ -1,0 +1,209 @@
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import type { NextRequest } from "next/server";
+
+// LE CONTRÔLE HEBDOMADAIRE DU CALENDRIER FÉDÉRAL.
+//
+// Ce cron PRÉVIENT, il n'applique pas. Appliquer un écart efface les disponibilités des
+// rencontres déplacées et re-notifie l'équipe : un scraping qui casse — squashnet a déjà changé
+// son rendu HTML du jour au lendemain, en silence — pourrait alors vider un calendrier ou
+// déplacer une convocation sans que personne ne l'ait voulu.
+//
+// Trois choses à tenir, et aucune ne se voit à la relecture :
+//   * il n'écrit AUCUNE rencontre ;
+//   * il alerte UNE FOIS pour un même écart (sinon le même report reviendrait tous les lundis
+//     jusqu'à ce qu'un admin l'applique, et l'alerte deviendrait un bruit qu'on n'ouvre plus) ;
+//   * un hoquet réseau n'est pas un calendrier vide.
+
+const h = vi.hoisted(() => ({
+  interclub: true,
+  authorized: true,
+  teams: [] as Array<Record<string, unknown>>,
+  stored: [] as Array<Record<string, unknown>>,
+  /** Ce que squashnet rend, ou l'erreur qu'il jette. */
+  published: [] as Array<import("@/lib/squashnet/calendar").OwnTie>,
+  fetchThrows: false,
+  teamUpdates: [] as Array<Record<string, unknown>>,
+  drifts: [] as unknown[][],
+  admins: [] as Array<{ id: string; email: string }>,
+}));
+
+vi.mock("@/lib/features-server", () => ({ getFeatures: async () => ({ interclub: h.interclub }) }));
+vi.mock("@/lib/cron-auth", () => ({ cronAuthorized: () => h.authorized }));
+vi.mock("@/lib/cron-run", () => ({ recordCronRun: vi.fn() }));
+vi.mock("@/lib/admin", () => ({ isAdminEmail: (e: string | null) => e === "chef@ex.com" }));
+// Le parsing est éprouvé chez lui (`squashnet/calendar.test.ts`, sur fragment réel) : ici on
+// mocke le RÉSEAU seulement, et on garde le vrai `diffCalendar` / `calendarFingerprint`.
+vi.mock("@/lib/squashnet/calendar", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/squashnet/calendar")>()),
+  fetchTeamCalendar: vi.fn(async () => {
+    if (h.fetchThrows) throw new Error("502");
+    return [];
+  }),
+  // `ownFixtures` reçoit le tableau vide ci-dessus : on lui substitue ce que le test veut voir
+  // publié, ce qui évite de reconstruire un fragment HTML dans chaque cas.
+  ownFixtures: vi.fn(() => h.published),
+}));
+vi.mock("@/lib/interclub-notify", () => ({
+  notifyCalendarDrift: vi.fn(async (...a: unknown[]) => {
+    h.drifts.push(a);
+  }),
+}));
+vi.mock("@/lib/db", () => ({
+  prisma: {
+    interclubTeam: {
+      findMany: vi.fn(async () => h.teams),
+      update: vi.fn(async (args: { data: Record<string, unknown> }) => {
+        h.teamUpdates.push(args.data);
+        return {};
+      }),
+    },
+    interclub: { findMany: vi.fn(async () => h.stored) },
+    user: { findMany: vi.fn(async () => h.admins) },
+  },
+}));
+
+import { GET } from "./route";
+import { calendarFingerprint, matchKey, type OwnTie } from "@/lib/squashnet/calendar";
+
+const req = () => ({ headers: new Headers() }) as unknown as NextRequest;
+const EVENT = "ev1";
+
+const tie = (over: Partial<OwnTie> = {}): OwnTie => ({
+  round: "J1",
+  date: "2026-10-09",
+  time: "20:00",
+  home: true,
+  opponent: "Montmartre 1",
+  venue: "SQUASH DE L YVETTE",
+  venueAddress: "1 rue du squash",
+  dateConfirmed: true,
+  ...over,
+});
+
+const team = (over: Record<string, unknown> = {}) => ({
+  id: "t1",
+  name: "Équipe 1",
+  snEventId: EVENT,
+  snTeamId: "161092",
+  snCalendarHash: calendarFingerprint([tie()]),
+  captainId: "cap",
+  ...over,
+});
+
+/** La rencontre correspondante en base, issue de l'import. */
+const stored = (over: Record<string, unknown> = {}) => ({
+  id: "f1",
+  round: "J1",
+  date: "2026-10-09",
+  time: "20:00",
+  home: true,
+  opponent: "Montmartre 1",
+  venue: "SQUASH DE L YVETTE",
+  venueAddress: "1 rue du squash",
+  dateConfirmed: true,
+  snMatchKey: matchKey(EVENT, "J1"),
+  ...over,
+});
+
+beforeEach(() => {
+  h.interclub = true;
+  h.authorized = true;
+  h.teams = [team()];
+  h.stored = [stored()];
+  h.published = [tie()];
+  h.fetchThrows = false;
+  h.teamUpdates = [];
+  h.drifts = [];
+  h.admins = [{ id: "adm", email: "chef@ex.com" }];
+});
+
+describe("gardes", () => {
+  it("404 quand l'interclub est coupé", async () => {
+    h.interclub = false;
+    expect((await GET(req())).status).toBe(404);
+  });
+
+  it("401 sans le secret du cron", async () => {
+    h.authorized = false;
+    expect((await GET(req())).status).toBe(401);
+  });
+});
+
+describe("contrôle de dérive", () => {
+  it("se tait quand rien n'a bougé, mais note qu'il a regardé", async () => {
+    // `snCheckedAt` répond à la question que le silence ne tranche pas : « rien n'a bougé »,
+    // ou « on n'a pas regardé » ?
+    const body = await (await GET(req())).json();
+    expect(body).toMatchObject({ checked: 1, drifted: 0, failed: 0 });
+    expect(h.drifts).toEqual([]);
+    expect(h.teamUpdates[0]).toHaveProperty("snCheckedAt");
+  });
+
+  it("alerte quand une journée est DÉPLACÉE, en disant laquelle et vers quand", async () => {
+    h.published = [tie({ date: "2026-10-16" })];
+    const body = await (await GET(req())).json();
+    expect(body.drifted).toBe(1);
+    expect(h.drifts[0][1]).toBe("Équipe 1");
+    expect(h.drifts[0][2]).toEqual(["J1 déplacée au 2026-10-16"]);
+  });
+
+  it("prévient le capitaine ET les admins", async () => {
+    h.published = [tie({ date: "2026-10-16" })];
+    await GET(req());
+    expect(h.drifts[0][0]).toEqual(expect.arrayContaining(["adm", "cap"]));
+  });
+
+  it("N'ÉCRIT AUCUNE RENCONTRE — c'est tout l'intérêt d'alerter plutôt qu'appliquer", async () => {
+    h.published = [tie({ date: "2026-10-16" }), tie({ round: "J2", date: "2026-10-23" })];
+    await GET(req());
+    // Seule la table des équipes est touchée (l'horodatage du contrôle).
+    expect(h.teamUpdates.every((u) => "snCheckedAt" in u)).toBe(true);
+  });
+
+  it("ne met PAS à jour l'empreinte quand elle a bougé", async () => {
+    // La mettre à jour ici ferait taire le lundi suivant un écart que personne n'a appliqué.
+    h.published = [tie({ date: "2026-10-16" })];
+    await GET(req());
+    expect(h.teamUpdates.some((u) => "snCalendarHash" in u)).toBe(false);
+  });
+
+  it("premier passage : enregistre l'empreinte SANS alerter", async () => {
+    // Signaler « le calendrier a changé » à la première lecture serait faux, et donnerait le
+    // ton pour toutes les alertes suivantes.
+    h.teams = [team({ snCalendarHash: null })];
+    await GET(req());
+    expect(h.drifts).toEqual([]);
+    expect(h.teamUpdates[0]).toHaveProperty("snCalendarHash");
+  });
+
+  it("annonce une journée NOUVELLE", async () => {
+    h.published = [tie(), tie({ round: "J2", date: "2026-10-16" })];
+    await GET(req());
+    expect(h.drifts[0][2]).toEqual(["J2 nouvelle (2026-10-16)"]);
+  });
+
+  it("se tait si l'empreinte bouge sans qu'aucun écart suivi n'apparaisse", async () => {
+    // L'adresse ne fait pas partie de l'empreinte, mais un import manuel peut couvrir la
+    // journée : alerter à vide userait l'attention pour rien.
+    h.published = [tie({ venue: "Autre nom" })];
+    h.stored = [stored({ venue: "Autre nom" })];
+    await GET(req());
+    expect(h.drifts).toEqual([]);
+  });
+
+  it("un hoquet réseau n'est PAS un calendrier vide", async () => {
+    // On ne touche à rien — surtout pas à `snCheckedAt`, qui doit continuer de dire la
+    // dernière fois qu'on a vraiment regardé.
+    h.fetchThrows = true;
+    const body = await (await GET(req())).json();
+    expect(body).toMatchObject({ checked: 0, failed: 1, drifted: 0 });
+    expect(h.teamUpdates).toEqual([]);
+    expect(h.drifts).toEqual([]);
+  });
+
+  it("ignore les équipes sans ancrage — la requête les exclut déjà", async () => {
+    h.teams = [];
+    const body = await (await GET(req())).json();
+    expect(body).toMatchObject({ teams: 0, checked: 0 });
+  });
+});
