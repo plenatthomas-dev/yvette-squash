@@ -103,7 +103,17 @@ describe("GET /api/interclub", () => {
       {
         id: "f1",
         date: "2026-09-03",
-        team: { id: "t1", name: "Équipe 1" },
+        time: "20:00",
+        venue: "SQUASH DE L YVETTE",
+        venueAddress: "1 rue du squash",
+        round: "J3",
+        dateConfirmed: true,
+        team: {
+          id: "t1",
+          name: "Équipe 1",
+          captainId: "u9",
+          captain: { displayName: "Xavier Le Marquis", nickname: null },
+        },
         opponent: "Massy",
         home: true,
         division: "D2",
@@ -121,6 +131,67 @@ describe("GET /api/interclub", () => {
     expect(body.fixtures[0].score).toEqual({ home: 1, away: 1 });
     // Deux matchs sur quatre saisis ⇒ la rencontre est en cours, pas terminée.
     expect(body.fixtures[0].status).toBe("live");
+  });
+
+  it("porte ce qui fait d'une rencontre un RENDEZ-VOUS : journée, heure, lieu, capitaine", async () => {
+    // Ces champs manquaient à cette route alors que l'écran les affiche déjà. Le plus coûteux
+    // était `dateConfirmed` : indéfini, le composant le lit comme « non confirmée », et TOUTES
+    // les lignes portaient la mention « prévisionnelle » — y compris les dates fermes. Une
+    // mention qui s'affiche partout ne veut plus rien dire nulle part.
+    h.fixtures = [
+      {
+        id: "f1",
+        date: "2026-09-03",
+        time: "20:00",
+        venue: "SQUASH DE L YVETTE",
+        venueAddress: "1 rue du squash",
+        round: "J3",
+        dateConfirmed: true,
+        team: {
+          id: "t1",
+          name: "Équipe 1",
+          captainId: "u9",
+          captain: { displayName: "Xavier Le Marquis", nickname: null },
+        },
+        opponent: "Massy",
+        home: true,
+        division: "D2",
+        matchCount: 4,
+        matches: [],
+      },
+    ];
+    const f = (await (await GET(req())).json()).fixtures[0];
+    expect(f).toMatchObject({
+      round: "J3",
+      time: "20:00",
+      venue: "SQUASH DE L YVETTE",
+      venueAddress: "1 rue du squash",
+      dateConfirmed: true,
+    });
+    expect(f.team).toMatchObject({ captainId: "u9", captainName: "Xavier Le Marquis" });
+  });
+
+  it("n'invente pas de capitaine quand l'équipe n'en a pas", async () => {
+    h.fixtures = [
+      {
+        id: "f1",
+        date: "2026-09-03",
+        time: null,
+        venue: null,
+        venueAddress: null,
+        round: null,
+        dateConfirmed: false,
+        team: { id: "t1", name: "Équipe 1", captainId: null, captain: null },
+        opponent: "Massy",
+        home: true,
+        division: null,
+        matchCount: 4,
+        matches: [],
+      },
+    ];
+    const f = (await (await GET(req())).json()).fixtures[0];
+    expect(f.team.captainName).toBeNull();
+    expect(f.dateConfirmed).toBe(false);
   });
 });
 

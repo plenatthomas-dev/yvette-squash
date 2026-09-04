@@ -37,7 +37,16 @@ export async function GET(req: NextRequest) {
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       take: limit + 1,
       include: {
-        team: { select: { id: true, name: true } },
+        // Le CAPITAINE vient avec l'équipe : la fiche d'une rencontre l'affiche, et la liste
+        // sert de source à cette fiche.
+        team: {
+          select: {
+            id: true,
+            name: true,
+            captainId: true,
+            captain: { select: { displayName: true, nickname: true } },
+          },
+        },
         matches: { select: { gamesHome: true, gamesAway: true, status: true } },
       },
     }),
@@ -47,7 +56,24 @@ export async function GET(req: NextRequest) {
   const fixtures = (hasMore ? rows.slice(0, limit) : rows).map((f) => ({
     id: f.id,
     date: f.date,
-    team: f.team,
+    // CE QUI FAIT D'UNE RENCONTRE UN RENDEZ-VOUS, et pas seulement une ligne de résultat.
+    //
+    // Ces cinq champs manquaient à cette route alors que l'écran les affiche déjà : la liste
+    // rendait donc `round`, `time` et `venue` indéfinis, et surtout `dateConfirmed` indéfini —
+    // que le composant lit comme « non confirmée », si bien que TOUTES les lignes portaient la
+    // mention « prévisionnelle », y compris les dates fermes. Une mention qui s'affiche partout
+    // ne veut plus rien dire nulle part.
+    time: f.time,
+    venue: f.venue,
+    venueAddress: f.venueAddress,
+    round: f.round,
+    dateConfirmed: f.dateConfirmed,
+    team: {
+      id: f.team.id,
+      name: f.team.name,
+      captainId: f.team.captainId,
+      captainName: f.team.captain ? (f.team.captain.nickname ?? f.team.captain.displayName) : null,
+    },
     opponent: f.opponent,
     home: f.home,
     division: f.division,
