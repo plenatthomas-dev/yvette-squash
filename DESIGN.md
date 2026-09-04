@@ -34,6 +34,18 @@ colors:
   live-edge-clair: "#f0b429"
   live-edge-sombre: "#8a6a1f"
   live-edge-rose: "#d98a2b"
+  good-wash-clair: "#eef4fe"
+  good-wash-sombre: "#131c29"
+  good-wash-rose: "#dfe9fa"
+  good-edge-clair: "#3f7ad1"
+  good-edge-sombre: "#4a7cc0"
+  good-edge-rose: "#4271b8"
+  bad-wash-clair: "#fdeeed"
+  bad-wash-sombre: "#271515"
+  bad-wash-rose: "#ffd7d7"
+  bad-edge-clair: "#d9534f"
+  bad-edge-sombre: "#b05450"
+  bad-edge-rose: "#c25350"
 typography:
   display:
     fontFamily: "system-ui, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif"
@@ -353,11 +365,36 @@ système, pas une recommandation. Les cinq rôles nommés ici sont la cible vers
 converger : une nouvelle règle doit se rattacher à l'un d'eux plutôt qu'introduire une
 vingt-sixième valeur.
 
+### La rampe de fait
+
+Entre les rôles nommés et les vingt-cinq valeurs réelles, il existe une **rampe de fait** :
+cinq crans qui portent, à eux seuls, **108 des 172 déclarations en `rem`** de la feuille
+(63 %). Elle n'a jamais été décidée, elle s'est formée — mais elle est aujourd'hui le système
+réel du texte secondaire, et l'ignorer revient à inventer une valeur de plus à chaque écran.
+
+| Cran | Emplois | Ce qu'il porte |
+|---|---|---|
+| **0,72rem** | 23 | pastilles, sigles, en-têtes de colonnes serrées |
+| **0,75rem** | 8 | petits boutons, pastilles d'état |
+| **0,80rem** | 32 | texte secondaire courant : dates, mentions, tableaux denses |
+| **0,85rem** | 31 | texte d'appoint lisible : encarts, libellés d'outils |
+| **0,90rem** | 14 | texte d'appoint appuyé, titres de blocs repliés |
+
+Les huit valeurs restantes (0,58 · 0,62 · 0,66 · 0,78 · 0,88 · 0,92 · 0,95 · 0,98rem) sont des
+survivances, pas des crans : elles n'apparaissent qu'une poignée de fois chacune et **ne
+doivent pas servir de précédent**.
+
 ### Named Rules
 
 **La Règle du Micro Étiqueté.** En dessous de 0,75rem, un texte doit être soit un chiffre, soit
 accompagné d'un libellé accessible (`title`, `aria-label`, ou texte `sr-only`). La densité se
 gagne par l'étiquetage, jamais en supposant que le lecteur sait déjà.
+
+**La Règle du Cran Voisin.** Une nouvelle taille se prend dans la rampe de fait (0,72 · 0,75 ·
+0,80 · 0,85 · 0,90rem), jamais entre deux crans. Un écart de deux centièmes de `rem` ne se voit
+pas — et c'est précisément le problème : il ne se lit pas comme un système, il se lit comme une
+inattention. Deux éléments du même dispositif (deux pastilles, deux en-têtes) prennent le même
+cran, pas deux crans voisins.
 
 ## Layout
 

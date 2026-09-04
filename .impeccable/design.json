@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-29T12:04:38.908783Z",
+  "generatedAt": "2026-09-04T21:07:04.908977Z",
   "title": "Design System: Squash de l'Yvette",
   "extensions": {
     "colorMeta": {
@@ -483,6 +483,66 @@
           "#ffb55d",
           "#ffdb83"
         ]
+      },
+      "good-wash-clair": {
+        "role": "tertiary",
+        "displayName": "Voile Favorable",
+        "canonical": "#eef4fe",
+        "tonalRamp": [
+          "#050c17",
+          "#0d1a2b",
+          "#131c29",
+          "#1e3b63",
+          "#2f5c9c",
+          "#3f7ad1",
+          "#8ab4ec",
+          "#eef4fe"
+        ]
+      },
+      "good-edge-clair": {
+        "role": "tertiary",
+        "displayName": "Bord Favorable",
+        "canonical": "#3f7ad1",
+        "tonalRamp": [
+          "#050c17",
+          "#0d1a2b",
+          "#16304f",
+          "#20456f",
+          "#2f5c9c",
+          "#3f7ad1",
+          "#79a8e4",
+          "#c4dbf6"
+        ]
+      },
+      "bad-wash-clair": {
+        "role": "tertiary",
+        "displayName": "Voile Défavorable",
+        "canonical": "#fdeeed",
+        "tonalRamp": [
+          "#170707",
+          "#271515",
+          "#3d1f1e",
+          "#5c2d2b",
+          "#8a3f3c",
+          "#b05450",
+          "#d9534f",
+          "#fdeeed"
+        ]
+      },
+      "bad-edge-clair": {
+        "role": "tertiary",
+        "displayName": "Bord Défavorable",
+        "canonical": "#d9534f",
+        "tonalRamp": [
+          "#170707",
+          "#271515",
+          "#3d1f1e",
+          "#5c2d2b",
+          "#8a3f3c",
+          "#b05450",
+          "#d9534f",
+          "#f0a9a6"
+        ]
       }
     },
     "typographyMeta": {
@@ -505,6 +565,10 @@
       "micro": {
         "displayName": "Micro",
         "purpose": "Badges, pastilles de comptage, présences empilées. Poids 700 pour compenser la taille ; toujours étiqueté."
+      },
+      "rampe-de-fait": {
+        "displayName": "Rampe de fait",
+        "purpose": "Cinq crans — 0,72 · 0,75 · 0,80 · 0,85 · 0,90rem — qui portent 108 des 172 déclarations en rem de la feuille (63 %). Jamais décidée, elle s'est formée ; elle est aujourd'hui le système réel du texte secondaire. Toute nouvelle taille s'y prend."
       }
     },
     "shadows": [
@@ -695,6 +759,30 @@
       "description": "Un match = un bloc, actions comprises. La vignette s'ENFONCE sous la carte au lieu de flotter (Regle de la Carte sur Carte).",
       "html": "<div class=\"ds-tile\"><button class=\"ds-tile-btn\"><span class=\"ds-tile-head\"><span class=\"ds-tile-order\">Simple 2</span><span class=\"ds-state ds-state-live\">En cours</span></span><span class=\"ds-tile-players\">Marc Dubois <span class=\"ds-tile-vs\">c.</span> Paul Martin</span><span class=\"ds-tile-games\"><span class=\"ds-tile-list\">11-9</span><span class=\"ds-tile-inplay\">7&ndash;4</span><span class=\"ds-tile-score\">1&ndash;0</span></span></button><div class=\"ds-tile-actions\"><button class=\"ds-tile-cta\">Reprendre le marquage</button></div></div>",
       "css": ".ds-tile { border: 1px solid var(--live-edge); border-radius: 12px; background: var(--live-wash); overflow: hidden; } .ds-tile-btn { display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 12px 14px; text-align: left; background: none; border: 0; color: var(--pico-contrast); font-size: .95rem; cursor: pointer; } .ds-tile-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; } .ds-tile-order { font-size: .8rem; font-weight: 600; color: var(--pico-muted-color); } .ds-tile-players { font-size: 1rem; line-height: 1.35; } .ds-tile-vs { font-size: .8rem; color: var(--pico-muted-color); } .ds-tile-games { display: flex; align-items: baseline; gap: 8px; } .ds-tile-list { font-size: .8rem; color: var(--pico-muted-color); font-variant-numeric: tabular-nums; } .ds-tile-inplay { padding: 2px 8px; border-radius: 999px; font-weight: 700; font-size: .9rem; color: #78350f; background: #fcd34d; } .ds-tile-score { font-weight: 700; font-size: 1.15rem; font-variant-numeric: tabular-nums; } .ds-tile-actions { padding: 10px 14px; border-top: 1px solid var(--live-edge); } .ds-tile-cta { padding: 7px 14px; font-size: .85rem; border-radius: 10px; border: 1px solid var(--pico-card-border-color); background: var(--pico-secondary-background, #5c6370); color: #fff; cursor: pointer; }"
+    },
+    {
+      "name": "Classement de poule",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Donnée de référence, repliée par défaut. Le résumé porte déjà la réponse courante — notre rang en pastille et la date du relevé — pour que déplier soit un choix.",
+      "html": "<details class=\"ds-standings\" open><summary><span class=\"ds-standings-title\">Classement</span><span class=\"ds-standings-rank\">2e</span><span class=\"ds-standings-sub\">sur 6 · au 4 sept.</span></summary><div class=\"ds-standings-scroll\"><table class=\"ds-standings-table\"><thead><tr><th>#</th><th class=\"ds-st-team\">Équipe</th><th>J</th><th>V</th><th>E+</th><th>E-</th><th>D</th><th class=\"ds-st-pts\">Pts</th></tr></thead><tbody><tr><td>1</td><th class=\"ds-st-team\">Liberty Country Club 3</th><td>5</td><td>4</td><td>0</td><td>0</td><td>1</td><td class=\"ds-st-pts\">12</td></tr><tr class=\"ds-us\"><td>2</td><th class=\"ds-st-team\">Squash de l'Yvette</th><td>4</td><td>3</td><td>0</td><td>0</td><td>1</td><td class=\"ds-st-pts\">9</td></tr></tbody></table></div></details>",
+      "css": ".ds-standings { padding: 8px 12px; background: var(--sunken); border-radius: 8px; }.ds-standings > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; cursor: pointer; font-size: 0.9rem; padding: 8px 10px; margin: -8px -12px; background: var(--pico-card-background-color); border: 1px solid var(--pico-card-border-color); border-radius: 8px; }.ds-standings-title { font-weight: 700; margin-right: auto; }.ds-standings-rank { padding: 2px 9px; border-radius: 999px; background: var(--pico-contrast); color: var(--pico-background-color); font-size: 0.75rem; font-weight: 700; }.ds-standings-sub { font-size: 0.8rem; color: var(--pico-muted-color); }.ds-standings-scroll { overflow-x: auto; margin-top: 8px; }.ds-standings-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; font-variant-numeric: tabular-nums; }.ds-standings-table th, .ds-standings-table td { padding: 4px 5px; border: none; border-bottom: 1px solid var(--pico-card-border-color); text-align: center; white-space: nowrap; }.ds-standings-table thead th { font-size: 0.72rem; font-weight: 600; color: var(--pico-muted-color); }.ds-standings-table th.ds-st-team { width: 99%; text-align: left; font-weight: 400; }.ds-st-pts { font-weight: 700; }.ds-standings-table tr.ds-us th, .ds-standings-table tr.ds-us td { background: var(--pico-card-background-color); font-weight: 700; }"
+    },
+    {
+      "name": "Vignette de disponibilité",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Le FOND porte l'état, pas seulement le filet : on balaie une liste de noms à l'œil, et c'est le fond qui se voit à cette vitesse. Toujours pas de vert — une disponibilité est un état, pas une action.",
+      "html": "<ul class=\"ds-dispo-list\"><li class=\"ds-dispo-row ds-yes\"><span class=\"ds-dispo-name\">Thomas</span><span class=\"ds-dispo-buttons\"><button aria-pressed=\"true\">Dispo</button><button>Incertain</button><button>Pas dispo</button></span></li><li class=\"ds-dispo-row ds-maybe\"><span class=\"ds-dispo-name\">Léa</span><span class=\"ds-dispo-buttons\"><button>Dispo</button><button aria-pressed=\"true\">Incertain</button><button>Pas dispo</button></span></li><li class=\"ds-dispo-row ds-no\"><span class=\"ds-dispo-name\">Paul</span><span class=\"ds-dispo-buttons\"><button>Dispo</button><button>Incertain</button><button aria-pressed=\"true\">Pas dispo</button></span></li></ul>",
+      "css": ".ds-dispo-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }.ds-dispo-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 10px; padding: 7px 10px; background: var(--sunken); border-left: 4px solid transparent; border-radius: 8px; }.ds-dispo-row.ds-yes { background: var(--good-wash); border-left-color: var(--good-edge); }.ds-dispo-row.ds-maybe { background: var(--live-wash); border-left-color: var(--live-edge); }.ds-dispo-row.ds-no { background: var(--bad-wash); border-left-color: var(--bad-edge); }.ds-dispo-name { font-size: 0.9rem; font-weight: 600; }.ds-dispo-buttons { display: flex; gap: 4px; }.ds-dispo-buttons button { margin: 0; padding: 4px 9px; font-size: 0.75rem; line-height: 1.2; background: var(--pico-card-background-color); border: 1px solid var(--pico-card-border-color); border-radius: 6px; color: var(--pico-muted-color); }.ds-dispo-buttons button[aria-pressed=\"true\"] { background: var(--pico-contrast); border-color: var(--pico-contrast); color: var(--pico-background-color); font-weight: 600; }"
+    },
+    {
+      "name": "Ligne de résultat",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Ce que la rencontre RAPPORTE au classement, avec l'average qui l'a tranché en encre du thème et l'autre en gris. Sans ce repère, « Nul gagné » a l'air d'une décision arbitraire de l'appli.",
+      "html": "<span class=\"ds-outcome ds-draw\"><span class=\"ds-outcome-verdict\">Nul gagné<span class=\"ds-outcome-tag\">E+</span></span><span class=\"ds-outcome-pts\">2 pts</span><span class=\"ds-outcome-avg ds-decisive\">jeux 9&ndash;8</span><span class=\"ds-outcome-avg\">points 153&ndash;161</span></span>",
+      "css": ".ds-outcome { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 0.8rem; color: var(--pico-muted-color); font-variant-numeric: tabular-nums; }.ds-outcome-verdict { display: inline-flex; align-items: baseline; gap: 5px; font-weight: 700; color: var(--pico-contrast); }.ds-draw .ds-outcome-verdict { color: var(--warn-fg); }.ds-outcome-tag { padding: 0 5px; border: 1px solid currentColor; border-radius: 999px; font-size: 0.72rem; font-weight: 700; }.ds-outcome-pts { font-weight: 700; color: var(--pico-contrast); }.ds-outcome-avg.ds-decisive { color: var(--pico-contrast); font-weight: 600; }"
     }
   ],
   "narrative": {
@@ -767,6 +855,16 @@
         "name": "La Règle des Trois Traitements",
         "body": "Deux états qui partagent le même traitement visuel ne sont pas deux états. « À venir » et « terminée » ont longtemps porté la même pastille sourdine : la liste n'en distinguait donc que deux sur trois, et le seul moyen de savoir était de lire. Contour, aplat vif, aplat sourd : trois formes, pas trois nuances d'une même forme.",
         "section": "components"
+      },
+      {
+        "name": "La Règle du Cran Voisin",
+        "body": "Une nouvelle taille se prend dans la rampe de fait (0,72 · 0,75 · 0,80 · 0,85 · 0,90rem), jamais entre deux crans. Un écart de deux centièmes de rem ne se voit pas — et c'est précisément le problème : il ne se lit pas comme un système, il se lit comme une inattention. Deux éléments du même dispositif prennent le même cran.",
+        "section": "typography"
+      },
+      {
+        "name": "La Règle de l'Issue Sans Voile",
+        "body": "L'issue d'une chose finie — rencontre gagnée ou perdue — se dit par un FILET à gauche et par la couleur du chiffre, jamais par un fond. Le voile pleine ligne reste réservé à « en cours », seul état qui demande qu'on regarde maintenant : une liste de saison est presque entièrement faite de rencontres terminées, les peindre le viderait de son sens. L'exception est le bloc de disponibilités, qui ne s'affiche que sur une rencontre à venir — aucun voile « en cours » n'y concurrence.",
+        "section": "colors"
       }
     ],
     "dos": [
@@ -780,7 +878,9 @@
       "**Do** figer les deux axes de toute vue tabulaire dense.",
       "**Do** thémer les bordures par `--pico-card-border-color` plutôt que de coder une couleur — **sauf quand la bordure porte du sens.** Pico redéfinit ce jeton en *couleur de carte* sous thème sombre (`pico.css:448` et `583`) : une bordure décorative y disparaît sans dommage, mais une bordure structurelle disparaît aussi. C'est ce qui a effacé le quadrillage de la grille, qui a désormais son propre jeton `--grid-line`.",
       "**Do** réutiliser les valeurs d'espacement déjà présentes (4, 6, 10, 14, 16, 18px) au lieu d'en introduire de nouvelles.",
-      "**Do** traiter les trois thèmes comme égaux : une nouveauté doit être vérifiée en clair, en sombre et en rose."
+      "**Do** traiter les trois thèmes comme égaux : une nouveauté doit être vérifiée en clair, en sombre et en rose.",
+      "Do prendre toute nouvelle taille de texte dans la rampe de fait (0,72 · 0,75 · 0,80 · 0,85 · 0,90rem), et donner le même cran à deux éléments du même dispositif.",
+      "Do dire l'issue d'une rencontre par un filet coloré et la couleur du score — bleu gagné, rouge perdu, ambre nul."
     ],
     "donts": [
       "**Don't** obliger à naviguer pour savoir s'il reste un terrain. La réponse est visible, ou le design a échoué. C'est l'anti-référence ResaMania, et c'est la raison d'être du produit.",
@@ -792,7 +892,9 @@
       "**Don't** coder une couleur de bordure en dur : elle cassera l'un des trois thèmes.",
       "**Don't** griser par `opacity` un élément qui porte du texte : l'opacité composite le texte et son fond, et effondre un contraste par ailleurs conforme. Utiliser une paire de couleurs dédiée, calculée par thème.",
       "**Don't** peindre un ÉTAT avec l'aplat vert. Un onglet ou un filtre sélectionné se marque par le poids et un trait, jamais par le vert plein qui appartient à l'action.",
-      "**Don't** peindre une ligne entière pour un état qui n'a rien d'urgent à dire. Seul « en cours » le mérite ; un accent plein sur un état inactif est du bruit."
+      "**Don't** peindre une ligne entière pour un état qui n'a rien d'urgent à dire. Seul « en cours » le mérite ; un accent plein sur un état inactif est du bruit.",
+      "Don't peindre en vert un résultat favorable : une victoire est un état, pas un bouton, et le vert appartient à ce qu'on peut toucher. Le bleu porte le favorable.",
+      "Don't introduire une taille entre deux crans de la rampe de fait (0,78rem, 0,88rem, 0,92rem sont des survivances, pas des précédents)."
     ]
   }
 }
