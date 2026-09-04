@@ -5469,7 +5469,9 @@ body[data-bottombar] .install-banner {
   border-radius: 999px;
   background: var(--pico-contrast);
   color: var(--pico-background-color);
-  font-size: 0.78rem;
+  /* La même taille que `.ic-dispo-mine` : deux pastilles du même dispositif, à quelques
+     centièmes d'écart, se lisent comme une inattention plutôt que comme un système. */
+  font-size: 0.75rem;
   font-weight: 700;
   white-space: nowrap;
 }
