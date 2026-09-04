@@ -5268,3 +5268,62 @@ body[data-bottombar] .install-banner {
   background: var(--sunken);
   border-radius: var(--radius-sm);
 }
+
+/* ── LE RÉSULTAT AU SENS DE LA LIGUE ───────────────────────────────────────────────────────
+   « 2-2 » ne se suffit plus depuis que la division 4 se joue en quatre simples : la moitié des
+   issues est un nul, et un nul rapporte DEUX points ou UN selon l'average de jeux puis de
+   points. La ligne dit donc le verdict, ce qu'il rapporte, et les deux averages — celui qui a
+   tranché portant l'encre du thème pendant que l'autre reste en gris.
+
+   Pas de vert sur la victoire (Règle du Vert Actionnable : un résultat est un état, pas une
+   action), et pas de couleur seule : le mot porte le sens, la couleur ne fait que l'appuyer,
+   ce qui laisse la ligne lisible en niveaux de gris comme l'exige le vocabulaire des états. */
+.ic-outcome {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+  font-variant-numeric: tabular-nums;
+}
+.ic-outcome-verdict {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-weight: 700;
+  color: var(--pico-contrast);
+}
+.ic-outcome-loss .ic-outcome-verdict { color: var(--danger-fg); }
+/* Ambre pour les deux nuls : c'est le résultat qui demande qu'on regarde à deux fois, exactement
+   comme la date prévisionnelle. Gagné ou perdu se lit au MOT et au sigle, pas à la teinte —
+   les distinguer par deux verts aurait fait deux fautes d'un coup. */
+.ic-outcome-drawWon .ic-outcome-verdict,
+.ic-outcome-drawLost .ic-outcome-verdict,
+.ic-outcome-drawUnbroken .ic-outcome-verdict { color: var(--warn-fg); }
+
+/* Le sigle du classement fédéral. Il sert à retrouver sa ligne sur squashnet, il n'est pas le
+   verdict : contour discret, jamais plein. */
+.ic-outcome-tag {
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+.ic-outcome-pts {
+  font-weight: 700;
+  color: var(--pico-contrast);
+}
+/* L'average DÉCISIF sort du gris : c'est lui qui explique pourquoi un 2-2 vaut deux points
+   plutôt qu'un, et sans ce repère le verdict a l'air arbitraire. */
+.ic-outcome-avg.is-decisive {
+  color: var(--pico-contrast);
+  font-weight: 600;
+}
+
+/* Dans la FICHE, la même ligne respire un peu plus : elle suit le gros score, elle n'est pas
+   serrée dans une carte de liste. */
+.ic-outcome-line {
+  margin: -4px 0 10px;
+}

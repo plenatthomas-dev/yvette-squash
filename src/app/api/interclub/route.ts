@@ -8,6 +8,7 @@ import { isColorValue, isValidBestOf, isValidMatchCount, normalizeColor } from "
 import {
   fixtureScore,
   derivedStatus,
+  tieOutcome,
   MAX_DIVISION_LEN,
   MAX_OPPONENT_LEN,
   MAX_PLAYER_NAME_LEN,
@@ -47,7 +48,18 @@ export async function GET(req: NextRequest) {
             captain: { select: { displayName: true, nickname: true } },
           },
         },
-        matches: { select: { gamesHome: true, gamesAway: true, status: true } },
+        matches: {
+          // Le JEU PAR JEU vient avec : c'est lui qui donne l'average de points, second
+          // critère de départage d'un nul 2-2. Sans lui la liste afficherait « jeux 8-8 »
+          // sans pouvoir dire qui l'emporte, là où la fiche le saurait — deux écrans qui se
+          // contredisent sur le même résultat.
+          select: {
+            gamesHome: true,
+            gamesAway: true,
+            status: true,
+            games: { select: { pointsHome: true, pointsAway: true } },
+          },
+        },
       },
     }),
   ]);
@@ -80,6 +92,16 @@ export async function GET(req: NextRequest) {
     matchCount: f.matchCount,
     status: derivedStatus(f.matchCount, f.matches),
     score: fixtureScore(f.matches),
+    // Victoire / défaite / nul gagné ou perdu, avec les averages qui l'ont tranché.
+    outcome: tieOutcome(
+      f.matchCount,
+      f.matches.map((m) => ({
+        gamesHome: m.gamesHome,
+        gamesAway: m.gamesAway,
+        status: m.status,
+        games: m.games.map((g) => ({ home: g.pointsHome, away: g.pointsAway })),
+      })),
+    ),
   }));
 
   return NextResponse.json({ hasMore, teams, fixtures });

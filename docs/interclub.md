@@ -436,6 +436,48 @@ partagent aucune colonne.
 « Je suis dispo le 9 » ne veut pas dire « je suis dispo le 16 », et ce sont précisément les
 soirs de report qu'on se retrouve à trois.
 
+### Ce que la rencontre rapporte — le nul 2-2, et qui le gagne
+
+**En 2026-27, la division 4 passe de CINQ simples à QUATRE.** Ça n'a l'air de rien et ça change
+la moitié des issues : à cinq matchs, un nul était arithmétiquement impossible ; à quatre, le
+2-2 devient courant. Or deux rencontres affichées « 2-2 » ne valent pas la même chose au
+classement.
+
+Le barème de la ligue Île-de-France :
+
+| Issue | Points |
+|---|---|
+| Victoire | 3 |
+| **Nul gagné** (`E+` au classement fédéral) | **2** |
+| **Nul perdu** (`E-`) | **1** |
+| Défaite | 0 |
+
+et le départage d'un nul se fait à l'**average de jeux**, puis — **à jeux égaux seulement** — à
+l'**average de points**.
+
+L'ordre n'est pas un détail. Il a été vérifié en recalculant les dix-sept rencontres nulles de
+la poule Hommes 1 du critérium 2025-26 contre le classement officiel : sur CLOUD1–PUC1, les
+jeux donnaient l'un (9-8) et les points l'autre (153-161), et c'est le gagnant **aux jeux** qui
+a reçu les deux points. Prendre les points d'abord aurait désigné le mauvais vainqueur.
+
+`tieOutcome()` (`src/lib/interclub-db.ts`) est la seule définition de cette règle : la liste et
+la fiche l'appellent toutes deux, pour qu'aucun écran ne puisse annoncer des points de
+classement que l'autre contredirait.
+
+**Deux garde-fous dans cette fonction, et ils comptent :**
+
+- **Rien n'est rendu tant que la rencontre n'est pas finie.** Un 2-1 en cours annoncé
+  « Victoire, 3 pts » serait faux le temps d'un match — c'est-à-dire pendant toute la soirée où
+  l'on regarde l'écran.
+- **Les points de jeu sont TUS quand le détail est incomplet.** Un match saisi « 3-1 » sans son
+  jeu par jeu rendrait un total partiel, qu'on lirait comme un total. Sur le chiffre qui
+  départage, un total faux ne fait pas qu'induire en erreur : il désigne le mauvais vainqueur.
+  D'où le contrôle `jeux.length === gamesHome + gamesAway`, match par match.
+
+À l'écran, la carte d'une rencontre terminée porte le verdict, ce qu'il rapporte, et **les deux
+averages — celui qui a tranché en encre du thème, l'autre en gris**. Sans ce repère, « Nul
+gagné » a l'air d'une décision arbitraire de l'appli.
+
 ### Le capitaine — une désignation, pas un droit
 
 Nommé par un admin (`set_captain`), affiché sur son équipe et sur chaque rencontre. Il **ne

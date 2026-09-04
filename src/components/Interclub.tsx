@@ -17,6 +17,7 @@ import InterclubFollow from "@/components/InterclubFollow";
 import InterclubLive from "@/components/InterclubLive";
 import { InterclubAvailability } from "@/components/InterclubAvailability";
 import { CLUB_TZ } from "@/lib/time";
+import type { TieOutcome } from "@/lib/interclub-db";
 import {
   COLOR_PRESETS,
   colorsTooClose,
@@ -116,6 +117,14 @@ type FixtureRow = {
   matchCount: number;
   status: "scheduled" | "live" | "done";
   score: { home: number; away: number };
+  /**
+   * Comment la LIGUE compte cette rencontre. NULL tant qu'elle n'est pas finie.
+   *
+   * Le score seul ne dit pas ce qu'on a gagné : depuis le passage de la division 4 à quatre
+   * simples, un 2-2 vaut DEUX points de classement ou UN selon l'average, et rien à l'écran ne
+   * permettait de savoir lequel.
+   */
+  outcome: TieOutcome | null;
 };
 
 type MatchRow = {
@@ -161,6 +170,84 @@ const STATUS_LABEL: Record<FixtureRow["status"], string> = {
   live: "En cours",
   done: "Terminée",
 };
+
+/**
+ * Le RÉSULTAT au sens de la ligue, en toutes lettres.
+ *
+ * « E+ » et « E- » sont les intitulés du classement fédéral, et personne ne les devine : le mot
+ * porte le sens, le sigle sert à retrouver sa ligne sur squashnet. Les deux, donc.
+ */
+const OUTCOME_LABEL: Record<TieOutcome["result"], string> = {
+  win: "Victoire",
+  loss: "Défaite",
+  drawWon: "Nul gagné",
+  drawLost: "Nul perdu",
+  drawUnbroken: "Nul",
+};
+
+/** Le sigle du classement, quand il y en a un. */
+const OUTCOME_TAG: Partial<Record<TieOutcome["result"], string>> = {
+  drawWon: "E+",
+  drawLost: "E-",
+};
+
+const DECIDED_BY_LABEL: Record<NonNullable<TieOutcome["decidedBy"]>, string> = {
+  matches: "aux matchs",
+  games: "à l'average de jeux",
+  rallies: "à l'average de points",
+};
+
+/**
+ * La ligne de RÉSULTAT d'une rencontre terminée : ce qu'elle rapporte, et ce qui l'a tranché.
+ *
+ * Elle existe parce que « 2-2 » ne se suffit plus. À quatre simples, la moitié des issues
+ * possibles est un nul, et un nul vaut deux points ou un seul selon l'average — l'écart entre
+ * une deuxième place et une quatrième sur une saison. Le chiffre qui départage est donc montré
+ * À CÔTÉ du verdict, et signalé comme décisif quand c'est lui qui a tranché : sans ça, « Nul
+ * gagné » ressemble à une décision arbitraire de l'appli.
+ *
+ * Aucun vert ici, malgré la victoire : Règle du Vert Actionnable — un résultat est un ÉTAT, et
+ * le vert appartient à ce qu'on peut toucher. La distinction tient au mot et à la graisse, ce
+ * qui la laisse lisible en niveaux de gris.
+ */
+function TieOutcomeLine({ outcome }: { outcome: TieOutcome }) {
+  const tag = OUTCOME_TAG[outcome.result];
+  const pts = outcome.leaguePoints;
+  const titre =
+    outcome.decidedBy === null
+      ? "Nul que ni les jeux ni les points ne départagent — la ligue tranche."
+      : outcome.decidedBy === "matches"
+        ? `${OUTCOME_LABEL[outcome.result]} — ${pts} point${pts === 1 ? "" : "s"} au classement.`
+        : `Nul départagé ${DECIDED_BY_LABEL[outcome.decidedBy]} — ${pts} point${
+            pts === 1 ? "" : "s"
+          } au classement.`;
+
+  return (
+    <span className={`ic-outcome ic-outcome-${outcome.result}`} title={titre}>
+      <span className="ic-outcome-verdict">
+        {OUTCOME_LABEL[outcome.result]}
+        {tag && <span className="ic-outcome-tag">{tag}</span>}
+      </span>
+      {pts !== null && (
+        <span className="ic-outcome-pts">
+          {pts} pt{pts === 1 ? "" : "s"}
+        </span>
+      )}
+      <span className={`ic-outcome-avg${outcome.decidedBy === "games" ? " is-decisive" : ""}`}>
+        jeux {outcome.games.home}–{outcome.games.away}
+      </span>
+      {/* Les points de jeu ne s'affichent que si TOUT le détail est saisi : un total partiel
+          présenté comme un total désignerait le mauvais vainqueur d'un nul. */}
+      {outcome.rallies && (
+        <span
+          className={`ic-outcome-avg${outcome.decidedBy === "rallies" ? " is-decisive" : ""}`}
+        >
+          points {outcome.rallies.home}–{outcome.rallies.away}
+        </span>
+      )}
+    </span>
+  );
+}
 
 /** Les mêmes trois états, côté SIMPLE. Le vocabulaire diffère : un match se « saisit ». */
 const MATCH_STATUS_LABEL: Record<string, string> = {
@@ -564,6 +651,9 @@ export default function Interclub({
                     </span>
                   )}
                 </span>
+                {/* Le verdict de la ligue, seulement quand il y en a un : `outcome` est nul
+                    tant que la rencontre n'est pas finie. */}
+                {f.outcome && <TieOutcomeLine outcome={f.outcome} />}
                 {f.division && <span className="ic-division">{f.division}</span>}
               </button>
             </li>
@@ -836,6 +926,14 @@ function FixtureDialog({
         {fixture.score.home}–{fixture.score.away}{" "}
         <span className="muted tiny">{STATUS_LABEL[fixture.status]}</span>
       </p>
+      {/* La fiche dit la MÊME chose que la carte, calculée par la même fonction : deux écrans
+          qui annonceraient des points de classement différents sur la même rencontre seraient
+          pires que pas de points du tout. */}
+      {fixture.outcome && (
+        <p className="ic-outcome-line">
+          <TieOutcomeLine outcome={fixture.outcome} />
+        </p>
+      )}
 
       {/* LES DISPONIBILITÉS AVANT LA COMPOSITION, et c'est l'ordre du geste réel : on demande
           qui peut venir, PUIS on compose avec ceux qui peuvent. Les placer sous les simples

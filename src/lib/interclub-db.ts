@@ -200,6 +200,111 @@ export function derivedStatus(
   return started ? "live" : "scheduled";
 }
 
+/**
+ * Comment la LIGUE compte cette rencontre.
+ *
+ * À quatre simples, le 2-2 est possible — c'est nouveau pour nous : la division 4 se jouait en
+ * CINQ matchs jusqu'en 2025-26, où un nul était arithmétiquement hors d'atteinte. Le barème de
+ * la ligue Île-de-France, vérifié en recalculant les dix-sept rencontres nulles du critérium
+ * 2025-26 contre le classement officiel :
+ *
+ *   victoire 3 pts · NUL GAGNÉ (E+) 2 pts · NUL PERDU (E-) 1 pt · défaite 0
+ *
+ * et le départage d'un nul se fait à l'average de JEUX, puis — à jeux égaux seulement — à
+ * l'average de POINTS. L'ordre n'est pas indifférent : sur CLOUD1–PUC1, les jeux donnaient
+ * l'un (9-8) et les points l'autre (153-161), et c'est bien le gagnant aux jeux qui a reçu les
+ * deux points au classement.
+ *
+ * ⚠️ Les points de jeu ne sont rendus que si le détail est COMPLET — un seul match saisi en
+ * « 3-1 » sans son jeu par jeu, et la somme serait un total partiel présenté comme un total.
+ * C'est précisément le chiffre qui départage : faux, il désignerait le mauvais vainqueur.
+ */
+export type TieResult = "win" | "loss" | "drawWon" | "drawLost" | "drawUnbroken";
+
+export type TieOutcome = {
+  result: TieResult;
+  /** Points de classement. NULL quand rien ne départage — on ne les invente pas. */
+  leaguePoints: number | null;
+  /** Matchs gagnés, jeux gagnés, et points de jeu cumulés (NULL si le détail manque). */
+  matches: { home: number; away: number };
+  games: { home: number; away: number };
+  rallies: { home: number; away: number } | null;
+  /** Ce qui a tranché, pour que l'écran puisse le montrer plutôt que de le laisser deviner. */
+  decidedBy: "matches" | "games" | "rallies" | null;
+};
+
+export function tieOutcome(
+  matchCount: number,
+  matches: {
+    gamesHome: number | null;
+    gamesAway: number | null;
+    status: string;
+    games?: { home: number; away: number }[];
+  }[],
+): TieOutcome | null {
+  // Une rencontre pas finie n'a pas de résultat. Le dire à mi-parcours ferait passer un 2-1
+  // en cours pour une victoire acquise.
+  if (derivedStatus(matchCount, matches) !== "done") return null;
+
+  const joues = matches.filter(
+    (m) => m.status === "done" && m.gamesHome !== null && m.gamesAway !== null,
+  );
+  const mScore = fixtureScore(matches);
+
+  let jeuxH = 0;
+  let jeuxA = 0;
+  for (const m of joues) {
+    jeuxH += m.gamesHome as number;
+    jeuxA += m.gamesAway as number;
+  }
+
+  let ptsH = 0;
+  let ptsA = 0;
+  let complet = true;
+  for (const m of joues) {
+    const jeux = m.games ?? [];
+    // Le nombre de jeux DÉTAILLÉS doit égaler le nombre de jeux joués : c'est la seule
+    // vérification qui distingue « tout est saisi » de « il en manque un ».
+    if (jeux.length !== (m.gamesHome as number) + (m.gamesAway as number)) {
+      complet = false;
+      break;
+    }
+    for (const j of jeux) {
+      ptsH += j.home;
+      ptsA += j.away;
+    }
+  }
+  const rallies = complet ? { home: ptsH, away: ptsA } : null;
+
+  const base = { matches: mScore, games: { home: jeuxH, away: jeuxA }, rallies };
+  if (mScore.home > mScore.away) {
+    return { ...base, result: "win", leaguePoints: 3, decidedBy: "matches" };
+  }
+  if (mScore.away > mScore.home) {
+    return { ...base, result: "loss", leaguePoints: 0, decidedBy: "matches" };
+  }
+  if (jeuxH !== jeuxA) {
+    const gagne = jeuxH > jeuxA;
+    return {
+      ...base,
+      result: gagne ? "drawWon" : "drawLost",
+      leaguePoints: gagne ? 2 : 1,
+      decidedBy: "games",
+    };
+  }
+  if (rallies && rallies.home !== rallies.away) {
+    const gagne = rallies.home > rallies.away;
+    return {
+      ...base,
+      result: gagne ? "drawWon" : "drawLost",
+      leaguePoints: gagne ? 2 : 1,
+      decidedBy: "rallies",
+    };
+  }
+  // Jeux égaux et points égaux (ou points indisponibles) : la ligue tranchera, pas nous.
+  return { ...base, result: "drawUnbroken", leaguePoints: null, decidedBy: null };
+}
+
 /** Vue envoyée au client. Ne contient que du déjà-public : noms d'affichage, scores, couleurs. */
 export function serializeInterclub(f: FullInterclub, userId: string | null, isAdmin = false) {
   const matches = f.matches.map((m) => {
@@ -259,6 +364,16 @@ export function serializeInterclub(f: FullInterclub, userId: string | null, isAd
     winGames: winGamesFor(f.bestOf),
     status: derivedStatus(f.matchCount, f.matches),
     score: fixtureScore(f.matches),
+    // Comment la LIGUE compte cette rencontre. NULL tant qu'elle n'est pas finie.
+    outcome: tieOutcome(
+      f.matchCount,
+      f.matches.map((m) => ({
+        gamesHome: m.gamesHome,
+        gamesAway: m.gamesAway,
+        status: m.status,
+        games: m.games.map((g) => ({ home: g.pointsHome, away: g.pointsAway })),
+      })),
+    ),
     createdById: f.createdById,
     isCreator: !!userId && f.createdById === userId,
     // Le serveur autorise le créateur OU un admin : l'écran affiche donc le bouton dans les

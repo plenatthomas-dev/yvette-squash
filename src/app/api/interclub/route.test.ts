@@ -119,10 +119,10 @@ describe("GET /api/interclub", () => {
         division: "D2",
         matchCount: 4,
         matches: [
-          { gamesHome: 3, gamesAway: 0, status: "done" },
-          { gamesHome: 1, gamesAway: 3, status: "done" },
-          { gamesHome: null, gamesAway: null, status: "pending" },
-          { gamesHome: null, gamesAway: null, status: "pending" },
+          { gamesHome: 3, gamesAway: 0, status: "done", games: [] },
+          { gamesHome: 1, gamesAway: 3, status: "done", games: [] },
+          { gamesHome: null, gamesAway: null, status: "pending", games: [] },
+          { gamesHome: null, gamesAway: null, status: "pending", games: [] },
         ],
       },
     ];
@@ -131,6 +131,67 @@ describe("GET /api/interclub", () => {
     expect(body.fixtures[0].score).toEqual({ home: 1, away: 1 });
     // Deux matchs sur quatre saisis ⇒ la rencontre est en cours, pas terminée.
     expect(body.fixtures[0].status).toBe("live");
+  });
+
+  /** Une rencontre minimale, dont seuls les simples changent d'un test à l'autre. */
+  const rencontre = (matches: Array<Record<string, unknown>>) => ({
+    id: "f1",
+    date: "2026-09-03",
+    time: "20:00",
+    venue: null,
+    venueAddress: null,
+    round: "J3",
+    dateConfirmed: true,
+    team: { id: "t1", name: "Équipe 1", captainId: null, captain: null },
+    opponent: "Massy",
+    home: true,
+    division: "D4",
+    matchCount: 4,
+    matches,
+  });
+
+  it("dit ce que la rencontre RAPPORTE, pas seulement son score", async () => {
+    // Un 2-2 vaut deux points de classement ou un seul selon l'average : le score seul laisse
+    // la question ouverte, et la liste est l'écran où on lit sa saison.
+    const trois = (a: number, b: number) => [
+      { pointsHome: a, pointsAway: b },
+      { pointsHome: a, pointsAway: b },
+      { pointsHome: a, pointsAway: b },
+    ];
+    h.fixtures = [
+      rencontre([
+        { gamesHome: 3, gamesAway: 0, status: "done", games: trois(11, 1) },
+        { gamesHome: 3, gamesAway: 0, status: "done", games: trois(11, 1) },
+        { gamesHome: 0, gamesAway: 3, status: "done", games: trois(9, 11) },
+        { gamesHome: 0, gamesAway: 3, status: "done", games: trois(9, 11) },
+      ]),
+    ];
+    const body = await (await GET(req())).json();
+    expect(body.fixtures[0].score).toEqual({ home: 2, away: 2 });
+    // Jeux 6-6, donc c'est l'average de POINTS qui tranche — 120 contre 72.
+    expect(body.fixtures[0].outcome).toMatchObject({
+      result: "drawWon",
+      leaguePoints: 2,
+      decidedBy: "rallies",
+      games: { home: 6, away: 6 },
+      rallies: { home: 120, away: 72 },
+    });
+  });
+
+  it("ne prête aucun résultat à une rencontre qui n'est pas finie", async () => {
+    // Deux simples sur quatre : annoncer « Victoire, 3 pts » à mi-parcours serait faux
+    // pendant toute la soirée, c'est-à-dire pendant qu'on regarde.
+    h.fixtures = [
+      rencontre([
+        { gamesHome: 3, gamesAway: 0, status: "done", games: [] },
+        { gamesHome: 3, gamesAway: 0, status: "done", games: [] },
+        { gamesHome: null, gamesAway: null, status: "pending", games: [] },
+        { gamesHome: null, gamesAway: null, status: "pending", games: [] },
+      ]),
+    ];
+    const body = await (await GET(req())).json();
+    expect(body.fixtures[0].status).toBe("live");
+    expect(body.fixtures[0].outcome).toBeNull();
   });
 
   it("porte ce qui fait d'une rencontre un RENDEZ-VOUS : journée, heure, lieu, capitaine", async () => {
