@@ -63,6 +63,7 @@ const MAX_SQUASHNET_NAME_LEN = 60;
 //   set_squashnet_name → corrige le NOM sous lequel chercher ce membre sur squashnet
 //                     (body.givenName + body.familyName ; les deux vides = retire la correction),
 //                     puis retente le rapprochement tout de suite. Ne renomme PAS le membre.
+//   rematch_squashnet → retente le rapprochement squashnet de ce membre, sans rien modifier.
 export async function POST(req: NextRequest) {
   const admin = await requireAdmin(req);
   if (!admin) {
@@ -238,6 +239,21 @@ export async function POST(req: NextRequest) {
     // réseau ne remet pas en cause l'enregistrement du nom, qui est ce qu'on veut garder.
     const status = await refreshMemberRanking(target.id);
     return NextResponse.json({ ok: true, givenName: given || null, familyName: family || null, status });
+  }
+
+  //   rematch_squashnet → retente le rapprochement de ce membre, sans rien changer d'autre.
+  //
+  // Le pendant exact de `rematch_guest` côté joueurs sans compte, et il existe pour la même
+  // raison : `set_squashnet_name` ne rapproche QUE lorsque le nom change. Or un rapprochement
+  // peut échouer pour une cause qui n'a rien à voir avec le nom — squashnet indisponible ce
+  // jour-là, licence pas encore publiée, mois pas encore paru. Sans ce bouton, la seule façon
+  // de réessayer serait de modifier le nom pour le remettre ensuite : un geste absurde.
+  if (action === "rematch_squashnet") {
+    if (!(await getFeatures()).ranking) {
+      return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
+    }
+    const status = await refreshMemberRanking(target.id);
+    return NextResponse.json({ ok: true, status });
   }
 
   if (action === "delete") {

@@ -73,7 +73,8 @@ type Action =
   | "delete"
   | "set_team"
   | "set_clt_override"
-  | "set_squashnet_name";
+  | "set_squashnet_name"
+  | "rematch_squashnet";
 
 // Petite pastille de statut (pas de classe .badge globale : elle n'existe qu'en scopé).
 const badge: CSSProperties = {
@@ -207,7 +208,7 @@ export default function MembersPage() {
         setMembers((prev) =>
           prev.map((m) => (m.id === id ? { ...m, teamId: data.teamId ?? null } : m)),
         );
-      } else if (action === "set_squashnet_name") {
+      } else if (action === "set_squashnet_name" || action === "rematch_squashnet") {
         // Le serveur a retenté le rapprochement dans la foulée : on montre son verdict, sinon
         // l'admin aurait saisi un nom sans jamais savoir s'il était le bon avant le prochain
         // passage mensuel du cron. Puis on recharge, pour que le classement retrouvé s'affiche.
@@ -286,6 +287,15 @@ export default function MembersPage() {
     if (!!given !== !!family) return;
     setSnStatus(null);
     void postAction(id, "set_squashnet_name", { givenName: given, familyName: family });
+  };
+
+  // Retenter le rapprochement SANS toucher au nom. `setSquashnetName` ne part qu'au changement,
+  // or un echec n'accuse pas toujours le nom : squashnet muet ce jour-la, licence pas encore
+  // publiee, mois pas encore paru. Sans ce bouton, reessayer voudrait dire modifier le nom pour
+  // le remettre aussitot.
+  const rematchSquashnet = (id: string) => {
+    setSnStatus(null);
+    void postAction(id, "rematch_squashnet");
   };
 
   const revokePasskey = (id: string, pk: MemberPasskey) => {
@@ -445,11 +455,16 @@ export default function MembersPage() {
                     connexion du membre, le corriger ici ne tiendrait pas une journée. */}
                 {interclub && m.teamId && (
                   <div className="tiny" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      <span className="muted" style={{ flex: "0 0 auto" }}>
-                        Nom sur squashnet&nbsp;:
-                      </span>
-                      {/* `key` indexée sur la valeur enregistrée : après un rechargement, le
+                    {/* L'intitulé prend sa LIGNE, les deux champs partagent la suivante. Sur la
+                        même ligne que lui, ils débordaient d'un téléphone : le second passait
+                        seul à la ligne, aligné à gauche, sans plus rien qui le rattache au
+                        premier — on lisait alors deux champs sans rapport l'un avec l'autre. */}
+                    <span className="muted">Nom sur squashnet&nbsp;:</span>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {/* `flex: 1` + `minWidth: 0` : les deux champs se partagent la largeur
+                          disponible quelle qu'elle soit, au lieu de deux largeurs fixes qui ne
+                          tiennent que sur un écran donné.
+                          `key` indexée sur la valeur enregistrée : après un rechargement, le
                           champ non contrôlé doit repartir de ce que le serveur a retenu (nom
                           normalisé, ou vide si la correction a été retirée). */}
                       <input
@@ -460,7 +475,7 @@ export default function MembersPage() {
                         aria-label={`Prénom sur squashnet de ${m.displayName}`}
                         placeholder="Prénom"
                         maxLength={60}
-                        style={{ width: "8rem", margin: 0 }}
+                        style={{ flex: 1, minWidth: 0, margin: 0 }}
                       />
                       <input
                         key={`sn-family-${m.id}-${m.squashnetFamilyName ?? ""}`}
@@ -470,8 +485,36 @@ export default function MembersPage() {
                         aria-label={`Nom de famille sur squashnet de ${m.displayName}`}
                         placeholder="Nom"
                         maxLength={60}
-                        style={{ width: "9rem", margin: 0 }}
+                        style={{ flex: 1, minWidth: 0, margin: 0 }}
                       />
+                    </div>
+
+                    {/* Retenter le rapprochement À LA DEMANDE. Les champs ne le déclenchent qu'au
+                        CHANGEMENT du nom ; or un échec n'accuse pas toujours le nom (squashnet
+                        muet ce jour-là, licence pas encore publiée, mois pas encore paru). Sans
+                        ce bouton, réessayer voudrait dire modifier le nom pour le remettre
+                        aussitôt. Même mot que pour un joueur sans compte, dans l'espace admin.
+                        Bouton en CONTOUR : c'est une réparation, elle ne doit pas peser plus que
+                        « Lien d'activation » plus bas sur la carte. */}
+                    <div>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={busyId === m.id}
+                        onClick={() => rematchSquashnet(m.id)}
+                        title="Retente le rapprochement squashnet — après avoir corrigé une orthographe, par exemple."
+                        style={{
+                          width: "auto",
+                          margin: 0,
+                          padding: "3px 10px",
+                          fontSize: "inherit",
+                          background: "transparent",
+                          borderColor: "var(--pico-muted-border-color)",
+                          color: "var(--pico-contrast)",
+                        }}
+                      >
+                        Re-rapprocher
+                      </button>
                     </div>
 
                     {/* Le verdict du rapprochement relancé à l'instant. Il n'est affiché
@@ -499,7 +542,7 @@ export default function MembersPage() {
                         exactement ce silence qui laissait passer le défaut — un joueur qu'on
                         croyait classé et qu'aucun rapprochement n'avait jamais atteint. Tu ne
                         l'affiches pas si une correction manuelle couvre déjà le besoin. */}
-                    {!m.squashnetMatched && m.cltSource !== "override" && !snStatus && (
+                    {!m.squashnetMatched && m.cltSource !== "override" && snStatus?.id !== m.id && (
                       <span className="muted" style={{ color: "var(--warn-fg)" }}>
                         ⚠️ Jamais retrouvé sur squashnet.
                       </span>
@@ -516,64 +559,65 @@ export default function MembersPage() {
                     qu'à l'écriture — le sélecteur l'empêche dès la saisie. Enregistré au choix
                     (`onChange`), pas au tap comme le switch d'équipe au-dessus. */}
                 {interclub && m.teamId && (
-                  <div
-                    className="tiny"
-                    style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
-                  >
-                    <span className="muted" style={{ flex: "0 0 auto" }}>
-                      Classement interclub&nbsp;:
-                    </span>
-                    <select
-                      value={m.cltOverride ?? ""}
-                      disabled={busyId === m.id}
-                      onChange={(e) => setCltOverride(m.id, e.target.value)}
-                      aria-label={`Classement interclub forcé pour ${m.displayName}`}
-                      title="Écrase le rapprochement squashnet pour l'ordre des simples interclub. Vide = pas de correction."
-                      style={{ width: "auto", margin: 0 }}
-                    >
-                      <option value="">
-                        {m.cltSource === "squashnet" && m.clt
-                          ? `— aucune (squashnet : ${m.clt}) —`
-                          : "— aucune correction —"}
-                      </option>
-                      {KNOWN_CLASSEMENTS.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
+                  <div className="tiny" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {/* Même disposition que le nom de recherche ci-dessus, et pour la même
+                        raison mesurée sur un téléphone : intitulé sur SA ligne, contrôles sur
+                        la suivante. Tout sur une seule ligne, « rang&nbsp;: » restait orphelin
+                        à droite du sélecteur et son champ passait seul à la ligne d'après. */}
+                    <span className="muted">Classement interclub&nbsp;:</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <select
+                        value={m.cltOverride ?? ""}
+                        disabled={busyId === m.id}
+                        onChange={(e) => setCltOverride(m.id, e.target.value)}
+                        aria-label={`Classement interclub forcé pour ${m.displayName}`}
+                        title="Écrase le rapprochement squashnet pour l'ordre des simples interclub. Vide = pas de correction."
+                        style={{ flex: 1, minWidth: 0, margin: 0 }}
+                      >
+                        <option value="">
+                          {m.cltSource === "squashnet" && m.clt
+                            ? `— aucune (squashnet : ${m.clt}) —`
+                            : "— aucune correction —"}
                         </option>
-                      ))}
-                    </select>
+                        {KNOWN_CLASSEMENTS.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
 
-                    {/* Le RANG MIXTE, second critère de l'ordre des simples : à classement
-                        égal, le plus petit rang joue le simple le plus petit. Champ NOMBRE et
-                        non `<select>` — contrairement aux classements, les rangs ne forment
-                        pas une liste fermée, ils vont à quelques milliers et bougent chaque
-                        mois. Enregistré à la perte de focus (`onBlur`), pas à chaque frappe :
-                        « 2339 » passerait sinon par 2, 23 et 233, trois rangs parfaitement
-                        valides qui partiraient chacun au serveur.
-                        Inutile pour un NC — la fédération ne les ordonne pas entre eux — d'où
-                        le placeholder qui le dit plutôt qu'un champ grisé sans explication. */}
-                    <span className="muted" style={{ flex: "0 0 auto" }}>
-                      rang&nbsp;:
-                    </span>
-                    <input
-                      type="number"
-                      min={1}
-                      inputMode="numeric"
-                      defaultValue={m.rangMOverride ?? ""}
-                      key={`rangm-${m.id}-${m.rangMOverride ?? ""}`}
-                      disabled={busyId === m.id}
-                      onBlur={(e) => setRangMOverride(m.id, e.target.value)}
-                      aria-label={`Rang mixte interclub forcé pour ${m.displayName}`}
-                      title="Écrase le rang mixte squashnet. Départage les joueurs de même classement. Inutile pour un NC."
-                      placeholder={
-                        m.rangMSource === "squashnet" && m.rangM != null
-                          ? `squashnet : ${m.rangM}`
-                          : m.clt === "NC"
-                            ? "inutile (NC)"
-                            : "aucun"
-                      }
-                      style={{ width: "9rem", margin: 0 }}
-                    />
+                      {/* Le RANG MIXTE, second critère de l'ordre des simples : à classement
+                          égal, le plus petit rang joue le simple le plus petit. Champ NOMBRE et
+                          non `<select>` — contrairement aux classements, les rangs ne forment
+                          pas une liste fermée, ils vont à quelques milliers et bougent chaque
+                          mois. Enregistré à la perte de focus (`onBlur`), pas à chaque frappe :
+                          « 2339 » passerait sinon par 2, 23 et 233, trois rangs parfaitement
+                          valides qui partiraient chacun au serveur.
+                          Inutile pour un NC — la fédération ne les ordonne pas entre eux — d'où
+                          le placeholder qui le dit plutôt qu'un champ grisé sans explication. */}
+                      <span className="muted" style={{ flex: "0 0 auto" }}>
+                        rang&nbsp;:
+                      </span>
+                      <input
+                        type="number"
+                        min={1}
+                        inputMode="numeric"
+                        defaultValue={m.rangMOverride ?? ""}
+                        key={`rangm-${m.id}-${m.rangMOverride ?? ""}`}
+                        disabled={busyId === m.id}
+                        onBlur={(e) => setRangMOverride(m.id, e.target.value)}
+                        aria-label={`Rang mixte interclub forcé pour ${m.displayName}`}
+                        title="Écrase le rang mixte squashnet. Départage les joueurs de même classement. Inutile pour un NC."
+                        placeholder={
+                          m.rangMSource === "squashnet" && m.rangM != null
+                            ? `squashnet : ${m.rangM}`
+                            : m.clt === "NC"
+                              ? "inutile (NC)"
+                              : "aucun"
+                        }
+                        style={{ flex: "0 1 7.5rem", minWidth: 0, margin: 0 }}
+                      />
+                    </div>
                   </div>
                 )}
 

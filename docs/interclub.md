@@ -284,6 +284,12 @@ l'admin saisirait un nom sans savoir s'il est le bon, et l'apprendrait au procha
 carte affiche par ailleurs un « jamais retrouvé sur squashnet » **permanent** tant qu'aucun
 rapprochement n'a abouti : c'est ce silence-là qui laissait passer le défaut.
 
+Un bouton **« Re-rapprocher »** (`rematch_squashnet`) retente sans rien modifier — le pendant
+exact de `rematch_guest` côté joueurs sans compte. Il existe parce que `set_squashnet_name` ne
+rapproche qu'au **changement** du nom, alors qu'un échec n'accuse pas toujours le nom :
+squashnet muet ce jour-là, licence pas encore publiée, mois pas encore paru. Sans lui, réessayer
+voudrait dire modifier le nom pour le remettre aussitôt.
+
 Reste le cas où la fédération ne connaît vraiment pas la personne (pas encore licenciée) : alors
 seulement, on force la valeur.
 
@@ -497,6 +503,7 @@ score enregistré).
 | `GET/POST /api/admin/interclub-teams` | Équipes, membres et joueurs sans compte, dont leur classement et leur rang mixte ; rapprochement squashnet à l'ajout et à la demande (**admin**) |
 | `POST /api/admin/members` (action `set_clt_override`) | Correction admin du classement ET du rang mixte d'un membre (**admin**) |
 | `POST /api/admin/members` (action `set_squashnet_name`) | Nom sous lequel chercher un membre sur squashnet, puis rapprochement immédiat (**admin**) |
+| `POST /api/admin/members` (action `rematch_squashnet`) | Retente le rapprochement d'un membre, sans rien modifier (**admin**) |
 | `GET /api/notifications` | La cloche (pas de flag : elle sert à toute l'appli) |
 
 **Composants** — `Interclub.tsx` (orchestration), `InterclubScorer.tsx` (marquage),

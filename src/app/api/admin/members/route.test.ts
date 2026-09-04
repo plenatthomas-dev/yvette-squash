@@ -467,6 +467,44 @@ describe("POST /api/admin/members — set_squashnet_name", () => {
   });
 });
 
+// Le pendant de `rematch_guest` côté membres. Il existe parce qu'un rapprochement raté
+// n'accuse pas toujours le nom : squashnet muet ce jour-là, licence pas encore publiée, mois
+// pas encore paru. `set_squashnet_name` ne rapproche qu'au CHANGEMENT du nom — sans cette
+// action, réessayer voudrait dire modifier le nom pour le remettre aussitôt.
+describe("POST /api/admin/members — rematch_squashnet", () => {
+  it("retente le rapprochement et renvoie son verdict", async () => {
+    const res = await POST(postReq({ id: "u1", action: "rematch_squashnet" }));
+    expect(res.status).toBe(200);
+    expect(h.refreshMember).toHaveBeenCalledWith("u1");
+    expect(await res.json()).toMatchObject({ ok: true, status: "matched" });
+  });
+
+  it("ne touche À RIEN d'autre : ni le nom de recherche, ni les corrections", async () => {
+    // C'est ce qui le distingue de `set_squashnet_name` : un bouton « réessayer » qui
+    // réécrirait au passage la saisie de l'admin serait un piège.
+    await POST(postReq({ id: "u1", action: "rematch_squashnet" }));
+    expect(h.userUpdate).not.toHaveBeenCalled();
+  });
+
+  it("relaie un échec sans le maquiller", async () => {
+    h.refreshMember.mockResolvedValue("unknown");
+    const res = await POST(postReq({ id: "u1", action: "rematch_squashnet" }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("unknown");
+  });
+
+  it("404 quand le classement fédéral est coupé", async () => {
+    h.featureRanking = false;
+    expect((await POST(postReq({ id: "u1", action: "rematch_squashnet" }))).status).toBe(404);
+    expect(h.refreshMember).not.toHaveBeenCalled();
+  });
+
+  it("réservé aux admins", async () => {
+    h.admin = null;
+    expect((await POST(postReq({ id: "u1", action: "rematch_squashnet" }))).status).toBe(403);
+  });
+});
+
 describe("POST /api/admin/members — désactiver, sans laisser de tricount bloqué", () => {
   beforeEach(() => {
     h.payePar = [];
