@@ -5308,7 +5308,9 @@ body[data-bottombar] .install-banner {
   padding: 0 5px;
   border: 1px solid currentColor;
   border-radius: 999px;
-  font-size: 0.7rem;
+  /* La même taille que `.ic-provisoire-tag` : c'est la pastille voisine sur la même carte, et
+     deux petits sigles côte à côte à 0,02rem d'écart ne se lisent pas comme un système. */
+  font-size: 0.72rem;
   font-weight: 700;
 }
 .ic-outcome-pts {
