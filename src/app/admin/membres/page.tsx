@@ -134,10 +134,16 @@ export default function MembersPage() {
   const [links, setLinks] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ id: string; text: string } | null>(null);
+  // Saisie EN COURS du nom de recherche squashnet, par membre. Indispensable, et pas un
+  // confort : l'enregistrement exige les DEUX moitiés, or on les tape l'une après l'autre. En
+  // jugeant chaque champ contre le seul état serveur, aucune des deux ne partait jamais — la
+  // première parce que la seconde manquait, la seconde parce que la première n'avait pas été
+  // envoyée. Le formulaire était inerte, en silence. Le brouillon les fait se voir.
+  const [snDraft, setSnDraft] = useState<Record<string, { given: string; family: string }>>({});
   // Verdict du dernier rapprochement squashnet déclenché à la main, pour le membre concerné.
   const [snStatus, setSnStatus] = useState<{
     id: string;
-    status: "matched" | "moved" | "unknown";
+    status: "matched" | "moved" | "unknown" | "error";
   } | null>(null);
 
   const load = async () => {
@@ -191,7 +197,7 @@ export default function MembersPage() {
         teamId?: string | null;
         clt?: string | null;
         rangM?: number | null;
-        status?: "matched" | "moved" | "unknown";
+        status?: "matched" | "moved" | "unknown" | "error";
       };
       if (!res.ok) {
         setMsg({ id, text: data.error ?? "Action impossible." });
@@ -209,6 +215,15 @@ export default function MembersPage() {
           prev.map((m) => (m.id === id ? { ...m, teamId: data.teamId ?? null } : m)),
         );
       } else if (action === "set_squashnet_name" || action === "rematch_squashnet") {
+        // Le brouillon a fait son office : on le retire pour que les champs repartent de ce que
+        // le serveur a réellement retenu (nom normalisé, ou vide si la correction est retirée).
+        if (action === "set_squashnet_name") {
+          setSnDraft((d) => {
+            const next = { ...d };
+            delete next[id];
+            return next;
+          });
+        }
         // Le serveur a retenté le rapprochement dans la foulée : on montre son verdict, sinon
         // l'admin aurait saisi un nom sans jamais savoir s'il était le bon avant le prochain
         // passage mensuel du cron. Puis on recharge, pour que le classement retrouvé s'affiche.
@@ -272,21 +287,37 @@ export default function MembersPage() {
     void postAction(id, "set_clt_override", { clt: m?.cltOverride ?? "", rangM: next });
   };
 
-  // Les deux moitiés du nom de recherche partent ENSEMBLE (le serveur refuse une identité à
-  // moitié remplie, qui rendrait le rapprochement plus permissif que le comportement par
-  // défaut), mais se tapent séparément : d'où la lecture de l'autre moitié à chaque envoi.
-  // Enregistré à la perte de focus, comme le rang : un nom passe par toutes ses initiales.
-  const setSquashnetName = (id: string, part: "given" | "family", value: string) => {
-    const m = members.find((x) => x.id === id);
-    const next = value.trim().replace(/\s+/g, " ");
-    const given = part === "given" ? next : (m?.squashnetGivenName ?? "");
-    const family = part === "family" ? next : (m?.squashnetFamilyName ?? "");
-    if (given === (m?.squashnetGivenName ?? "") && family === (m?.squashnetFamilyName ?? "")) return;
-    // Une seule moitié tapée : on n'envoie rien et on ne dit rien non plus. L'admin est en
-    // train de remplir l'autre champ ; crier « incomplet » entre deux champs serait du bruit.
+  /** Ce qu'affichent les deux champs : le brouillon en cours s'il existe, sinon l'enregistré. */
+  const snFields = (m: Member) =>
+    snDraft[m.id] ?? { given: m.squashnetGivenName ?? "", family: m.squashnetFamilyName ?? "" };
+
+  const editSquashnetName = (m: Member, part: "given" | "family", value: string) =>
+    setSnDraft((d) => ({ ...d, [m.id]: { ...snFields(m), [part]: value } }));
+
+  // Enregistré à la perte de focus, comme le rang : un nom passe par toutes ses initiales, et
+  // partir à chaque frappe enverrait « S », « So », « Soi »…
+  //
+  // Les deux moitiés partent ENSEMBLE — le serveur refuse une identité amputée, qui rendrait le
+  // rapprochement plus permissif que le comportement par défaut. On lit donc les DEUX champs
+  // tels qu'ils sont à l'écran, brouillon compris : c'est ce que la version précédente ratait,
+  // en comparant chaque moitié à un état serveur qui ne pouvait pas encore avoir bougé.
+  const commitSquashnetName = (m: Member) => {
+    const d = snFields(m);
+    const given = d.given.trim().replace(/\s+/g, " ");
+    const family = d.family.trim().replace(/\s+/g, " ");
+    // Rien n'a changé par rapport à l'enregistré : ni écriture, ni rapprochement inutile.
+    if (given === (m.squashnetGivenName ?? "") && family === (m.squashnetFamilyName ?? "")) return;
+    // Une seule moitié : l'admin est en train de remplir l'autre champ. On n'envoie rien, mais
+    // l'écran le DIT (cf. `snHalf` plus bas) — c'est ce silence-là qui a coûté un aller-retour.
     if (!!given !== !!family) return;
     setSnStatus(null);
-    void postAction(id, "set_squashnet_name", { givenName: given, familyName: family });
+    void postAction(m.id, "set_squashnet_name", { givenName: given, familyName: family });
+  };
+
+  /** Vrai quand une seule moitié est saisie : rien ne partira, et il faut le dire. */
+  const snHalf = (m: Member) => {
+    const d = snFields(m);
+    return !!d.given.trim() !== !!d.family.trim();
   };
 
   // Retenter le rapprochement SANS toucher au nom. `setSquashnetName` ne part qu'au changement,
@@ -468,26 +499,35 @@ export default function MembersPage() {
                           champ non contrôlé doit repartir de ce que le serveur a retenu (nom
                           normalisé, ou vide si la correction a été retirée). */}
                       <input
-                        key={`sn-given-${m.id}-${m.squashnetGivenName ?? ""}`}
-                        defaultValue={m.squashnetGivenName ?? ""}
+                        value={snFields(m).given}
                         disabled={busyId === m.id}
-                        onBlur={(e) => setSquashnetName(m.id, "given", e.target.value)}
+                        onChange={(e) => editSquashnetName(m, "given", e.target.value)}
+                        onBlur={() => commitSquashnetName(m)}
                         aria-label={`Prénom sur squashnet de ${m.displayName}`}
                         placeholder="Prénom"
                         maxLength={60}
                         style={{ flex: 1, minWidth: 0, margin: 0 }}
                       />
                       <input
-                        key={`sn-family-${m.id}-${m.squashnetFamilyName ?? ""}`}
-                        defaultValue={m.squashnetFamilyName ?? ""}
+                        value={snFields(m).family}
                         disabled={busyId === m.id}
-                        onBlur={(e) => setSquashnetName(m.id, "family", e.target.value)}
+                        onChange={(e) => editSquashnetName(m, "family", e.target.value)}
+                        onBlur={() => commitSquashnetName(m)}
                         aria-label={`Nom de famille sur squashnet de ${m.displayName}`}
                         placeholder="Nom"
                         maxLength={60}
                         style={{ flex: 1, minWidth: 0, margin: 0 }}
                       />
                     </div>
+
+                    {/* Une seule moitié saisie : RIEN ne sera enregistré, et se taire ferait
+                        croire le contraire. C'est exactement le silence qui a fait passer un
+                        formulaire inerte pour un rapprochement raté. */}
+                    {snHalf(m) && (
+                      <span className="muted" style={{ color: "var(--warn-fg)" }}>
+                        ⚠️ Donne le prénom ET le nom — rien n'est enregistré tant qu'il en manque un.
+                      </span>
+                    )}
 
                     {/* Retenter le rapprochement À LA DEMANDE. Les champs ne le déclenchent qu'au
                         CHANGEMENT du nom ; or un échec n'accuse pas toujours le nom (squashnet
@@ -534,7 +574,9 @@ export default function MembersPage() {
                           ? "✓ Retrouvé sur squashnet, classement à jour."
                           : snStatus.status === "moved"
                             ? "⚠️ Trouvé, mais hors du club : classement retiré."
-                            : "⚠️ Toujours introuvable. Vérifie l'orthographe, sinon force le classement ci-dessous."}
+                            : snStatus.status === "error"
+                              ? "⚠️ Le rapprochement n'a pas pu aboutir (squashnet muet, ou écriture refusée). Le nom est enregistré : réessaie avec « Re-rapprocher »."
+                              : "⚠️ Toujours introuvable. Vérifie l'orthographe, sinon force le classement ci-dessous."}
                       </span>
                     )}
 

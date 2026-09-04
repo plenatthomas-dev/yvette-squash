@@ -371,10 +371,19 @@ describe("refreshMemberRanking", () => {
     expect(h.deleteMany).toHaveBeenCalled();
   });
 
-  it("ne LÈVE JAMAIS sur un hoquet réseau : l'enregistrement du nom doit survivre", async () => {
+  it("ne LÈVE JAMAIS sur un hoquet réseau, et ne le déguise pas en « introuvable »", async () => {
+    // « Introuvable » est une affirmation sur la FÉDÉRATION. Une panne n'en est pas une : les
+    // confondre envoie l'admin corriger une orthographe déjà juste.
     h.member = { id: "u1", displayName: "Jean Dupont" };
     h.searchRanking.mockRejectedValue(new Error("502"));
-    expect(await refreshMemberRanking("u1")).toBe("unknown");
+    expect(await refreshMemberRanking("u1")).toBe("error");
+  });
+
+  it("une écriture base refusée est une ERREUR, pas une absence", async () => {
+    h.member = { id: "u1", displayName: "Jean Dupont" };
+    h.searchRanking.mockResolvedValue([row("DUPONT JEAN")]);
+    h.upsert.mockRejectedValue(new Error("base indisponible"));
+    expect(await refreshMemberRanking("u1")).toBe("error");
   });
 
   it("membre introuvable en base → « unknown », sans écriture", async () => {

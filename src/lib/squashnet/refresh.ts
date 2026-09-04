@@ -345,8 +345,15 @@ export async function matchGuestRanking(guest: {
  *
  * NE LÈVE JAMAIS : un hoquet squashnet ne doit pas faire échouer l'enregistrement du nom, qui
  * est la partie qu'on veut garder. Renvoie le verdict pour que l'écran le dise.
+ *
+ * QUATRE ISSUES, PAS TROIS. « Introuvable » est une affirmation sur la FÉDÉRATION ; une panne
+ * (squashnet muet, écriture base refusée) n'en est pas une. Les confondre fait accuser la
+ * fédération d'un défaut qui est chez nous, et envoie l'admin corriger une orthographe déjà
+ * juste — c'est arrivé, et ça a coûté une heure de recherche du mauvais côté.
  */
-export async function refreshMemberRanking(userId: string): Promise<"matched" | "moved" | "unknown"> {
+export async function refreshMemberRanking(
+  userId: string,
+): Promise<"matched" | "moved" | "unknown" | "error"> {
   try {
     const u = await prisma.user.findUnique({
       where: { id: userId },
@@ -370,7 +377,7 @@ export async function refreshMemberRanking(userId: string): Promise<"matched" | 
     }
     return "unknown";
   } catch {
-    return "unknown";
+    return "error";
   }
 }
 

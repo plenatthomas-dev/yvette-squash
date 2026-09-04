@@ -284,6 +284,14 @@ l'admin saisirait un nom sans savoir s'il est le bon, et l'apprendrait au procha
 carte affiche par ailleurs un « jamais retrouvé sur squashnet » **permanent** tant qu'aucun
 rapprochement n'a abouti : c'est ce silence-là qui laissait passer le défaut.
 
+⚠️ **Les deux champs se tapent l'un après l'autre, et doivent se voir.** L'écran garde donc un
+BROUILLON par membre : juger chaque moitié contre le seul état venu du serveur rendait le
+formulaire inerte — le prénom refusé faute de nom, puis le nom refusé parce que le prénom
+n'avait jamais été envoyé, sans un mot à l'écran. Une saisie à moitié le dit désormais, et
+`refreshMemberRanking` distingue une **panne** (`error`) d'une **absence** (`unknown`) : dire
+« introuvable » quand squashnet est muet, c'est accuser la fédération d'un défaut qui est chez
+nous, et envoyer l'admin corriger une orthographe déjà juste.
+
 Un bouton **« Re-rapprocher »** (`rematch_squashnet`) retente sans rien modifier — le pendant
 exact de `rematch_guest` côté joueurs sans compte. Il existe parce que `set_squashnet_name` ne
 rapproche qu'au **changement** du nom, alors qu'un échec n'accuse pas toujours le nom :

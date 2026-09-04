@@ -236,7 +236,8 @@ export async function POST(req: NextRequest) {
     });
     // Rapprochement IMMÉDIAT : sans lui, l'admin saisirait un nom sans savoir s'il est le bon
     // et devrait attendre le passage mensuel du cron pour l'apprendre. Best-effort — l'échec
-    // réseau ne remet pas en cause l'enregistrement du nom, qui est ce qu'on veut garder.
+    // réseau ne remet pas en cause l'enregistrement du nom, qui est ce qu'on veut garder, et
+    // se signale alors par un statut `error` distinct d'un « introuvable ».
     const status = await refreshMemberRanking(target.id);
     return NextResponse.json({ ok: true, givenName: given || null, familyName: family || null, status });
   }
