@@ -6,11 +6,11 @@ import {
   fetchTeamCalendar,
   ownFixtures,
   diffCalendar,
+  describeDiff,
   calendarFingerprint,
   matchKey,
   type OwnTie,
   type StoredTie,
-  type CalendarDiff,
 } from "@/lib/squashnet/calendar";
 import { interclubChanged } from "@/lib/interclub-gate";
 import { UNSET_PLAYER, derivedStatus } from "@/lib/interclub-db";
@@ -102,17 +102,6 @@ async function anchoredTeam(teamId: unknown) {
     };
   }
   return { ok: true as const, team: { ...team, snEventId: team.snEventId, snTeamId: team.snTeamId } };
-}
-
-/** Résumé lisible d'un écart, pour l'écran comme pour la notification. */
-export function describeDiff(diff: CalendarDiff): string[] {
-  return [
-    ...diff.toCreate.map((t) => `${t.round} à créer (${t.date})`),
-    ...diff.toUpdate.map(
-      (u) => `${u.tie.round} : ${u.changes.map((c) => `${c.field} ${c.from ?? "—"} → ${c.to ?? "—"}`).join(", ")}`,
-    ),
-    ...diff.toDelete.map((d) => `${d.round ?? "?"} n'est plus publiée (${d.date} c. ${d.opponent})`),
-  ];
 }
 
 // POST /api/admin/interclub-calendar

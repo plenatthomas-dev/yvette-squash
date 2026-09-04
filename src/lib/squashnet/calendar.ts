@@ -340,6 +340,25 @@ export function diffCalendar(stored: StoredTie[], fetched: OwnTie[], eventId: st
 }
 
 /**
+ * Résumé lisible d'un écart, pour l'écran comme pour la notification.
+ *
+ * ⚠️ ELLE VIT ICI, ET PAS DANS LA ROUTE QUI S'EN SERT. Un fichier `route.ts` d'App Router
+ * n'accepte QUE des exports connus — les verbes HTTP et une poignée d'options de segment. Y
+ * exporter une fonction utilitaire compile en local (`tsc` ne connaît pas cette règle, elle est
+ * propre au framework) mais casse `next build` : « describeDiff is not a valid Route export
+ * field ». Le déploiement est le premier endroit qui l'apprend, ce qui est le pire endroit.
+ */
+export function describeDiff(diff: CalendarDiff): string[] {
+  return [
+    ...diff.toCreate.map((t) => `${t.round} à créer (${t.date})`),
+    ...diff.toUpdate.map(
+      (u) => `${u.tie.round} : ${u.changes.map((c) => `${c.field} ${c.from ?? "—"} → ${c.to ?? "—"}`).join(", ")}`,
+    ),
+    ...diff.toDelete.map((d) => `${d.round ?? "?"} n'est plus publiée (${d.date} c. ${d.opponent})`),
+  ];
+}
+
+/**
  * Empreinte du calendrier publié pour une équipe.
  *
  * Elle répond à UNE question, et une seule : « est-ce le même calendrier que la dernière fois
