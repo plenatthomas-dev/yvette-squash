@@ -79,6 +79,15 @@ typography:
     fontFamily: "system-ui, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif"
     fontSize: "1.15rem"
     fontWeight: 400
+  # La rampe de fait, énumérée pour l'outillage — cf. « La rampe de fait » plus bas. Les cinq
+  # crans qui portent 63 % des déclarations en rem. Les survivances (0,58 · 0,62 · 0,66 · 0,78 ·
+  # 0,88 · 0,92 · 0,95 · 0,98rem) n'y figurent PAS : elles doivent continuer à être signalées.
+  scale:
+    cran-72: "0.72rem"
+    cran-75: "0.75rem"
+    cran-80: "0.8rem"
+    cran-85: "0.85rem"
+    cran-90: "0.9rem"
 rounded:
   sm: "8px"
   md: "12px"
