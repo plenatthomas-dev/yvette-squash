@@ -1,0 +1,18 @@
+-- LA POULE, TROISIÈME IDENTIFIANT D'ANCRAGE — sans elle, l'import ne trouve rien.
+--
+-- On croyait qu'une épreuve fédérale (`snEventId`) désignait un calendrier. Elle en contient
+-- PLUSIEURS : « Hommes 4 - Poule A », « Hommes 4 - Poule IVD »… Interrogé sans préciser laquelle,
+-- squashnet rend celle qu'il veut.
+--
+-- Mesuré sur notre propre critérium 2025-2026 : la réponse était la poule de Jeu de Paume,
+-- Montmartre, PUC et Vincennes — où le Squash de l'Yvette ne figure pas. `ownFixtures` filtrait
+-- alors sur notre `snTeamId` et ne retenait rien. L'import aurait donc rapporté ZÉRO rencontre,
+-- sans erreur, sans 502 et sans explication : la pire forme de panne, celle qui ressemble à une
+-- ligue qui n'a rien publié.
+--
+-- L'identifiant se lit dans le tableau de la poule sur la page « Équipes » de l'équipe
+-- (`<table id="round_370138">`), et se passe en `roundid` à la requête du calendrier.
+--
+-- NULL = équipe pas encore ancrée. Les trois identifiants vont ensemble ou pas du tout, garde
+-- tenue par la route d'admin : deux sur trois donnerait l'impression d'être configuré.
+ALTER TABLE "InterclubTeam" ADD COLUMN "snRoundId" TEXT;

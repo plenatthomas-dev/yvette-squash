@@ -85,12 +85,21 @@ async function anchoredTeam(teamId: unknown) {
   }
   const team = await prisma.interclubTeam.findUnique({
     where: { id: teamId },
-    select: { id: true, name: true, snEventId: true, snTeamId: true, captainId: true },
+    select: {
+      id: true,
+      name: true,
+      snEventId: true,
+      snTeamId: true,
+      snRoundId: true,
+      captainId: true,
+    },
   });
   if (!team) {
     return { ok: false as const, response: NextResponse.json({ error: "Équipe inconnue" }, { status: 404 }) };
   }
-  if (!team.snEventId || !team.snTeamId) {
+  // Les TROIS, ou rien. `snRoundId` désigne la POULE : sans lui, squashnet rend celle qu'il veut
+  // et le filtrage par `snTeamId` ne retient plus rien — un import de zéro rencontre, muet.
+  if (!team.snEventId || !team.snTeamId || !team.snRoundId) {
     // Message explicite plutôt qu'un import vide : « 0 rencontre trouvée » enverrait chercher
     // la panne du côté de la fédération alors que la configuration manque ici.
     return {
@@ -101,7 +110,15 @@ async function anchoredTeam(teamId: unknown) {
       ),
     };
   }
-  return { ok: true as const, team: { ...team, snEventId: team.snEventId, snTeamId: team.snTeamId } };
+  return {
+    ok: true as const,
+    team: {
+      ...team,
+      snEventId: team.snEventId,
+      snTeamId: team.snTeamId,
+      snRoundId: team.snRoundId,
+    },
+  };
 }
 
 // POST /api/admin/interclub-calendar
@@ -124,7 +141,10 @@ export async function POST(req: NextRequest) {
 
   let published: OwnTie[];
   try {
-    published = ownFixtures(await fetchTeamCalendar(team.snEventId), team.snTeamId);
+    published = ownFixtures(
+      await fetchTeamCalendar(team.snEventId, team.snRoundId),
+      team.snTeamId,
+    );
   } catch {
     // L'échec réseau se DIT. Le confondre avec un calendrier vide ferait croire que la ligue
     // n'a rien publié, et l'admin attendrait une publication déjà faite.

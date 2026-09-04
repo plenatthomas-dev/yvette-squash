@@ -59,8 +59,18 @@ export async function GET(req: NextRequest) {
   }
 
   const teams = await prisma.interclubTeam.findMany({
-    where: { snEventId: { not: null }, snTeamId: { not: null } },
-    select: { id: true, name: true, snEventId: true, snTeamId: true, snCalendarHash: true, captainId: true },
+    // Les trois identifiants, sinon l'équipe n'est pas ancrée : interroger sans la POULE
+    // rendrait un calendrier qui n'est pas le sien, et le contrôle comparerait n'importe quoi.
+    where: { snEventId: { not: null }, snTeamId: { not: null }, snRoundId: { not: null } },
+    select: {
+      id: true,
+      name: true,
+      snEventId: true,
+      snTeamId: true,
+      snRoundId: true,
+      snCalendarHash: true,
+      captainId: true,
+    },
   });
 
   let checked = 0;
@@ -70,7 +80,10 @@ export async function GET(req: NextRequest) {
   for (const team of teams) {
     let published;
     try {
-      published = ownFixtures(await fetchTeamCalendar(team.snEventId!), team.snTeamId!);
+      published = ownFixtures(
+        await fetchTeamCalendar(team.snEventId!, team.snRoundId!),
+        team.snTeamId!,
+      );
     } catch {
       // Un hoquet réseau n'est PAS un calendrier vide. On ne touche à rien — surtout pas à
       // `snCheckedAt`, qui doit continuer de dire « la dernière fois qu'on a vraiment regardé ».

@@ -95,6 +95,8 @@ type IcTeam = {
       dit lesquelles des ~56 rencontres publiées sont les nôtres. */
   snEventId: string | null;
   snTeamId: string | null;
+  /** La POULE de l'épreuve. Sans elle, squashnet rend celle qu'il veut. */
+  snRoundId: string | null;
   /** Dernier contrôle du calendrier. Il répond à la question que le silence ne tranche pas :
       « rien n'a bougé », ou « on n'a pas regardé » ? */
   snCheckedAt: string | null;
@@ -257,7 +259,9 @@ export default function AdminPage() {
   // partent ENSEMBLE ou pas du tout (le serveur refuse un seul des deux), et une comparaison
   // à l'état SERVEUR pour décider quoi envoyer ne peut jamais être vraie — rien n'a encore
   // été écrit. Le même raisonnement avait rendu inerte la saisie du nom squashnet d'un membre.
-  const [icAnchor, setIcAnchor] = useState<Record<string, { eventId: string; snTeamId: string }>>({});
+  const [icAnchor, setIcAnchor] = useState<
+    Record<string, { eventId: string; roundId: string; snTeamId: string }>
+  >({});
   const [icCal, setIcCal] = useState<CalPreview | null>(null);
   const [icCalBusy, setIcCalBusy] = useState(false);
   const [icName, setIcName] = useState("");
@@ -631,22 +635,34 @@ export default function AdminPage() {
     }
   };
 
-  /** Les deux identifiants du brouillon, ou l'ancrage enregistré tant qu'on n'a rien tapé. */
+  /** Les trois identifiants du brouillon, ou l'ancrage enregistré tant qu'on n'a rien tapé. */
   const anchorFields = (t: IcTeam) =>
-    icAnchor[t.id] ?? { eventId: t.snEventId ?? "", snTeamId: t.snTeamId ?? "" };
+    icAnchor[t.id] ?? {
+      eventId: t.snEventId ?? "",
+      roundId: t.snRoundId ?? "",
+      snTeamId: t.snTeamId ?? "",
+    };
 
-  const editAnchor = (t: IcTeam, patch: { eventId?: string; snTeamId?: string }) =>
-    setIcAnchor((prev) => ({ ...prev, [t.id]: { ...anchorFields(t), ...patch } }));
+  const editAnchor = (
+    t: IcTeam,
+    patch: { eventId?: string; roundId?: string; snTeamId?: string },
+  ) => setIcAnchor((prev) => ({ ...prev, [t.id]: { ...anchorFields(t), ...patch } }));
 
   const saveAnchor = async (t: IcTeam) => {
-    const { eventId, snTeamId } = anchorFields(t);
+    const { eventId, roundId, snTeamId } = anchorFields(t);
     setIcBusy(true);
     setIcResult(null);
     try {
       const res = await fetch("/api/admin/interclub-teams", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "set_squashnet_event", teamId: t.id, eventId, snTeamId }),
+        body: JSON.stringify({
+          action: "set_squashnet_event",
+          teamId: t.id,
+          eventId,
+          roundId,
+          snTeamId,
+        }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
@@ -656,7 +672,13 @@ export default function AdminPage() {
       setIcTeams((prev) =>
         prev.map((x) =>
           x.id === t.id
-            ? { ...x, snEventId: eventId || null, snTeamId: snTeamId || null, snCheckedAt: null }
+            ? {
+                ...x,
+                snEventId: eventId || null,
+                snRoundId: roundId || null,
+                snTeamId: snTeamId || null,
+                snCheckedAt: null,
+              }
             : x,
         ),
       );
@@ -1406,12 +1428,24 @@ export default function AdminPage() {
                               </summary>
 
                               <p className="muted tiny">
-                                Les deux identifiants se lisent dans l&apos;URL de la page
-                                « équipes » du championnat sur squashnet
-                                (<code>?eventid=…&amp;teamid=…</code>). Ils vont ensemble :{" "}
-                                <strong>eventid</strong> dit quoi télécharger,{" "}
-                                <strong>teamid</strong> lesquelles des rencontres publiées sont
-                                les nôtres.
+                                Trois identifiants, et ils vont <strong>ensemble</strong>.{" "}
+                                <strong>eventid</strong> et <strong>teamid</strong> se lisent dans
+                                l&apos;URL de la page « équipes » de l&apos;équipe sur squashnet
+                                (<code>?eventid=…&amp;teamid=…</code>). La{" "}
+                                <strong>poule</strong> se lit sur cette même page, dans le code
+                                du tableau de la poule (<code>round_370138</code> ⇒ saisir{" "}
+                                <code>370138</code>).
+                              </p>
+                              {/* La poule N'EST PAS un raffinement : une épreuve en contient
+                                  plusieurs, et sans elle squashnet rend celle qu'il veut. Sur
+                                  notre propre critérium, c'était une poule où l'Yvette ne figure
+                                  pas — donc un import de zéro rencontre, muet. Le dire ici, c'est
+                                  éviter que quelqu'un laisse le champ vide en le croyant
+                                  facultatif. */}
+                              <p className="muted tiny">
+                                Sans la poule, l&apos;import rapporte <strong>zéro rencontre</strong>{" "}
+                                sans rien dire : une épreuve en contient plusieurs, et la
+                                fédération en rend une au hasard.
                               </p>
 
                               <div className="ic-sn-fields">
@@ -1421,6 +1455,14 @@ export default function AdminPage() {
                                   onChange={(ev) => editAnchor(t, { eventId: ev.target.value })}
                                   placeholder="eventid"
                                   aria-label={`Identifiant d'épreuve squashnet de ${t.name}`}
+                                />
+                                <input
+                                  value={anchorFields(t).roundId}
+                                  disabled={icBusy}
+                                  onChange={(ev) => editAnchor(t, { roundId: ev.target.value })}
+                                  placeholder="poule"
+                                  inputMode="numeric"
+                                  aria-label={`Identifiant de poule squashnet de ${t.name}`}
                                 />
                                 <input
                                   value={anchorFields(t).snTeamId}
@@ -1438,12 +1480,12 @@ export default function AdminPage() {
                               <button
                                 type="button"
                                 className="secondary"
-                                disabled={icCalBusy || !t.snEventId || !t.snTeamId}
+                                disabled={icCalBusy || !t.snEventId || !t.snTeamId || !t.snRoundId}
                                 onClick={() => previewCalendar(t)}
                                 title={
-                                  t.snEventId
+                                  t.snEventId && t.snRoundId && t.snTeamId
                                     ? "Télécharge le calendrier publié et montre l'écart, sans rien écrire."
-                                    : "Renseigne d'abord les deux identifiants."
+                                    : "Renseigne d'abord les trois identifiants."
                                 }
                               >
                                 {icCalBusy && icCal?.teamId !== t.id ? "…" : "Prévisualiser l'import"}

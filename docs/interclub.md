@@ -391,9 +391,17 @@ section `ic_a=393986`, qui rend un fragment HTML rendu serveur.
 Trois constats du site ont décidé de la conception, et ils se vérifient dans
 `src/lib/squashnet/calendar.test.ts` sur un fragment réel :
 
-1. **`teamid` ne filtre rien.** On reçoit l'événement entier (14 journées × 4 rencontres) ;
-   c'est `ownFixtures()` qui retient les lignes portant notre `data-teamid`. D'où **deux**
-   identifiants à renseigner par équipe, jamais un seul.
+1. **Une épreuve contient PLUSIEURS POULES, et `teamid` ne filtre rien.** Deux pièges distincts
+   qui se cumulent. D'abord `roundid` : sans lui, la fédération rend la poule qu'elle veut —
+   mesuré sur notre propre critérium, celle de Jeu de Paume, Montmartre, PUC et Vincennes, où
+   l'Yvette ne figure pas. Ensuite `teamid`, qui ne filtre pas : on reçoit la poule entière, et
+   c'est `ownFixtures()` qui retient les lignes portant notre `data-teamid`. D'où **trois**
+   identifiants à renseigner par équipe (`snEventId`, `snRoundId`, `snTeamId`), jamais deux.
+
+   La panne que ça évite est la plus vicieuse de toutes : sans la poule, l'import ne lève
+   aucune erreur, ne rend aucun 502, et annonce simplement « 0 rencontre publiée » — ce qui
+   ressemble exactement à une ligue qui n'a pas encore publié. La poule se lit sur la page
+   « Équipes » de l'équipe, dans le code du tableau (`<table id="round_370138">`).
 2. **Les journées non planifiées portent une date bouchon**, commune à plusieurs journées.
    Importée telle quelle, elle convoquerait l'équipe quatre fois le même soir. Plusieurs
    journées à la même date ⇒ `dateConfirmed: false`, la date s'affiche comme
@@ -401,6 +409,17 @@ Trois constats du site ont décidé de la conception, et ils se vérifient dans
 3. **Le jour de la semaine n'est pas garanti** — l'événement d'essai se joue le mardi, pas le
    jeudi. Rien ne code un jour en dur : la date vient du calendrier fédéral, et les vacances
    scolaires n'entrent nulle part dans le calcul (la ligue les a déjà retirées).
+
+**Le parseur est éprouvé sur le vrai calendrier de l'équipe.**
+`src/lib/squashnet/calendar.reel.test.ts` fige le fragment réel du critérium 2025-2026 (Hommes 4,
+poule IVD) capté sur squashnet, et vérifie les cinq journées de l'Yvette : leurs dates, leurs
+adversaires, domicile/extérieur, les gymnases, l'heure. C'est ce fichier qui a révélé l'affaire
+de la poule — un parseur vert sur des fragments d'école et muet sur la seule épreuve qui nous
+concerne n'aurait rien prouvé.
+
+Il documente au passage un cas que le modèle prévoyait sans l'avoir jamais vu : **J01 se joue
+APRÈS J02, J03 et J04** (le 15 juin, contre le 28 mai pour J02). La journée et la date ne vont
+pas dans le même ordre — c'est la justification, en vrai, du rapprochement par journée.
 
 **L'import se fait en deux temps, `preview` puis `apply`.** Ce qu'il écrit n'est pas une donnée
 d'affichage : c'est la date à laquelle une équipe se déplace. Un scraping qui casse — squashnet
@@ -665,7 +684,7 @@ score enregistré).
 | `GET/PUT /api/interclub/follows` | Mes abonnements |
 | `GET /api/directory` | Annuaire : membres opt-in ET joueurs sans compte (`kind`), avec équipe et classement |
 | `GET/POST /api/admin/interclub-teams` | Équipes, membres et joueurs sans compte, dont leur classement et leur rang mixte ; rapprochement squashnet à l'ajout et à la demande (**admin**) |
-| `POST /api/admin/interclub-teams` (actions `set_captain`, `set_squashnet_event`) | Capitaine de l'équipe · ancrage sur le championnat fédéral (**admin**) |
+| `POST /api/admin/interclub-teams` (actions `set_captain`, `set_squashnet_event`) | Capitaine de l'équipe · ancrage fédéral — **épreuve, poule ET équipe**, les trois ensemble ou aucun (**admin**) |
 | `POST /api/admin/interclub-calendar` | Import du calendrier : `preview` puis `apply` (**admin**) |
 | `GET /api/cron/interclub-availability` | Appel J-10, relance J-3, récap au capitaine |
 | `GET /api/cron/interclub-calendar` | Contrôle hebdomadaire de dérive — alerte, n'écrit rien |

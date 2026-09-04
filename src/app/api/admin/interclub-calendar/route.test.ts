@@ -114,7 +114,14 @@ const commencee = (over: Record<string, unknown> = {}) =>
   enBase({ matches: [{ gamesHome: 2, status: "done" }], ...over });
 
 beforeEach(() => {
-  h.team = { id: "t1", name: "Équipe 1", snEventId: EVENT, snTeamId: "161092", captainId: "c1" };
+  h.team = {
+    id: "t1",
+    name: "Équipe 1",
+    snEventId: EVENT,
+    snRoundId: "370138",
+    snTeamId: "161092",
+    captainId: "c1",
+  };
   h.fixtures = [];
   h.published = [];
   h.fetchThrows = false;
@@ -132,7 +139,24 @@ describe("préambule", () => {
   it("dit qu'une équipe SANS ancrage ne peut pas importer, plutôt que d'importer zéro rencontre", async () => {
     // « 0 rencontre trouvée » enverrait chercher la panne du côté de la fédération alors que la
     // configuration manque ici.
-    h.team = { id: "t1", name: "Équipe 1", snEventId: null, snTeamId: null, captainId: null };
+    h.team = {
+      id: "t1",
+      name: "Équipe 1",
+      snEventId: null,
+      snRoundId: null,
+      snTeamId: null,
+      captainId: null,
+    };
+    const res = await POST(req({ action: "preview", teamId: "t1" }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/pas rattachée/i);
+  });
+
+  it("refuse d'importer sans la POULE, même avec épreuve et équipe", async () => {
+    // C'est le cas qui ne se voit pas : sans `roundid`, squashnet rend une poule au hasard,
+    // `ownFixtures` n'y trouve pas notre équipe, et l'import annonce zéro rencontre sans la
+    // moindre erreur. On préfère refuser en le disant.
+    h.team = { ...(h.team as Record<string, unknown>), snRoundId: null };
     const res = await POST(req({ action: "preview", teamId: "t1" }));
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/pas rattachée/i);

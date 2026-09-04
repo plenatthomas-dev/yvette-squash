@@ -219,16 +219,31 @@ export function ownFixtures(ties: CalendarTie[], snTeamId: string): OwnTie[] {
 // --- Réseau ----------------------------------------------------------------
 
 /**
- * Télécharge et parse le calendrier d'un événement. Jette si squashnet ne répond pas — les
+ * Télécharge et parse le calendrier d'UNE POULE. Jette si squashnet ne répond pas — les
  * appelants (import admin, contrôle hebdomadaire) décident quoi en faire, l'un en le disant à
  * l'écran, l'autre en réessayant la semaine suivante.
+ *
+ * ⚠️ `roundId` DÉSIGNE LA POULE, ET IL N'EST PAS FACULTATIF EN PRATIQUE. Une épreuve fédérale
+ * en contient plusieurs (« Hommes 4 - Poule A », « Hommes 4 - Poule IVD »…), et sans lui le
+ * site rend celle qu'il veut. Mesuré sur notre propre critérium : sans `roundid`, la réponse
+ * était la poule de Jeu de Paume, Montmartre, PUC et Vincennes — où l'Yvette ne figure pas.
+ * L'import rapportait donc zéro rencontre, sans erreur et sans explication, ce qui est la pire
+ * forme de panne. Il se lit dans l'identifiant du tableau de la poule (`round_<id>`) sur la
+ * page « Équipes » de l'équipe.
+ *
+ * Il reste typé nullable parce qu'une équipe peut n'être pas encore ancrée ; l'appel part alors
+ * sans, et rend la poule par défaut. C'est aux routes d'exiger les trois identifiants.
  */
-export async function fetchTeamCalendar(eventId: string): Promise<CalendarTie[]> {
+export async function fetchTeamCalendar(
+  eventId: string,
+  roundId: string | null = null,
+): Promise<CalendarTie[]> {
   const html = await postAjax({
     ic_a: CALENDAR_ACTION,
     mustache: "1",
     ic_ajax: "1",
     eventid: eventId,
+    ...(roundId ? { roundid: roundId } : {}),
   });
   return parseTeamCalendar(html);
 }

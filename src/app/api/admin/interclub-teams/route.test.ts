@@ -409,52 +409,69 @@ describe("POST set_captain", () => {
 
 // L'ANCRAGE FÉDÉRAL — de quel championnat cette équipe joue le calendrier.
 describe("POST set_squashnet_event", () => {
+  // L'ancrage réel de l'équipe 1 sur le critérium 2025-2026, poule IVD (Hommes 4).
   const EVENT = "879981be57df0005cac674dce4378296";
+  const POULE = "370138";
+  const EQUIPE = "161092";
+  const ancrage = (over: Record<string, unknown> = {}) => ({
+    action: "set_squashnet_event",
+    teamId: "t1",
+    eventId: EVENT,
+    roundId: POULE,
+    snTeamId: EQUIPE,
+    ...over,
+  });
 
-  it("enregistre les deux identifiants", async () => {
-    const res = await POST(
-      post({ action: "set_squashnet_event", teamId: "t1", eventId: EVENT, snTeamId: "161092" }),
-    );
+  it("enregistre les TROIS identifiants", async () => {
+    const res = await POST(post(ancrage()));
     expect(res.status).toBe(200);
-    expect(h.teamUpdated?.data).toMatchObject({ snEventId: EVENT, snTeamId: "161092" });
+    expect(h.teamUpdated?.data).toMatchObject({
+      snEventId: EVENT,
+      snRoundId: POULE,
+      snTeamId: EQUIPE,
+    });
   });
 
   it("efface l'empreinte en changeant d'ancrage", async () => {
     // La garder ferait passer le premier contrôle du NOUVEAU championnat pour « rien n'a
     // bougé », et l'écart resterait invisible jusqu'à la saison suivante.
-    await POST(post({ action: "set_squashnet_event", teamId: "t1", eventId: EVENT, snTeamId: "161092" }));
+    await POST(post(ancrage()));
     expect(h.teamUpdated?.data).toMatchObject({ snCalendarHash: null, snCheckedAt: null });
   });
 
-  it("REFUSE une moitié d'ancrage", async () => {
-    // Les deux sont nécessaires : l'épreuve dit quoi télécharger, l'équipe dit lesquelles des
-    // ~56 rencontres rendues sont les nôtres. N'en poser qu'un rendrait l'import impossible
-    // tout en donnant l'impression d'être configuré.
-    expect(
-      (await POST(post({ action: "set_squashnet_event", teamId: "t1", eventId: EVENT }))).status,
-    ).toBe(400);
-    expect(
-      (await POST(post({ action: "set_squashnet_event", teamId: "t1", snTeamId: "161092" }))).status,
-    ).toBe(400);
+  it("REFUSE un ancrage incomplet, quelle que soit la pièce qui manque", async () => {
+    // Les trois sont nécessaires : l'épreuve dit quoi télécharger, la POULE laquelle des
+    // plusieurs qu'elle contient, l'équipe lesquelles des rencontres rendues sont les nôtres.
+    //
+    // ⚠️ La poule est la pièce dont l'absence coûte le plus cher, parce qu'elle ne provoque
+    // AUCUNE erreur : squashnet rend alors une poule au hasard, `ownFixtures` n'y trouve pas
+    // notre équipe, et l'import annonce zéro rencontre — ce qui ressemble à une ligue qui n'a
+    // rien publié. Deux champs sur trois donneraient l'impression d'être configuré.
+    for (const manquant of ["eventId", "roundId", "snTeamId"] as const) {
+      const corps = ancrage({ [manquant]: undefined });
+      delete (corps as Record<string, unknown>)[manquant];
+      expect((await POST(post(corps))).status).toBe(400);
+    }
     expect(h.teamUpdated).toBeNull();
   });
 
   it("refuse des identifiants malformés", async () => {
-    // Les contrôler ici évite un import qui échoue plus tard sans qu'on sache lequel des deux
+    // Les contrôler ici évite un import qui échoue plus tard sans qu'on sache lequel des trois
     // champs était fautif.
-    expect(
-      (await POST(post({ action: "set_squashnet_event", teamId: "t1", eventId: "pas-un-hash", snTeamId: "161092" }))).status,
-    ).toBe(400);
-    expect(
-      (await POST(post({ action: "set_squashnet_event", teamId: "t1", eventId: EVENT, snTeamId: "abc" }))).status,
-    ).toBe(400);
+    expect((await POST(post(ancrage({ eventId: "pas-un-hash" })))).status).toBe(400);
+    expect((await POST(post(ancrage({ snTeamId: "abc" })))).status).toBe(400);
+    expect((await POST(post(ancrage({ roundId: "poule-IVD" })))).status).toBe(400);
     expect(h.teamUpdated).toBeNull();
   });
 
-  it("accepte de tout effacer avec deux champs vides", async () => {
-    const res = await POST(post({ action: "set_squashnet_event", teamId: "t1", eventId: "", snTeamId: "" }));
+  it("accepte de tout effacer avec trois champs vides", async () => {
+    const res = await POST(post(ancrage({ eventId: "", roundId: "", snTeamId: "" })));
     expect(res.status).toBe(200);
-    expect(h.teamUpdated?.data).toMatchObject({ snEventId: null, snTeamId: null });
+    expect(h.teamUpdated?.data).toMatchObject({
+      snEventId: null,
+      snRoundId: null,
+      snTeamId: null,
+    });
   });
 
   it("404 quand l'interclub est coupé", async () => {

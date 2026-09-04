@@ -634,6 +634,11 @@ model InterclubTeam {
   // ne filtre RIEN, il rend tout l'événement). NULL = pas d'import possible pour cette équipe.
   snEventId      String?
   snTeamId       String?
+  // La POULE dans cette épreuve (l'identifiant du tableau `round_<id>` sur la page « Équipes »).
+  // Sans elle, squashnet rend la poule de son choix : mesuré sur notre critérium, une poule où
+  // l'équipe ne figure pas — donc un import de zéro rencontre, muet. Les TROIS identifiants vont
+  // ensemble ou pas du tout.
+  snRoundId      String?
   // Empreinte du dernier calendrier téléchargé, et date du dernier contrôle.
   //
   // L'empreinte est ce qui rend le contrôle hebdomadaire SUPPORTABLE : sans elle, un report
