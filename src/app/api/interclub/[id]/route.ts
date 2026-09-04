@@ -129,6 +129,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.venueAddress = parseOptionalText(body.venueAddress, MAX_VENUE_ADDRESS_LEN);
   }
   if (typeof body.home === "boolean") data.home = body.home;
+  // LE RATTRAPAGE DE LA DATE PRÉVISIONNELLE. La détection automatique a deux angles morts
+  // (cf. `ownFixtures`, lib/squashnet/calendar.ts) : deux vraies journées le même soir passent
+  // pour prévisionnelles, et une seule journée non planifiée passe pour ferme. C'est ce booléen,
+  // posé à la main, qui les corrige — et c'est pour lui que `dateConfirmed` est une colonne et
+  // non un calcul refait à chaque lecture.
   if (typeof body.dateConfirmed === "boolean") data.dateConfirmed = body.dateConfirmed;
 
   if (Object.keys(data).length === 0) {
@@ -169,18 +174,48 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 // DELETE /api/interclub/{id} : créateur ou admin (supprime matchs et jeux en cascade).
+//
+// ⚠️ UNE RENCONTRE COMMENCÉE NE SE SUPPRIME PLUS QUE PAR UN ADMIN.
+//
+// La suppression est DÉFINITIVE et emporte en cascade les simples, le jeu par jeu et les
+// disponibilités. Tant que ces lignes ne servaient qu'à afficher un score passé, la perte était
+// regrettable ; depuis que les statistiques de joueur s'en déduisent, un seul clic efface le
+// palmarès de quatre personnes — et rien ne le dit à l'écran, le total se contentant de
+// diminuer.
+//
+// Le `PATCH` refuse depuis toujours de déplacer une rencontre entamée (409). Le chemin de la
+// SUPPRESSION, plus destructeur, était pourtant resté le plus permissif des deux. L'admin
+// garde la main : une soirée créée par erreur et marquée par erreur doit rester effaçable.
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const access = await requireInterclubMember(req);
   if (!access.ok) return access.response;
   const { session } = access;
   const { id } = await params;
-  const f = await prisma.interclub.findUnique({ where: { id }, select: { createdById: true } });
+  const f = await prisma.interclub.findUnique({
+    where: { id },
+    select: {
+      createdById: true,
+      matchCount: true,
+      matches: { select: { gamesHome: true, status: true } },
+    },
+  });
   if (!f) {
     return NextResponse.json({ error: "Rencontre introuvable" }, { status: 404 });
   }
 
-  if (f.createdById !== session.userId && !isAdminEmail(session.email)) {
+  const admin = isAdminEmail(session.email);
+  if (f.createdById !== session.userId && !admin) {
     return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
+  }
+  if (!admin && derivedStatus(f.matchCount, f.matches) !== "scheduled") {
+    return NextResponse.json(
+      {
+        error:
+          "Rencontre déjà commencée : ses résultats comptent dans les statistiques. " +
+          "Demande à un admin de la supprimer.",
+      },
+      { status: 409 },
+    );
   }
 
   await prisma.interclub.delete({ where: { id } });

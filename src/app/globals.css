@@ -5550,8 +5550,9 @@ body[data-bottombar] .install-banner {
   color: var(--pico-contrast);
 }
 
-/* Les averages en toutes lettres, pour nous seulement : ce sont eux qui départagent un nul 2-2
-   et deux équipes à égalité de points. Dix colonnes de plus les auraient rendus illisibles. */
+/* Nos chiffres en toutes lettres, pour nous seulement — l'écran les appelle « Nos stats », le
+   règlement les appelle des averages : ce sont eux qui départagent un nul 2-2 et deux équipes à
+   égalité de points. Dix colonnes de plus les auraient rendus illisibles. */
 .ic-standings-avg {
   margin: 8px 0 0;
   font-variant-numeric: tabular-nums;
@@ -5562,4 +5563,106 @@ body[data-bottombar] .install-banner {
    date d'hier ou de trois semaines. */
 .ic-sn > button.ic-sn-standings {
   margin-bottom: 6px;
+}
+
+/* ── LE PALMARÈS DES JOUEURS ───────────────────────────────────────────────────────────────
+   Même dispositif que le classement de poule, et c'est voulu : les deux répondent à « où en
+   est-on ? », l'un pour l'équipe, l'autre pour les joueurs. Replié par défaut, il ne charge
+   rien tant qu'on ne l'ouvre pas — la requête joint toute l'histoire du club. */
+.ic-stats {
+  margin: 10px 0 4px;
+  padding: 8px 12px;
+  background: var(--sunken);
+  border-radius: var(--radius-sm);
+}
+.ic-stats > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 8px 10px;
+  margin: -8px -12px;
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: var(--radius-sm);
+}
+.ic-stats-title {
+  font-weight: 700;
+  margin-right: auto;
+}
+.ic-stats-msg,
+.ic-stats-note {
+  margin: 10px 0 0;
+}
+
+.ic-stats-season {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+.ic-stats-season select {
+  width: auto;
+  margin: 0;
+  padding: 4px 26px 4px 8px;
+  height: auto;
+  font-size: 0.8rem;
+}
+
+.ic-stats-scroll {
+  overflow-x: auto;
+  margin: 8px 0 0;
+}
+.ic-stats-table {
+  width: 100%;
+  margin: 0;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+.ic-stats-table th,
+.ic-stats-table td {
+  padding: 4px 5px;
+  border: none;
+  border-bottom: 1px solid var(--pico-card-border-color);
+  text-align: center;
+  white-space: nowrap;
+  background: none;
+}
+.ic-stats-table thead th {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--pico-muted-color);
+}
+.ic-stats-table tbody tr:last-child th,
+.ic-stats-table tbody tr:last-child td {
+  border-bottom: none;
+}
+/* Le nom prend ce qui reste et se coupe ; les autres colonnes font deux caractères. Assez
+   spécifique pour l'emporter sur l'alignement centré des cellules. */
+.ic-stats-table th.ic-stats-name,
+.ic-stats-table td.ic-stats-name {
+  width: 99%;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  font-weight: 600;
+}
+.ic-stats-pct {
+  font-weight: 700;
+  color: var(--pico-contrast);
+}
+/* « hors appli » : une précision, pas un statut. Elle ne doit jamais peser autant que le nom. */
+.ic-stats-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--pico-muted-color);
+  white-space: nowrap;
 }

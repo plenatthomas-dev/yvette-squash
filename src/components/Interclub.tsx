@@ -18,6 +18,7 @@ import InterclubLive from "@/components/InterclubLive";
 import { InterclubAvailability } from "@/components/InterclubAvailability";
 import { CLUB_TZ } from "@/lib/time";
 import type { TieOutcome } from "@/lib/interclub-db";
+import { InterclubStats } from "@/components/InterclubStats";
 import {
   COLOR_PRESETS,
   colorsTooClose,
@@ -66,11 +67,6 @@ import { compareRosterOrder, isNC, lineupOrderConflict, type OrderedSlot } from 
 // chaque écriture. Le direct, lui, sonde — mais c'est `InterclubLive` qui s'en charge, et
 // seulement quand il y a quelque chose à regarder.
 
-/**
- * Une équipe, telle que la liste et la fiche la rendent. `captainName` n'accompagne que la
- * FICHE d'une rencontre (`serializeInterclub`) : la liste des équipes du sélecteur n'en a pas
- * besoin, d'où un champ facultatif plutôt que deux types presque identiques.
- */
 /** Une ligne du classement de la poule, telle que la fédération la publie. */
 type StandingRow = {
   rank: number;
@@ -90,6 +86,11 @@ type StandingRow = {
   rallies: { won: number; lost: number; diff: number };
 };
 
+/**
+ * Une équipe, telle que la liste et la fiche la rendent. `captainName` n'accompagne que la
+ * FICHE d'une rencontre (`serializeInterclub`) : la liste des équipes du sélecteur n'en a pas
+ * besoin, d'où un champ facultatif plutôt que deux types presque identiques.
+ */
 type Team = {
   id: string;
   name: string;
@@ -289,7 +290,7 @@ function TieOutcomeLine({ outcome }: { outcome: TieOutcome }) {
   );
 }
 
-/** « 2e », « 1er ». Le rang se lit d'un coup d'oeil, pas en déchiffrant un nombre nu. */
+/** « 2e », « 1er ». Le rang se lit d'un coup d'œil, pas en déchiffrant un nombre nu. */
 function rangCourt(n: number): string {
   return n === 1 ? "1er" : `${n}e`;
 }
@@ -730,8 +731,8 @@ export default function Interclub({
     // CE QUI EST JOUÉ DESCEND, D'ABORD ET AVANT TOUT.
     //
     // Le tri se faisait sur la seule date, et le résultat était contre-intuitif : une
-    // rencontre terminée hier passait devant quatre rencontres à venir de la semaine
-    // dernière restées sans score. On ouvrait l'écran sur du passé.
+    // rencontre terminée hier passait devant quatre rencontres de la semaine dernière
+    // restées sans score, donc encore à traiter. On ouvrait l'écran sur du passé.
     //
     // L'état prime donc sur la date. « À venir » et « en cours » restent ensemble en tête —
     // c'est ce qu'on vient chercher — et le passé se consulte en dessous.
@@ -782,6 +783,11 @@ export default function Interclub({
             <StandingsTable team={t} />
           </div>
         ))}
+
+      {/* Le palmarès suit l'onglet comme le classement, et se place juste après lui : les deux
+          répondent à la même curiosité — « où en est-on ? » — l'une pour l'équipe, l'autre pour
+          les joueurs. Il ne charge rien tant qu'on ne l'ouvre pas. */}
+      <InterclubStats teamId={activeTab === "all" ? null : activeTab} onExpired={stableExpired} />
 
       {rows.length === 0 ? (
         <EmptyState icon="🏸" text="Aucune rencontre pour le moment." />
@@ -844,8 +850,6 @@ export default function Interclub({
                     </span>
                   )}
                 </span>
-                {/* Le verdict de la ligue, seulement quand il y en a un : `outcome` est nul
-                    tant que la rencontre n'est pas finie. */}
                 {f.outcome && <TieOutcomeLine outcome={f.outcome} />}
                 {f.division && <span className="ic-division">{f.division}</span>}
               </button>

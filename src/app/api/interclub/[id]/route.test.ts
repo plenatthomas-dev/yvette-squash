@@ -263,6 +263,48 @@ describe("DELETE /api/interclub/{id}", () => {
     h.session = { userId: "autre", email: "CHEF@Example.com" };
     expect((await DELETE(req(), ctx)).status).toBe(200);
   });
+
+  // LA GARDE VENUE AVEC LES STATISTIQUES. Tant qu'un score n'existait que sur sa propre carte,
+  // supprimer une rencontre entamée ne coûtait que cette carte. Depuis que le palmarès des
+  // joueurs se déduit des simples terminés, la même suppression retire des victoires du
+  // classement de quelqu'un — sans que personne ne s'en aperçoive. Le créateur perd donc le
+  // droit d'effacer ce qu'il a commencé à marquer.
+  it("409 pour le CRÉATEUR dès que la rencontre est entamée", async () => {
+    h.fixture = fixture({ matches: [match({ status: "live" })] });
+    const res = await DELETE(req(), ctx);
+    expect(res.status).toBe(409);
+    expect(h.deleted).toBeNull();
+    // Le message dit POURQUOI et vers qui se tourner : un refus muet enverrait sur le support.
+    expect((await res.json()).error).toMatch(/statistiques/);
+  });
+
+  it("409 aussi quand elle est terminée", async () => {
+    h.fixture = fixture({
+      matches: [1, 2, 3, 4].map((n) =>
+        match({ id: `m${n}`, order: n, status: "done", gamesHome: 3, gamesAway: 0 }),
+      ),
+    });
+    expect((await DELETE(req(), ctx)).status).toBe(409);
+    expect(h.deleted).toBeNull();
+  });
+
+  // L'ADMIN GARDE LA MAIN, et c'est le point de la garde : une soirée créée par erreur puis
+  // marquée par erreur doit rester effaçable, sinon la base se remplit de faux résultats
+  // que le palmarès compte pour vrais.
+  it("laisse passer l'admin sur une rencontre entamée", async () => {
+    h.session = { userId: "autre", email: "chef@example.com" };
+    h.fixture = fixture({ matches: [match({ status: "live" })] });
+    expect((await DELETE(req(), ctx)).status).toBe(200);
+    expect(h.deleted).toBe("f1");
+  });
+
+  // L'ORDRE DES DEUX REFUS. Un quidam sur une rencontre entamée doit lire « accès réservé »,
+  // pas « demande à un admin » : le second lui ferait croire qu'il aurait pu, sans le score.
+  it("le 403 passe AVANT le 409", async () => {
+    h.session = { userId: "quidam", email: "quidam@example.com" };
+    h.fixture = fixture({ matches: [match({ status: "live" })] });
+    expect((await DELETE(req(), ctx)).status).toBe(403);
+  });
 });
 
 // LE PATCH — la route qui manquait.
