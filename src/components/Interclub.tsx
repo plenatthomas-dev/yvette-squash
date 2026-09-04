@@ -214,6 +214,17 @@ const OUTCOME_LABEL: Record<TieOutcome["result"], string> = {
   drawUnbroken: "Nul",
 };
 
+/**
+ * Les cinq issues ramenées aux TROIS couleurs qui se distinguent d'un coup d'œil.
+ *
+ * Gagné, perdu, et « quelque chose entre les deux » : distinguer visuellement le nul gagné du
+ * nul perdu demanderait deux teintes voisines, que personne ne séparerait en parcourant une
+ * liste. La nuance est dans la ligne de résultat, qui l'écrit en toutes lettres.
+ */
+function issueClass(r: TieOutcome["result"]): "win" | "loss" | "draw" {
+  return r === "win" ? "win" : r === "loss" ? "loss" : "draw";
+}
+
 /** Le sigle du classement, quand il y en a un. */
 const OUTCOME_TAG: Partial<Record<TieOutcome["result"], string>> = {
   drawWon: "E+",
@@ -318,8 +329,11 @@ function StandingsTable({ team }: { team: Team }) {
     <details className="ic-standings">
       <summary>
         <span className="ic-standings-title">Classement</span>
+        {/* Le rang en PASTILLE : c'est la réponse qu'on vient chercher, et noyée dans la
+            phrase elle se lisait comme une précision de plus. */}
+        {nous && <span className="ic-standings-rank">{rangCourt(nous.rank)}</span>}
         <span className="ic-standings-sub muted tiny">
-          {nous ? `${rangCourt(nous.rank)} sur ${rows.length}` : `${rows.length} équipes`}
+          {nous ? `sur ${rows.length}` : `${rows.length} équipes`}
           {/* La date de relevé n'est pas décorative : sans elle, un classement figé depuis
               trois semaines s'affiche exactement comme un classement à jour. */}
           {team.standingsAt && ` · au ${jourCourt(team.standingsAt)}`}
@@ -380,16 +394,12 @@ function StandingsTable({ team }: { team: Team }) {
           les rendrait illisibles sur un téléphone, les taire les rendrait introuvables. */}
       {nous && (
         <p className="ic-standings-avg muted tiny">
-          Nos averages — matchs {nous.matches.won}&ndash;{nous.matches.lost} (
+          Nos stats — matchs {nous.matches.won}&ndash;{nous.matches.lost} (
           {signe(nous.matches.diff)}) · jeux {nous.games.won}&ndash;{nous.games.lost} (
           {signe(nous.games.diff)}) · points {nous.rallies.won}&ndash;{nous.rallies.lost} (
           {signe(nous.rallies.diff)})
         </p>
       )}
-      <p className="ic-standings-src muted tiny">
-        Publié par la ligue sur squashnet. Victoire 3 pts, nul gagné 2, nul perdu 1, défaite 0 —
-        un nul se départage à l&apos;average de jeux, puis de points.
-      </p>
     </details>
   );
 }
@@ -717,6 +727,21 @@ export default function Interclub({
   // « c'est quand, la prochaine ? », et il fallait faire défiler pour y répondre.
   const aujourdhui = todayISO();
   const visibleRows = [...filtered].sort((a, b) => {
+    // CE QUI EST JOUÉ DESCEND, D'ABORD ET AVANT TOUT.
+    //
+    // Le tri se faisait sur la seule date, et le résultat était contre-intuitif : une
+    // rencontre terminée hier passait devant quatre rencontres à venir de la semaine
+    // dernière restées sans score. On ouvrait l'écran sur du passé.
+    //
+    // L'état prime donc sur la date. « À venir » et « en cours » restent ensemble en tête —
+    // c'est ce qu'on vient chercher — et le passé se consulte en dessous.
+    const finiA = a.status === "done";
+    const finiB = b.status === "done";
+    if (finiA !== finiB) return finiA ? 1 : -1;
+    // Les terminées : la plus récente d'abord, on remonte le temps.
+    if (finiA) return b.date.localeCompare(a.date);
+    // Les autres : la plus PROCHE d'abord. Une date déjà passée mais sans résultat reste
+    // devant — c'est justement une rencontre dont il manque quelque chose.
     const aVenirA = a.date >= aujourdhui;
     const aVenirB = b.date >= aujourdhui;
     if (aVenirA !== aVenirB) return aVenirA ? -1 : 1;
@@ -772,7 +797,16 @@ export default function Interclub({
           )}
           {visibleRows.map((f) => (
             <li key={f.id}>
-              <button className={`ic-row ic-row-${f.status}`} onClick={() => setOpenId(f.id)}>
+              {/* L'issue de la rencontre passe DANS la classe de la ligne : « 2-2 » sans
+                  couleur ne dit pas si la soirée a été bonne, et on parcourt une saison à
+                  l'œil, pas en lisant chaque ligne. Le voile pleine ligne reste réservé à
+                  « en cours » (DESIGN.md) : ici c'est un filet et le score, pas un fond. */}
+              <button
+                className={`ic-row ic-row-${f.status}${
+                  f.outcome ? ` ic-issue-${issueClass(f.outcome.result)}` : ""
+                }`}
+                onClick={() => setOpenId(f.id)}
+              >
                 <span className="ic-row-head">
                   <span className="ic-date" title={`Date de la rencontre : ${shortDate(f.date)}`}>
                     {f.round && <span className="ic-round">{f.round}</span>}

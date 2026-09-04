@@ -167,3 +167,68 @@ describe("la ligne de résultat sur la carte d'une rencontre", () => {
     expect(screen.getByText(/jeux 10–4/).className).not.toContain("is-decisive");
   });
 });
+
+describe("la ligne porte l'issue, et l'ordre met le passé en dernier", () => {
+  const issue = (result: string) => ({
+    result,
+    leaguePoints: result === "win" ? 3 : result === "loss" ? 0 : 2,
+    matches: { home: 2, away: 2 },
+    games: { home: 9, away: 8 },
+    rallies: { home: 153, away: 161 },
+    decidedBy: result === "win" || result === "loss" ? "matches" : "games",
+  });
+
+  it("teinte la ligne selon l'issue — gagnée, perdue, nulle", async () => {
+    // Trois classes et pas cinq : le nul gagné et le nul perdu partagent la couleur du nul.
+    // Deux teintes voisines ne se sépareraient pas en parcourant une liste, et la nuance est
+    // déjà écrite en toutes lettres dans la ligne de résultat.
+    vi.stubGlobal(
+      "fetch",
+      servir([
+        carte({ id: "a", date: "2026-06-18", outcome: issue("win") }),
+        carte({ id: "b", date: "2026-06-11", outcome: issue("loss") }),
+        carte({ id: "c", date: "2026-06-04", outcome: issue("drawLost") }),
+      ]),
+    );
+    monter();
+    await waitFor(() => expect(document.querySelectorAll(".ic-row")).toHaveLength(3));
+    const classes = [...document.querySelectorAll(".ic-row")].map((r) => r.className);
+    expect(classes.join(" ")).toContain("ic-issue-win");
+    expect(classes.join(" ")).toContain("ic-issue-loss");
+    expect(classes.join(" ")).toContain("ic-issue-draw");
+  });
+
+  it("ne teinte RIEN tant que la rencontre n'est pas finie", async () => {
+    vi.stubGlobal(
+      "fetch",
+      servir([carte({ status: "scheduled", score: { home: 0, away: 0 }, outcome: null })]),
+    );
+    monter();
+    await waitFor(() => expect(document.querySelector(".ic-row")).toBeTruthy());
+    expect(document.querySelector(".ic-row")?.className).not.toContain("ic-issue-");
+  });
+
+  it("RENVOIE LE JOUÉ EN BAS, même s'il est plus récent", async () => {
+    // Le tri se faisait sur la seule date : une rencontre terminée hier passait devant
+    // quatre rencontres restées sans score, et on ouvrait l'écran sur du passé.
+    vi.stubGlobal(
+      "fetch",
+      servir([
+        carte({ id: "finie", date: "2026-06-18", opponent: "Verrieres 3", outcome: issue("win") }),
+        carte({
+          id: "attente",
+          date: "2026-06-11",
+          opponent: "Liberty 2",
+          status: "scheduled",
+          score: { home: 0, away: 0 },
+          outcome: null,
+        }),
+      ]),
+    );
+    monter();
+    await waitFor(() => expect(document.querySelectorAll(".ic-row")).toHaveLength(2));
+    const noms = [...document.querySelectorAll(".ic-opponent")].map((n) => n.textContent ?? "");
+    expect(noms[0]).toContain("Liberty 2");
+    expect(noms[1]).toContain("Verrieres 3");
+  });
+});

@@ -222,6 +222,32 @@ n'ont rien d'urgent à dire et se lisent à leur pastille.
   12,10:1 (sombre) · 14,37:1 (rose). En thème rose il garde sa teinte ambre — c'est précisément
   son écart avec le rose ambiant qui le rend repérable.
 
+### Issue : ce qui s'est bien passé, ce qui s'est mal passé
+
+Deux familles de plus, **bleu** et **rouge**, pour dire l'issue d'une chose finie — une rencontre
+gagnée ou perdue, une disponibilité donnée ou refusée. L'ambre du voile d'état tient le troisième
+cas, « entre les deux » : nul, incertain.
+
+- **Voile Favorable** (`--good-wash`) et **Bord Favorable** (`--good-edge`) : `#eef4fe`/`#3f7ad1`
+  clair, `#131c29`/`#4a7cc0` sombre, `#dfe9fa`/`#4271b8` rose.
+- **Voile Défavorable** (`--bad-wash`) et **Bord Défavorable** (`--bad-edge`) : `#fdeeed`/`#d9534f`
+  clair, `#271515`/`#b05450` sombre, `#ffd7d7`/`#c25350` rose.
+
+**Bleu et non vert pour « gagné ».** C'est la Règle du Vert Actionnable appliquée là où elle
+coûte quelque chose : une victoire est le résultat le plus positif du produit, et c'est
+exactement ce qui rend tentant de la peindre en vert. Mais elle n'est pas un bouton — on ne
+clique pas sur une victoire. Le bleu ne porte aucune autre charge dans ce vocabulaire, il est
+donc libre.
+
+**Le voile pleine ligne reste réservé à « en cours ».** L'issue d'une rencontre se dit par un
+FILET à gauche et par la couleur du score, jamais par un fond. Peindre les lignes terminées
+donnerait de la concurrence au seul état qui demande qu'on regarde maintenant, et le viderait de
+son sens — une liste de saison est presque entièrement faite de rencontres terminées.
+
+L'exception est le bloc de **disponibilités**, où le fond porte l'état : il ne s'affiche que sur
+une rencontre à venir, donc aucun voile « en cours » ne peut y entrer en concurrence, et on y
+balaie une liste de noms à l'œil plutôt qu'on ne la lit ligne à ligne.
+
 ### Couleurs volontairement hors thème
 
 Deux paires échappent au système, et c'est délibéré. Toutes deux fixent **fond ET texte

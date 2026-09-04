@@ -92,9 +92,10 @@ describe("le classement de la poule", () => {
   it("annonce notre rang et la date du relevé sans qu'on ait à déplier", async () => {
     monter();
     await waitFor(() => expect(screen.getByText("Classement")).toBeTruthy());
-    // « 2e sur 3 » répond à la question courante ; ouvrir devient un choix, pas un passage
-    // obligé.
-    expect(screen.getByText(/2e sur 3/)).toBeTruthy();
+    // Le rang répond à la question courante ; ouvrir devient un choix, pas un passage obligé.
+    // Il est en PASTILLE, séparé du « sur 3 » : c'est ce qu'on vient chercher.
+    expect(screen.getByText("2e")).toBeTruthy();
+    expect(screen.getByText(/sur 3/)).toBeTruthy();
     expect(screen.getByText(/4 sept\./)).toBeTruthy();
   });
 
@@ -114,10 +115,10 @@ describe("le classement de la poule", () => {
     expect(screen.getByText(/3 équipes/)).toBeTruthy();
   });
 
-  it("donne nos averages en toutes lettres — ce sont eux qui départagent", async () => {
+  it("donne nos stats en toutes lettres — les averages départagent", async () => {
     monter();
     await screen.findByText("Classement");
-    const avg = screen.getByText(/Nos averages/);
+    const avg = screen.getByText(/Nos stats/);
     expect(avg.textContent).toContain("jeux 39–19 (+20)");
     expect(avg.textContent).toContain("points 559–436 (+123)");
     expect(avg.textContent).toContain("matchs 11–4 (+7)");

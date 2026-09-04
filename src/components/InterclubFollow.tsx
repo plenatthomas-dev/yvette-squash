@@ -141,7 +141,7 @@ export default function InterclubFollow({
 
   return (
     <div className="ic-follow">
-      <h4 className="ic-follow-title">Être prévenu</h4>
+      <h4 className="ic-follow-title">Notifications</h4>
       {teams.map((t) => (
         <label key={t.id} className="ic-follow-row">
           <span>{t.name}</span>

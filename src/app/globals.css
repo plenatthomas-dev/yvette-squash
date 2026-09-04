@@ -73,6 +73,12 @@
      d'urgent, et un accent plein sur un état inactif est du bruit. */
   --live-wash: #fff8e6;
   --live-edge: #f0b429;
+  /* Ce qui s'est bien / mal passé. Voir le commentaire du thème sombre pour le pourquoi
+     du bleu plutôt que du vert. */
+  --good-wash: #eef4fe;
+  --good-edge: #3f7ad1;
+  --bad-wash: #fdeeed;
+  --bad-edge: #d9534f;
   --accent: #2f6fe0;
   /* Encre à poser SUR --accent (fond plein : segment actif, pastille). Le blanc ne tient le
      seuil que sur l'accent clair — 4,70:1 ici, mais 3,22:1 sur le bleu du thème sombre, d'où
@@ -157,6 +163,13 @@
     --sunken: #12161d;
     --live-wash: #2a2314;
     --live-edge: #8a6a1f;
+    /* BLEU ET NON VERT pour « gagné » : Règle du Vert Actionnable — une victoire est un état,
+       pas un bouton, et le vert du produit appartient à ce qu'on peut toucher. Le bleu ne
+       porte aucune autre charge dans ce vocabulaire. L'ambre existant sert le nul. */
+    --good-wash: #131c29;
+    --good-edge: #4a7cc0;
+    --bad-wash: #271515;
+    --bad-edge: #b05450;
     /* Muted relevé de #7b8495 : il tombait à 4,44:1 sur les cartes et 4,18:1 sur les
        encarts, sous le seuil de 4,5. Touche TOUT le texte secondaire du thème sombre. */
     --pico-muted-color: #8b94a5;
@@ -204,6 +217,10 @@
   --sunken: #12161d;
   --live-wash: #2a2314;
   --live-edge: #8a6a1f;
+  --good-wash: #131c29;
+  --good-edge: #4a7cc0;
+  --bad-wash: #271515;
+  --bad-edge: #b05450;
   /* Cf. bloc prefers-color-scheme ci-dessus : #7b8495 échouait à 4,44:1 / 4,18:1. */
   --pico-muted-color: #8b94a5;
   --accent: #4f8cff;
@@ -297,6 +314,10 @@
   --sunken: #ffd5ea;
   --live-wash: #ffe8cf;
   --live-edge: #d98a2b;
+  --good-wash: #dfe9fa;
+  --good-edge: #4271b8;
+  --bad-wash: #ffd7d7;
+  --bad-edge: #c25350;
   --accent: #c8008f;
   --accent-fg: #ffffff; /* 5,45:1 sur ce magenta */
   --notice-bg: #ffdcef;
@@ -4131,6 +4152,22 @@ body[data-bottombar] .install-banner {
 }
 .ic-row-live:hover { border-color: var(--live-edge); }
 
+/* L'ISSUE D'UNE RENCONTRE TERMINÉE — un filet et le score, jamais un voile.
+   « 2-2 » ne dit pas si la soirée a été bonne, et une saison se parcourt à l'œil : la ligne
+   doit se lire sans qu'on ait à déchiffrer chaque score. Mais le VOILE pleine ligne reste
+   réservé à « en cours » (DESIGN.md, Voile d'état) — c'est le seul état qui demande qu'on
+   regarde MAINTENANT, et lui donner de la concurrence le viderait de son sens.
+   Le filet est le même dispositif que sur les lignes de disponibilité : cohérent, et il ne
+   consomme pas de fond. */
+.ic-row.ic-issue-win { border-left: 3px solid var(--good-edge); }
+.ic-row.ic-issue-loss { border-left: 3px solid var(--bad-edge); }
+.ic-row.ic-issue-draw { border-left: 3px solid var(--live-edge); }
+/* Le score prend la couleur de l'issue : c'est le chiffre qu'on regarde, autant qu'il porte
+   l'information au lieu de la faire chercher trois lignes plus bas. */
+.ic-issue-win .ic-score { color: var(--good-edge); }
+.ic-issue-loss .ic-score { color: var(--bad-edge); }
+.ic-issue-draw .ic-score { color: var(--warn-fg); }
+
 .ic-total {
   font-size: 1.4rem;
   font-weight: 700;
@@ -4987,16 +5024,56 @@ body[data-bottombar] .install-banner {
 .ic-dispo {
   margin: 16px 0;
 }
+/* Le résumé du bloc replié. Il porte les deux seules choses qu'on y cherche : MA réponse et
+   le compte de l'équipe. Déplié, il redevient un simple titre de section. */
 .ic-dispo-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 4px 10px;
   margin-bottom: 8px;
+  cursor: pointer;
+  padding: 8px 10px;
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: var(--radius-sm);
 }
 .ic-dispo-head h4 {
   margin: 0;
+  margin-right: auto;
   font-size: 0.95rem;
+}
+/* MA réponse, en pastille. Même vocabulaire de couleurs que les vignettes en dessous : ce
+   qu'on voit replié doit être ce qu'on retrouve déplié. */
+.ic-dispo-mine {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+  border: 1px solid var(--pico-card-border-color);
+  color: var(--pico-muted-color);
+}
+.ic-dispo-mine.is-yes {
+  background: var(--good-wash);
+  border-color: var(--good-edge);
+  color: var(--pico-contrast);
+}
+.ic-dispo-mine.is-maybe {
+  background: var(--live-wash);
+  border-color: var(--live-edge);
+  color: var(--warn-fg);
+}
+.ic-dispo-mine.is-no {
+  background: var(--bad-wash);
+  border-color: var(--bad-edge);
+  color: var(--danger-fg);
+}
+/* « à répondre » : c'est la seule variante qui demande un geste, elle est donc la plus
+   appuyée — en contour franc, sans fond, pour ne pas se faire passer pour une réponse. */
+.ic-dispo-mine.is-none {
+  border-color: var(--pico-contrast);
+  color: var(--pico-contrast);
 }
 
 /* Le compte se lit en SIMPLES COUVERTS. Sourdine tant que le compte est fait — c'est
@@ -5032,12 +5109,27 @@ body[data-bottombar] .install-banner {
   gap: 4px 10px;
   padding: 7px 10px;
   background: var(--sunken);
-  border-left: 3px solid transparent;
+  border-left: 4px solid transparent;
   border-radius: var(--radius-sm);
 }
-.ic-dispo-row.is-yes { border-left-color: var(--pico-contrast); }
-.ic-dispo-row.is-maybe { border-left-color: var(--live-edge); }
-.ic-dispo-row.is-no { border-left-color: var(--danger-border); }
+/* LE FOND PORTE L'ÉTAT, pas seulement le filet. Un filet de trois pixels sur fond identique
+   demandait de viser la ligne pour la lire ; on compose une équipe en balayant la liste, et
+   c'est le FOND qui se voit à cette vitesse.
+   Ici, contrairement à la liste des rencontres, aucun voile « en cours » ne peut entrer en
+   concurrence : ce bloc ne s'affiche que sur une rencontre à venir.
+   Toujours pas de vert sur « dispo » : une disponibilité est un état, pas une action. */
+.ic-dispo-row.is-yes {
+  background: var(--good-wash);
+  border-left-color: var(--good-edge);
+}
+.ic-dispo-row.is-maybe {
+  background: var(--live-wash);
+  border-left-color: var(--live-edge);
+}
+.ic-dispo-row.is-no {
+  background: var(--bad-wash);
+  border-left-color: var(--bad-edge);
+}
 /* Un absent reste LISIBLE mais recule : c'est le seul état dont on n'a plus rien à faire
    au moment de composer. */
 .ic-dispo-row.is-no .ic-dispo-name { color: var(--pico-muted-color); }
@@ -5354,10 +5446,32 @@ body[data-bottombar] .install-banner {
   align-items: baseline;
   gap: 4px 8px;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
+  padding: 8px 10px;
+  /* Le résumé déborde le rembourrage du bloc et devient une BARRE : posé nu sur le fond
+     enfoncé, il ressemblait à une note de bas de page, et personne n'y voyait un contrôle. */
+  margin: -8px -12px;
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: var(--radius-sm);
+}
+.ic-standings[open] > summary {
+  margin-bottom: 0;
 }
 .ic-standings-title {
   font-weight: 700;
+  margin-right: auto;
+}
+/* Le rang, en pastille pleine : c'est la réponse qu'on vient chercher. Encre du thème et non
+   couleur d'issue — être 2e n'est ni une victoire ni une défaite. */
+.ic-standings-rank {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--pico-contrast);
+  color: var(--pico-background-color);
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 /* Le résumé porte déjà la réponse courante — notre rang et la date du relevé — pour que
    déplier soit un choix, pas un passage obligé. */
@@ -5402,7 +5516,11 @@ body[data-bottombar] .install-banner {
 }
 /* Le nom prend ce qui reste et se coupe : c'est la seule colonne élastique, les autres font
    deux caractères. */
-.ic-st-team {
+/* Assez spécifique pour l'emporter sur l'alignement centré des cellules : les chiffres se
+   lisent centrés, une colonne de NOMS ne se lit qu'alignée à gauche. La version précédente
+   posait bien `text-align: left`, mais avec un poids inférieur — donc sans effet. */
+.ic-standings-table th.ic-st-team,
+.ic-standings-table td.ic-st-team {
   width: 99%;
   max-width: 0;
   overflow: hidden;
@@ -5435,9 +5553,6 @@ body[data-bottombar] .install-banner {
 .ic-standings-avg {
   margin: 8px 0 0;
   font-variant-numeric: tabular-nums;
-}
-.ic-standings-src {
-  margin: 6px 0 0;
 }
 
 /* Le relevé du classement, dans l'admin : bouton pleine largeur comme ses voisins, avec la

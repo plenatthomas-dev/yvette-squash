@@ -347,3 +347,58 @@ describe("bloc de disponibilité — écraser une réponse de première main", (
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 });
+
+describe("le bloc se replie, et son résumé dit l'essentiel", () => {
+  const details = () => document.querySelector("details.ic-dispo") as HTMLDetailsElement;
+
+  it("s'ouvre TANT QUE JE N'AI PAS RÉPONDU", async () => {
+    // C'est le seul moment où ce bloc demande un geste. Replié, la question passerait
+    // inaperçue et personne ne répondrait avant la relance.
+    await monte([entree({ key: "u1", name: "Thomas" }), entree({ key: "u2", name: "Léa" })]);
+    expect(details().open).toBe(true);
+    expect(screen.getByText("à répondre")).toBeTruthy();
+  });
+
+  it("se replie UNE FOIS MA RÉPONSE POSÉE", async () => {
+    // Il n'est plus qu'une consultation : ouvert, il repoussait les simples si bas qu'il
+    // fallait faire défiler pour voir la composition de l'équipe.
+    await monte([
+      entree({ key: "u1", name: "Thomas", status: "yes" }),
+      entree({ key: "u2", name: "Léa" }),
+    ]);
+    expect(details().open).toBe(false);
+  });
+
+  it("montre MA réponse dans le résumé, sans qu'on ait à déplier", async () => {
+    await monte([entree({ key: "u1", name: "Thomas", status: "maybe" })]);
+    const pastille = document.querySelector(".ic-dispo-mine");
+    expect(pastille?.textContent).toBe("Incertain");
+    expect(pastille?.className).toContain("is-maybe");
+  });
+
+  it("NE SE REFERME PAS sous les doigts quand je réponds", async () => {
+    // `open={!jaiRépondu}` calculé à chaque rendu refermerait le bloc à l'instant précis où
+    // l'utilisateur clique — juste avant qu'il ne relise ce qu'il vient de poser.
+    await monte([entree({ key: "u1", name: "Thomas" })]);
+    expect(details().open).toBe(true);
+
+    fetchMock.mockImplementation(async () =>
+      json(corps([entree({ key: "u1", name: "Thomas", status: "yes" })])),
+    );
+    fireEvent.click(within(boutonsDe("Thomas")).getByRole("button", { name: "Dispo" }));
+    await souffle();
+
+    expect(details().open).toBe(true);
+  });
+
+  it("garde le compte de l'équipe visible même replié", async () => {
+    await monte([
+      entree({ key: "u1", name: "Thomas", status: "yes" }),
+      entree({ key: "u2", name: "Léa", status: "yes" }),
+    ]);
+    expect(details().open).toBe(false);
+    // Le compte parle en simples à couvrir : c'est la question du capitaine, et elle ne
+    // doit pas demander un geste de plus.
+    expect(screen.getByText(/2\/4 dispo/)).toBeTruthy();
+  });
+});

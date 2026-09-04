@@ -112,6 +112,32 @@ export function InterclubAvailability({
    * code alors qu'il n'y en a pas : c'est une règle, elle doit se dire.
    */
   const [refus, setRefus] = useState<string | null>(null);
+  /**
+   * Le bloc est-il déplié ?
+   *
+   * `null` = pas encore décidé, faute de données. À la première charge, on ouvre SI JE N'AI PAS
+   * ENCORE RÉPONDU, et on referme sinon : c'est la seule règle qui satisfait les deux usages du
+   * même écran. Tant que ma réponse manque, la question doit me sauter aux yeux ; une fois
+   * répondu, ce bloc n'est plus qu'une consultation, et il poussait les simples si bas qu'il
+   * fallait faire défiler pour voir la composition.
+   *
+   * L'état est GARDÉ ici plutôt que calculé à chaque rendu : passer `open={!jaiRépondu}` en
+   * dur refermerait le bloc sous les doigts de l'utilisateur à l'instant où il répond.
+   */
+  const [ouvert, setOuvert] = useState<boolean | null>(null);
+
+  /**
+   * FIXE l'état d'ouverture au premier chargement, et plus jamais ensuite.
+   *
+   * Sans ça, `ouvert` reste `null` — l'utilisateur n'ayant rien replié — et l'ouverture
+   * continue de se DÉDUIRE de ma réponse. À la seconde où je clique « Dispo », la déduction
+   * bascule et le bloc se referme sous mes doigts, juste avant que je relise ce que je viens
+   * de poser. Un test le tient.
+   */
+  useEffect(() => {
+    if (!data || ouvert !== null) return;
+    setOuvert(!(data.entries.find((e) => e.key === data.me)?.status ?? null));
+  }, [data, ouvert]);
 
   const load = useCallback(async () => {
     try {
@@ -195,11 +221,22 @@ export function InterclubAvailability({
   if (!data) return null;
   const { entries, counts, matchCount } = data;
   const manque = counts.yes < matchCount;
+  const maReponse = entries.find((e) => e.key === data.me)?.status ?? null;
+  const deplie = ouvert ?? !maReponse;
 
   return (
-    <section className="ic-dispo">
-      <div className="ic-dispo-head">
+    <details
+      className="ic-dispo"
+      open={deplie}
+      onToggle={(ev) => setOuvert(ev.currentTarget.open)}
+    >
+      <summary className="ic-dispo-head">
         <h4>Disponibilités</h4>
+        {/* MA réponse, dans le résumé : c'est la seule chose que je cherche quand le bloc est
+            replié, et l'y montrer évite d'avoir à déplier pour vérifier que j'ai bien répondu. */}
+        <span className={`ic-dispo-mine${maReponse ? ` is-${maReponse}` : " is-none"}`}>
+          {maReponse ? AVAILABILITY_LABELS[maReponse] : "à répondre"}
+        </span>
         {/* Le compte parle en SIMPLES À COUVRIR, pas en pourcentage de réponses : c'est la
             seule question que le capitaine se pose. Les « incertain » sont dits à part —
             les additionner aux présents ferait taire l'alerte le jour où elle est utile. */}
@@ -207,7 +244,7 @@ export function InterclubAvailability({
           {counts.yes}/{matchCount} dispo
           {counts.maybe > 0 && ` · ${counts.maybe} incertain${counts.maybe > 1 ? "s" : ""}`}
         </span>
-      </div>
+      </summary>
 
       <ul className="ic-dispo-list">
         {entries.map((e) => {
@@ -310,6 +347,6 @@ export function InterclubAvailability({
           </button>
         </div>
       )}
-    </section>
+    </details>
   );
 }
