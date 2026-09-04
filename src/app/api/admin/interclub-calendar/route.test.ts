@@ -22,6 +22,9 @@ const h = vi.hoisted(() => ({
   updated: [] as Array<{ id: string; data: Record<string, unknown> }>,
   wipedFor: [] as string[],
   moved: [] as Array<[unknown, string, unknown]>,
+  standings: [] as Array<Record<string, unknown>>,
+  standingsThrows: false,
+  teamUpdates: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("@/lib/interclub-access", () => ({ interclubDisabledResponse: async () => null }));
@@ -44,11 +47,21 @@ vi.mock("@/lib/squashnet/calendar", async (importOriginal) => ({
   ownFixtures: vi.fn(() => h.published),
 }));
 
+vi.mock("@/lib/squashnet/standings", () => ({
+  fetchStandings: vi.fn(async () => {
+    if (h.standingsThrows) throw new Error("réseau");
+    return h.standings;
+  }),
+}));
+
 vi.mock("@/lib/db", () => {
   const prisma: Record<string, unknown> = {
     interclubTeam: {
       findUnique: vi.fn(async () => h.team),
-      update: vi.fn(async () => ({})),
+      update: vi.fn(async (args: { data: Record<string, unknown> }) => {
+        h.teamUpdates.push(args.data);
+        return {};
+      }),
     },
     interclub: {
       findMany: vi.fn(async () => h.fixtures),
@@ -119,6 +132,7 @@ beforeEach(() => {
     name: "Équipe 1",
     snEventId: EVENT,
     snRoundId: "370138",
+    snDrawId: "47760",
     snTeamId: "161092",
     captainId: "c1",
   };
@@ -129,6 +143,9 @@ beforeEach(() => {
   h.updated = [];
   h.wipedFor = [];
   h.moved = [];
+  h.standings = [{ rank: 1, name: "Squash de l'Yvette", snTeamId: "161092", points: 9 }];
+  h.standingsThrows = false;
+  h.teamUpdates = [];
 });
 
 describe("préambule", () => {
@@ -251,5 +268,48 @@ describe("application", () => {
     await POST(req({ action: "apply", teamId: "t1" }));
     expect(h.updated).toEqual([]);
     expect(h.created).toHaveLength(1); // son homologue fédérale est créée à côté
+  });
+});
+
+describe("classement — la lecture à la demande", () => {
+  it("télécharge et enregistre le classement de la poule", async () => {
+    const res = await POST(req({ action: "standings", teamId: "t1" }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).rows).toBe(1);
+    const ecrit = h.teamUpdates.at(-1);
+    expect(JSON.parse(ecrit?.snStandingsJson as string)).toEqual(h.standings);
+    expect(ecrit?.snStandingsAt).toBeInstanceOf(Date);
+  });
+
+  it("REFUSE sans la division, plutôt que de rendre une autre poule", async () => {
+    // Sans `drawid`, la fédération ignore `roundid` et rend la division 1 : huit équipes,
+    // dix-huit colonnes, un tableau parfaitement crédible où l'Yvette ne figure pas. C'est
+    // exactement le genre de résultat qu'on afficherait sans se poser de question.
+    h.team = { ...(h.team as Record<string, unknown>), snDrawId: null };
+    const res = await POST(req({ action: "standings", teamId: "t1" }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/division/i);
+    expect(h.teamUpdates).toHaveLength(0);
+  });
+
+  it("un classement VIDE n'écrase pas celui qu'on a", async () => {
+    // Zéro ligne n'est pas « la poule est vide » : c'est une poule non publiée, ou un ancrage
+    // faux. L'écrire remplacerait un tableau valide par du vide, en silence.
+    h.standings = [];
+    const res = await POST(req({ action: "standings", teamId: "t1" }));
+    expect(res.status).toBe(404);
+    expect(h.teamUpdates).toHaveLength(0);
+  });
+
+  it("un hoquet réseau se DIT, il ne vide rien", async () => {
+    h.standingsThrows = true;
+    const res = await POST(req({ action: "standings", teamId: "t1" }));
+    expect(res.status).toBe(502);
+    expect(h.teamUpdates).toHaveLength(0);
+  });
+
+  it("refuse une équipe sans ancrage, comme l'import", async () => {
+    h.team = { ...(h.team as Record<string, unknown>), snEventId: null };
+    expect((await POST(req({ action: "standings", teamId: "t1" }))).status).toBe(400);
   });
 });

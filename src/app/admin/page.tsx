@@ -97,6 +97,10 @@ type IcTeam = {
   snTeamId: string | null;
   /** La POULE de l'épreuve. Sans elle, squashnet rend celle qu'il veut. */
   snRoundId: string | null;
+  /** La DIVISION. Elle ne sert pas au calendrier mais au CLASSEMENT. */
+  snDrawId: string | null;
+  /** Dernier relevé du classement, pour distinguer « à jour » de « figé ». */
+  snStandingsAt: string | null;
   /** Dernier contrôle du calendrier. Il répond à la question que le silence ne tranche pas :
       « rien n'a bougé », ou « on n'a pas regardé » ? */
   snCheckedAt: string | null;
@@ -260,7 +264,7 @@ export default function AdminPage() {
   // à l'état SERVEUR pour décider quoi envoyer ne peut jamais être vraie — rien n'a encore
   // été écrit. Le même raisonnement avait rendu inerte la saisie du nom squashnet d'un membre.
   const [icAnchor, setIcAnchor] = useState<
-    Record<string, { eventId: string; roundId: string; snTeamId: string }>
+    Record<string, { eventId: string; drawId: string; roundId: string; snTeamId: string }>
   >({});
   const [icCal, setIcCal] = useState<CalPreview | null>(null);
   const [icCalBusy, setIcCalBusy] = useState(false);
@@ -635,21 +639,22 @@ export default function AdminPage() {
     }
   };
 
-  /** Les trois identifiants du brouillon, ou l'ancrage enregistré tant qu'on n'a rien tapé. */
+  /** Les quatre identifiants du brouillon, ou l'ancrage enregistré tant qu'on n'a rien tapé. */
   const anchorFields = (t: IcTeam) =>
     icAnchor[t.id] ?? {
       eventId: t.snEventId ?? "",
+      drawId: t.snDrawId ?? "",
       roundId: t.snRoundId ?? "",
       snTeamId: t.snTeamId ?? "",
     };
 
   const editAnchor = (
     t: IcTeam,
-    patch: { eventId?: string; roundId?: string; snTeamId?: string },
+    patch: { eventId?: string; drawId?: string; roundId?: string; snTeamId?: string },
   ) => setIcAnchor((prev) => ({ ...prev, [t.id]: { ...anchorFields(t), ...patch } }));
 
   const saveAnchor = async (t: IcTeam) => {
-    const { eventId, roundId, snTeamId } = anchorFields(t);
+    const { eventId, drawId, roundId, snTeamId } = anchorFields(t);
     setIcBusy(true);
     setIcResult(null);
     try {
@@ -660,6 +665,7 @@ export default function AdminPage() {
           action: "set_squashnet_event",
           teamId: t.id,
           eventId,
+          drawId,
           roundId,
           snTeamId,
         }),
@@ -675,9 +681,13 @@ export default function AdminPage() {
             ? {
                 ...x,
                 snEventId: eventId || null,
+                snDrawId: drawId || null,
                 snRoundId: roundId || null,
                 snTeamId: snTeamId || null,
                 snCheckedAt: null,
+                // Changer d'ancrage périme le classement de l'ancienne poule, que le serveur
+                // vient d'effacer : l'écran doit dire la même chose que la base.
+                snStandingsAt: null,
               }
             : x,
         ),
@@ -707,6 +717,44 @@ export default function AdminPage() {
    * date à laquelle une équipe se déplace, et appliquer un écart de date efface les
    * disponibilités déjà recueillies. On regarde d'abord, on applique ensuite.
    */
+  /**
+   * Retélécharge le CLASSEMENT de la poule tout de suite.
+   *
+   * La passe hebdomadaire le fait déjà, mais elle passe le lundi : sans ce bouton, celui qui
+   * vient de saisir l'ancrage attendrait jusqu'à six jours pour découvrir qu'il s'est trompé de
+   * division — et une division fausse rend le tableau d'une AUTRE poule, parfaitement crédible.
+   */
+  const refreshStandings = async (t: IcTeam) => {
+    setIcCalBusy(true);
+    setIcResult(null);
+    try {
+      const res = await fetch("/api/admin/interclub-calendar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "standings", teamId: t.id }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        rows?: number;
+        standingsAt?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        setIcResult({ ok: false, text: data.error ?? "Classement indisponible." });
+        return;
+      }
+      setIcResult({ ok: true, text: `Classement à jour — ${data.rows} équipe(s).` });
+      setIcTeams((prev) =>
+        prev.map((x) =>
+          x.id === t.id ? { ...x, snStandingsAt: data.standingsAt ?? null } : x,
+        ),
+      );
+    } catch {
+      setIcResult({ ok: false, text: "Réseau indisponible." });
+    } finally {
+      setIcCalBusy(false);
+    }
+  };
+
   const previewCalendar = async (t: IcTeam) => {
     setIcCalBusy(true);
     setIcResult(null);
@@ -1428,13 +1476,26 @@ export default function AdminPage() {
                               </summary>
 
                               <p className="muted tiny">
-                                Trois identifiants, et ils vont <strong>ensemble</strong>.{" "}
+                                Quatre identifiants, et ils vont <strong>ensemble</strong>.{" "}
                                 <strong>eventid</strong> et <strong>teamid</strong> se lisent dans
                                 l&apos;URL de la page « équipes » de l&apos;équipe sur squashnet
                                 (<code>?eventid=…&amp;teamid=…</code>). La{" "}
                                 <strong>poule</strong> se lit sur cette même page, dans le code
                                 du tableau de la poule (<code>round_370138</code> ⇒ saisir{" "}
-                                <code>370138</code>).
+                                <code>370138</code>). La <strong>division</strong> se lit dans la
+                                liste « Tableau/Division » de la page « Classement et rencontres »
+                                (<code>Hommes 4</code> ⇒ <code>47760</code>).
+                              </p>
+                              {/* La division ne sert PAS au calendrier — elle sert au
+                                  classement, et son absence y est encore plus traître que celle
+                                  de la poule : sans elle, `roundid` est ignoré et la fédération
+                                  rend la division 1. Huit équipes, dix-huit colonnes, un
+                                  tableau parfaitement crédible, et pas une ligne qui nous
+                                  concerne. On l'afficherait tel quel. */}
+                              <p className="muted tiny">
+                                Sans la division, le <strong>classement</strong> affiché serait
+                                celui de la division 1 — un tableau juste en apparence, où
+                                l&apos;équipe ne figure pas.
                               </p>
                               {/* La poule N'EST PAS un raffinement : une épreuve en contient
                                   plusieurs, et sans elle squashnet rend celle qu'il veut. Sur
@@ -1457,6 +1518,14 @@ export default function AdminPage() {
                                   aria-label={`Identifiant d'épreuve squashnet de ${t.name}`}
                                 />
                                 <input
+                                  value={anchorFields(t).drawId}
+                                  disabled={icBusy}
+                                  onChange={(ev) => editAnchor(t, { drawId: ev.target.value })}
+                                  placeholder="division"
+                                  inputMode="numeric"
+                                  aria-label={`Identifiant de division squashnet de ${t.name}`}
+                                />
+                                <input
                                   value={anchorFields(t).roundId}
                                   disabled={icBusy}
                                   onChange={(ev) => editAnchor(t, { roundId: ev.target.value })}
@@ -1477,6 +1546,40 @@ export default function AdminPage() {
                                 </button>
                               </div>
 
+                              {/* Le classement se relit à la demande : le cron hebdomadaire ne
+                                  passe que le lundi, et c'est JUSTE APRÈS avoir saisi l'ancrage
+                                  qu'on a besoin de vérifier qu'il est bon. */}
+                              <button
+                                type="button"
+                                className="secondary ic-sn-standings"
+                                disabled={
+                                  icCalBusy ||
+                                  !t.snEventId ||
+                                  !t.snTeamId ||
+                                  !t.snRoundId ||
+                                  !t.snDrawId
+                                }
+                                onClick={() => refreshStandings(t)}
+                                title={
+                                  t.snDrawId
+                                    ? "Retélécharge le classement de la poule maintenant."
+                                    : "Renseigne d'abord la division."
+                                }
+                              >
+                                Relire le classement
+                                {t.snStandingsAt && (
+                                  <span className="muted tiny">
+                                    {" "}
+                                    (relevé du{" "}
+                                    {new Date(t.snStandingsAt).toLocaleDateString("fr-FR", {
+                                      day: "numeric",
+                                      month: "short",
+                                    })}
+                                    )
+                                  </span>
+                                )}
+                              </button>
+
                               <button
                                 type="button"
                                 className="secondary"
@@ -1485,7 +1588,7 @@ export default function AdminPage() {
                                 title={
                                   t.snEventId && t.snRoundId && t.snTeamId
                                     ? "Télécharge le calendrier publié et montre l'écart, sans rien écrire."
-                                    : "Renseigne d'abord les trois identifiants."
+                                    : "Renseigne d'abord les quatre identifiants."
                                 }
                               >
                                 {icCalBusy && icCal?.teamId !== t.id ? "…" : "Prévisualiser l'import"}

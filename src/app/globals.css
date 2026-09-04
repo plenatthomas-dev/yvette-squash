@@ -5329,3 +5329,120 @@ body[data-bottombar] .install-banner {
 .ic-outcome-line {
   margin: -4px 0 10px;
 }
+
+/* ── LE CLASSEMENT DE LA POULE ─────────────────────────────────────────────────────────────
+   Donnée de RÉFÉRENCE, pas d'action : repliée par défaut, posée entre le filtre d'équipe et la
+   liste des résultats — l'endroit exact où naît la question « on est où ? ».
+
+   ENFONCÉE, pas encadrée (Règle de la Carte sur Carte) : ce bloc vit dans l'écran interclub, il
+   n'est pas une carte de plus au même niveau que les rencontres. */
+.ic-standings-wrap {
+  margin: 10px 0 4px;
+}
+.ic-standings-team {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+.ic-standings {
+  padding: 8px 12px;
+  background: var(--sunken);
+  border-radius: var(--radius-sm);
+}
+.ic-standings > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.ic-standings-title {
+  font-weight: 700;
+}
+/* Le résumé porte déjà la réponse courante — notre rang et la date du relevé — pour que
+   déplier soit un choix, pas un passage obligé. */
+.ic-standings-sub {
+  font-weight: 400;
+}
+
+/* Huit colonnes ne rentrent pas toujours : le tableau défile DANS son cadre. Une page qui
+   défile horizontalement casserait tout le reste de l'écran. */
+.ic-standings-scroll {
+  overflow-x: auto;
+  margin: 8px 0 0;
+}
+.ic-standings-table {
+  width: 100%;
+  margin: 0;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+.ic-standings-table th,
+.ic-standings-table td {
+  padding: 4px 5px;
+  border: none;
+  border-bottom: 1px solid var(--pico-card-border-color);
+  text-align: center;
+  white-space: nowrap;
+  background: none;
+}
+.ic-standings-table thead th {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--pico-muted-color);
+}
+.ic-standings-table tbody tr:last-child th,
+.ic-standings-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.ic-st-rank {
+  width: 1.6rem;
+  color: var(--pico-muted-color);
+}
+/* Le nom prend ce qui reste et se coupe : c'est la seule colonne élastique, les autres font
+   deux caractères. */
+.ic-st-team {
+  width: 99%;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  font-weight: 400;
+}
+.ic-st-pts {
+  font-weight: 700;
+  color: var(--pico-contrast);
+}
+
+/* NOTRE ligne. Reconnue par l'identifiant fédéral, jamais par le nom. Pas de vert (Règle du
+   Vert Actionnable : être dans le tableau n'est pas une action) et pas de fond de couleur, qui
+   entrerait en concurrence avec le voile « en cours » des rencontres juste en dessous : un
+   simple filet à gauche et l'encre du thème, ce qui reste lisible en niveaux de gris. */
+.ic-standings-table tbody tr.is-us th,
+.ic-standings-table tbody tr.is-us td {
+  background: var(--pico-card-background-color);
+  font-weight: 700;
+  color: var(--pico-contrast);
+}
+.ic-standings-table tbody tr.is-us .ic-st-rank {
+  box-shadow: inset 3px 0 0 var(--pico-contrast);
+  color: var(--pico-contrast);
+}
+
+/* Les averages en toutes lettres, pour nous seulement : ce sont eux qui départagent un nul 2-2
+   et deux équipes à égalité de points. Dix colonnes de plus les auraient rendus illisibles. */
+.ic-standings-avg {
+  margin: 8px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.ic-standings-src {
+  margin: 6px 0 0;
+}
+
+/* Le relevé du classement, dans l'admin : bouton pleine largeur comme ses voisins, avec la
+   date du dernier relevé collée dessus — c'est elle qui dit si le tableau affiché aux joueurs
+   date d'hier ou de trois semaines. */
+.ic-sn > button.ic-sn-standings {
+  margin-bottom: 6px;
+}

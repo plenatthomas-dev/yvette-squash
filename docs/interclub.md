@@ -478,6 +478,69 @@ classement que l'autre contredirait.
 averages — celui qui a tranché en encre du thème, l'autre en gris**. Sans ce repère, « Nul
 gagné » a l'air d'une décision arbitraire de l'appli.
 
+### Le classement de la poule
+
+**Quatre identifiants d'ancrage, pas trois.** Le calendrier se contente de l'épreuve, de la
+poule et de l'équipe ; le classement en exige un quatrième, la **division** (`snDrawId`,
+« Hommes 4 » = `47760`).
+
+Ce n'est pas un raffinement. Sur `ic_a=394242`, **`roundid` est ignoré tant qu'on ne dit pas de
+quelle division la poule fait partie**, et la fédération rend alors la division 1. Mesuré en
+demandant la poule IVD : la réponse était le classement de Squash Pyramides, Montigny et
+Vincennes — huit équipes, dix-huit colonnes, aucune erreur, et pas une ligne qui nous concerne.
+C'est pire que la panne muette de la poule sur le calendrier, où l'import annonçait au moins
+« 0 rencontre » : **ici le résultat a l'air juste**, et on l'afficherait tel quel.
+
+Les quatre vont donc ensemble ou pas du tout, garde tenue par la route d'admin.
+
+| Paramètre | Ce qu'il désigne | Où le lire |
+|---|---|---|
+| `eventid` | l'épreuve | URL de la page « équipes » |
+| `drawid` | la **division** | liste « Tableau/Division » de la page « Classement et rencontres » |
+| `roundid` | la poule | code du tableau de la poule (`round_370138`) |
+| `teamid` | notre équipe | URL de la page « équipes » |
+
+**Le parsing s'accroche aux `data-label`, pas aux colonnes.** Le tableau fédéral en compte
+dix-huit dans un ordre que rien ne garantit, et chaque cellule porte son intitulé
+(`<td data-label="J+">`). Une colonne insérée en tête décalerait un parsing positionnel **sans
+rien casser de visible** : on lirait les jeux à la place des matchs, et le classement affiché
+serait faux mais crédible. Un test fige cette propriété en inversant l'ordre des colonnes.
+
+**Le classement est mis en cache, et sa date est affichée.** Il ne bouge qu'après une journée de
+championnat ; l'aller chercher à chaque ouverture ferait dépendre une page quotidienne de la
+disponibilité de squashnet. Il est donc rafraîchi par **la passe hebdomadaire qui contrôle déjà
+le calendrier** — pas de nouveau cron — et stocké sur `InterclubTeam`
+(`snStandingsJson` / `snStandingsAt`). Le rafraîchissement vit dans son propre `try` : un
+classement indisponible ne doit pas emporter le contrôle du calendrier, qui est la raison d'être
+de ce cron.
+
+Trois refus, tous pour la même raison — **ne jamais remplacer une donnée valide par du vide** :
+
+- un classement de **zéro ligne** n'est pas écrit (c'est une poule non publiée, ou un ancrage
+  faux) ;
+- un **échec réseau** ne touche à rien ;
+- un **JSON illisible** en base rend `null` au lieu de faire tomber tout l'écran interclub — la
+  colonne est du texte, et un `JSON.parse` qui explose dans la sérialisation emporterait les
+  rencontres, les équipes et le direct pour un tableau annexe.
+
+**Un bouton « Relire le classement » double le cron dans l'admin.** La passe ne tourne que le
+lundi : sans lui, celui qui vient de saisir l'ancrage attendrait jusqu'à six jours pour
+découvrir qu'il s'est trompé de division — précisément l'erreur qui rend un tableau crédible.
+
+À l'écran, le classement se place **entre le filtre d'équipe et la liste des résultats**, replié
+par défaut, un par onglet : c'est là que naît la question « on est où ? », et le résumé y répond
+déjà (« 2e sur 6 · au 4 sept. ») pour que déplier reste un choix.
+
+**Notre ligne est reconnue par `snTeamId`, jamais par le nom.** La ligue écrit « Squash de
+l'Yvette » là où nous écrivons « Équipe 2 » ; un rapprochement par nom ne surlignerait jamais
+rien, ou surlignerait la mauvaise ligne le jour où deux équipes du club jouent la même poule.
+Sans ancrage, aucune ligne n'est surlignée — visible, et préférable à une ligne fausse mise en
+avant.
+
+**Huit colonnes et pas dix-huit** (`# Équipe J V E+ E- D Pts`) : le reste est illisible sur un
+téléphone. Les averages qui départagent — matchs, jeux, points — sont donnés **en toutes
+lettres sous le tableau, pour notre équipe seulement**, là où ils se lisent.
+
 ### Le capitaine — une désignation, pas un droit
 
 Nommé par un admin (`set_captain`), affiché sur son équipe et sur chaque rencontre. Il **ne

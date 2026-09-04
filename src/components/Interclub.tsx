@@ -71,7 +71,36 @@ import { compareRosterOrder, isNC, lineupOrderConflict, type OrderedSlot } from 
  * FICHE d'une rencontre (`serializeInterclub`) : la liste des équipes du sélecteur n'en a pas
  * besoin, d'où un champ facultatif plutôt que deux types presque identiques.
  */
-type Team = { id: string; name: string; captainName?: string | null };
+/** Une ligne du classement de la poule, telle que la fédération la publie. */
+type StandingRow = {
+  rank: number;
+  name: string;
+  code: string | null;
+  /** L'identifiant FÉDÉRAL. C'est lui qui dit « c'est nous », jamais le nom. */
+  snTeamId: string | null;
+  points: number;
+  played: number;
+  won: number;
+  drawWon: number;
+  drawLost: number;
+  lost: number;
+  penalties: number;
+  matches: { won: number; lost: number; diff: number };
+  games: { won: number; lost: number; diff: number };
+  rallies: { won: number; lost: number; diff: number };
+};
+
+type Team = {
+  id: string;
+  name: string;
+  captainName?: string | null;
+  /** Le classement de la poule, en cache. NULL = pas d'ancrage, ou poule non publiée. */
+  standings?: StandingRow[] | null;
+  /** Quand il a été téléchargé. Sans cette date, un tableau figé a l'air à jour. */
+  standingsAt?: string | null;
+  /** Notre identifiant dans cette poule, pour surligner notre ligne. */
+  snTeamId?: string | null;
+};
 
 // Le serveur ne renvoie QUE le roster de l'équipe qui dispute la rencontre : la restriction
 // est appliquée là-bas, pas ici. Deux populations s'y mêlent — les MEMBRES (compte sur
@@ -246,6 +275,122 @@ function TieOutcomeLine({ outcome }: { outcome: TieOutcome }) {
         </span>
       )}
     </span>
+  );
+}
+
+/** « 2e », « 1er ». Le rang se lit d'un coup d'oeil, pas en déchiffrant un nombre nu. */
+function rangCourt(n: number): string {
+  return n === 1 ? "1er" : `${n}e`;
+}
+
+/** « 4 sept. » — la fraîcheur du classement, à partir d'un horodatage complet. */
+function jourCourt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+}
+
+/** Un écart signé, « +20 » / « -14 ». Le signe est l'information ; sans lui, tout se vaut. */
+const signe = (n: number) => (n > 0 ? `+${n}` : `${n}`);
+
+/**
+ * LE CLASSEMENT DE LA POULE.
+ *
+ * Replié par défaut, et c'est délibéré : c'est de la donnée de RÉFÉRENCE, consultée quand on se
+ * demande où on en est, pas à chaque ouverture de l'écran. Le résumé porte déjà la réponse à la
+ * question courante — notre rang — pour que l'ouvrir soit un choix et pas un passage obligé.
+ *
+ * Notre ligne est reconnue par `snTeamId`, JAMAIS par le nom : la ligue écrit « Squash de
+ * l'Yvette » là où nous écrivons « Équipe 2 », et deux équipes du club dans la même poule se
+ * confondraient. Le jour où l'ancrage manque, aucune ligne n'est surlignée — c'est visible, et
+ * c'est mieux qu'une ligne fausse mise en avant.
+ *
+ * Huit colonnes et pas dix-huit : le tableau fédéral en publie dix-huit, illisibles sur un
+ * téléphone. Les averages de jeux et de points — ceux qui départagent un nul — sont donnés en
+ * toutes lettres SOUS le tableau, pour notre équipe seulement, là où ils se lisent.
+ */
+function StandingsTable({ team }: { team: Team }) {
+  const rows = team.standings;
+  if (!rows || rows.length === 0) return null;
+  const nous = team.snTeamId ? rows.find((r) => r.snTeamId === team.snTeamId) : undefined;
+
+  return (
+    <details className="ic-standings">
+      <summary>
+        <span className="ic-standings-title">Classement</span>
+        <span className="ic-standings-sub muted tiny">
+          {nous ? `${rangCourt(nous.rank)} sur ${rows.length}` : `${rows.length} équipes`}
+          {/* La date de relevé n'est pas décorative : sans elle, un classement figé depuis
+              trois semaines s'affiche exactement comme un classement à jour. */}
+          {team.standingsAt && ` · au ${jourCourt(team.standingsAt)}`}
+        </span>
+      </summary>
+
+      {/* Le tableau défile DANS son cadre : huit colonnes ne rentrent pas toujours, et une
+          page qui défile horizontalement casse tout le reste de l'écran. */}
+      <div className="ic-standings-scroll">
+        <table className="ic-standings-table">
+          <thead>
+            <tr>
+              <th scope="col" className="ic-st-rank">
+                #
+              </th>
+              <th scope="col" className="ic-st-team">
+                Équipe
+              </th>
+              <th scope="col">J</th>
+              <th scope="col">V</th>
+              <th scope="col" title="Nul gagné à l'average — 2 points">
+                E+
+              </th>
+              <th scope="col" title="Nul perdu à l'average — 1 point">
+                E-
+              </th>
+              <th scope="col">D</th>
+              <th scope="col" className="ic-st-pts">
+                Pts
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const cestNous = !!team.snTeamId && r.snTeamId === team.snTeamId;
+              return (
+                <tr key={`${r.rank}-${r.snTeamId ?? r.name}`} className={cestNous ? "is-us" : ""}>
+                  <td className="ic-st-rank">{r.rank}</td>
+                  <th scope="row" className="ic-st-team" title={r.name}>
+                    {r.name}
+                    {cestNous && <span className="sr-only"> (notre équipe)</span>}
+                  </th>
+                  <td>{r.played}</td>
+                  <td>{r.won}</td>
+                  <td>{r.drawWon}</td>
+                  <td>{r.drawLost}</td>
+                  <td>{r.lost}</td>
+                  <td className="ic-st-pts">{r.points}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* LES AVERAGES, en toutes lettres et pour nous seulement. Ce sont eux qui départagent
+          un nul 2-2 et deux équipes à égalité de points ; les noyer dans dix colonnes de plus
+          les rendrait illisibles sur un téléphone, les taire les rendrait introuvables. */}
+      {nous && (
+        <p className="ic-standings-avg muted tiny">
+          Nos averages — matchs {nous.matches.won}&ndash;{nous.matches.lost} (
+          {signe(nous.matches.diff)}) · jeux {nous.games.won}&ndash;{nous.games.lost} (
+          {signe(nous.games.diff)}) · points {nous.rallies.won}&ndash;{nous.rallies.lost} (
+          {signe(nous.rallies.diff)})
+        </p>
+      )}
+      <p className="ic-standings-src muted tiny">
+        Publié par la ligue sur squashnet. Victoire 3 pts, nul gagné 2, nul perdu 1, défaite 0 —
+        un nul se départage à l&apos;average de jeux, puis de points.
+      </p>
+    </details>
   );
 }
 
@@ -598,6 +743,20 @@ export default function Interclub({
       {/* Les onglets ne s'affichent qu'à partir de DEUX équipes : avec une seule, un filtre
           qui ne filtre rien est du bruit. Le schéma prévoit la troisième. */}
       {teams.length > 1 && <TeamTabs teams={teams} value={activeTab} onChange={setTab} />}
+
+      {/* LE CLASSEMENT SUIT L'ONGLET. Sur « Toutes », on montre celui de chaque équipe qui en
+          a un : une équipe correspond à une poule, et il n'existe pas de classement « toutes
+          équipes confondues » qui voudrait dire quelque chose. Il se place ICI, entre le
+          filtre et les résultats, parce que c'est exactement la question que la liste de
+          résultats fait naître. */}
+      {teams
+        .filter((t) => (activeTab === "all" || t.id === activeTab) && t.standings?.length)
+        .map((t) => (
+          <div key={t.id} className="ic-standings-wrap">
+            {teams.length > 1 && <p className="ic-standings-team muted tiny">{t.name}</p>}
+            <StandingsTable team={t} />
+          </div>
+        ))}
 
       {rows.length === 0 ? (
         <EmptyState icon="🏸" text="Aucune rencontre pour le moment." />

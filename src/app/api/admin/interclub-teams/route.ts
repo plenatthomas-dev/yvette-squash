@@ -64,6 +64,8 @@ export async function GET(req: NextRequest) {
         snEventId: true,
         snTeamId: true,
         snRoundId: true,
+        snDrawId: true,
+        snStandingsAt: true,
         // `snCheckedAt` répond à la question que le silence ne tranche pas : « le calendrier
         // n'a pas bougé », ou « on n'a pas regardé » ?
         snCheckedAt: true,
@@ -90,6 +92,9 @@ export async function GET(req: NextRequest) {
       snEventId: t.snEventId,
       snTeamId: t.snTeamId,
       snRoundId: t.snRoundId,
+      snDrawId: t.snDrawId,
+      // Pour que l'admin sache si le classement affiché est frais ou figé.
+      snStandingsAt: t.snStandingsAt ? t.snStandingsAt.toISOString() : null,
       snCheckedAt: t.snCheckedAt?.toISOString() ?? null,
     })),
     members,
@@ -107,8 +112,9 @@ export async function GET(req: NextRequest) {
 //   { action: "remove_guest", guestId }                    → retire un invité du roster
 //   { action: "set_captain", teamId, userId }              → nomme (ou retire, userId null) le
 //        capitaine de l'équipe
-//   { action: "set_squashnet_event", teamId, eventId, roundId, snTeamId } → ancre l'équipe sur
-//        son championnat fédéral (épreuve, POULE et équipe), ce qui rend l'import possible
+//   { action: "set_squashnet_event", teamId, eventId, drawId, roundId, snTeamId } → ancre
+//        l'équipe sur son championnat fédéral (épreuve, DIVISION, poule et équipe), ce qui rend
+//        l'import du calendrier et la lecture du classement possibles
 export async function POST(req: NextRequest) {
   const off = await interclubDisabledResponse();
   if (off) return off;
@@ -127,6 +133,7 @@ export async function POST(req: NextRequest) {
     eventId?: unknown;
     snTeamId?: unknown;
     roundId?: unknown;
+    drawId?: unknown;
   };
 
   // LE CAPITAINE — une désignation, pas un droit.
@@ -161,17 +168,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, captainId: userId });
   }
 
-  // L'ANCRAGE FÉDÉRAL — de quel championnat cette équipe joue le calendrier.
+  // L'ANCRAGE FÉDÉRAL — de quel championnat cette équipe joue le calendrier et le classement.
   //
-  // Les TROIS identifiants sont nécessaires et vont ensemble :
+  // Les QUATRE identifiants sont nécessaires et vont ensemble :
   //   * `eventId`  dit quelle ÉPREUVE télécharger ;
-  //   * `roundId`  dit quelle POULE de cette épreuve — une épreuve en contient plusieurs, et
+  //   * `drawId`   dit quelle DIVISION (« Hommes 4 »). Il ne sert pas au calendrier mais au
+  //                CLASSEMENT : sans lui, `roundid` est ignoré et la fédération rend la
+  //                division 1 — huit équipes, dix-huit colonnes, et pas une ligne qui nous
+  //                concerne. Plus insidieux que la panne de la poule : le résultat A L'AIR
+  //                juste, on l'afficherait tel quel ;
+  //   * `roundId`  dit quelle POULE de cette division — une épreuve en contient plusieurs, et
   //                sans lui squashnet rend celle qu'il veut. Mesuré sur notre propre critérium :
   //                la réponse était une poule où l'Yvette ne figure pas, donc un import de zéro
   //                rencontre, sans erreur et sans explication ;
   //   * `snTeamId` dit lesquelles des rencontres rendues sont les nôtres — le paramètre `teamid`
   //                de squashnet ne filtre RIEN, il rend la poule entière.
-  // N'en poser que deux rendrait l'import inutile tout en donnant l'impression d'être configuré.
+  // N'en poser que trois rendrait la moitié de la fonction inutile tout en donnant l'impression
+  // d'être configuré.
   if (body.action === "set_squashnet_event") {
     if (typeof body.teamId !== "string" || !body.teamId) {
       return NextResponse.json({ error: "Équipe invalide" }, { status: 400 });
@@ -179,12 +192,14 @@ export async function POST(req: NextRequest) {
     const eventId = typeof body.eventId === "string" ? body.eventId.trim() : "";
     const snTeamId = typeof body.snTeamId === "string" ? body.snTeamId.trim() : "";
     const roundId = typeof body.roundId === "string" ? body.roundId.trim() : "";
-    const poses = [eventId, snTeamId, roundId].filter(Boolean).length;
-    if (poses !== 0 && poses !== 3) {
+    const drawId = typeof body.drawId === "string" ? body.drawId.trim() : "";
+    const poses = [eventId, snTeamId, roundId, drawId].filter(Boolean).length;
+    if (poses !== 0 && poses !== 4) {
       return NextResponse.json(
         {
           error:
-            "Donne les trois identifiants — épreuve, poule et équipe — ou laisse les trois vides.",
+            "Donne les quatre identifiants — épreuve, division, poule et équipe — ou laisse " +
+            "les quatre vides.",
         },
         { status: 400 },
       );
@@ -201,16 +216,25 @@ export async function POST(req: NextRequest) {
     if (roundId && !/^\d{1,12}$/.test(roundId)) {
       return NextResponse.json({ error: "Identifiant de poule invalide." }, { status: 400 });
     }
+    if (drawId && !/^\d{1,12}$/.test(drawId)) {
+      return NextResponse.json({ error: "Identifiant de division invalide." }, { status: 400 });
+    }
     await prisma.interclubTeam.update({
       where: { id: body.teamId },
       data: {
         snEventId: eventId || null,
         snTeamId: snTeamId || null,
         snRoundId: roundId || null,
+        snDrawId: drawId || null,
         // Changer d'ancrage rend l'ancienne empreinte caduque : la garder ferait passer le
         // premier contrôle du nouveau championnat pour « rien n'a bougé ».
         snCalendarHash: null,
         snCheckedAt: null,
+        // Et le classement de l'ancienne poule n'a plus rien à voir avec la nouvelle. Le
+        // garder afficherait, sous le nom de la bonne équipe, le tableau d'un autre
+        // championnat — l'erreur la plus difficile à repérer de toutes.
+        snStandingsJson: null,
+        snStandingsAt: null,
       },
     });
     return NextResponse.json({ ok: true, snEventId: eventId || null, snTeamId: snTeamId || null });

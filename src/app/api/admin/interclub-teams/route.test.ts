@@ -96,7 +96,10 @@ beforeEach(() => {
       captain: null,
       snEventId: null,
       snTeamId: null,
+      snRoundId: null,
+      snDrawId: null,
       snCheckedAt: null,
+      snStandingsAt: null,
     },
   ];
   h.user = null;
@@ -160,7 +163,15 @@ describe("GET /api/admin/interclub-teams", () => {
         captainName: null,
         snEventId: null,
         snTeamId: null,
+        // Les quatre pièces de l'ancrage se lisent à l'écran d'admin, donc elles sortent d'ici.
+        // `snDrawId` en fait partie depuis que le CLASSEMENT est affiché : sans division, la
+        // fédération rend celui de la division 1, et il a l'air juste.
+        snRoundId: null,
+        snDrawId: null,
         snCheckedAt: null,
+        // Date du dernier relevé du classement : c'est elle qui distingue « à jour » de
+        // « figé depuis trois semaines ».
+        snStandingsAt: null,
       },
     ]);
     // `clt`/`rangM` EFFECTIFS, plus les deux étages qui les produisent : l'écran doit pouvoir
@@ -411,25 +422,36 @@ describe("POST set_captain", () => {
 describe("POST set_squashnet_event", () => {
   // L'ancrage réel de l'équipe 1 sur le critérium 2025-2026, poule IVD (Hommes 4).
   const EVENT = "879981be57df0005cac674dce4378296";
+  const DIVISION = "47760";
   const POULE = "370138";
   const EQUIPE = "161092";
   const ancrage = (over: Record<string, unknown> = {}) => ({
     action: "set_squashnet_event",
     teamId: "t1",
     eventId: EVENT,
+    drawId: DIVISION,
     roundId: POULE,
     snTeamId: EQUIPE,
     ...over,
   });
 
-  it("enregistre les TROIS identifiants", async () => {
+  it("enregistre les QUATRE identifiants", async () => {
     const res = await POST(post(ancrage()));
     expect(res.status).toBe(200);
     expect(h.teamUpdated?.data).toMatchObject({
       snEventId: EVENT,
+      snDrawId: DIVISION,
       snRoundId: POULE,
       snTeamId: EQUIPE,
     });
+  });
+
+  it("périme AUSSI le classement en changeant d'ancrage", async () => {
+    // Le garder afficherait, sous le nom de la bonne équipe, le tableau d'un autre
+    // championnat — l'erreur la plus difficile à repérer de toutes, parce que rien ne cloche
+    // à l'écran.
+    await POST(post(ancrage()));
+    expect(h.teamUpdated?.data).toMatchObject({ snStandingsJson: null, snStandingsAt: null });
   });
 
   it("efface l'empreinte en changeant d'ancrage", async () => {
@@ -447,7 +469,7 @@ describe("POST set_squashnet_event", () => {
     // AUCUNE erreur : squashnet rend alors une poule au hasard, `ownFixtures` n'y trouve pas
     // notre équipe, et l'import annonce zéro rencontre — ce qui ressemble à une ligue qui n'a
     // rien publié. Deux champs sur trois donneraient l'impression d'être configuré.
-    for (const manquant of ["eventId", "roundId", "snTeamId"] as const) {
+    for (const manquant of ["eventId", "drawId", "roundId", "snTeamId"] as const) {
       const corps = ancrage({ [manquant]: undefined });
       delete (corps as Record<string, unknown>)[manquant];
       expect((await POST(post(corps))).status).toBe(400);
@@ -461,14 +483,18 @@ describe("POST set_squashnet_event", () => {
     expect((await POST(post(ancrage({ eventId: "pas-un-hash" })))).status).toBe(400);
     expect((await POST(post(ancrage({ snTeamId: "abc" })))).status).toBe(400);
     expect((await POST(post(ancrage({ roundId: "poule-IVD" })))).status).toBe(400);
+    expect((await POST(post(ancrage({ drawId: "Hommes 4" })))).status).toBe(400);
     expect(h.teamUpdated).toBeNull();
   });
 
-  it("accepte de tout effacer avec trois champs vides", async () => {
-    const res = await POST(post(ancrage({ eventId: "", roundId: "", snTeamId: "" })));
+  it("accepte de tout effacer avec quatre champs vides", async () => {
+    const res = await POST(
+      post(ancrage({ eventId: "", drawId: "", roundId: "", snTeamId: "" })),
+    );
     expect(res.status).toBe(200);
     expect(h.teamUpdated?.data).toMatchObject({
       snEventId: null,
+      snDrawId: null,
       snRoundId: null,
       snTeamId: null,
     });

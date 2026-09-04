@@ -32,7 +32,20 @@ export async function GET(req: NextRequest) {
   const teamId = req.nextUrl.searchParams.get("teamId") || undefined;
 
   const [teams, rows] = await Promise.all([
-    prisma.interclubTeam.findMany({ orderBy: { order: "asc" }, select: { id: true, name: true } }),
+    prisma.interclubTeam.findMany({
+      orderBy: { order: "asc" },
+      select: {
+        id: true,
+        name: true,
+        // LE CLASSEMENT DE LA POULE, servi depuis le cache. Il arrive avec les équipes plutôt
+        // que par une route à lui : c'est une donnée d'équipe, elle tient en quelques lignes,
+        // et un aller-retour de plus à l'ouverture de l'écran ne se justifierait pas pour un
+        // tableau qui ne bouge qu'une fois par semaine.
+        snStandingsJson: true,
+        snStandingsAt: true,
+        snTeamId: true,
+      },
+    }),
     prisma.interclub.findMany({
       where: teamId ? { teamId } : undefined,
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
@@ -63,6 +76,32 @@ export async function GET(req: NextRequest) {
       },
     }),
   ]);
+
+  // Le JSON stocké est relu ici, pas renvoyé tel quel : une colonne texte peut contenir
+  // n'importe quoi (ancien format, écriture interrompue), et un `JSON.parse` qui explose dans
+  // la sérialisation de la réponse ferait tomber TOUT l'écran interclub pour un tableau
+  // annexe. Illisible ⇒ pas de classement, le reste passe.
+  const equipes = teams.map((t) => {
+    let standings: unknown = null;
+    if (t.snStandingsJson) {
+      try {
+        const lu = JSON.parse(t.snStandingsJson);
+        if (Array.isArray(lu) && lu.length > 0) standings = lu;
+      } catch {
+        standings = null;
+      }
+    }
+    return {
+      id: t.id,
+      name: t.name,
+      // `snTeamId` sert à SURLIGNER notre ligne dans le tableau. Par l'identifiant fédéral et
+      // jamais par le nom : « Squash de l'Yvette » côté ligue et « Équipe 2 » chez nous ne se
+      // ressemblent pas, et deux équipes du club dans la même poule se confondraient.
+      snTeamId: t.snTeamId,
+      standings,
+      standingsAt: t.snStandingsAt ? t.snStandingsAt.toISOString() : null,
+    };
+  });
 
   const hasMore = rows.length > limit;
   const fixtures = (hasMore ? rows.slice(0, limit) : rows).map((f) => ({
@@ -104,7 +143,7 @@ export async function GET(req: NextRequest) {
     ),
   }));
 
-  return NextResponse.json({ hasMore, teams, fixtures });
+  return NextResponse.json({ hasMore, teams: equipes, fixtures });
 }
 
 // POST /api/interclub : crée une rencontre et ses N simples d'un coup.

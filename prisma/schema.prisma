@@ -615,42 +615,54 @@ model SquashnetRanking {
 // Une équipe de l'asso ("Équipe 1", "Équipe 2"). Un modèle plutôt qu'une colonne figée :
 // une 3e équipe un jour ne coûte alors qu'une ligne, pas une migration.
 model InterclubTeam {
-  id             String            @id @default(cuid())
-  name           String            @unique // "Équipe 1", "Équipe 2"
-  order          Int               @default(0) // ordre d'affichage
-  createdAt      DateTime          @default(now())
+  id              String            @id @default(cuid())
+  name            String            @unique // "Équipe 1", "Équipe 2"
+  order           Int               @default(0) // ordre d'affichage
+  createdAt       DateTime          @default(now())
   // LE CAPITAINE. Une DÉSIGNATION, pas un droit : il ne peut rien que les autres ne puissent
   // (composer une équipe reste ouvert à tout membre, cf. lib/interclub-access.ts — verrouiller
   // créerait un point de blocage le soir où le capitaine n'est pas là). Ce qu'il apporte est
   // ailleurs : l'équipe sait à qui parler, et LUI SEUL reçoit le récapitulatif des
   // disponibilités et les alertes de calendrier, que personne d'autre n'a à recevoir.
   // SetNull : perdre son compte ne doit pas emporter l'équipe.
-  captain        User?             @relation("InterclubCaptain", fields: [captainId], references: [id], onDelete: SetNull)
-  captainId      String?
+  captain         User?             @relation("InterclubCaptain", fields: [captainId], references: [id], onDelete: SetNull)
+  captainId       String?
   // --- Ancrage du championnat sur squashnet -------------------------------------------------
   // De quel ÉVÉNEMENT fédéral cette équipe joue le calendrier, et sous quel identifiant elle y
   // figure. Les deux sont nécessaires : l'événement dit quoi télécharger, `snTeamId` dit
   // lesquelles des ~56 rencontres rendues sont les nôtres (le paramètre `teamid` de squashnet
   // ne filtre RIEN, il rend tout l'événement). NULL = pas d'import possible pour cette équipe.
-  snEventId      String?
-  snTeamId       String?
+  snEventId       String?
+  snTeamId        String?
   // La POULE dans cette épreuve (l'identifiant du tableau `round_<id>` sur la page « Équipes »).
   // Sans elle, squashnet rend la poule de son choix : mesuré sur notre critérium, une poule où
   // l'équipe ne figure pas — donc un import de zéro rencontre, muet. Les TROIS identifiants vont
   // ensemble ou pas du tout.
-  snRoundId      String?
+  snRoundId       String?
+  // La DIVISION (« Hommes 4 »), quatrième identifiant. Elle ne sert pas au calendrier mais au
+  // CLASSEMENT : sans elle, `roundid` est ignoré et la fédération rend la division 1 — un
+  // tableau bien formé, huit équipes, et pas une ligne qui nous concerne. Plus insidieux que
+  // la panne de la poule, parce que le résultat a l'air juste.
+  snDrawId        String?
+  // Le classement de la poule, tel que téléchargé, et QUAND. Rafraîchi par la passe
+  // hebdomadaire du calendrier : le classement ne bouge qu'après une journée de championnat, et
+  // dépendre de squashnet à chaque ouverture d'écran serait payer cher une donnée lente.
+  // `snStandingsAt` est ce qui distingue « à jour » de « figé depuis trois semaines » — sans
+  // elle, les deux s'affichent pareil.
+  snStandingsJson String?
+  snStandingsAt   DateTime?
   // Empreinte du dernier calendrier téléchargé, et date du dernier contrôle.
   //
   // L'empreinte est ce qui rend le contrôle hebdomadaire SUPPORTABLE : sans elle, un report
   // détecté une fois serait re-signalé tous les lundis jusqu'à ce qu'un admin l'applique, et
   // l'alerte deviendrait un bruit qu'on n'ouvre plus. `snCheckedAt` répond à l'autre question,
   // celle que le silence ne tranche pas : « rien n'a bougé », ou « on n'a pas regardé » ?
-  snCalendarHash String?
-  snCheckedAt    DateTime?
-  members        User[]
-  guests         InterclubGuest[]
-  fixtures       Interclub[]
-  followers      InterclubFollow[]
+  snCalendarHash  String?
+  snCheckedAt     DateTime?
+  members         User[]
+  guests          InterclubGuest[]
+  fixtures        Interclub[]
+  followers       InterclubFollow[]
 
   @@index([order])
   @@index([captainId])

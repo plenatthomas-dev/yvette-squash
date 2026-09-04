@@ -78,7 +78,15 @@ const validBody = {
 beforeEach(() => {
   h.interclub = true;
   h.session = { userId: "u1" };
-  h.teams = [{ id: "t1", name: "Équipe 1" }];
+  h.teams = [
+    {
+      id: "t1",
+      name: "Équipe 1",
+      snTeamId: null,
+      snStandingsJson: null,
+      snStandingsAt: null,
+    },
+  ];
   h.team = { id: "t1", name: "Équipe 1" };
   h.user = null;
   h.users = [];
@@ -552,5 +560,76 @@ describe("POST /api/interclub", () => {
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/classement inconnu/);
     expect(h.created).toBeNull();
+  });
+});
+
+describe("GET /api/interclub — le classement de la poule", () => {
+  const LIGNE = {
+    rank: 2,
+    name: "Squash de l'Yvette",
+    code: "YVETTE",
+    snTeamId: "161092",
+    points: 9,
+    played: 4,
+    won: 3,
+    drawWon: 0,
+    drawLost: 0,
+    lost: 1,
+    penalties: 0,
+    matches: { won: 11, lost: 4, diff: 7 },
+    games: { won: 39, lost: 19, diff: 20 },
+    rallies: { won: 559, lost: 436, diff: 123 },
+  };
+
+  it("sert le classement en cache avec la date du relevé", async () => {
+    h.teams = [
+      {
+        id: "t1",
+        name: "Équipe 1",
+        snTeamId: "161092",
+        snStandingsJson: JSON.stringify([LIGNE]),
+        snStandingsAt: new Date("2026-09-04T09:00:00.000Z"),
+      },
+    ];
+    const body = await (await GET(req())).json();
+    expect(body.teams[0].standings).toEqual([LIGNE]);
+    // La date n'est pas décorative : sans elle, un tableau figé depuis trois semaines
+    // s'affiche comme un tableau à jour.
+    expect(body.teams[0].standingsAt).toBe("2026-09-04T09:00:00.000Z");
+    // Et notre identifiant fédéral suit, parce que c'est LUI qui surligne notre ligne.
+    expect(body.teams[0].snTeamId).toBe("161092");
+  });
+
+  it("un JSON illisible ne fait pas tomber TOUT l'écran interclub", async () => {
+    // La colonne est du texte : ancien format, écriture interrompue, rien ne l'en empêche.
+    // Un `JSON.parse` qui explose ici emporterait les rencontres, les équipes et le direct
+    // pour un tableau annexe.
+    h.teams = [
+      {
+        id: "t1",
+        name: "Équipe 1",
+        snTeamId: "161092",
+        snStandingsJson: "{ ceci n'est pas du JSON",
+        snStandingsAt: new Date("2026-09-04T09:00:00.000Z"),
+      },
+    ];
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.teams[0].standings).toBeNull();
+  });
+
+  it("un tableau VIDE vaut pas de classement, pas un classement à zéro équipe", async () => {
+    h.teams = [
+      { id: "t1", name: "Équipe 1", snTeamId: null, snStandingsJson: "[]", snStandingsAt: null },
+    ];
+    const body = await (await GET(req())).json();
+    expect(body.teams[0].standings).toBeNull();
+  });
+
+  it("rend null quand rien n'a jamais été relevé", async () => {
+    const body = await (await GET(req())).json();
+    expect(body.teams[0].standings).toBeNull();
+    expect(body.teams[0].standingsAt).toBeNull();
   });
 });
