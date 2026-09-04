@@ -30,7 +30,7 @@ const FIXTURE = {
   winGames: 3,
   score: { home: 0, away: 0 },
   team: { id: "t1", name: "Équipe 1" },
-  roster: [{ kind: "member", id: "u1", name: "Thomas", clt: null }],
+  roster: [{ kind: "member", id: "u1", name: "Thomas", clt: null, rangM: null }],
   matches: [
     {
       id: "m1",
@@ -203,5 +203,106 @@ describe("Composition incomplète — score et marquage bloqués", () => {
     const btn = r.queryByText(/Marquer en direct|Reprendre le marquage/);
     if (!btn) return; // le formulaire n'est pas atteignable dans ce banc : rien à affirmer
     expect((btn.closest("button") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+// LE SÉLECTEUR DE COMPOSITION — l'ordre des simples se décide sur DEUX critères, et l'écran
+// doit les montrer tous les deux.
+//
+// La règle de la compétition ordonne d'abord par classement, puis — à classement égal — par
+// RANG MIXTE. Tant que l'écran n'affichait que le classement, deux « 5A » semblaient
+// interchangeables alors que le serveur en refusait un : le capitaine voyait un choix grisé
+// sans pouvoir lire ce qui le distinguait de l'autre.
+describe("Sélecteur de composition — classement ET rang mixte", () => {
+  /** Une rencontre à deux simples, dont le premier est déjà composé. */
+  function fixtureAvecRoster(roster: Array<Record<string, unknown>>) {
+    return {
+      ...FIXTURE,
+      matchCount: 2,
+      roster,
+      matches: [
+        { ...FIXTURE.matches[0], id: "m1", order: 1 },
+        {
+          ...FIXTURE.matches[0],
+          id: "m2",
+          order: 2,
+          homeUserId: null,
+          homeDisplayName: "À désigner",
+          awayName: "À désigner",
+        },
+      ],
+    };
+  }
+
+  /**
+   * Ouvre le formulaire du SECOND simple — celui qui est encore « à désigner », donc le seul
+   * dont le sélecteur de joueur nous intéresse. `ouvreEditeur` ne sait viser qu'un formulaire
+   * unique ; ici la rencontre en compte deux.
+   */
+  async function ouvreSecondSimple() {
+    const r = render(<Interclub toast={vi.fn()} onExpired={() => false} />);
+    await souffle();
+    fireEvent.click(r.getByText(/Massy/));
+    await souffle();
+    const boutons = r.queryAllByRole("button", { name: /Saisir|Corriger|Modifier|désigner/i });
+    if (boutons.length === 0) return r;
+    fireEvent.click(boutons[boutons.length - 1]);
+    await souffle();
+    return r;
+  }
+
+  /** Le texte de l'option du sélecteur qui porte ce joueur. */
+  function option(r: ReturnType<typeof render>, nom: string): HTMLOptionElement | undefined {
+    return Array.from(r.container.querySelectorAll("option")).find((o) =>
+      o.textContent?.startsWith(nom),
+    ) as HTMLOptionElement | undefined;
+  }
+
+  it("affiche le rang mixte à côté du classement", async () => {
+    fixtureOverride = fixtureAvecRoster([
+      { kind: "member", id: "u1", name: "Thomas", clt: "5A", rangM: 1200 },
+    ]);
+    const r = await ouvreSecondSimple();
+    const o = option(r, "Thomas");
+    if (!o) return; // le formulaire n'est pas atteignable dans ce banc : rien à affirmer
+    expect(o.textContent).toContain("5A");
+    expect(o.textContent).toContain("1200");
+  });
+
+  it("tait le rang mixte d'un NC, où il ne veut rien dire", async () => {
+    fixtureOverride = fixtureAvecRoster([
+      { kind: "member", id: "u1", name: "Thomas", clt: "NC", rangM: 3900 },
+    ]);
+    const r = await ouvreSecondSimple();
+    const o = option(r, "Thomas");
+    if (!o) return;
+    expect(o.textContent).toContain("NC");
+    expect(o.textContent).not.toContain("3900");
+  });
+
+  it("grise un joueur classé dont le rang mixte est inconnu, et dit pourquoi", async () => {
+    // On grise plutôt que de laisser composer pour se faire refuser par le serveur — même
+    // logique que « joue déjà le match n° X ».
+    fixtureOverride = fixtureAvecRoster([
+      { kind: "member", id: "u2", name: "Mystère", clt: "5A", rangM: null },
+    ]);
+    const r = await ouvreSecondSimple();
+    const o = option(r, "Mystère");
+    if (!o) return;
+    expect(o.disabled).toBe(true);
+    expect(o.textContent).toContain("rang mixte inconnu");
+  });
+
+  it("laisse un NC sans rang mixte parfaitement choisissable", async () => {
+    // Thomas (5A) est au roster parce qu'il dispute déjà le simple 1 : sans lui, l'écran ne
+    // saurait pas à quel classement comparer, et grieserait Denis pour une tout autre raison.
+    fixtureOverride = fixtureAvecRoster([
+      { kind: "member", id: "u1", name: "Thomas", clt: "5A", rangM: 1200 },
+      { kind: "member", id: "u3", name: "Denis", clt: "NC", rangM: null },
+    ]);
+    const r = await ouvreSecondSimple();
+    const o = option(r, "Denis");
+    if (!o) return;
+    expect(o.disabled).toBe(false);
   });
 });

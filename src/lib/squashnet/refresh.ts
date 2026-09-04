@@ -4,13 +4,30 @@ import { classifyRanking } from "./match";
 import type { RankingRow } from "./client";
 
 // ============================================================================
-//  Rafraîchissement du classement fédéral (squashnet.fr) des membres OPT-IN de
-//  l'annuaire (`listed`). Cœur PARTAGÉ entre le cron mensuel (warm-rankings) et
-//  le bouton admin « Rafraîchir les classements » (déclenchement manuel).
+//  Rafraîchissement du classement fédéral (squashnet.fr). Cœur PARTAGÉ entre le
+//  cron mensuel (warm-rankings) et le bouton admin « Rafraîchir les classements ».
 //
-//  Pour chaque membre : recherche par nom, verdict SÛR (classifyRanking) ;
-//  upsert si trouvé, suppression SEULEMENT sur signal positif de départ, jamais
+//  Pour chaque joueur : recherche par nom, verdict SÛR (classifyRanking) ;
+//  écriture si trouvé, effacement SEULEMENT sur signal positif de départ, jamais
 //  sur un simple « pas trouvé ». Séquentiel (doux pour squashnet), idempotent.
+//
+//  DEUX POPULATIONS, UNE SEULE PASSE.
+//   * les MEMBRES — compte sur l'appli — dont le classement nourrit l'annuaire ET
+//     l'ordre des simples interclub. Balayés s'ils sont OPT-IN de l'annuaire
+//     (`listed`) OU rattachés à une équipe interclub : un membre qui s'est retiré
+//     du trombinoscope n'a pas pour autant quitté son équipe, et sans classement
+//     rapproché il devient inalignable (cf. `interclub-roster.ts`) ;
+//   * les JOUEURS SANS COMPTE (`InterclubGuest`) — « sans compte » ne veut pas
+//     dire « sans licence » : ils disputent le même championnat, donc squashnet
+//     les connaît. Leur classement était saisi à la main faute d'être cherché ;
+//     il se périmait dès le mois suivant, en silence.
+//
+//  L'ADMIN GARDE LE DERNIER MOT DES DEUX CÔTÉS. Cette passe n'écrit QUE les
+//  colonnes de rapprochement (`SquashnetRanking` pour un membre, `sn*` pour un
+//  invité) et ne touche JAMAIS aux corrections manuelles (`interclubCltOverride`,
+//  `InterclubGuest.cltOverride`…), qui restent prioritaires à la lecture. C'est ce
+//  qui rend le rafraîchissement inoffensif pour un joueur que squashnet ne sait
+//  pas retrouver : sa correction survit à tous les runs.
 // ============================================================================
 
 // Disjoncteur « suppression en masse ». Le verdict `moved` (nom retrouvé uniquement hors du
@@ -25,61 +42,169 @@ const BULK_MOVE_RATIO = 0.34; // ET au-delà d'~1/3 des membres balayés → ano
 export interface RefreshResult {
   /** Période de classement ciblée, ex. "2026-07-07". Null si squashnet n'en renvoie aucune. */
   month: string | null;
-  /** Nombre de membres listés passés en revue. */
+  /** Nombre de joueurs passés en revue — membres balayés ET joueurs sans compte. */
   members: number;
-  /** Classements rapprochés puis upsertés. */
+  /** Dont joueurs SANS COMPTE (`InterclubGuest`), déjà comptés dans `members`. */
+  guests: number;
+  /** Classements rapprochés puis écrits. */
   matched: number;
-  /** Classements obsolètes retirés (lignes DB supprimées, sur signal positif de départ). */
+  /** Classements obsolètes retirés (sur signal positif de départ du club). */
   cleared: number;
-  /** Membres laissés en l'état, faute de signal fiable (erreur/silence squashnet, ambiguïté,
-   *  ou suppression neutralisée par le disjoncteur anti-effacement-massif). */
+  /** Joueurs laissés en l'état, faute de signal fiable (erreur/silence squashnet, ambiguïté,
+   *  ou effacement neutralisé par le disjoncteur anti-effacement-massif). */
   skipped: number;
-  /** Membres dont l'ÉCRITURE base a échoué (imputé à la base, jamais à squashnet). */
+  /** Joueurs dont l'ÉCRITURE base a échoué (imputé à la base, jamais à squashnet). */
   failed: number;
-  /** Vrai si le disjoncteur a neutralisé un lot de suppressions (anomalie systémique probable). */
+  /** Vrai si le disjoncteur a neutralisé un lot d'effacements (anomalie systémique probable). */
   bulkMoveBlocked: boolean;
 }
 
 /**
- * Rafraîchit le classement de tous les membres listés. Best-effort et NON atomique : chaque
- * membre est indépendant. Une erreur squashnet (timeout, 5xx) → membre `skipped` ; une erreur
- * d'écriture base → membre `failed` (comptée à part, jamais confondue avec un souci squashnet),
+ * Un joueur à rapprocher, quelle que soit sa population. Le rapprochement lui-même ne dépend
+ * que du NOM : c'est ce qui permet aux deux populations de partager la même boucle, le même
+ * verdict et le même disjoncteur — trois choses qu'on ne veut surtout pas voir diverger.
+ */
+type Subject = { kind: "member" | "guest"; id: string; name: string };
+
+/** Les joueurs à balayer, dans l'ordre : membres d'abord, joueurs sans compte ensuite. */
+async function subjectsToRefresh(): Promise<Subject[]> {
+  const [users, guests] = await Promise.all([
+    // `listed` OU rattaché à une équipe : cf. l'en-tête du module. Un membre retiré de
+    // l'annuaire mais aligné en championnat a besoin de son classement — pas pour être affiché,
+    // mais pour pouvoir être composé.
+    prisma.user.findMany({
+      where: { OR: [{ listed: true }, { teamId: { not: null } }] },
+      select: { id: true, displayName: true },
+    }),
+    prisma.interclubGuest.findMany({ select: { id: true, name: true } }),
+  ]);
+
+  // On matche sur le VRAI nom (`displayName`), jamais le pseudo (`nickname`). On écarte tout de
+  // suite les noms vides : ils ne sont pas évaluables et fausseraient le compteur `members`, le
+  // ratio du disjoncteur et le critère « tous ignorés » du heartbeat.
+  return [
+    ...users.map((u) => ({ kind: "member" as const, id: u.id, name: u.displayName.trim() })),
+    ...guests.map((g) => ({ kind: "guest" as const, id: g.id, name: g.name.trim() })),
+  ].filter((s) => s.name !== "");
+}
+
+/** Écrit un rapprochement RÉUSSI, là où cette population le range. */
+async function writeMatch(
+  subject: Subject,
+  hit: { clt: string; rang: number | null; rangM: number | null; licence: string; cat: string; club: string },
+  month: string,
+): Promise<void> {
+  if (subject.kind === "member") {
+    const data = {
+      clt: hit.clt,
+      rang: hit.rang,
+      rangM: hit.rangM,
+      licence: hit.licence,
+      cat: hit.cat,
+      club: hit.club,
+      month,
+    };
+    await prisma.squashnetRanking.upsert({
+      where: { userId: subject.id },
+      update: data,
+      create: { userId: subject.id, ...data },
+    });
+    return;
+  }
+  // Un invité n'a pas de `User` : son rapprochement vit à plat sur sa propre ligne. `rang` (le
+  // rang DANS SON GENRE) n'y est pas repris — il ne sert qu'aux têtes de série du tournoi, où
+  // un joueur sans compte n'apparaît jamais.
+  await prisma.interclubGuest.update({
+    where: { id: subject.id },
+    data: {
+      snClt: hit.clt,
+      snRangM: hit.rangM,
+      snLicence: hit.licence,
+      snClub: hit.club,
+      snMonth: month,
+      snStatus: "matched",
+      snCheckedAt: new Date(),
+    },
+  });
+}
+
+/** Efface un rapprochement DEVENU FAUX (le joueur a quitté le club), la correction admin intacte. */
+async function clearMatch(subject: Subject): Promise<number> {
+  if (subject.kind === "member") {
+    const del = await prisma.squashnetRanking.deleteMany({ where: { userId: subject.id } });
+    return del.count;
+  }
+  const upd = await prisma.interclubGuest.updateMany({
+    where: { id: subject.id },
+    data: {
+      snClt: null,
+      snRangM: null,
+      snLicence: null,
+      snClub: null,
+      snMonth: null,
+      snStatus: "moved",
+      snCheckedAt: new Date(),
+    },
+  });
+  return upd.count;
+}
+
+/**
+ * Note qu'on a CHERCHÉ sans conclure. Un membre ne garde aucune trace de ce non-résultat ; un
+ * invité, si — c'est ce qui permet à l'écran d'admin de dire « pas trouvable sur squashnet »,
+ * donc de savoir quand la saisie manuelle est nécessaire, au lieu de laisser une ligne muette
+ * qu'on ne découvre bloquante que le soir d'une rencontre.
+ *
+ * Best-effort, l'échec avalé : rater cette note ne compromet aucun classement, et la faire
+ * compter comme `failed` mêlerait une panne cosmétique à des pertes de données réelles.
+ */
+async function noteAttempt(subject: Subject, status: "unknown" | "moved"): Promise<void> {
+  if (subject.kind !== "guest") return;
+  await prisma.interclubGuest
+    .updateMany({ where: { id: subject.id }, data: { snStatus: status, snCheckedAt: new Date() } })
+    .catch(() => {});
+}
+
+/**
+ * Rafraîchit le classement de tous les joueurs balayés. Best-effort et NON atomique : chaque
+ * joueur est indépendant. Une erreur squashnet (timeout, 5xx) → joueur `skipped` ; une erreur
+ * d'écriture base → joueur `failed` (comptée à part, jamais confondue avec un souci squashnet),
  * sans interrompre le reste du lot. Renvoie `month: null` sans rien toucher si la période de
  * classement est introuvable.
  */
 export async function refreshRankings(): Promise<RefreshResult> {
   const month = await getLatestMonth();
   if (!month) {
-    return { month: null, members: 0, matched: 0, cleared: 0, skipped: 0, failed: 0, bulkMoveBlocked: false };
+    return {
+      month: null,
+      members: 0,
+      guests: 0,
+      matched: 0,
+      cleared: 0,
+      skipped: 0,
+      failed: 0,
+      bulkMoveBlocked: false,
+    };
   }
 
-  // On matche sur le VRAI nom (displayName), jamais le pseudo (nickname). On écarte tout de
-  // suite les noms vides : ils ne sont pas évaluables et fausseraient le compteur `members`,
-  // le ratio du disjoncteur et le critère « tous ignorés » du heartbeat.
-  const listed = await prisma.user.findMany({
-    where: { listed: true },
-    select: { id: true, displayName: true },
-  });
-  const members = listed
-    .map((m) => ({ id: m.id, name: m.displayName.trim() }))
-    .filter((m) => m.name !== "");
+  const subjects = await subjectsToRefresh();
+  const guests = subjects.filter((s) => s.kind === "guest").length;
 
   let matched = 0;
   let cleared = 0;
   let skipped = 0;
   let failed = 0;
-  // Les suppressions (`moved`) sont DIFFÉRÉES : on décide en fin de passe si le lot est crédible
+  // Les effacements (`moved`) sont DIFFÉRÉS : on décide en fin de passe si le lot est crédible
   // (cf. disjoncteur ci-dessus) avant d'effacer quoi que ce soit.
-  const movedIds: string[] = [];
+  const moved: Subject[] = [];
 
-  for (const m of members) {
-    const name = m.name;
-    // displayName = « Prénom Nom » → on interroge squashnet par le dernier mot (≈ nom de
-    // famille) ; la recherche fait un « contient » sur « NOM PRÉNOM », donc l'ordre importe peu.
-    const tokens = name.split(/\s+/);
+  for (const subject of subjects) {
+    // Le nom est « Prénom Nom » → on interroge squashnet par le dernier mot (≈ nom de famille) ;
+    // la recherche fait un « contient » sur « NOM PRÉNOM », donc l'ordre importe peu.
+    const tokens = subject.name.split(/\s+/);
     const query = tokens[tokens.length - 1];
 
-    // 1) Appel réseau squashnet SEUL sous try : un hoquet (timeout, 5xx) → membre `skipped`.
+    // 1) Appel réseau squashnet SEUL sous try : un hoquet (timeout, 5xx) → joueur `skipped`.
     let rows: RankingRow[];
     try {
       rows = await searchRanking(query, { month });
@@ -88,75 +213,92 @@ export async function refreshRankings(): Promise<RefreshResult> {
       continue;
     }
 
-    // 2) Verdict. On ne SUPPRIME que sur un signal POSITIF (« moved » : nom retrouvé uniquement
+    // 2) Verdict. On n'EFFACE que sur un signal POSITIF (« moved » : nom retrouvé uniquement
     //    hors du club) ; « pas trouvé » (page 2, ambiguïté, réponse vide) est « unknown » → rien.
-    const verdict = classifyRanking({ givenName: "", familyName: name }, rows);
+    const verdict = classifyRanking({ givenName: "", familyName: subject.name }, rows);
     if (verdict.status === "matched") {
-      const hit = verdict.match;
       try {
-        await prisma.squashnetRanking.upsert({
-          where: { userId: m.id },
-          update: {
-            clt: hit.clt,
-            rang: hit.rang,
-            rangM: hit.rangM,
-            licence: hit.licence,
-            cat: hit.cat,
-            club: hit.club,
-            month,
-          },
-          create: {
-            userId: m.id,
-            clt: hit.clt,
-            rang: hit.rang,
-            rangM: hit.rangM,
-            licence: hit.licence,
-            cat: hit.cat,
-            club: hit.club,
-            month,
-          },
-        });
+        await writeMatch(subject, verdict.match, month);
         matched++;
       } catch {
         failed++; // panne base : imputée à la base, on continue le lot.
       }
     } else if (verdict.status === "moved") {
-      movedIds.push(m.id);
+      moved.push(subject);
     } else {
+      await noteAttempt(subject, "unknown");
       skipped++;
     }
   }
 
   // 3) Disjoncteur : un lot de `moved` anormalement gros trahit un souci systémique (club
-  //    renommé côté squashnet), pas des départs réels → on ne supprime rien ce run.
-  const bulkMoveBlocked =
-    movedIds.length >= BULK_MOVE_MIN && movedIds.length > members.length * BULK_MOVE_RATIO;
+  //    renommé côté squashnet), pas des départs réels → on n'efface rien ce run.
+  const bulkMoveBlocked = moved.length >= BULK_MOVE_MIN && moved.length > subjects.length * BULK_MOVE_RATIO;
   if (bulkMoveBlocked) {
-    skipped += movedIds.length; // suppressions neutralisées → considérées « non concluantes ».
+    skipped += moved.length; // effacements neutralisés → considérés « non concluants ».
   } else {
-    for (const id of movedIds) {
+    for (const subject of moved) {
       try {
-        const del = await prisma.squashnetRanking.deleteMany({ where: { userId: id } });
-        cleared += del.count;
+        cleared += await clearMatch(subject);
       } catch {
         failed++;
       }
     }
   }
 
-  return { month, members: members.length, matched, cleared, skipped, failed, bulkMoveBlocked };
+  return { month, members: subjects.length, guests, matched, cleared, skipped, failed, bulkMoveBlocked };
+}
+
+/**
+ * Rapproche UN joueur sans compte, tout de suite — à son inscription au roster, ou sur demande
+ * de l'admin (« Re-rapprocher »). Même verdict et mêmes écritures que la passe complète : ce
+ * qu'un run mensuel conclurait, ce bouton le conclut aussi.
+ *
+ * NE LÈVE JAMAIS. Un hoquet squashnet ne doit pas faire échouer l'inscription de l'invité :
+ * l'admin le verra « pas trouvable » et saisira le classement à la main, ce qui est exactement
+ * le repli prévu. Renvoie le verdict pour que l'écran le dise.
+ */
+export async function matchGuestRanking(guest: {
+  id: string;
+  name: string;
+}): Promise<"matched" | "moved" | "unknown"> {
+  const subject: Subject = { kind: "guest", id: guest.id, name: guest.name.trim() };
+  if (!subject.name) return "unknown";
+  try {
+    const month = await getLatestMonth();
+    if (!month) return "unknown";
+    const tokens = subject.name.split(/\s+/);
+    const rows = await searchRanking(tokens[tokens.length - 1], { month });
+    const verdict = classifyRanking({ givenName: "", familyName: subject.name }, rows);
+    if (verdict.status === "matched") {
+      await writeMatch(subject, verdict.match, month);
+      return "matched";
+    }
+    // Pas de disjoncteur ici : il protège d'un EFFACEMENT EN MASSE, et il n'y a qu'un joueur.
+    if (verdict.status === "moved") {
+      await clearMatch(subject);
+      return "moved";
+    }
+    await noteAttempt(subject, "unknown");
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
 }
 
 /**
  * Résume un run pour le heartbeat du tableau de bord. `ok` est FAUX si quelque chose cloche
  * vraiment : une écriture base a échoué, le disjoncteur a bloqué des suppressions, ou TOUS les
- * membres ont été ignorés (squashnet muet). Un run où rien n'a bougé mais où squashnet a
+ * joueurs ont été ignorés (squashnet muet). Un run où rien n'a bougé mais où squashnet a
  * répondu (aucun changement de classement) reste `ok`.
  */
 export function summarizeRefresh(r: RefreshResult): { ok: boolean; info: string } {
   const ok =
     r.failed === 0 && !r.bulkMoveBlocked && (r.members === 0 || r.skipped < r.members);
   const parts = [`${r.matched} rapproché(s)`, `${r.cleared} retiré(s)`, `${r.skipped} ignoré(s)`];
+  // Les joueurs sans compte sont dits à part : ils sont une nouveauté de ce balayage, et c'est
+  // la seule ligne qui dise à l'admin que leurs classements ont bien été cherchés.
+  if (r.guests) parts.push(`dont ${r.guests} hors appli`);
   if (r.failed) parts.push(`${r.failed} échec(s) base`);
   if (r.bulkMoveBlocked) parts.push("suppression en masse BLOQUÉE");
   return { ok, info: parts.join(", ") };

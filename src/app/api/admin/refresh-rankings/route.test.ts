@@ -8,6 +8,7 @@ const h = vi.hoisted(() => ({
   refresh: {
     month: "2026-07-07",
     members: 3,
+    guests: 1,
     matched: 2,
     cleared: 1,
     skipped: 0,
@@ -52,6 +53,7 @@ beforeEach(() => {
   h.refresh = {
     month: "2026-07-07",
     members: 3,
+    guests: 1,
     matched: 2,
     cleared: 1,
     skipped: 0,
@@ -78,7 +80,7 @@ describe("POST /api/admin/refresh-rankings", () => {
   });
 
   it("502 si la période de classement est introuvable (squashnet indispo)", async () => {
-    h.refresh = { month: null, members: 0, matched: 0, cleared: 0, skipped: 0, failed: 0, bulkMoveBlocked: false };
+    h.refresh = { month: null, members: 0, guests: 0, matched: 0, cleared: 0, skipped: 0, failed: 0, bulkMoveBlocked: false };
     const res = await POST(req());
     expect(res.status).toBe(502);
     // Pas de heartbeat trompeur si le rafraîchissement n'a rien pu faire.
@@ -92,6 +94,7 @@ describe("POST /api/admin/refresh-rankings", () => {
       ok: true,
       month: "2026-07-07",
       members: 3,
+      guests: 1,
       matched: 2,
       cleared: 1,
       skipped: 0,
@@ -105,7 +108,7 @@ describe("POST /api/admin/refresh-rankings", () => {
   });
 
   it("heartbeat ok=false quand le disjoncteur a bloqué des suppressions en masse", async () => {
-    h.refresh = { month: "2026-07-07", members: 10, matched: 0, cleared: 0, skipped: 10, failed: 0, bulkMoveBlocked: true };
+    h.refresh = { month: "2026-07-07", members: 10, guests: 0, matched: 0, cleared: 0, skipped: 10, failed: 0, bulkMoveBlocked: true };
     const res = await POST(req());
     expect(res.status).toBe(200);
     expect((await res.json()).bulkMoveBlocked).toBe(true);

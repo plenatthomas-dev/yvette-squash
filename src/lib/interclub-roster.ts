@@ -16,7 +16,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { MAX_PLAYER_NAME_LEN, UNSET_PLAYER } from "./interclub-db";
-import { lineupOrderConflict, type OrderedSlot } from "./interclub-order";
+import { classementPower, isNC, lineupOrderConflict, type OrderedSlot } from "./interclub-order";
 
 /** Une entrée choisissable dans le sélecteur de composition. */
 export interface RosterEntry {
@@ -32,11 +32,14 @@ export interface RosterEntry {
    */
   clt: string | null;
   /**
-   * Rang national MIXTE (`SquashnetRanking.rangM`), ou `null` si inconnu — TOUJOURS `null` pour
-   * un invité (`InterclubGuest` n'a pas de rang, seulement un `clt` saisi à la main). Ne sert
-   * PAS à l'ordre des simples (`interclub-order.ts` compare des CLASSEMENTS, jamais des rangs) :
-   * uniquement à départager, dans le sélecteur, deux joueurs de MÊME classement — le mieux
-   * classé au rang mixte le plus PETIT passe en tête (cf. `Interclub.tsx`, tri d'affichage).
+   * Rang national MIXTE effectif, ou `null` si inconnu. Même priorité que `clt`, des deux côtés
+   * du roster : la correction admin (`User.interclubRangMOverride` / `InterclubGuest.
+   * rangMOverride`) si posée, sinon le rapprochement squashnet.
+   *
+   * DÉPARTAGE les joueurs de MÊME classement dans l'ordre des simples (`interclub-order.ts`) —
+   * il n'est donc plus seulement décoratif : un joueur non-`NC` sans rang mixte connu n'est pas
+   * alignable, exactement comme un joueur sans classement. Un `NC` en est dispensé : la
+   * fédération ne les ordonne pas entre eux.
    */
   rangM: number | null;
 }
@@ -63,6 +66,11 @@ export interface ResolvedPick {
    * pas connu (cf. `RosterEntry.clt`).
    */
   clt: string | null;
+  /**
+   * Rang mixte effectif, même statut que `clt` : relu à chaque écriture, jamais stocké. `null`
+   * pour un « à désigner » — et, légitimement, pour un `NC`, que la règle n'ordonne pas.
+   */
+  rangM: number | null;
 }
 
 export type PickResult = { ok: true; value: ResolvedPick } | { ok: false; error: string };
@@ -99,17 +107,11 @@ export async function teamRoster(teamId: string): Promise<RosterEntry[]> {
   const [members, guests] = await Promise.all([
     prisma.user.findMany({
       where: { teamId, disabledAt: null },
-      select: {
-        id: true,
-        displayName: true,
-        nickname: true,
-        interclubCltOverride: true,
-        squashnetRanking: { select: { clt: true, rangM: true } },
-      },
+      select: MEMBER_RANKING_SELECT,
     }),
     prisma.interclubGuest.findMany({
       where: { teamId },
-      select: { id: true, name: true, clt: true },
+      select: GUEST_RANKING_SELECT,
     }),
   ]);
 
@@ -119,14 +121,14 @@ export async function teamRoster(teamId: string): Promise<RosterEntry[]> {
       id: u.id,
       name: memberName(u),
       clt: memberClt(u),
-      rangM: u.squashnetRanking?.rangM ?? null,
+      rangM: memberRangM(u),
     })),
     ...guests.map((g) => ({
       kind: "guest" as const,
       id: g.id,
       name: g.name,
-      clt: g.clt ?? null,
-      rangM: null,
+      clt: guestClt(g),
+      rangM: guestRangM(g),
     })),
   ].sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
 }
@@ -152,14 +154,7 @@ export interface TeamMemberEntry extends RosterEntry {
 export async function allTeamMembers(): Promise<TeamMemberEntry[]> {
   const members = await prisma.user.findMany({
     where: { teamId: { not: null }, disabledAt: null },
-    select: {
-      id: true,
-      teamId: true,
-      displayName: true,
-      nickname: true,
-      interclubCltOverride: true,
-      squashnetRanking: { select: { clt: true, rangM: true } },
-    },
+    select: { ...MEMBER_RANKING_SELECT, teamId: true },
   });
 
   return members
@@ -170,9 +165,55 @@ export async function allTeamMembers(): Promise<TeamMemberEntry[]> {
       teamId: u.teamId as string,
       name: memberName(u),
       clt: memberClt(u),
-      rangM: u.squashnetRanking?.rangM ?? null,
+      rangM: memberRangM(u),
     }))
     .sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
+}
+
+// ---------------------------------------------------------------------------
+//  Le CLASSEMENT EFFECTIF d'un joueur — une seule définition, deux populations.
+//
+//  Membres et invités ont désormais la même structure : une correction ADMIN, prioritaire, et
+//  un RAPPROCHEMENT squashnet en dessous. Les colonnes diffèrent (un membre porte son
+//  rapprochement dans une table à part, un invité à plat), la RÈGLE non — d'où quatre
+//  accesseurs symétriques plutôt qu'un `??` recopié à chaque requête, où l'un des deux finit
+//  toujours par oublier l'override.
+// ---------------------------------------------------------------------------
+
+/** Les colonnes qu'il faut lire sur un membre pour établir son classement effectif. */
+const MEMBER_RANKING_SELECT = {
+  id: true,
+  displayName: true,
+  nickname: true,
+  interclubCltOverride: true,
+  interclubRangMOverride: true,
+  squashnetRanking: { select: { clt: true, rangM: true } },
+} as const;
+
+/** Idem pour un invité — mêmes deux étages, colonnes à plat. */
+const GUEST_RANKING_SELECT = {
+  id: true,
+  teamId: true,
+  name: true,
+  cltOverride: true,
+  rangMOverride: true,
+  snClt: true,
+  snRangM: true,
+} as const;
+
+/** La forme minimale que `memberClt`/`memberRangM` savent lire. */
+interface MemberRanking {
+  interclubCltOverride: string | null;
+  interclubRangMOverride: number | null;
+  squashnetRanking: { clt: string; rangM?: number | null } | null;
+}
+
+/** La forme minimale que `guestClt`/`guestRangM` savent lire. */
+interface GuestRanking {
+  cltOverride: string | null;
+  rangMOverride: number | null;
+  snClt: string | null;
+  snRangM: number | null;
 }
 
 /**
@@ -181,8 +222,140 @@ export async function allTeamMembers(): Promise<TeamMemberEntry[]> {
  * rapprochement qui s'est trompé (nom mal orthographié côté ResaMania, licence pas encore
  * rapprochée…) sans attendre que squashnet se corrige de lui-même le mois suivant.
  */
-function memberClt(u: { interclubCltOverride: string | null; squashnetRanking: { clt: string } | null }): string | null {
+function memberClt(u: MemberRanking): string | null {
   return u.interclubCltOverride ?? u.squashnetRanking?.clt ?? null;
+}
+
+/**
+ * Rang mixte effectif d'un membre, MÊME priorité que `memberClt`.
+ *
+ * ⚠️ Les deux corrections sont INDÉPENDANTES : forcer le classement ne force pas le rang, et
+ * réciproquement. Un membre dont le rapprochement squashnet est bon mais le classement
+ * fraîchement monté garde ainsi son rang rapproché, sans qu'un admin ait à le recopier.
+ */
+function memberRangM(u: MemberRanking): number | null {
+  return u.interclubRangMOverride ?? u.squashnetRanking?.rangM ?? null;
+}
+
+/** Classement effectif d'un invité — même règle, autres colonnes (cf. `MEMBER_RANKING_SELECT`). */
+function guestClt(g: GuestRanking): string | null {
+  return g.cltOverride ?? g.snClt ?? null;
+}
+
+/** Rang mixte effectif d'un invité — même règle, autres colonnes. */
+function guestRangM(g: GuestRanking): number | null {
+  return g.rangMOverride ?? g.snRangM ?? null;
+}
+
+/**
+ * Ce joueur est-il alignable, du seul point de vue de son CLASSEMENT ? Renvoie le motif de
+ * refus, ou `null`.
+ *
+ * Le contrôle vit ici et non dans `lineupOrderConflict` parce qu'il porte sur UN joueur, pas
+ * sur un ordre : le tout premier simple composé d'une rencontre n'a personne à qui se comparer,
+ * et laisserait donc passer un joueur qu'aucune composition ultérieure ne pourra jamais
+ * valider. Mieux vaut le dire au moment où on le désigne.
+ *
+ * Deux exigences, dans cet ordre :
+ *   1. un CLASSEMENT connu et reconnu — sans quoi on ne peut le situer nulle part ;
+ *   2. un RANG MIXTE connu, SAUF pour un `NC` : depuis que le rang départage les ex æquo de
+ *      classement, un « 5A » sans rang est invérifiable dès qu'un autre « 5A » est aligné. Les
+ *      `NC`, eux, sont équivalents entre eux — la fédération ne les ordonne pas.
+ */
+function rankingRefusal(name: string, clt: string | null, rangM: number | null): string | null {
+  if (clt == null || classementPower(clt) === null) {
+    return `${name} : classement inconnu — attribue-lui un classement avant de le désigner`;
+  }
+  if (!isNC(clt) && rangM == null) {
+    return `${name} (${clt}) : rang mixte inconnu — il départage les joueurs de même classement, renseigne-le avant de le désigner`;
+  }
+  return null;
+}
+
+/**
+ * Un joueur sans compte tel que l'ÉCRAN D'ADMIN doit le voir : son classement effectif, plus
+ * les deux étages qui le produisent. L'écran ne peut pas se contenter de l'effectif — il faut
+ * qu'il montre D'OÙ il vient pour que l'admin sache s'il doit corriger quelque chose, et qu'il
+ * puisse pré-remplir les champs de correction avec la correction EXISTANTE et non avec la
+ * valeur rapprochée (qu'il transformerait sinon en override au premier enregistrement).
+ */
+export interface TeamGuestEntry {
+  id: string;
+  teamId: string;
+  name: string;
+  /** Classement et rang EFFECTIFS (correction admin sinon rapprochement). */
+  clt: string | null;
+  rangM: number | null;
+  /** La correction ADMIN telle qu'elle est en base — `null` si l'admin n'a rien forcé. */
+  cltOverride: string | null;
+  rangMOverride: number | null;
+  /** Le RAPPROCHEMENT squashnet, et le verdict de la dernière tentative. */
+  snClt: string | null;
+  snRangM: number | null;
+  /** « matched » | « moved » | « unknown », ou `null` si jamais tenté. */
+  snStatus: string | null;
+  snCheckedAt: string | null;
+}
+
+/**
+ * TOUS les joueurs sans compte, toutes équipes confondues — le pendant d'`allTeamMembers` pour
+ * l'autre moitié du roster. Triés par nom, comme lui : l'écran les fusionne en une seule liste
+ * qu'il retrie par classement, et un tri stable a besoin des deux moitiés déjà ordonnées.
+ */
+const GUEST_ENTRY_SELECT = {
+  id: true,
+  teamId: true,
+  name: true,
+  cltOverride: true,
+  rangMOverride: true,
+  snClt: true,
+  snRangM: true,
+  snStatus: true,
+  snCheckedAt: true,
+} as const;
+
+function toGuestEntry(g: {
+  id: string;
+  teamId: string;
+  name: string;
+  cltOverride: string | null;
+  rangMOverride: number | null;
+  snClt: string | null;
+  snRangM: number | null;
+  snStatus: string | null;
+  snCheckedAt: Date | null;
+}): TeamGuestEntry {
+  return {
+    id: g.id,
+    teamId: g.teamId,
+    name: g.name,
+    clt: guestClt(g),
+    rangM: guestRangM(g),
+    cltOverride: g.cltOverride,
+    rangMOverride: g.rangMOverride,
+    snClt: g.snClt,
+    snRangM: g.snRangM,
+    snStatus: g.snStatus,
+    snCheckedAt: g.snCheckedAt?.toISOString() ?? null,
+  };
+}
+
+export async function allTeamGuests(): Promise<TeamGuestEntry[]> {
+  const guests = await prisma.interclubGuest.findMany({ select: GUEST_ENTRY_SELECT });
+  return guests
+    .map(toGuestEntry)
+    .sort((a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" }));
+}
+
+/**
+ * Le même joueur sans compte, lu SEUL — après une écriture, pour rendre son état à jour sans
+ * que l'écran ait à recharger toute la page. La projection est partagée avec `allTeamGuests`
+ * (`toGuestEntry`) : deux réponses qui décrivent le même joueur ne doivent pas pouvoir
+ * diverger d'un champ.
+ */
+export async function teamGuest(id: string): Promise<TeamGuestEntry | null> {
+  const g = await prisma.interclubGuest.findUnique({ where: { id }, select: GUEST_ENTRY_SELECT });
+  return g ? toGuestEntry(g) : null;
 }
 
 /**
@@ -239,15 +412,7 @@ export async function resolveHomePick(
   if (want.kind === "member") {
     const u = await db.user.findUnique({
       where: { id: want.id },
-      select: {
-        id: true,
-        displayName: true,
-        nickname: true,
-        teamId: true,
-        disabledAt: true,
-        interclubCltOverride: true,
-        squashnetRanking: { select: { clt: true } },
-      },
+      select: { ...MEMBER_RANKING_SELECT, teamId: true, disabledAt: true },
     });
     return decideMember(u, teamId);
   }
@@ -255,7 +420,7 @@ export async function resolveHomePick(
   if (want.kind === "guest") {
     const g = await db.interclubGuest.findUnique({
       where: { id: want.id },
-      select: { id: true, name: true, teamId: true, clt: true },
+      select: GUEST_RANKING_SELECT,
     });
     return decideGuest(g, teamId);
   }
@@ -288,21 +453,13 @@ export async function resolveHomePicks(
     userIds.length
       ? db.user.findMany({
           where: { id: { in: userIds } },
-          select: {
-            id: true,
-            displayName: true,
-            nickname: true,
-            teamId: true,
-            disabledAt: true,
-            interclubCltOverride: true,
-            squashnetRanking: { select: { clt: true } },
-          },
+          select: { ...MEMBER_RANKING_SELECT, teamId: true, disabledAt: true },
         })
       : Promise.resolve([]),
     guestIds.length
       ? db.interclubGuest.findMany({
           where: { id: { in: guestIds } },
-          select: { id: true, name: true, teamId: true, clt: true },
+          select: GUEST_RANKING_SELECT,
         })
       : Promise.resolve([]),
   ]);
@@ -338,15 +495,13 @@ function wanted(pick: HomePick): Wanted {
 
 function decideMember(
   u:
-    | {
+    | (MemberRanking & {
         id: string;
         displayName: string;
         nickname: string | null;
         teamId: string | null;
         disabledAt: Date | null;
-        interclubCltOverride: string | null;
-        squashnetRanking: { clt: string } | null;
-      }
+      })
     | null,
   teamId: string,
 ): PickResult {
@@ -356,12 +511,9 @@ function decideMember(
     return { ok: false, error: "Ce membre n'est pas dans l'équipe qui dispute la rencontre" };
   }
   const clt = memberClt(u);
-  if (clt == null) {
-    return {
-      ok: false,
-      error: `${memberName(u)} : classement inconnu — attribue-lui un classement avant de le désigner`,
-    };
-  }
+  const rangM = memberRangM(u);
+  const refusal = rankingRefusal(memberName(u), clt, rangM);
+  if (refusal) return { ok: false, error: refusal };
   return {
     ok: true,
     value: {
@@ -369,31 +521,31 @@ function decideMember(
       homeGuestId: null,
       homeDisplayName: memberName(u),
       clt,
+      rangM,
     },
   };
 }
 
 function decideGuest(
-  g: { id: string; name: string; teamId: string; clt: string | null } | null,
+  g: (GuestRanking & { id: string; name: string; teamId: string }) | null,
   teamId: string,
 ): PickResult {
   if (!g) return { ok: false, error: "Joueur inconnu" };
   if (g.teamId !== teamId) {
     return { ok: false, error: "Ce joueur n'est pas dans l'équipe qui dispute la rencontre" };
   }
-  if (g.clt == null) {
-    return {
-      ok: false,
-      error: `${g.name} : classement inconnu — attribue-lui un classement avant de le désigner`,
-    };
-  }
+  const clt = guestClt(g);
+  const rangM = guestRangM(g);
+  const refusal = rankingRefusal(g.name, clt, rangM);
+  if (refusal) return { ok: false, error: refusal };
   return {
     ok: true,
     value: {
       homeUserId: null,
       homeGuestId: g.id,
       homeDisplayName: g.name.slice(0, MAX_PLAYER_NAME_LEN),
-      clt: g.clt,
+      clt,
+      rangM,
     },
   };
 }
@@ -406,7 +558,7 @@ function decideGuest(
 function unsetPick(): PickResult {
   return {
     ok: true,
-    value: { homeUserId: null, homeGuestId: null, homeDisplayName: UNSET_PLAYER, clt: null },
+    value: { homeUserId: null, homeGuestId: null, homeDisplayName: UNSET_PLAYER, clt: null, rangM: null },
   };
 }
 
@@ -443,21 +595,36 @@ export async function findOrderConflict(
     userIds.length
       ? db.user.findMany({
           where: { id: { in: userIds } },
-          select: { id: true, interclubCltOverride: true, squashnetRanking: { select: { clt: true } } },
+          select: {
+            id: true,
+            interclubCltOverride: true,
+            interclubRangMOverride: true,
+            squashnetRanking: { select: { clt: true, rangM: true } },
+          },
         })
       : Promise.resolve([]),
     guestIds.length
-      ? db.interclubGuest.findMany({ where: { id: { in: guestIds } }, select: { id: true, clt: true } })
+      ? db.interclubGuest.findMany({
+          where: { id: { in: guestIds } },
+          select: { id: true, cltOverride: true, rangMOverride: true, snClt: true, snRangM: true },
+        })
       : Promise.resolve([]),
   ]);
-  const byUser = new Map(users.map((u) => [u.id, memberClt(u)]));
-  const byGuest = new Map(guests.map((g) => [g.id, g.clt]));
+  // Les DEUX critères de l'ordre sont relus ensemble : n'en relire qu'un laisserait
+  // `lineupOrderConflict` réclamer un rang mixte qu'on ne lui aurait pas donné, sur des joueurs
+  // pourtant parfaitement renseignés en base.
+  const byUser = new Map(users.map((u) => [u.id, { clt: memberClt(u), rangM: memberRangM(u) }]));
+  const byGuest = new Map(guests.map((g) => [g.id, { clt: guestClt(g), rangM: guestRangM(g) }]));
+  const NO_RANKING = { clt: null, rangM: null };
 
-  const slots: OrderedSlot[] = designated.map((s) => ({
-    order: s.order,
-    name: s.homeDisplayName,
-    clt: s.homeUserId ? (byUser.get(s.homeUserId) ?? null) : s.homeGuestId ? (byGuest.get(s.homeGuestId) ?? null) : null,
-  }));
+  const slots: OrderedSlot[] = designated.map((s) => {
+    const r = s.homeUserId
+      ? (byUser.get(s.homeUserId) ?? NO_RANKING)
+      : s.homeGuestId
+        ? (byGuest.get(s.homeGuestId) ?? NO_RANKING)
+        : NO_RANKING;
+    return { order: s.order, name: s.homeDisplayName, clt: r.clt, rangM: r.rangM };
+  });
   slots.push(candidate);
 
   return lineupOrderConflict(slots);

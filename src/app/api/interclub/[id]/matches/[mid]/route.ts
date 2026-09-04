@@ -251,6 +251,7 @@ export async function PATCH(
         const orderProblem = await findOrderConflict(tx, m.interclubId, mid, {
           order: m.order,
           clt: p.clt,
+          rangM: p.rangM,
           name: p.homeDisplayName,
         });
         if (orderProblem) throw new HttpError(400, orderProblem);

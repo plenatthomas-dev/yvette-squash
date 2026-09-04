@@ -36,6 +36,13 @@ export type MemberRow = {
   clt: string | null;
   cltOverride: string | null;
   cltSource: "override" | "squashnet" | null;
+  // Le RANG MIXTE, exactement de la même façon — c'est le SECOND critère de l'ordre des simples
+  // (il départage deux joueurs de même classement), donc un membre non-NC qui n'en a pas n'est
+  // alignable nulle part. La correction est indépendante de celle du classement : on peut
+  // forcer l'un en laissant l'autre au rapprochement.
+  rangM: number | null;
+  rangMOverride: number | null;
+  rangMSource: "override" | "squashnet" | null;
   // Origine des résas du membre sur 30 j glissants (cf. src/lib/booking-origin.ts pour la
   // mise en mots, qui dépend aussi de `mode` : un compte « email seul » n'est pas mesurable).
   bookingsApp: number;
@@ -79,7 +86,8 @@ export async function listMembers(): Promise<MemberRow[]> {
       createdAt: true,
       teamId: true,
       interclubCltOverride: true,
-      squashnetRanking: { select: { clt: true } },
+      interclubRangMOverride: true,
+      squashnetRanking: { select: { clt: true, rangM: true } },
       passkeys: {
         select: { id: true, deviceLabel: true, createdAt: true, lastUsedAt: true },
         orderBy: { createdAt: "desc" },
@@ -108,6 +116,16 @@ export async function listMembers(): Promise<MemberRow[]> {
     clt: u.interclubCltOverride ?? u.squashnetRanking?.clt ?? null,
     cltOverride: u.interclubCltOverride,
     cltSource: u.interclubCltOverride ? "override" : u.squashnetRanking ? "squashnet" : null,
+    rangM: u.interclubRangMOverride ?? u.squashnetRanking?.rangM ?? null,
+    rangMOverride: u.interclubRangMOverride,
+    // « squashnet » seulement si le rapprochement porte RÉELLEMENT un rang : contrairement au
+    // classement, `SquashnetRanking.rangM` est nullable — une ligne rapprochée sans rang ne
+    // doit pas faire croire à l'admin qu'une valeur existe quelque part.
+    rangMSource: u.interclubRangMOverride
+      ? "override"
+      : u.squashnetRanking?.rangM != null
+        ? "squashnet"
+        : null,
     bookingsApp: originByUser.get(u.id)?.app ?? 0,
     bookingsResa: originByUser.get(u.id)?.resa ?? 0,
   }));

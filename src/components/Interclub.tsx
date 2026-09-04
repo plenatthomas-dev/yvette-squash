@@ -34,7 +34,7 @@ import {
   winGamesFor,
   type GameScore,
 } from "@/lib/interclub";
-import { compareRosterOrder, lineupOrderConflict, type OrderedSlot } from "@/lib/interclub-order";
+import { compareRosterOrder, isNC, lineupOrderConflict, type OrderedSlot } from "@/lib/interclub-order";
 
 // Vue « Interclub » : les rencontres de championnat par équipes.
 //
@@ -76,8 +76,13 @@ type RosterEntry = {
   name: string;
   /** Classement fédéral effectif, ou `null` si inconnu — décide de l'ordre des simples. */
   clt: string | null;
-  /** Rang national mixte squashnet, ou `null` — départage deux joueurs de même classement dans
-   *  le sélecteur (cf. `compareRosterOrder`) ; toujours `null` pour un invité. */
+  /**
+   * Rang national MIXTE effectif, ou `null` si inconnu. SECOND critère de l'ordre des simples :
+   * il départage deux joueurs de même classement (le plus petit rang joue le simple le plus
+   * petit), et n'est donc plus un simple confort d'affichage — un joueur non-`NC` qui n'en a
+   * pas n'est alignable nulle part. Un `NC` en est dispensé : la fédération ne les ordonne pas
+   * entre eux (cf. `interclub-order.ts`).
+   */
   rangM: number | null;
 };
 
@@ -721,7 +726,11 @@ function FixtureDialog({
   // — le mieux classé des joueurs présents joue le simple n° 1). Même logique que `takenBy` :
   // on grise ici les choix que le serveur refuserait, plutôt que de laisser composer puis
   // échouer à l'enregistrement.
-  const rosterClt = new Map(fixture.roster.map((r) => [`${r.kind}:${r.id}`, r.clt]));
+  // Les DEUX critères de l'ordre, relus depuis le roster : le classement n'est pas stocké sur
+  // le match (seul le nom l'est, figé), le rang mixte non plus.
+  const rosterRanking = new Map(
+    fixture.roster.map((r) => [`${r.kind}:${r.id}`, { clt: r.clt, rangM: r.rangM }]),
+  );
   const orderSlots: OrderedSlot[] = fixture.matches
     .filter((m) => m.homeDisplayName !== UNSET_PLAYER)
     .map((m) => {
@@ -730,7 +739,13 @@ function FixtureDialog({
         : m.homeGuestId
           ? `guest:${m.homeGuestId}`
           : null;
-      return { order: m.order, name: m.homeDisplayName, clt: key ? (rosterClt.get(key) ?? null) : null };
+      const r = key ? rosterRanking.get(key) : undefined;
+      return {
+        order: m.order,
+        name: m.homeDisplayName,
+        clt: r?.clt ?? null,
+        rangM: r?.rangM ?? null,
+      };
     });
 
   return (
@@ -1172,24 +1187,40 @@ function MatchEditor({
               // ceux où une comparaison d'ordre est possible. Même logique que `taken` : on
               // grise plutôt que de laisser composer pour se faire refuser par le serveur.
               const noClt = r.clt == null;
-              // Romprait-il l'ordre des simples par classement s'il jouait CELUI-CI ? Même
-              // logique que `taken` : on grise plutôt que de laisser composer pour rien.
+              // Sans RANG MIXTE non plus, depuis qu'il départage les joueurs de même classement.
+              // Les NC en sont dispensés : la fédération ne les ordonne pas entre eux.
+              const noRang = !noClt && !isNC(r.clt as string) && r.rangM == null;
+              // Romprait-il l'ordre des simples s'il jouait CELUI-CI ? Même logique que `taken` :
+              // on grise plutôt que de laisser composer pour rien.
               const orderProblem =
-                taken || noClt
+                taken || noClt || noRang
                   ? null
-                  : lineupOrderConflict([...otherOrderSlots, { order: match.order, name: r.name, clt: r.clt }]);
-              const blocked = taken || noClt || !!orderProblem;
+                  : lineupOrderConflict([
+                      ...otherOrderSlots,
+                      { order: match.order, name: r.name, clt: r.clt, rangM: r.rangM },
+                    ]);
+              const blocked = taken || noClt || noRang || !!orderProblem;
               return (
                 <option key={key} value={key} disabled={blocked}>
                   {r.name}
-                  {r.clt ? ` (${r.clt})` : ""}
+                  {/* Le classement ET le rang : ce sont les deux critères qui décident de
+                      l'ordre, et le second est le seul moyen de comprendre pourquoi deux « 5A »
+                      ne sont pas interchangeables. Le rang est tu pour un NC, où il ne veut
+                      rien dire.
+
+                      Noté « 5A #1200 » : le dièse dit « numéro » sans le mot, et une option de
+                      `<select>` ne se met pas sur deux lignes — sur un téléphone, « · rang »
+                      coûtait quatre caractères par joueur pour ne rien apprendre à personne. */}
+                  {r.clt ? ` (${r.clt}${r.rangM != null && !isNC(r.clt) ? ` #${r.rangM}` : ""})` : ""}
                   {taken
                     ? ` — joue déjà le match n° ${at}`
                     : noClt
                       ? " — classement inconnu"
-                      : orderProblem
-                        ? " — hors ordre de classement"
-                        : ""}
+                      : noRang
+                        ? " — rang mixte inconnu"
+                        : orderProblem
+                          ? " — hors ordre de classement"
+                          : ""}
                 </option>
               );
             })}

@@ -93,6 +93,41 @@ describe("GET /api/directory", () => {
     expect(members[0].rangM).toBeUndefined();
   });
 
+  it("expose la correction admin du RANG MIXTE, comme celle du classement", async () => {
+    // Depuis que l'ordre des simples interclub s'appuie sur le rang mixte, un admin peut en
+    // forcer un. Le taire ici trierait un membre corrigé à une place que plus rien ne justifie.
+    h.users = [
+      {
+        id: "a",
+        displayName: "Alice Martin",
+        nickname: null,
+        interclubCltOverride: "4D",
+        interclubRangMOverride: 812,
+        squashnetRanking: null,
+      },
+    ];
+    const { members } = await (await GET(req())).json();
+    expect(members[0]).toMatchObject({ clt: "4D", rangM: 812 });
+    // `rang` (le rang DANS SON GENRE) et `cat` ne se corrigent nulle part : aucun écran ne les
+    // demande, et ils ne servent qu'aux têtes de série et à une info-bulle.
+    expect(members[0].rang).toBeUndefined();
+  });
+
+  it("la correction du rang mixte l'emporte sur le rapprochement", async () => {
+    h.users = [
+      {
+        id: "a",
+        displayName: "Alice Martin",
+        nickname: null,
+        interclubCltOverride: null,
+        interclubRangMOverride: 812,
+        squashnetRanking: { clt: "3A", rang: 10, rangM: 20, cat: "+45" },
+      },
+    ];
+    const { members } = await (await GET(req())).json();
+    expect(members[0]).toMatchObject({ clt: "3A", rangM: 812, rang: 10 });
+  });
+
   it("priorise la correction admin sur le rapprochement squashnet, mais garde le rang de squashnet", async () => {
     h.users = [
       {

@@ -303,7 +303,20 @@ describe("POST /api/admin/members", () => {
     expect(res.status).toBe(200);
     expect(h.userUpdate).toHaveBeenCalledWith({
       where: { id: "u1" },
-      data: { interclubCltOverride: "5B" },
+      data: { interclubCltOverride: "5B", interclubRangMOverride: null },
+    });
+  });
+
+  it("set_clt_override : force AUSSI le rang mixte, second critère de l'ordre des simples", async () => {
+    // Sans lui, un membre corrigé à la main resterait inalignable dès qu'un autre partage son
+    // classement — pour une donnée qu'aucun écran ne proposait de renseigner.
+    const res = await POST(
+      postReq({ id: "u1", action: "set_clt_override", clt: "5B", rangM: "2 339" }),
+    );
+    expect(res.status).toBe(200);
+    expect(h.userUpdate).toHaveBeenCalledWith({
+      where: { id: "u1" },
+      data: { interclubCltOverride: "5B", interclubRangMOverride: 2339 },
     });
   });
 
@@ -311,13 +324,21 @@ describe("POST /api/admin/members", () => {
     await POST(postReq({ id: "u1", action: "set_clt_override", clt: "" }));
     expect(h.userUpdate).toHaveBeenCalledWith({
       where: { id: "u1" },
-      data: { interclubCltOverride: null },
+      data: { interclubCltOverride: null, interclubRangMOverride: null },
     });
   });
 
   it("set_clt_override : refuse un format non reconnu", async () => {
     const res = await POST(postReq({ id: "u1", action: "set_clt_override", clt: "cinq" }));
     expect(res.status).toBe(400);
+    expect(h.userUpdate).not.toHaveBeenCalled();
+  });
+
+  it("set_clt_override : refuse un rang mixte non entier ou nul, sans rien écrire", async () => {
+    // Un « 0 » est une case vide déguisée : le laisser passer placerait ce membre EN TÊTE de
+    // l'ordre des simples, devant les mieux classés du club.
+    expect((await POST(postReq({ id: "u1", action: "set_clt_override", clt: "5B", rangM: "0" }))).status).toBe(400);
+    expect((await POST(postReq({ id: "u1", action: "set_clt_override", clt: "5B", rangM: "abc" }))).status).toBe(400);
     expect(h.userUpdate).not.toHaveBeenCalled();
   });
 

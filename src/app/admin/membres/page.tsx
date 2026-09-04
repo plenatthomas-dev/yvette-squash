@@ -42,6 +42,12 @@ type Member = {
   clt: string | null;
   cltOverride: string | null;
   cltSource: "override" | "squashnet" | null;
+  // Le RANG MIXTE, exactement de la même façon : c'est le SECOND critère de l'ordre des simples
+  // (il départage deux joueurs de même classement), donc un membre non-NC qui n'en a pas ne
+  // peut être aligné nulle part — d'où une correction propre, à côté de celle du classement.
+  rangM: number | null;
+  rangMOverride: number | null;
+  rangMSource: "override" | "squashnet" | null;
   // Résas du membre sur 30 j, par origine. Mises en mots par memberOriginLabel, qui tient
   // compte de `mode` : un compte « email seul » n'est pas mesurable côté ResaMania.
   bookingsApp: number;
@@ -147,7 +153,7 @@ export default function MembersPage() {
   const postAction = async (
     id: string,
     action: Action,
-    extra?: { passkeyId?: string; teamId?: string | null; clt?: string },
+    extra?: { passkeyId?: string; teamId?: string | null; clt?: string; rangM?: string },
   ) => {
     setBusyId(id);
     setMsg(null);
@@ -162,6 +168,7 @@ export default function MembersPage() {
         error?: string;
         teamId?: string | null;
         clt?: string | null;
+        rangM?: number | null;
       };
       if (!res.ok) {
         setMsg({ id, text: data.error ?? "Action impossible." });
@@ -212,13 +219,28 @@ export default function MembersPage() {
     void postAction(id, "set_team", { teamId });
   };
 
-  // Enregistré à la perte de focus, pas à chaque frappe : c'est un champ texte, pas un switch.
+  // Les deux corrections partent ENSEMBLE au serveur (une seule action), mais se règlent
+  // séparément à l'écran : forcer un classement n'oblige pas à retaper un rang déjà rapproché,
+  // et réciproquement. D'où la lecture de l'AUTRE valeur courante à chaque envoi — l'omettre
+  // reviendrait à l'effacer, `set_clt_override` écrivant les deux colonnes.
+  //
   // Retaper exactement la valeur déjà enregistrée n'écrit rien, même logique que `setTeam`.
   const setCltOverride = (id: string, clt: string) => {
-    const current = members.find((m) => m.id === id)?.cltOverride ?? "";
+    const m = members.find((x) => x.id === id);
     const next = clt.trim();
-    if (current === next) return;
-    void postAction(id, "set_clt_override", { clt: next });
+    if ((m?.cltOverride ?? "") === next) return;
+    void postAction(id, "set_clt_override", {
+      clt: next,
+      rangM: m?.rangMOverride != null ? String(m.rangMOverride) : "",
+    });
+  };
+
+  // Enregistré à la perte de focus, pas à chaque frappe : c'est un champ nombre, pas un switch.
+  const setRangMOverride = (id: string, rangM: string) => {
+    const m = members.find((x) => x.id === id);
+    const next = rangM.trim();
+    if ((m?.rangMOverride != null ? String(m.rangMOverride) : "") === next) return;
+    void postAction(id, "set_clt_override", { clt: m?.cltOverride ?? "", rangM: next });
   };
 
   const revokePasskey = (id: string, pk: MemberPasskey) => {
@@ -402,6 +424,38 @@ export default function MembersPage() {
                         </option>
                       ))}
                     </select>
+
+                    {/* Le RANG MIXTE, second critère de l'ordre des simples : à classement
+                        égal, le plus petit rang joue le simple le plus petit. Champ NOMBRE et
+                        non `<select>` — contrairement aux classements, les rangs ne forment
+                        pas une liste fermée, ils vont à quelques milliers et bougent chaque
+                        mois. Enregistré à la perte de focus (`onBlur`), pas à chaque frappe :
+                        « 2339 » passerait sinon par 2, 23 et 233, trois rangs parfaitement
+                        valides qui partiraient chacun au serveur.
+                        Inutile pour un NC — la fédération ne les ordonne pas entre eux — d'où
+                        le placeholder qui le dit plutôt qu'un champ grisé sans explication. */}
+                    <span className="muted" style={{ flex: "0 0 auto" }}>
+                      rang&nbsp;:
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      inputMode="numeric"
+                      defaultValue={m.rangMOverride ?? ""}
+                      key={`rangm-${m.id}-${m.rangMOverride ?? ""}`}
+                      disabled={busyId === m.id}
+                      onBlur={(e) => setRangMOverride(m.id, e.target.value)}
+                      aria-label={`Rang mixte interclub forcé pour ${m.displayName}`}
+                      title="Écrase le rang mixte squashnet. Départage les joueurs de même classement. Inutile pour un NC."
+                      placeholder={
+                        m.rangMSource === "squashnet" && m.rangM != null
+                          ? `squashnet : ${m.rangM}`
+                          : m.clt === "NC"
+                            ? "inutile (NC)"
+                            : "aucun"
+                      }
+                      style={{ width: "9rem", margin: 0 }}
+                    />
                   </div>
                 )}
 

@@ -6,16 +6,24 @@
 // n° 1, et les simples suivants s'enchaînent dans l'ordre décroissant de classement. Concrètement
 // : si Albert (classé 5A) joue le simple 1, alors Benoît (classé 4D, MIEUX classé que 5A malgré
 // la lettre) ne peut jouer AUCUN simple de cette rencontre — l'aligner casserait l'ordre quel
-// que soit le numéro qu'on lui donnerait. Deux joueurs de MÊME classement (deux « 5A », ou deux
-// « NC ») sont interchangeables : rien ne les départage, `RangM` n'intervient jamais ici.
+// que soit le numéro qu'on lui donnerait.
+//
+// DEUX CRITÈRES, PAS UN. Le classement décide d'abord ; à classement ÉGAL (deux « 5A »), c'est
+// le RANG MIXTE (`rangM` — « M » comme mixte, pas masculin) qui départage, le plus petit devant.
+// Deux « 5A » ne sont donc PAS interchangeables dès lors que leurs rangs diffèrent. Ce module a
+// longtemps prétendu le contraire (« RangM n'intervient jamais ici ») : c'était faux, et une
+// rencontre composée sur cette base est sanctionnable au même titre qu'un classement inversé.
+//
+// LA SEULE EXCEPTION EST « NC ». Les non-classés sont équivalents ENTRE EUX : la fédération ne
+// les ordonne pas, et leur rang mixte — quand squashnet en publie un — ne veut rien dire à ce
+// niveau de la pyramide. Un NC est donc alignable SANS rang mixte connu ; tout autre classement
+// exige les deux (cf. `lineupOrderConflict`, et `decideMember`/`decideGuest` dans
+// `interclub-roster.ts` pour un joueur isolé, qu'aucune comparaison ne peut atteindre).
 //
 // LE FORMAT « clt » (« 5A », « NC », « 1N »…) est celui de squashnet.fr, déjà utilisé par
 // `SquashnetRanking.clt` et par le tri de l'annuaire (`directorySort.ts`). Ce module ne le
-// CONFOND JAMAIS avec un rang (`rang`/`rangM`, un entier) : le rang mesure une position dans un
-// classement national qui bouge chaque mois et n'a pas vocation à ordonner une rencontre — deux
-// joueurs du même classement peuvent avoir des rangs très différents sans que l'un doive jouer
-// avant l'autre. C'est explicitement ce que demande la règle du club (« le classement RangM
-// n'intervient pas »).
+// CONFOND JAMAIS avec un rang : ce sont deux échelles distinctes, comparées l'une APRÈS l'autre
+// et jamais mélangées — un rang ne rattrape pas un classement inférieur, si petit soit-il.
 //
 // LA LISTE DES CLASSEMENTS RECONNUS EST FERMÉE, et volontairement calée sur le règlement sportif
 // FFSquash en vigueur (« Principes du classement 2025-2026 », art. 3 — pyramide du classement) :
@@ -71,6 +79,19 @@ export function classementPower(clt: string): ClassementPower | null {
   // ×10 pour que le chiffre domine TOUJOURS la lettre (0..3) : la série 2 doit rester plus
   // forte que toute série suivante, donc démarrer après « 1N » (poids 1), jamais avant.
   return 2 + numero * 10 + lettre;
+}
+
+/**
+ * Ce classement est-il « non classé » ? La SEULE valeur pour laquelle le rang mixte ne
+ * départage pas (cf. l'en-tête du module) : la fédération n'ordonne pas les NC entre eux, et
+ * un NC est donc alignable sans rang mixte connu.
+ *
+ * Une valeur non reconnue n'est PAS un NC : elle n'est rien du tout, et l'appelant la refuse
+ * plus haut. Ne jamais dériver ce test d'un `classementPower === Infinity` : le poids d'un
+ * classement est un détail d'implémentation de la comparaison, pas une identité.
+ */
+export function isNC(clt: string): boolean {
+  return clt.trim().toUpperCase() === "NC";
 }
 
 /**
@@ -130,6 +151,50 @@ export function parseClassementInput(v: unknown): { ok: true; value: string | nu
   return { ok: true, value: upper };
 }
 
+/**
+ * Rang mixte le plus grand qu'un admin puisse saisir. La fédération publie quelques milliers de
+ * lignes ; la borne n'est là que pour attraper une faute de frappe (un numéro de licence collé
+ * dans le mauvais champ, une année…), pas pour valider quoi que ce soit sur le fond.
+ */
+const MAX_RANG_M = 99_999;
+
+/**
+ * Normalise une saisie ADMIN de rang mixte — le pendant de `parseClassementInput`, pour le
+ * second critère de l'ordre des simples. Accepte un nombre ou une chaîne (le `value` d'un
+ * `<input type="number">` est une chaîne), et tolère les espaces de milliers, comme squashnet
+ * les affiche (« 2 339 »).
+ *
+ * Chaîne vide = pas de rang saisi, `null` accepté : ce n'est pas une erreur, juste un champ
+ * qu'on n'a pas rempli — légitime pour un `NC`, que la règle n'ordonne pas.
+ *
+ * REFUSE zéro et le négatif, comme `toRank` côté squashnet (`squashnet/match.ts`) : un rang
+ * commence à 1, et un « 0 » est une case vide déguisée qui placerait son joueur EN TÊTE de
+ * l'ordre — devant les mieux classés du club.
+ */
+export function parseRangMInput(v: unknown): { ok: true; value: number | null } | { ok: false; error: string } {
+  if (v === null || v === undefined) return { ok: true, value: null };
+  if (typeof v === "number") {
+    if (!Number.isInteger(v) || v < 1 || v > MAX_RANG_M) {
+      return { ok: false, error: `Rang mixte invalide (un entier entre 1 et ${MAX_RANG_M})` };
+    }
+    return { ok: true, value: v };
+  }
+  if (typeof v !== "string") return { ok: false, error: "Rang mixte invalide" };
+  const trimmed = v.trim();
+  if (!trimmed) return { ok: true, value: null };
+  // Espaces INTERNES retirés seulement ici : « 2 339 » est la forme affichée par squashnet, donc
+  // celle qu'un admin recopie. Tout autre caractère reste une faute, et se dit.
+  const digits = trimmed.replace(/\s/g, "");
+  if (!/^\d+$/.test(digits)) {
+    return { ok: false, error: `Rang mixte invalide (un entier entre 1 et ${MAX_RANG_M})` };
+  }
+  const n = parseInt(digits, 10);
+  if (n < 1 || n > MAX_RANG_M) {
+    return { ok: false, error: `Rang mixte invalide (un entier entre 1 et ${MAX_RANG_M})` };
+  }
+  return { ok: true, value: n };
+}
+
 /** Un simple désigné, tel qu'exposé par `interclub-roster.ts` — pas les simples « à désigner ». */
 export interface OrderedSlot {
   /** Numéro du simple (1..matchCount), l'ordre de passage réel. */
@@ -138,6 +203,12 @@ export interface OrderedSlot {
   name: string;
   /** Classement effectif du joueur, ou `null` si inconnu (jamais rapproché, jamais forcé). */
   clt: string | null;
+  /**
+   * Rang mixte effectif (correction admin sinon rapprochement squashnet), ou `null` si inconnu.
+   * DÉPARTAGE les joueurs de même classement — il ne rattrape jamais un classement inférieur.
+   * Exigé pour tout classement AUTRE que `NC` (cf. l'en-tête du module).
+   */
+  rangM: number | null;
 }
 
 /**
@@ -153,7 +224,7 @@ export interface OrderedSlot {
  * d'autre ne soit désigné, ne doit pas exiger un classement qui ne servira peut-être jamais.
  * L'exigence n'apparaît qu'au SECOND joueur désigné, quand une comparaison devient possible.
  *
- * Deux causes de refus dès qu'au moins deux simples sont désignés, dans cet ordre — la
+ * Trois causes de refus dès qu'au moins deux simples sont désignés, dans cet ordre — la
  * première rencontrée est rendue :
  *   1. CLASSEMENT INCONNU. Un simple désigné mais dont le classement n'a pas pu être établi
  *      (joueur jamais rapproché sur squashnet, invité sans classement saisi, correction
@@ -161,11 +232,18 @@ export interface OrderedSlot {
  *      est respecté sans savoir où ce joueur se situe. On refuse plutôt que de supposer un
  *      ordre qui pourrait être faux — le club risquerait une sanction fédérale sur une
  *      hypothèse de l'appli.
- *   2. ORDRE VIOLÉ. Un simple de numéro plus GRAND porte un joueur mieux classé qu'un simple de
- *      numéro plus PETIT. Il suffit de comparer les simples désignés CONSÉCUTIFS une fois triés
- *      par numéro : par transitivité, une suite non-décroissante de poids sur des paires
- *      consécutives l'est sur TOUTES les paires — pas besoin de comparer chaque simple à tous
- *      les autres.
+ *   2. RANG MIXTE INCONNU sur un joueur qui n'est PAS `NC`. Même raisonnement, un cran plus
+ *      bas : depuis que le rang départage les ex æquo de classement, un joueur sans rang est
+ *      invérifiable dès qu'un autre partage son classement. On l'exige de TOUS les non-NC
+ *      désignés, sans attendre de savoir si un ex æquo est effectivement présent : l'exiger
+ *      seulement en cas d'égalité ferait apparaître le refus au troisième joueur composé,
+ *      pour une donnée manquante depuis le premier — un piège plutôt qu'une règle.
+ *   3. ORDRE VIOLÉ. Un simple de numéro plus GRAND porte un joueur qui devrait passer AVANT un
+ *      simple de numéro plus PETIT : soit parce qu'il est mieux CLASSÉ, soit — à classement
+ *      égal, `NC` excepté — parce que son RANG MIXTE est plus petit. Il suffit de comparer les
+ *      simples désignés CONSÉCUTIFS une fois triés par numéro : par transitivité, une suite
+ *      non-décroissante sur des paires consécutives l'est sur TOUTES les paires — pas besoin de
+ *      comparer chaque simple à tous les autres.
  */
 export function lineupOrderConflict(slots: readonly OrderedSlot[]): string | null {
   if (slots.length < 2) return null;
@@ -180,10 +258,17 @@ export function lineupOrderConflict(slots: readonly OrderedSlot[]): string | nul
     }
   }
 
+  for (const s of sorted) {
+    // `s.clt` non-nul et reconnu, vérifié par la boucle ci-dessus.
+    if (!isNC(s.clt as string) && s.rangM == null) {
+      return `${s.name} (${s.clt}) : rang mixte inconnu — il départage les joueurs de même classement, renseigne-le avant de composer le simple n° ${s.order}`;
+    }
+  }
+
   for (let i = 1; i < sorted.length; i++) {
     const prev = sorted[i - 1];
     const cur = sorted[i];
-    // Non-nul, vérifié par la boucle ci-dessus.
+    // Non-nul, vérifié par la première boucle.
     const prevPower = classementPower(prev.clt as string) as ClassementPower;
     const curPower = classementPower(cur.clt as string) as ClassementPower;
     if (curPower < prevPower) {
@@ -191,6 +276,19 @@ export function lineupOrderConflict(slots: readonly OrderedSlot[]): string | nul
         `${cur.name} (${cur.clt}) est mieux classé que ${prev.name} (${prev.clt}) : ` +
         `il doit jouer un simple numéroté avant le sien (actuellement simple n° ${prev.order}).`
       );
+    }
+    // Classement ÉGAL : le rang mixte départage, sauf entre NC (équivalents entre eux, et
+    // testés sur le seul `prev` — à poids égal, `cur` est NC si et seulement si `prev` l'est).
+    if (curPower === prevPower && !isNC(prev.clt as string)) {
+      // Non-nuls hors NC, vérifiés par la deuxième boucle.
+      const prevRang = prev.rangM as number;
+      const curRang = cur.rangM as number;
+      if (curRang < prevRang) {
+        return (
+          `${cur.name} (${cur.clt}, rang ${curRang}) devance ${prev.name} (${prev.clt}, rang ${prevRang}) ` +
+          `à classement égal : il doit jouer un simple numéroté avant le sien (actuellement simple n° ${prev.order}).`
+        );
+      }
     }
   }
 
@@ -201,7 +299,11 @@ export function lineupOrderConflict(slots: readonly OrderedSlot[]): string | nul
 export interface RankableRosterEntry {
   name: string;
   clt: string | null;
-  /** Rang national mixte (`SquashnetRanking.rangM`), ou `null` — toujours `null` pour un invité. */
+  /**
+   * Rang national mixte EFFECTIF (correction admin sinon rapprochement squashnet), ou `null`
+   * si inconnu — membre comme invité, les deux populations en ont un depuis que l'ordre des
+   * simples le réclame.
+   */
   rangM: number | null;
 }
 
@@ -210,14 +312,19 @@ export interface RankableRosterEntry {
  * avec `lineupOrderConflict`, qui VALIDE l'ordre des simples DÉJÀ DÉSIGNÉS d'une rencontre —
  * celui-ci ne fait que trier une LISTE de choix possibles, et ne refuse jamais rien.
  *
+ * Ses deux premiers paliers sont exactement les critères de la RÈGLE (classement, puis rang
+ * mixte) : la liste se lit donc dans l'ordre où ces joueurs devront disputer les simples, ce
+ * qui est tout l'intérêt de la trier.
+ *
  * Trois paliers, dans cet ordre :
  *   1. CLASSEMENT (`classementPower`), le plus fort en tête — un classement mal formé ou absent
  *      compte comme « inconnu » et passe systématiquement après tout classement reconnu, y
  *      compris `NC` (qui EST un classement, juste le plus faible) ;
- *   2. à classement égal (deux « 5A », deux `NC`, ou deux inconnus), le RANG MIXTE squashnet
- *      (`rangM`) le plus PETIT — mais seulement quand les DEUX camarades de palier le connaissent,
- *      sans quoi comparer un rang à une absence de rang n'aurait aucun sens (cf. `directorySort.ts`,
- *      même principe : on ne mélange jamais un rang connu et une absence de rang) ;
+ *   2. à classement égal (deux « 5A », deux `NC`, ou deux inconnus), le RANG MIXTE (`rangM`) le
+ *      plus PETIT — mais seulement quand les DEUX camarades de palier le connaissent, sans quoi
+ *      comparer un rang à une absence de rang n'aurait aucun sens (cf. `directorySort.ts`, même
+ *      principe). Deux `NC` sont ainsi triés par rang alors que la règle les tient pour
+ *      interchangeables : c'est un ordre d'AFFICHAGE stable, il n'autorise ni ne refuse rien ;
  *   3. sinon, ordre ALPHABÉTIQUE (déjà l'ordre reçu du serveur, `localeCompare` FR) — un tri
  *      stable laisse ce palier intact sans qu'on ait à le refaire ici.
  */

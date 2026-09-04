@@ -22,12 +22,86 @@ type PendingRequest = {
 
 type CronRun = { name: string; lastRunAt: string; ok: boolean; info: string | null };
 
+/**
+ * Ce qu'il faut savoir d'un joueur pour dire s'il est alignable : son classement, son rang
+ * mixte, et d'où ils viennent. Les deux populations du roster l'affichent à l'identique — un
+ * membre et un joueur hors appli obéissent à la même règle, et les distinguer à l'œil ferait
+ * croire le contraire.
+ *
+ * CE QUI MANQUE SE DIT, plutôt que de laisser un blanc. Une ligne muette ne se découvre
+ * bloquante que le soir d'une rencontre, au moment de composer — trop tard pour la corriger.
+ * Le rang mixte n'est réclamé qu'aux non-NC : la fédération n'ordonne pas les NC entre eux
+ * (cf. `interclub-order.ts`), donc l'exiger d'eux serait un faux manque.
+ */
+/**
+ * Ce joueur a-t-il de quoi être aligné ? Le classement ET, sauf pour un `NC`, le rang mixte —
+ * les deux critères de l'ordre des simples (cf. `interclub-order.ts`). C'est ce qui décide si
+ * l'écran propose la correction manuelle ou se contente d'un bouton « Actualiser » : proposer
+ * d'écraser une donnée juste est une invitation à la casser, ne rien proposer sur une donnée
+ * manquante est une impasse.
+ */
+function rankingComplete(g: { clt: string | null; rangM: number | null }): boolean {
+  return g.clt != null && (g.clt === "NC" || g.rangM != null);
+}
+
+function RankingBadges({
+  clt,
+  rangM,
+  source,
+}: {
+  clt: string | null;
+  rangM: number | null;
+  /** « squashnet » (rapproché) ou « forcé » (saisi par un admin) ; omis quand ça ne s'applique pas. */
+  source?: "squashnet" | "forcé" | null;
+}) {
+  const rangMissing = clt != null && clt !== "NC" && rangM == null;
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto" }}>
+      {clt ? (
+        <span className="directory-clt">{clt}</span>
+      ) : (
+        <span className="muted">classement inconnu</span>
+      )}
+      {/* Même notation que le sélecteur de composition (« 5A #1200 ») : c'est le même nombre,
+          et deux écrans qui montrent la même chose ne doivent pas l'écrire autrement. Ce qui
+          MANQUE, en revanche, se dit en toutes lettres — « # inconnu » ne serait pas lisible. */}
+      {rangM != null ? (
+        <span className="muted">#{rangM}</span>
+      ) : rangMissing ? (
+        <span className="muted">rang inconnu</span>
+      ) : null}
+      {source && <span className="muted">· {source}</span>}
+    </span>
+  );
+}
+
 /** Équipe interclub et son effectif inscrit sur l'appli (l'affectation se fait page Membres). */
 type IcTeam = { id: string; name: string; memberCount: number };
 /** Membre inscrit rattaché à une équipe : listé ici en LECTURE (rattachement page Membres). */
 type IcMember = { id: string; teamId: string; name: string; clt: string | null; rangM: number | null };
-/** Joueur d'une équipe SANS compte : il joue le championnat sans utiliser l'appli. */
-type IcGuest = { id: string; teamId: string; name: string; clt: string | null };
+/**
+ * Joueur d'une équipe SANS compte : il joue le championnat sans utiliser l'appli — souvent
+ * délibérément (« je ne veux pas de l'appli, mais je veux bien y figurer »).
+ *
+ * `clt`/`rangM` sont les valeurs EFFECTIVES, celles qui décident de l'ordre des simples.
+ * `cltOverride`/`rangMOverride` portent la seule saisie admin, pour préremplir les champs sans
+ * transformer un rapprochement en correction au premier enregistrement. `snStatus` dit ce que
+ * squashnet a répondu la dernière fois — c'est lui qui permet d'écrire « pas trouvable » au
+ * lieu de laisser une ligne muette dont on découvre le soir venu qu'elle bloque la composition.
+ */
+type IcGuest = {
+  id: string;
+  teamId: string;
+  name: string;
+  clt: string | null;
+  rangM: number | null;
+  cltOverride: string | null;
+  rangMOverride: number | null;
+  snClt: string | null;
+  snRangM: number | null;
+  snStatus: string | null;
+  snCheckedAt: string | null;
+};
 type Dashboard = {
   members: number;
   disabledMembers: number;
@@ -109,10 +183,6 @@ export default function AdminPage() {
   const [icGuests, setIcGuests] = useState<IcGuest[]>([]);
   const [icTeamId, setIcTeamId] = useState("");
   const [icName, setIcName] = useState("");
-  // Classement fédéral du joueur hors appli, pour l'ORDRE des simples interclub (le mieux
-  // classé des joueurs présents joue le simple n° 1) — un invité n'a pas de compte, donc rien
-  // à rapprocher sur squashnet ; c'est ici, et nulle part ailleurs, que ce classement se saisit.
-  const [icClt, setIcClt] = useState("");
 
   useEffect(() => {
     if (!emailLogin) return;
@@ -337,17 +407,31 @@ export default function AdminPage() {
       const res = await fetch("/api/admin/interclub-teams", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "add_guest", teamId: icTeamId, name, clt: icClt.trim() }),
+        body: JSON.stringify({ action: "add_guest", teamId: icTeamId, name }),
       });
-      const data = (await res.json().catch(() => ({}))) as { guest?: IcGuest; error?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        guest?: IcGuest;
+        status?: string;
+        error?: string;
+      };
       if (!res.ok || !data.guest) {
         setIcResult({ ok: false, text: data.error ?? "Ajout impossible." });
         return;
       }
       setIcGuests((prev) => [...prev, data.guest!].sort((a, b) => a.name.localeCompare(b.name, "fr")));
       setIcName("");
-      setIcClt("");
-      setIcResult({ ok: true, text: `${data.guest.name} ajouté.` });
+      // Le serveur a déjà cherché ce joueur sur squashnet : on RAPPORTE le verdict au lieu de
+      // dire « ajouté » et de laisser l'admin découvrir plus tard qu'il manque un classement.
+      // C'est le seul moment où le nom est encore sous ses yeux, donc le seul où « pas trouvé »
+      // est actionnable (corriger l'orthographe, ou forcer le classement).
+      setIcResult(
+        data.status === "matched"
+          ? { ok: true, text: `${data.guest.name} ajouté — classement ${data.guest.clt ?? "?"} rapproché sur squashnet.` }
+          : {
+              ok: false,
+              text: `${data.guest.name} ajouté, mais introuvable sur squashnet : vérifie l'orthographe et re-rapproche, ou saisis son classement et son rang à la main.`,
+            },
+      );
     } catch {
       setIcResult({ ok: false, text: "Ajout impossible." });
     } finally {
@@ -355,27 +439,80 @@ export default function AdminPage() {
     }
   };
 
-  // Correction du classement d'un invité déjà inscrit. Enregistrée à la perte de focus, comme
-  // le champ équivalent de la page Membres — retaper la valeur déjà enregistrée n'écrit rien.
-  const setGuestClt = async (g: IcGuest, raw: string) => {
-    const clt = raw.trim();
-    if ((g.clt ?? "") === clt) return;
+  /**
+   * Correction manuelle d'un invité — le REPLI quand squashnet ne sait pas le retrouver.
+   *
+   * Les deux critères partent ENSEMBLE (le serveur écrit les deux colonnes), mais se règlent
+   * séparément à l'écran : corriger un classement n'oblige pas à retaper un rang. D'où
+   * `patch`, qui ne porte QUE le champ modifié — l'autre est relu sur la ligne courante, car
+   * l'omettre l'effacerait. Même geste que la page Membres, où la correction d'un membre suit
+   * exactement la même mécanique.
+   *
+   * Comparaison sur l'OVERRIDE et non sur la valeur effective : rejouer un rapprochement en le
+   * renvoyant tel quel le figerait en correction, et le prochain run mensuel ne pourrait plus
+   * le mettre à jour.
+   */
+  const setGuestRanking = async (
+    g: IcGuest,
+    patch: { clt?: string; rangM?: string },
+  ) => {
+    const clt = (patch.clt ?? g.cltOverride ?? "").trim();
+    const rangM = (patch.rangM ?? (g.rangMOverride != null ? String(g.rangMOverride) : "")).trim();
+    if (clt === (g.cltOverride ?? "") && rangM === (g.rangMOverride != null ? String(g.rangMOverride) : "")) {
+      return;
+    }
     setIcBusy(true);
     setIcResult(null);
     try {
       const res = await fetch("/api/admin/interclub-teams", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "set_guest_clt", guestId: g.id, clt }),
+        body: JSON.stringify({ action: "set_guest_ranking", guestId: g.id, clt, rangM }),
       });
-      const data = (await res.json().catch(() => ({}))) as { clt?: string | null; error?: string };
-      if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { guest?: IcGuest; error?: string };
+      if (!res.ok || !data.guest) {
         setIcResult({ ok: false, text: data.error ?? "Enregistrement impossible." });
         return;
       }
-      setIcGuests((prev) => prev.map((x) => (x.id === g.id ? { ...x, clt: data.clt ?? null } : x)));
+      setIcGuests((prev) => prev.map((x) => (x.id === g.id ? data.guest! : x)));
     } catch {
       setIcResult({ ok: false, text: "Enregistrement impossible." });
+    } finally {
+      setIcBusy(false);
+    }
+  };
+
+  /**
+   * Retente le rapprochement squashnet d'un seul invité. Utile juste après avoir corrigé
+   * l'orthographe d'un nom, ou quand une licence vient d'être enregistrée côté fédération : le
+   * cron mensuel y arriverait, mais pas avant le prochain jeudi de championnat.
+   */
+  const rematchGuest = async (g: IcGuest) => {
+    setIcBusy(true);
+    setIcResult(null);
+    try {
+      const res = await fetch("/api/admin/interclub-teams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "rematch_guest", guestId: g.id }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        guest?: IcGuest;
+        status?: string;
+        error?: string;
+      };
+      if (!res.ok || !data.guest) {
+        setIcResult({ ok: false, text: data.error ?? "Rapprochement impossible." });
+        return;
+      }
+      setIcGuests((prev) => prev.map((x) => (x.id === g.id ? data.guest! : x)));
+      setIcResult(
+        data.status === "matched"
+          ? { ok: true, text: `${g.name} : classement ${data.guest.snClt ?? "?"} rapproché sur squashnet.` }
+          : { ok: false, text: `${g.name} : toujours introuvable sur squashnet.` },
+      );
+    } catch {
+      setIcResult({ ok: false, text: "Rapprochement impossible." });
     } finally {
       setIcBusy(false);
     }
@@ -800,7 +937,15 @@ export default function AdminPage() {
                   Seuls les joueurs du roster d&apos;une équipe peuvent être alignés dans ses
                   rencontres. Les membres inscrits se rattachent depuis la{" "}
                   <Link href="/admin/membres">page Membres</Link>. Ajoute ici ceux qui jouent le
-                  championnat <strong>sans compte sur l&apos;appli</strong>.
+                  championnat <strong>sans compte sur l&apos;appli</strong> : leur classement est
+                  cherché sur squashnet à l&apos;ajout, et tu ne le saisis à la main que si la
+                  fédération ne les retrouve pas.
+                </p>
+                <p className="muted tiny">
+                  L&apos;ordre des simples se décide sur <strong>deux</strong> critères : le
+                  classement d&apos;abord, puis le <strong>rang mixte</strong> entre joueurs de
+                  même classement. Un joueur à qui il manque l&apos;un des deux ne peut être
+                  aligné nulle part — sauf un NC, que la fédération n&apos;ordonne pas.
                 </p>
 
                 {icTeams.length === 0 ? (
@@ -825,10 +970,10 @@ export default function AdminPage() {
                         compareRosterOrder(
                           a.kind === "member"
                             ? { name: a.m.name, clt: a.m.clt, rangM: a.m.rangM }
-                            : { name: a.g.name, clt: a.g.clt, rangM: null },
+                            : { name: a.g.name, clt: a.g.clt, rangM: a.g.rangM },
                           b.kind === "member"
                             ? { name: b.m.name, clt: b.m.clt, rangM: b.m.rangM }
-                            : { name: b.g.name, clt: b.g.clt, rangM: null },
+                            : { name: b.g.name, clt: b.g.clt, rangM: b.g.rangM },
                         ),
                       );
                       return (
@@ -864,13 +1009,7 @@ export default function AdminPage() {
                                     }}
                                   >
                                     <span>{e.m.name}</span>
-                                    {e.m.clt ? (
-                                      <span className="directory-clt">{e.m.clt}</span>
-                                    ) : (
-                                      <span className="muted" style={{ flex: "0 0 auto" }}>
-                                        classement inconnu
-                                      </span>
-                                    )}
+                                    <RankingBadges clt={e.m.clt} rangM={e.m.rangM} />
                                   </li>
                                 ) : (
                                   <li
@@ -885,30 +1024,101 @@ export default function AdminPage() {
                                     <span>
                                       {e.g.name} <span className="muted">· hors appli</span>
                                     </span>
-                                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                      {/* Un invité n'a pas de compte, donc rien à rapprocher sur
-                                          squashnet : son classement — qui décide de l'ordre des
-                                          simples interclub — se saisit ici, à la main. `<select>`
-                                          plutôt qu'un champ texte libre : la liste des classements
-                                          FFSquash est FERMÉE (`KNOWN_CLASSEMENTS`), un texte libre
-                                          laissait inventer une valeur qui n'existe pas. Enregistré
-                                          au choix (`onChange`), comme la correction équivalente sur
-                                          la page Membres. */}
-                                      <select
-                                        value={e.g.clt ?? ""}
-                                        disabled={icBusy}
-                                        onChange={(ev) => setGuestClt(e.g, ev.target.value)}
-                                        aria-label={`Classement interclub de ${e.g.name}`}
-                                        title="Classement fédéral, pour l'ordre des simples interclub."
-                                        style={{ margin: 0, width: "auto" }}
-                                      >
-                                        <option value="">— aucun —</option>
-                                        {KNOWN_CLASSEMENTS.map((c) => (
-                                          <option key={c} value={c}>
-                                            {c}
-                                          </option>
-                                        ))}
-                                      </select>
+                                    <span
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 6,
+                                        flexWrap: "wrap",
+                                        justifyContent: "flex-end",
+                                      }}
+                                    >
+                                      <RankingBadges
+                                        clt={e.g.clt}
+                                        rangM={e.g.rangM}
+                                        source={e.g.cltOverride ? "forcé" : e.g.snStatus === "matched" ? "squashnet" : null}
+                                      />
+                                      {/* Le rapprochement squashnet est la voie NORMALE ; ce qui
+                                          suit est le repli, et l'écran le dit dans cet ordre.
+                                          Un joueur retrouvé n'a rien à saisir — on ne montre les
+                                          champs de correction que lorsqu'ils servent, faute de
+                                          quoi ils invitent à écraser une donnée juste.
+
+                                          « Servent » veut bien dire : rapprochement RATÉ,
+                                          correction DÉJÀ posée, OU rapprochement réussi mais
+                                          INCOMPLET. Ce dernier cas est réel — squashnet publie
+                                          des lignes sans rang mixte — et n'ouvrir les champs
+                                          que sur `snStatus` y laissait un joueur inalignable
+                                          sans le moindre moyen de le corriger. */}
+                                      {rankingComplete(e.g) && !e.g.cltOverride && !e.g.rangMOverride ? (
+                                        <button
+                                          type="button"
+                                          className="secondary tiny"
+                                          disabled={icBusy}
+                                          onClick={() => rematchGuest(e.g)}
+                                          title="Relit le classement sur squashnet (le cron le fait aussi, une fois par mois)."
+                                          style={{ flex: "0 0 auto" }}
+                                        >
+                                          Actualiser
+                                        </button>
+                                      ) : (
+                                        <>
+                                          {/* `<select>` plutôt qu'un champ texte libre : la liste
+                                              des classements FFSquash est FERMÉE
+                                              (`KNOWN_CLASSEMENTS`), un texte libre laissait
+                                              inventer une valeur qui n'existe pas. */}
+                                          <select
+                                            value={e.g.cltOverride ?? ""}
+                                            disabled={icBusy}
+                                            onChange={(ev) => setGuestRanking(e.g, { clt: ev.target.value })}
+                                            aria-label={`Classement interclub de ${e.g.name}`}
+                                            title="Classement fédéral forcé, pour l'ordre des simples interclub."
+                                            style={{ margin: 0, width: "auto" }}
+                                          >
+                                            <option value="">
+                                              {e.g.snClt ? `— squashnet : ${e.g.snClt} —` : "— aucun —"}
+                                            </option>
+                                            {KNOWN_CLASSEMENTS.map((c) => (
+                                              <option key={c} value={c}>
+                                                {c}
+                                              </option>
+                                            ))}
+                                          </select>
+                                          {/* Champ NOMBRE et non `<select>` : les rangs ne forment
+                                              pas une liste fermée. Enregistré à la perte de focus,
+                                              pas à chaque frappe — « 2339 » passerait sinon par 2,
+                                              23 et 233, trois rangs parfaitement valides. */}
+                                          <input
+                                            type="number"
+                                            min={1}
+                                            inputMode="numeric"
+                                            defaultValue={e.g.rangMOverride ?? ""}
+                                            key={`grangm-${e.g.id}-${e.g.rangMOverride ?? ""}`}
+                                            disabled={icBusy}
+                                            onBlur={(ev) => setGuestRanking(e.g, { rangM: ev.target.value })}
+                                            aria-label={`Rang mixte de ${e.g.name}`}
+                                            title="Rang mixte forcé. Départage les joueurs de même classement. Inutile pour un NC."
+                                            placeholder={
+                                              e.g.snRangM != null
+                                                ? `squashnet : ${e.g.snRangM}`
+                                                : e.g.clt === "NC"
+                                                  ? "inutile (NC)"
+                                                  : "rang"
+                                            }
+                                            style={{ margin: 0, width: "8rem" }}
+                                          />
+                                          <button
+                                            type="button"
+                                            className="secondary tiny"
+                                            disabled={icBusy}
+                                            onClick={() => rematchGuest(e.g)}
+                                            title="Retente le rapprochement squashnet — après avoir corrigé une orthographe, par exemple."
+                                            style={{ flex: "0 0 auto" }}
+                                          >
+                                            Re-rapprocher
+                                          </button>
+                                        </>
+                                      )}
                                       <button
                                         type="button"
                                         className="secondary tiny"
@@ -950,25 +1160,16 @@ export default function AdminPage() {
                         aria-label="Prénom et nom du joueur hors appli"
                         style={{ margin: 0, flex: "1 1 140px" }}
                       />
-                      <select
-                        value={icClt}
-                        onChange={(e) => setIcClt(e.target.value)}
-                        aria-label="Classement fédéral du joueur hors appli (facultatif)"
-                        title="Classement fédéral — facultatif, pour l'ordre des simples interclub."
-                        style={{ margin: 0, flex: "0 1 110px" }}
-                      >
-                        <option value="">Classement…</option>
-                        {KNOWN_CLASSEMENTS.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
+                      {/* Plus de classement à saisir ici : il est CHERCHÉ sur squashnet à
+                          l'ajout, et la réponse le dit tout de suite. Le demander d'avance
+                          revenait à faire recopier à la main une donnée publique — et à la
+                          figer, puisqu'une saisie manuelle a priorité sur le rapprochement. */}
                       <button
                         type="button"
                         disabled={icBusy || !icTeamId || !icName.trim()}
                         onClick={addGuest}
                         style={{ flex: "0 0 auto" }}
+                        title="Le classement est cherché sur squashnet à partir du nom."
                       >
                         Ajouter
                       </button>

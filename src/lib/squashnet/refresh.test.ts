@@ -5,11 +5,17 @@ import type { RankingRow } from "./client";
 // le vrai code, pour tester le comportement de bout en bout de refreshRankings().
 const h = vi.hoisted(() => ({
   members: [] as { id: string; displayName: string }[],
+  // Les joueurs SANS COMPTE sont balayés par la même passe : ils partagent la boucle, le
+  // verdict et le disjoncteur. Vide par défaut — la plupart des cas ne parlent que des membres.
+  guests: [] as { id: string; name: string }[],
   getLatestMonth: vi.fn(),
   searchRanking: vi.fn(),
   upsert: vi.fn(),
   deleteMany: vi.fn(),
   findMany: vi.fn(),
+  guestFindMany: vi.fn(),
+  guestUpdate: vi.fn(),
+  guestUpdateMany: vi.fn(),
 }));
 
 vi.mock("./client", () => ({
@@ -20,6 +26,11 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     user: { findMany: h.findMany },
     squashnetRanking: { upsert: h.upsert, deleteMany: h.deleteMany },
+    interclubGuest: {
+      findMany: h.guestFindMany,
+      update: h.guestUpdate,
+      updateMany: h.guestUpdateMany,
+    },
   },
 }));
 
@@ -48,14 +59,30 @@ beforeEach(() => {
   h.searchRanking.mockReset();
   h.upsert.mockReset().mockResolvedValue({});
   h.deleteMany.mockReset().mockResolvedValue({ count: 1 });
+  // Remis à zéro comme `guests` : sans cela, l'effectif du test précédent débordait sur le
+  // suivant et consommait ses `mockResolvedValueOnce`.
+  h.members = [];
   h.findMany.mockReset().mockImplementation(async () => h.members);
+  h.guests = [];
+  h.guestFindMany.mockReset().mockImplementation(async () => h.guests);
+  h.guestUpdate.mockReset().mockResolvedValue({});
+  h.guestUpdateMany.mockReset().mockResolvedValue({ count: 1 });
 });
 
 describe("refreshRankings", () => {
   it("période introuvable → n'interroge ni la base ni squashnet", async () => {
     h.getLatestMonth.mockResolvedValueOnce(null);
     const res = await refreshRankings();
-    expect(res).toEqual({ month: null, members: 0, matched: 0, cleared: 0, skipped: 0, failed: 0, bulkMoveBlocked: false });
+    expect(res).toEqual({
+      month: null,
+      members: 0,
+      guests: 0,
+      matched: 0,
+      cleared: 0,
+      skipped: 0,
+      failed: 0,
+      bulkMoveBlocked: false,
+    });
     expect(h.findMany).not.toHaveBeenCalled();
     expect(h.searchRanking).not.toHaveBeenCalled();
   });
@@ -171,10 +198,93 @@ describe("refreshRankings", () => {
   });
 });
 
+// Les joueurs SANS COMPTE (`InterclubGuest`) partagent la boucle des membres depuis que leur
+// classement est rapproché plutôt que saisi à la main. « Sans compte » n'est pas « sans
+// licence » : ils disputent le même championnat, donc squashnet les connaît.
+describe("refreshRankings — joueurs sans compte", () => {
+  it("balaie les invités comme les membres, et les compte à part", async () => {
+    h.guests = [{ id: "g1", name: "Paul Hors-Appli" }];
+    h.searchRanking.mockResolvedValueOnce([row("HORS-APPLI PAUL")]);
+    const res = await refreshRankings();
+    expect(res).toMatchObject({ members: 1, guests: 1, matched: 1 });
+    // Écrit sur la LIGNE de l'invité, jamais dans `SquashnetRanking` (qui exige un `User`).
+    expect(h.upsert).not.toHaveBeenCalled();
+    expect(h.guestUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "g1" },
+        data: expect.objectContaining({ snClt: "5A", snRangM: 30, snStatus: "matched" }),
+      }),
+    );
+  });
+
+  it("n'écrit QUE les colonnes de rapprochement — la correction admin survit à tous les runs", async () => {
+    h.guests = [{ id: "g1", name: "Paul Hors-Appli" }];
+    h.searchRanking.mockResolvedValueOnce([row("HORS-APPLI PAUL")]);
+    await refreshRankings();
+    const data = h.guestUpdate.mock.calls[0][0].data as Record<string, unknown>;
+    // Sans quoi le run mensuel écraserait le classement forcé par un admin pour un joueur que
+    // squashnet retrouve mal — et personne ne comprendrait pourquoi la correction a disparu.
+    expect(data).not.toHaveProperty("cltOverride");
+    expect(data).not.toHaveProperty("rangMOverride");
+  });
+
+  it("note « introuvable » sur l'invité, pour que l'écran d'admin puisse le dire", async () => {
+    h.guests = [{ id: "g1", name: "Paul Hors-Appli" }];
+    h.searchRanking.mockResolvedValueOnce([]);
+    const res = await refreshRankings();
+    expect(res).toMatchObject({ matched: 0, skipped: 1 });
+    // Un membre ne garde aucune trace d'un non-résultat ; un invité, si — c'est ce qui permet
+    // d'écrire « pas trouvable sur squashnet » au lieu d'une ligne muette qu'on découvre
+    // bloquante le soir d'une rencontre.
+    expect(h.guestUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "g1" },
+        data: expect.objectContaining({ snStatus: "unknown" }),
+      }),
+    );
+  });
+
+  it("efface le rapprochement d'un invité parti dans un autre club (moved)", async () => {
+    h.guests = [{ id: "g1", name: "Paul Hors-Appli" }];
+    h.searchRanking.mockResolvedValueOnce([row("HORS-APPLI PAUL", { club: "Squash Club de Rennes" })]);
+    const res = await refreshRankings();
+    expect(res).toMatchObject({ cleared: 1 });
+    const data = h.guestUpdateMany.mock.calls[0][0].data as Record<string, unknown>;
+    expect(data).toMatchObject({ snClt: null, snRangM: null, snStatus: "moved" });
+    // Là non plus : ce qu'un admin a saisi ne s'efface pas parce que la fédération bouge.
+    expect(data).not.toHaveProperty("cltOverride");
+  });
+
+  it("le disjoncteur compte les DEUX populations ensemble", async () => {
+    // Un club renommé côté squashnet rend tout le monde « moved » d'un coup, invités compris :
+    // le fail-safe doit donc raisonner sur l'ensemble balayé, pas sur les seuls membres.
+    h.members = Array.from({ length: 3 }, (_, i) => ({ id: `u${i}`, displayName: "Jean Dupont" }));
+    h.guests = Array.from({ length: 3 }, (_, i) => ({ id: `g${i}`, name: "Jean Dupont" }));
+    h.searchRanking.mockResolvedValue([row("DUPONT JEAN", { club: "Squash Club de Rennes" })]);
+    const res = await refreshRankings();
+    expect(res).toMatchObject({ members: 6, guests: 3, cleared: 0, bulkMoveBlocked: true });
+    expect(h.deleteMany).not.toHaveBeenCalled();
+    expect(h.guestUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
+// Un membre retiré de l'annuaire n'a pas quitté son équipe. Tant que le classement ne servait
+// qu'au trombinoscope, l'ignorer était cohérent ; depuis qu'il décide de l'ORDRE DES SIMPLES,
+// c'est ce qui le rendait inalignable sans qu'aucun écran ne puisse y remédier.
+describe("refreshRankings — qui est balayé", () => {
+  it("balaie les membres listés OU rattachés à une équipe interclub", async () => {
+    await refreshRankings();
+    expect(h.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { OR: [{ listed: true }, { teamId: { not: null } }] } }),
+    );
+  });
+});
+
 describe("summarizeRefresh", () => {
   const base: RefreshResult = {
     month: "2026-07-07",
     members: 5,
+    guests: 0,
     matched: 3,
     cleared: 1,
     skipped: 1,

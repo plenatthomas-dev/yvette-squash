@@ -185,7 +185,7 @@ export async function POST(req: NextRequest) {
   // passage, exactement comme la boucle de création plus bas. Les lignes « à désigner » sont
   // ignorées : on inscrit souvent une rencontre avant de savoir qui joue chaque simple.
   const orderSlots: OrderedSlot[] = roster
-    .map((r, i) => ({ order: i + 1, name: r.pick.homeDisplayName, clt: r.pick.clt }))
+    .map((r, i) => ({ order: i + 1, name: r.pick.homeDisplayName, clt: r.pick.clt, rangM: r.pick.rangM }))
     .filter((s) => s.name !== UNSET_PLAYER);
   const orderProblem = lineupOrderConflict(orderSlots);
   if (orderProblem) {

@@ -155,7 +155,7 @@ describe("POST /api/interclub", () => {
       nickname: "Jéjé",
       teamId: "t1",
       disabledAt: null,
-      squashnetRanking: { clt: "5A" },
+      squashnetRanking: { clt: "5A", rangM: 1200 },
     };
     await POST(post({ ...validBody, matches: [{ userId: "u9", awayName: "Dupont" }] }));
     const create = (h.created?.matches as { create: Array<Record<string, unknown>> }).create;
@@ -196,7 +196,7 @@ describe("POST /api/interclub", () => {
   });
 
   it("aligne un joueur hors appli inscrit au roster de l'équipe", async () => {
-    h.guest = { id: "g1", name: "Paul Hors-Appli", teamId: "t1", clt: "4D" };
+    h.guest = { id: "g1", name: "Paul Hors-Appli", teamId: "t1", snClt: "4D", snRangM: 812 };
     await POST(post({ ...validBody, matches: [{ guestId: "g1" }] }));
     const create = (h.created?.matches as { create: Array<Record<string, unknown>> }).create;
     expect(create[0].homeGuestId).toBe("g1");
@@ -291,7 +291,7 @@ describe("POST /api/interclub", () => {
         teamId: "t1",
         disabledAt: null,
         interclubCltOverride: null,
-        squashnetRanking: { clt: "5A" },
+        squashnetRanking: { clt: "5A", rangM: 1200 },
       },
       {
         id: "u-benoit",
@@ -300,7 +300,7 @@ describe("POST /api/interclub", () => {
         teamId: "t1",
         disabledAt: null,
         interclubCltOverride: null,
-        squashnetRanking: { clt: "4D" },
+        squashnetRanking: { clt: "4D", rangM: 800 },
       },
     ];
     // Albert (5A) au simple 1, Benoît (4D, MIEUX classé) au simple 2 : ordre rompu.
@@ -321,7 +321,7 @@ describe("POST /api/interclub", () => {
         teamId: "t1",
         disabledAt: null,
         interclubCltOverride: null,
-        squashnetRanking: { clt: "4D" },
+        squashnetRanking: { clt: "4D", rangM: 800 },
       },
       {
         id: "u-benoit",
@@ -330,13 +330,71 @@ describe("POST /api/interclub", () => {
         teamId: "t1",
         disabledAt: null,
         interclubCltOverride: null,
-        squashnetRanking: { clt: "5A" },
+        squashnetRanking: { clt: "5A", rangM: 1200 },
       },
     ];
     const res = await POST(
       post({ ...validBody, matches: [{ userId: "u-albert" }, { userId: "u-benoit" }] }),
     );
     expect(res.status).toBe(201);
+  });
+
+  it("refuse deux joueurs de MÊME classement rangés à l'envers — le rang mixte départage", async () => {
+    // Deux « 5A » ne sont pas interchangeables : la règle de la compétition ordonne aussi par
+    // rang mixte à classement égal, et une rencontre composée à l'envers est sanctionnable.
+    h.users = [
+      {
+        id: "u-albert",
+        displayName: "Albert",
+        nickname: null,
+        teamId: "t1",
+        disabledAt: null,
+        interclubCltOverride: null,
+        squashnetRanking: { clt: "5A", rangM: 1500 },
+      },
+      {
+        id: "u-benoit",
+        displayName: "Benoît",
+        nickname: null,
+        teamId: "t1",
+        disabledAt: null,
+        interclubCltOverride: null,
+        squashnetRanking: { clt: "5A", rangM: 1200 },
+      },
+    ];
+    const res = await POST(
+      post({ ...validBody, matches: [{ userId: "u-albert" }, { userId: "u-benoit" }] }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("Benoît");
+    expect(h.created).toBeNull();
+  });
+
+  it("refuse de composer un joueur classé dont le rang mixte est inconnu", async () => {
+    h.user = {
+      id: "u9",
+      displayName: "Jérôme",
+      nickname: null,
+      teamId: "t1",
+      disabledAt: null,
+      squashnetRanking: { clt: "5A", rangM: null },
+    };
+    const res = await POST(post({ ...validBody, matches: [{ userId: "u9" }] }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("rang mixte inconnu");
+    expect(h.created).toBeNull();
+  });
+
+  it("compose un NC sans rang mixte : la fédération ne les ordonne pas entre eux", async () => {
+    h.user = {
+      id: "u9",
+      displayName: "Jérôme",
+      nickname: null,
+      teamId: "t1",
+      disabledAt: null,
+      squashnetRanking: { clt: "NC", rangM: null },
+    };
+    expect((await POST(post({ ...validBody, matches: [{ userId: "u9" }] }))).status).toBe(201);
   });
 
   it("n'exige pas de COMPARAISON de classement quand un seul simple est composé, mais exige quand même de le connaître", async () => {
@@ -350,7 +408,7 @@ describe("POST /api/interclub", () => {
       nickname: null,
       teamId: "t1",
       disabledAt: null,
-      squashnetRanking: { clt: "5A" },
+      squashnetRanking: { clt: "5A", rangM: 1200 },
     };
     const res = await POST(post({ ...validBody, matches: [{ userId: "u9" }] }));
     expect(res.status).toBe(201);

@@ -43,6 +43,10 @@ export async function GET(req: NextRequest) {
       // disponible pour un membre jamais rapproché sur squashnet (invité d'un autre club, pas
       // encore licencié…). Même priorité qu'en composition — voir plus bas.
       interclubCltOverride: ranking,
+      // Et la correction du RANG MIXTE, pour la même raison : depuis que l'ordre des simples
+      // interclub s'en sert, un admin peut en forcer un — le taire ici laisserait l'annuaire
+      // trier un membre corrigé à une place que plus rien ne justifie.
+      interclubRangMOverride: ranking,
       // Équipe interclub où le membre est aligné : jointure seulement si la fonction est active.
       team: interclub ? { select: { id: true, name: true } } : false,
     },
@@ -55,23 +59,31 @@ export async function GET(req: NextRequest) {
   // échelle comparable entre tous) + cat (info-bulle) ; jamais la licence ni le club
   // (données de traçabilité internes).
   //
-  // `clt` PRIORISE la correction admin (`interclubCltOverride`) sur le rapprochement squashnet
-  // — même règle qu'en composition d'interclub (`memberClt`, `interclub-roster.ts`) : c'est ce
-  // qui rend visible le classement d'un membre jamais rapproché (pas encore licencié, licence
-  // mal orthographiée côté ResaMania…) sans attendre que squashnet le résolve de lui-même.
-  // `rang`/`rangM`/`cat`, eux, ne viennent QUE du rapprochement : une correction manuelle ne
-  // porte qu'un classement, jamais de rang.
+  // `clt` ET `rangM` PRIORISENT la correction admin (`interclubCltOverride`,
+  // `interclubRangMOverride`) sur le rapprochement squashnet — même règle qu'en composition
+  // d'interclub (`memberClt`/`memberRangM`, `interclub-roster.ts`) : c'est ce qui rend visible
+  // le classement d'un membre jamais rapproché (pas encore licencié, licence mal orthographiée
+  // côté ResaMania…) sans attendre que squashnet le résolve de lui-même.
+  //
+  // `rang` (le rang DANS SON GENRE) et `cat`, eux, ne viennent QUE du rapprochement : ils ne
+  // se corrigent nulle part, faute d'un écran qui les demande — le premier ne sert qu'aux têtes
+  // de série du tournoi, le second qu'à une info-bulle.
   const members = users
     .map((u) => {
       const clt = u.interclubCltOverride ?? u.squashnetRanking?.clt ?? null;
+      const rangM = u.interclubRangMOverride ?? u.squashnetRanking?.rangM ?? null;
       return {
         id: u.id,
         name: u.nickname ?? u.displayName,
         ...(ranking && clt
           ? {
               clt,
+              // `rangM` sort du rapprochement OU de la correction, d'où sa sortie du bloc
+              // `squashnetRanking` : un membre corrigé de bout en bout n'a aucune ligne
+              // rapprochée, et resterait sinon sans rang dans l'annuaire.
+              ...(rangM != null ? { rangM } : {}),
               ...(u.squashnetRanking
-                ? { rang: u.squashnetRanking.rang, rangM: u.squashnetRanking.rangM, cat: u.squashnetRanking.cat }
+                ? { rang: u.squashnetRanking.rang, cat: u.squashnetRanking.cat }
                 : {}),
             }
           : {}),

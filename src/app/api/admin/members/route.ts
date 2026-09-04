@@ -4,7 +4,7 @@ import { requireAdmin, isAdminEmail } from "@/lib/admin";
 import { listMembers, deleteBlockersFor } from "@/lib/members";
 import { getFeatures } from "@/lib/features-server";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
-import { parseClassementInput } from "@/lib/interclub-order";
+import { parseClassementInput, parseRangMInput } from "@/lib/interclub-order";
 import { createEmailToken, authLinkFor, clientIp } from "@/lib/email-auth";
 import { alertsChanged } from "@/lib/alerts-gate";
 import { approveAsDisabledPayer } from "@/lib/tricount-summary";
@@ -48,10 +48,14 @@ export async function GET(req: NextRequest) {
 //   set_team        → rattache le membre à une équipe interclub (body.teamId, null = aucune).
 //                     Décision d'ADMIN et non réglage personnel : l'appartenance à une équipe
 //                     décide qui peut être aligné dans une rencontre.
-//   set_clt_override → force le classement fédéral de ce membre pour l'ordre des simples
-//                     interclub (body.clt, ex. "5B" ; vide = retire la correction). Sert quand
-//                     le rapprochement squashnet a échoué ou s'est trompé — nom mal orthographié
-//                     côté ResaMania, licence pas encore rapprochée…
+//   set_clt_override → force le classement fédéral ET le rang mixte de ce membre pour l'ordre
+//                     des simples interclub (body.clt, ex. "5B" ; body.rangM, ex. 2339 ; vides =
+//                     retire la correction). Sert quand le rapprochement squashnet a échoué ou
+//                     s'est trompé — nom mal orthographié côté ResaMania, licence pas encore
+//                     rapprochée… Les DEUX ensemble : l'ordre des simples départage les ex æquo
+//                     de classement par le rang, donc forcer l'un sans l'autre laisserait le
+//                     membre inalignable (cf. lib/interclub-order.ts). Un NC fait exception, la
+//                     fédération ne les ordonnant pas entre eux — `rangM` y reste facultatif.
 export async function POST(req: NextRequest) {
   const admin = await requireAdmin(req);
   if (!admin) {
@@ -63,6 +67,7 @@ export async function POST(req: NextRequest) {
     passkeyId?: unknown;
     teamId?: unknown;
     clt?: unknown;
+    rangM?: unknown;
   };
   if (typeof body.id !== "string" || !body.id) {
     return NextResponse.json({ error: "Membre invalide." }, { status: 400 });
@@ -176,11 +181,15 @@ export async function POST(req: NextRequest) {
     if (off) return off;
     const parsed = parseClassementInput(body.clt);
     if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+    const rangM = parseRangMInput(body.rangM);
+    if (!rangM.ok) return NextResponse.json({ error: rangM.error }, { status: 400 });
     await prisma.user.update({
       where: { id: target.id },
-      data: { interclubCltOverride: parsed.value },
+      // Deux colonnes d'OVERRIDE, jamais `squashnetRanking` : une correction manuelle ne doit
+      // pas se faire passer pour un rapprochement, sans quoi le run mensuel l'écraserait.
+      data: { interclubCltOverride: parsed.value, interclubRangMOverride: rangM.value },
     });
-    return NextResponse.json({ ok: true, clt: parsed.value });
+    return NextResponse.json({ ok: true, clt: parsed.value, rangM: rangM.value });
   }
 
   if (action === "delete") {

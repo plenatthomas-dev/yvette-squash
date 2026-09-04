@@ -42,7 +42,7 @@ Les seules restrictions protègent quelqu'un d'un **écrasement**, jamais d'un a
 | **Supprimer** une rencontre : créateur et admins | `DELETE …/{id}` | L'irréversible |
 | `knownGameCount` : l'écriture doit se fonder sur le même ÉTAT que la base — même nombre de jeux **et mêmes scores** | `PATCH …/matches/{mid}`, `PUT …/live` (règle unique, `staleGamesReason`) | Un écran ouvert dix minutes plus tôt qui efface ce qui a été joué, ou qui rejoue un score corrigé depuis |
 | Un simple **« à désigner »** ne peut ni commencer le marquage en direct ni recevoir un score saisi a posteriori | `POST …/claim`, `PUT …/live`, `PATCH …/matches/{mid}` (règle unique, `lineupComplete`) | Une notification qui annoncerait le placeholder comme un vrai nom de joueur |
-| Une composition qui romprait l'**ordre des simples par classement** (le mieux classé des joueurs présents doit jouer le simple n° 1) est refusée | `POST /api/interclub`, `PATCH …/matches/{mid}` (règle unique, `lineupOrderConflict`) | Une rencontre disputée dans le mauvais ordre, sanctionnable par la fédération |
+| Une composition qui romprait l'**ordre des simples** (le mieux classé des joueurs présents doit jouer le simple n° 1 ; à classement égal, le meilleur rang mixte passe devant) est refusée | `POST /api/interclub`, `PATCH …/matches/{mid}` (règle unique, `lineupOrderConflict`) | Une rencontre disputée dans le mauvais ordre, sanctionnable par la fédération |
 
 Deux choses échappent toutefois au membre, et sont réservées à l'**admin** :
 
@@ -62,15 +62,17 @@ c'est le cache du direct.
 ## Modèle de données
 
 Six tables (migrations `34_interclub`, `36_interclub_guests`, `37_interclub_notified`,
-`38_interclub_order`), plus `AppNotification` (`35_notifications`), qui sert à toute l'appli et
-pas seulement ici. La migration `38_` ajoute aussi `User.interclubCltOverride` — la correction
-admin d'un classement squashnet mal rapproché (cf. « Ordre des simples par classement »
-ci-dessous).
+`38_interclub_order`, `39_interclub_rangm`), plus `AppNotification` (`35_notifications`), qui
+sert à toute l'appli et pas seulement ici. La migration `38_` ajoute `User.interclubCltOverride`
+— la correction admin d'un classement squashnet mal rapproché ; la `39_` ajoute son pendant pour
+le **rang mixte** (`User.interclubRangMOverride`) et donne aux joueurs sans compte les mêmes
+deux étages que les membres, en renommant leur `clt` manuel en `cltOverride` (cf. « Ordre des
+simples : classement, puis rang mixte » ci-dessous).
 
 | Table | Rôle |
 |---|---|
 | `InterclubTeam` | Les équipes de l'asso. Une **table**, pas des colonnes `equipe1/equipe2` : une 3ᵉ équipe ne coûtera qu'une ligne. Semées idempotemment par la migration. |
-| `InterclubGuest` | Joueur du championnat **sans compte** sur l'appli. `name`, unique dans son équipe, et `clt` — son classement fédéral, saisi À LA MAIN par l'admin puisqu'il n'y a rien à rapprocher sur squashnet. |
+| `InterclubGuest` | Joueur du championnat **sans compte** sur l'appli. `name`, unique dans son équipe, et son classement à deux étages : le **rapprochement squashnet** (`snClt`, `snRangM`, `snStatus`…) et la **correction admin** (`cltOverride`, `rangMOverride`), prioritaire. « Sans compte » ne veut pas dire « sans licence » : ces joueurs disputent le même championnat, donc la fédération les connaît. |
 | `Interclub` | La rencontre. `opponent` est un **texte libre** — on ne tient pas d'annuaire des clubs adverses. `startNotifiedAt` / `doneNotifiedAt` sont des **marqueurs d'annonce**, pas des dates d'affichage : rien ne les lit hors des gardes de notification. |
 | `InterclubMatch` | Un simple. Porte `homeUserId` **ou** `homeGuestId` (contrainte `CHECK`, jamais les deux), la prise de marquage, et l'instantané du direct (`liveJson`). |
 | `InterclubGame` | Un jeu **terminé**. `@@unique([matchId, number])`. |
@@ -174,15 +176,23 @@ perd pas, seul le statut attend le premier point.
 
 ---
 
-## Ordre des simples par classement
+## Ordre des simples : classement, puis rang mixte
 
 Règle de la compétition FFSquash, pas une préférence de l'appli : **le mieux classé des joueurs
-présents joue le simple n° 1**, et les suivants s'enchaînent en ordre décroissant de classement.
+présents joue le simple n° 1**, et les suivants s'enchaînent en ordre décroissant.
 Concrètement, si Albert (classé `5A`) joue le simple 1, Benoît (classé `4D` — mieux classé que
 `5A` malgré la lettre, le CHIFFRE domine toujours) ne peut jouer **aucun** simple de cette
-rencontre : l'aligner casserait l'ordre quel que soit le numéro qu'on lui donnerait. Deux joueurs
-de même classement sont interchangeables — `RangM` n'intervient jamais ici, contrairement au tri
-de l'annuaire (`directorySort.ts`), qui compare des **rangs**, pas des **classements**.
+rencontre : l'aligner casserait l'ordre quel que soit le numéro qu'on lui donnerait.
+
+**DEUX critères, pas un.** À classement ÉGAL (deux `5A`), c'est le **rang mixte** (`rangM`) qui
+départage, le plus petit devant. Deux `5A` ne sont donc pas interchangeables dès que leurs rangs
+diffèrent. Cette page a longtemps affirmé le contraire (« `RangM` n'intervient jamais ici ») :
+c'était faux, et une rencontre composée sur cette base est sanctionnable au même titre qu'un
+classement inversé.
+
+**La seule exception est `NC`.** Les non-classés sont équivalents entre eux : la fédération ne
+les ordonne pas. Un `NC` est donc alignable **sans** rang mixte connu ; tout autre classement
+exige les deux, faute de quoi le joueur ne peut disputer aucun simple.
 
 **`src/lib/interclub-order.ts`** (module pur, sans Prisma) porte :
 - `classementPower(clt)` — le poids d'un classement, plus petit = plus fort. **Liste FERMÉE**
@@ -200,39 +210,68 @@ de l'annuaire (`directorySort.ts`), qui compare des **rangs**, pas des **classem
   corrections courantes portent sur des classements bas, pas sur un `1I` ;
 - `lineupOrderConflict(slots)` — le premier problème d'ORDRE entre des simples DÉJÀ DÉSIGNÉS, ou
   `null`. **Moins de deux simples désignés ⇒ rien à comparer**, donc rien à vérifier : c'est une
-  règle d'ordre RELATIF, elle n'a par construction rien à dire sur un simple isolé.
+  règle d'ordre RELATIF, elle n'a par construction rien à dire sur un simple isolé. Trois causes
+  de refus, dans cet ordre : classement inconnu, rang mixte inconnu (hors `NC`), ordre violé ;
+- `isNC(clt)` — la seule valeur que le rang mixte ne départage pas. Jamais dérivé d'un
+  `classementPower === Infinity` : le poids est un détail de la comparaison, pas une identité ;
+- `parseRangMInput(v)` — le pendant de `parseClassementInput` pour le rang. Tolère l'espace de
+  milliers (« 2 339 », la forme que squashnet affiche et qu'un admin recopie), refuse zéro et le
+  négatif (un « 0 » est une case vide déguisée, qui placerait son joueur EN TÊTE de l'ordre).
 
 ⚠️ **Ce n'est PAS la même chose que « avoir le droit de jouer ».** Un joueur dont le classement
 est **inconnu** (`clt === null` — jamais rapproché sur squashnet, et aucune correction admin
-posée) ne peut disputer **aucun** simple, y compris le tout premier composé d'une rencontre, où
-`lineupOrderConflict` seule ne réclamerait rien faute de second joueur à comparer. Cette
-exigence-là vit dans `interclub-roster.ts` (`decideMember`/`decideGuest`, appelées par
-`resolveHomePick`/`resolveHomePicks`) : composer QUELQUE joueur que ce soit passe TOUJOURS par
-elles, avant même que `findOrderConflict`/`lineupOrderConflict` n'aient leur mot à dire — donc
-avant que le nombre de simples déjà désignés entre en jeu. Un classement **connu mais faible**
-(`NC`) reste, lui, un classement valide : seul `clt === null` (rien à comparer, pas même « le
-dernier ») bloque la désignation.
+posée), ou dont le **rang mixte** manque alors qu'il n'est pas `NC`, ne peut disputer **aucun**
+simple, y compris le tout premier composé d'une rencontre, où `lineupOrderConflict` seule ne
+réclamerait rien faute de second joueur à comparer. Cette exigence-là vit dans
+`interclub-roster.ts` (`rankingRefusal`, appelée par `decideMember`/`decideGuest`, elles-mêmes
+appelées par `resolveHomePick`/`resolveHomePicks`) : composer QUELQUE joueur que ce soit passe
+TOUJOURS par elles, avant même que `findOrderConflict`/`lineupOrderConflict` n'aient leur mot à
+dire — donc avant que le nombre de simples déjà désignés entre en jeu. Un classement **connu
+mais faible** (`NC`) reste, lui, un classement valide, et dispense de surcroît du rang mixte.
 
-**D'où vient le classement d'un joueur** (`interclub-roster.ts`, `RosterEntry.clt` /
-`ResolvedPick.clt`) :
-- un **membre** : la correction admin (`User.interclubCltOverride`) si posée, sinon le dernier
-  rapprochement squashnet (`SquashnetRanking.clt`) ;
-- un **invité** (`InterclubGuest`, sans compte) : son champ `clt`, saisi à la main par l'admin —
-  il n'a rien à rapprocher.
+**Pourquoi exiger le rang même sans ex æquo à l'écran** : ne le réclamer qu'en cas d'égalité
+ferait surgir le refus au troisième joueur composé, pour une donnée manquante depuis le premier.
+C'est un piège, pas une règle.
+
+**D'où viennent le classement et le rang d'un joueur** (`interclub-roster.ts`, `RosterEntry` /
+`ResolvedPick`) — même structure des deux côtés du roster, une correction ADMIN prioritaire
+au-dessus d'un RAPPROCHEMENT automatique :
+- un **membre** : `User.interclubCltOverride` / `interclubRangMOverride` si posés, sinon
+  `SquashnetRanking.clt` / `.rangM` ;
+- un **invité** (`InterclubGuest`, sans compte) : `cltOverride` / `rangMOverride` si posés,
+  sinon `snClt` / `snRangM`.
+
+Les deux corrections sont **indépendantes** : forcer un classement laisse le rang rapproché en
+place, et réciproquement. Un membre fraîchement monté de série garde ainsi son rang squashnet
+sans qu'un admin ait à le recopier.
+
+**Le classement d'un joueur sans compte se CHERCHE, il ne se saisit plus d'abord.** « Sans
+compte » ne veut pas dire « sans licence » : ces joueurs disputent le même championnat, donc
+squashnet les connaît. L'inscription au roster déclenche le rapprochement sur-le-champ
+(`matchGuestRanking`, `lib/squashnet/refresh.ts`) et l'écran RAPPORTE le verdict — c'est le seul
+moment où le nom est encore sous les yeux de l'admin, donc le seul où « pas trouvé » est
+actionnable (corriger l'orthographe, ou forcer le classement). Le cron mensuel les rafraîchit
+ensuite comme les membres.
 
 **La correction admin existe pour un cas réel** : un rapprochement squashnet qui échoue ou se
 trompe (nom mal orthographié côté ResaMania — ex. « Matthieu Soismier » quand squashnet connaît
-« Matthieu Soisier »). Deux écrans :
-- `/admin/membres`, action `set_clt_override` (`POST /api/admin/members`) — un `<select>` par
-  membre, à côté du switch d'équipe interclub ;
-- l'espace admin, section « Équipes interclub », actions `add_guest`/`set_guest_clt`
-  (`POST /api/admin/interclub-teams`) — le classement d'un invité se saisit au même endroit que
-  son inscription au roster.
+« Matthieu Soisier »), ou un joueur pas encore licencié. Deux écrans :
+- `/admin/membres`, action `set_clt_override` (`POST /api/admin/members`) — un `<select>` de
+  classement et un champ de rang par membre, à côté du switch d'équipe interclub ;
+- l'espace admin, section « Équipes interclub », actions `add_guest` / `rematch_guest` /
+  `set_guest_ranking` (`POST /api/admin/interclub-teams`) — les champs de correction n'y
+  apparaissent que lorsqu'ils servent (joueur non rapproché, ou déjà forcé) ; un joueur retrouvé
+  n'offre qu'un bouton « Actualiser », pour ne pas inviter à écraser une donnée juste.
 
-Les deux valident le format en écrivant (`parseClassementInput`, même module) : une faute de
-frappe se signale à la SAISIE, pas le soir d'une rencontre au moment de composer. Et comme la
-liste FFSquash est fermée, ils ne proposent que `KNOWN_CLASSEMENTS` — un classement inventé n'est
-plus saisissable du tout, au lieu d'être refusé après coup.
+Les deux valident le format en écrivant (`parseClassementInput` / `parseRangMInput`, même
+module) : une faute de frappe se signale à la SAISIE, pas le soir d'une rencontre au moment de
+composer. Et comme la liste FFSquash est fermée, ils ne proposent que `KNOWN_CLASSEMENTS` — un
+classement inventé n'est plus saisissable du tout, au lieu d'être refusé après coup.
+
+⚠️ **Une correction n'est JAMAIS écrite dans les colonnes du rapprochement**, et le
+rafraîchissement mensuel ne touche jamais aux colonnes de correction. Sans cette séparation, le
+run suivant écraserait la correction de l'admin — ou, symétriquement, une correction ancienne
+figerait un classement que la fédération a fait bouger depuis.
 
 **L'EFFECTIF d'une équipe se lit en entier dans l'espace admin** (section « Équipes interclub »).
 Cet écran ne montrait qu'un DÉCOMPTE de membres (« 7 membres inscrits ») et la liste des seuls
@@ -242,16 +281,18 @@ renvoie donc aussi les membres nominativement (`allTeamMembers`, `interclub-rost
 règles que `teamRoster` : comptes désactivés exclus, classement effectif via `memberClt`), et
 l'écran affiche membres ET invités dans UNE liste triée par `compareRosterOrder`, du mieux au
 moins bien classé — c'est-à-dire dans l'ordre où ils devront disputer les simples. Le
-RATTACHEMENT, lui, reste sur `/admin/membres` : ici on lit les membres (badge de classement, ou
-« classement inconnu » qui dit tout de suite qu'ils ne pourront disputer aucun simple), on
-n'édite que les invités.
+RATTACHEMENT, lui, reste sur `/admin/membres` : ici on lit les membres (classement, rang mixte,
+ou « classement inconnu » / « rang inconnu » qui disent tout de suite qu'ils ne pourront
+disputer aucun simple), on n'édite que les invités. **Ce qui manque se dit**, plutôt que de
+laisser un blanc : une ligne muette ne se découvre bloquante que le soir d'une rencontre.
 
 **La correction admin d'un membre est aussi visible dans l'annuaire** (`GET /api/directory`) :
-`clt` y suit la même priorité qu'en composition (override d'abord, rapprochement squashnet
-sinon) — sans quoi un membre jamais rapproché (pas encore licencié, nom mal orthographié…)
-resterait sans badge de classement dans l'annuaire même après correction admin, alors qu'il en a
-un désormais pour l'interclub. `rang`/`rangM`/`cat`, eux, ne viennent QUE du rapprochement
-squashnet : une correction manuelle ne porte qu'un classement, jamais de rang.
+`clt` ET `rangM` y suivent la même priorité qu'en composition (override d'abord, rapprochement
+squashnet sinon) — sans quoi un membre jamais rapproché (pas encore licencié, nom mal
+orthographié…) resterait sans badge de classement, et à une place de tri que plus rien ne
+justifie, alors qu'il a désormais les deux pour l'interclub. `rang` (le rang DANS SON GENRE, qui
+ne sert qu'aux têtes de série du tournoi) et `cat` ne viennent QUE du rapprochement : aucun
+écran ne propose de les corriger.
 
 **Vérifié à l'écriture, jamais figé.** Contrairement à `homeDisplayName`, le classement n'est PAS
 stocké sur `InterclubMatch` : `findOrderConflict` (`interclub-roster.ts`) le relit à chaque
@@ -369,8 +410,9 @@ score enregistré).
   WSF du 1ᵉʳ septembre 2025, qui alignent l'amateur sur la PSA). Porte aussi `lineupComplete` —
   les deux joueurs d'un simple sont-ils désignés ? — partagée par le client et les trois routes
   d'écriture (claim, live, PATCH).
-- `src/lib/interclub-order.ts` — l'**ordre des simples par classement** : `classementPower`,
-  `lineupOrderConflict`, `parseClassementInput`. Cf. « Ordre des simples par classement »
+- `src/lib/interclub-order.ts` — l'**ordre des simples** (classement puis rang mixte) :
+  `classementPower`, `isNC`, `lineupOrderConflict`, `parseClassementInput`, `parseRangMInput`.
+  Cf. « Ordre des simples : classement, puis rang mixte »
   ci-dessus.
 
 **Côté base**
@@ -379,7 +421,8 @@ score enregistré).
   appliquée par les deux routes d'écriture. Elle a vécu en double, et les deux copies avaient
   divergé — le `PATCH` n'appliquait qu'une moitié de ce que ce document décrivait. Deux
   exemplaires d'une règle finissent toujours par ne plus dire la même chose.
-- `src/lib/interclub-roster.ts` — **qui peut être aligné** (`teamRoster`, `resolveHomePick`, `findAlignmentClash`), l'effectif de TOUTES les équipes pour l'écran d'admin (`allTeamMembers`) et, depuis l'ordre par classement, `findOrderConflict`
+- `src/lib/interclub-roster.ts` — **qui peut être aligné** (`teamRoster`, `resolveHomePick`, `findAlignmentClash`, `rankingRefusal`), l'effectif de TOUTES les équipes pour l'écran d'admin (`allTeamMembers`, `allTeamGuests`) et, depuis l'ordre par classement, `findOrderConflict`
+- `src/lib/squashnet/refresh.ts` — le **rapprochement fédéral** des DEUX populations en une passe (`refreshRankings`), et d'un joueur sans compte à la demande (`matchGuestRanking`)
 - `src/lib/interclub-gate.ts` — le **cache** du direct
 - `src/lib/interclub-access.ts` — le **contrôle d'accès** (flag + session)
 - `src/lib/interclub-notify.ts` — ciblage des abonnés et rédaction des notifications
@@ -395,8 +438,8 @@ score enregistré).
 | `POST/DELETE …/matches/{mid}/claim` | Prendre / relâcher le marquage |
 | `GET /api/interclub/live` | État des rencontres du jour (servi par le Data Cache) |
 | `GET/PUT /api/interclub/follows` | Mes abonnements |
-| `GET/POST /api/admin/interclub-teams` | Équipes, membres et joueurs sans compte, dont leur classement (**admin**) |
-| `POST /api/admin/members` (action `set_clt_override`) | Correction admin du classement d'un membre (**admin**) |
+| `GET/POST /api/admin/interclub-teams` | Équipes, membres et joueurs sans compte, dont leur classement et leur rang mixte ; rapprochement squashnet à l'ajout et à la demande (**admin**) |
+| `POST /api/admin/members` (action `set_clt_override`) | Correction admin du classement ET du rang mixte d'un membre (**admin**) |
 | `GET /api/notifications` | La cloche (pas de flag : elle sert à toute l'appli) |
 
 **Composants** — `Interclub.tsx` (orchestration), `InterclubScorer.tsx` (marquage),

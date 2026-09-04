@@ -4,8 +4,9 @@ import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/admin";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
 import { MAX_PLAYER_NAME_LEN } from "@/lib/interclub-db";
-import { parseClassementInput } from "@/lib/interclub-order";
-import { allTeamMembers } from "@/lib/interclub-roster";
+import { parseClassementInput, parseRangMInput } from "@/lib/interclub-order";
+import { allTeamGuests, allTeamMembers, teamGuest } from "@/lib/interclub-roster";
+import { matchGuestRanking } from "@/lib/squashnet/refresh";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,9 +19,16 @@ export const dynamic = "force-dynamic";
 // dans une composition. Le capitaine / l'admin décide, comme dans la vraie vie du club.
 //
 // Une équipe interclub NE COÏNCIDE PAS avec la liste des inscrits sur l'appli : il y a toujours
-// des joueurs du championnat qui ne l'ont jamais ouverte. D'où les « invités » (InterclubGuest),
-// gérés ici aussi — sans eux, la règle « seuls les joueurs de l'équipe peuvent être alignés »
-// obligeait à rouvrir la composition à un nom libre, donc à tout le monde.
+// des joueurs du championnat qui ne l'ont jamais ouverte — et qui n'ont pas forcément envie de
+// l'ouvrir, tout en acceptant d'y figurer. D'où les « invités » (InterclubGuest), gérés ici
+// aussi — sans eux, la règle « seuls les joueurs de l'équipe peuvent être alignés » obligeait à
+// rouvrir la composition à un nom libre, donc à tout le monde.
+//
+// LEUR CLASSEMENT SE CHERCHE, IL NE SE SAISIT PLUS D'ABORD. Ces joueurs sont licenciés comme
+// les autres : squashnet les connaît. L'inscription tente donc le rapprochement sur-le-champ
+// (`matchGuestRanking`), et la saisie manuelle (`set_guest_ranking`) devient ce qu'elle aurait
+// toujours dû être — un REPLI pour les joueurs que squashnet ne sait pas retrouver (homonymes,
+// orthographe divergente, licence pas encore enregistrée), pas la voie normale.
 //
 // L'ancien contenu de cette route était un outil de RECETTE (« fill » / « clear ») qui
 // répartissait les membres en alternance pour éprouver le sélecteur. Il n'a plus de raison
@@ -48,13 +56,12 @@ export async function GET(req: NextRequest) {
       orderBy: { order: "asc" },
       select: { id: true, name: true },
     }),
-    prisma.interclubGuest.findMany({
-      orderBy: { name: "asc" },
-      select: { id: true, teamId: true, name: true, clt: true },
-    }),
     // Le classement effectif (correction admin sinon rapprochement squashnet) est résolu par
-    // `interclub-roster.ts`, comme pour la composition d'une rencontre : une seule définition
-    // de « à quel classement joue ce membre », pas une copie par écran.
+    // `interclub-roster.ts` des DEUX côtés du roster, comme pour la composition d'une
+    // rencontre : une seule définition de « à quel classement joue ce joueur », pas une copie
+    // par écran. Un invité rend en plus ses deux étages séparément — l'écran doit dire d'où
+    // vient le classement, et savoir quand squashnet n'a rien trouvé.
+    allTeamGuests(),
     allTeamMembers(),
   ]);
 
@@ -72,10 +79,13 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/admin/interclub-teams
-//   { action: "add_guest", teamId, name, clt? } → inscrit un joueur sans compte au roster d'une
-//                                                  équipe, avec son classement fédéral si connu
-//   { action: "set_guest_clt", guestId, clt }   → corrige le classement d'un invité déjà inscrit
-//   { action: "remove_guest", guestId }         → retire un invité du roster
+//   { action: "add_guest", teamId, name }                  → inscrit un joueur sans compte au
+//        roster d'une équipe, PUIS tente de rapprocher son classement sur squashnet
+//   { action: "rematch_guest", guestId }                   → retente ce rapprochement
+//   { action: "set_guest_ranking", guestId, clt, rangM }   → force classement et rang mixte
+//        d'un invité que squashnet ne sait pas retrouver (les deux ensemble : ils forment un
+//        seul geste, « voilà où joue ce joueur »)
+//   { action: "remove_guest", guestId }                    → retire un invité du roster
 export async function POST(req: NextRequest) {
   const off = await interclubDisabledResponse();
   if (off) return off;
@@ -89,6 +99,7 @@ export async function POST(req: NextRequest) {
     guestId?: unknown;
     name?: unknown;
     clt?: unknown;
+    rangM?: unknown;
   };
 
   if (body.action === "add_guest") {
@@ -104,11 +115,6 @@ export async function POST(req: NextRequest) {
     if (!name) {
       return NextResponse.json({ error: "Nom manquant" }, { status: 400 });
     }
-    // Un invité n'a pas de compte, donc rien à rapprocher sur squashnet : son classement — qui
-    // décide de l'ordre des simples (cf. `lib/interclub-order.ts`) — se saisit ici, à la main.
-    const clt = parseClassementInput(body.clt);
-    if (!clt.ok) return NextResponse.json({ error: clt.error }, { status: 400 });
-
     const team = await prisma.interclubTeam.findUnique({
       where: { id: body.teamId },
       select: { id: true, _count: { select: { guests: true } } },
@@ -124,11 +130,20 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const guest = await prisma.interclubGuest.create({
-        data: { teamId: team.id, name, clt: clt.value },
-        select: { id: true, teamId: true, name: true, clt: true },
+      const created = await prisma.interclubGuest.create({
+        data: { teamId: team.id, name },
+        select: { id: true, name: true },
       });
-      return NextResponse.json({ ok: true, guest }, { status: 201 });
+      // « Sans compte » n'est pas « sans licence » : ce joueur dispute le même championnat, donc
+      // squashnet le connaît. On cherche TOUT DE SUITE plutôt que d'attendre le cron mensuel —
+      // c'est au moment où l'admin l'inscrit qu'il a le nom sous les yeux, donc le seul moment
+      // où « pas trouvable » est actionnable (il corrige l'orthographe, ou force le classement).
+      //
+      // Ne lève jamais et n'annule jamais la création : un hoquet squashnet ne doit pas faire
+      // perdre l'inscription, le repli manuel existe précisément pour ça.
+      const status = await matchGuestRanking(created);
+      const guest = await teamGuest(created.id);
+      return NextResponse.json({ ok: true, guest, status }, { status: 201 });
     } catch (e) {
       // P2002 = @@unique([teamId, name]) : le même joueur est déjà au roster. Ce n'est pas une
       // erreur d'admin, juste un doublon — on le dit sans dramatiser.
@@ -142,21 +157,47 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  if (body.action === "set_guest_clt") {
+  if (body.action === "rematch_guest") {
     if (typeof body.guestId !== "string" || !body.guestId) {
       return NextResponse.json({ error: "Joueur invalide" }, { status: 400 });
     }
+    const g = await prisma.interclubGuest.findUnique({
+      where: { id: body.guestId },
+      select: { id: true, name: true },
+    });
+    if (!g) return NextResponse.json({ error: "Joueur introuvable" }, { status: 404 });
+
+    // À utiliser après avoir corrigé l'orthographe d'un nom, ou quand une licence vient d'être
+    // enregistrée côté fédération : le cron mensuel finirait par y arriver, mais pas avant le
+    // prochain jeudi de championnat.
+    const status = await matchGuestRanking(g);
+    return NextResponse.json({ ok: true, status, guest: await teamGuest(g.id) });
+  }
+
+  if (body.action === "set_guest_ranking") {
+    if (typeof body.guestId !== "string" || !body.guestId) {
+      return NextResponse.json({ error: "Joueur invalide" }, { status: 400 });
+    }
+    // Les DEUX critères de l'ordre des simples se forcent ensemble (cf. `interclub-order.ts`) :
+    // forcer un « 5A » sans rang mixte laisserait le joueur inalignable, avec un message qui
+    // renvoie à un champ que l'écran n'aurait pas proposé. Un `NC` fait exception — la
+    // fédération ne les ordonne pas entre eux, donc `rangM` y reste facultatif.
     const clt = parseClassementInput(body.clt);
     if (!clt.ok) return NextResponse.json({ error: clt.error }, { status: 400 });
+    const rangM = parseRangMInput(body.rangM);
+    if (!rangM.ok) return NextResponse.json({ error: rangM.error }, { status: 400 });
 
     const { count } = await prisma.interclubGuest.updateMany({
       where: { id: body.guestId },
-      data: { clt: clt.value },
+      // Écrit les colonnes d'OVERRIDE, jamais celles du rapprochement : un classement forcé ne
+      // doit pas se faire passer pour une donnée squashnet, sans quoi le prochain run mensuel
+      // l'écraserait sans que personne comprenne pourquoi la correction a disparu.
+      data: { cltOverride: clt.value, rangMOverride: rangM.value },
     });
     if (count === 0) {
       return NextResponse.json({ error: "Joueur introuvable" }, { status: 404 });
     }
-    return NextResponse.json({ ok: true, clt: clt.value });
+    return NextResponse.json({ ok: true, guest: await teamGuest(body.guestId) });
   }
 
   if (body.action === "remove_guest") {

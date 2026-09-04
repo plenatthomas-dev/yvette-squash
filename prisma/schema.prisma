@@ -77,13 +77,21 @@ model User {
   // fréquent). Affiché comme colonne de l'annuaire. SetNull à la suppression de l'équipe.
   team                   InterclubTeam?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
   teamId                 String?
-  // Classement forcé par un admin pour l'ORDRE des simples interclub (cf. lib/interclub-order.ts),
-  // quand le rapprochement squashnet (`squashnetRanking`) a échoué ou s'est trompé — nom mal
-  // orthographié côté ResaMania, licence pas encore rapprochée… Même format que `clt`
-  // (« 5A », « NC »), sans rang associé : l'ordre des matchs ne compare que des classements,
-  // jamais des rangs. Prioritaire sur `squashnetRanking.clt` quand renseigné (cf. `effectiveClt`
-  // dans interclub-roster.ts) ; NULL = pas de correction, on se fie au rapprochement automatique.
+  // Classement ET rang mixte forcés par un admin pour l'ORDRE des simples interclub
+  // (cf. lib/interclub-order.ts), quand le rapprochement squashnet (`squashnetRanking`) a
+  // échoué ou s'est trompé — nom mal orthographié côté ResaMania, licence pas encore
+  // rapprochée… Format de `interclubCltOverride` : celui de `clt` (« 5A », « NC »).
+  //
+  // LES DEUX vont ensemble depuis que l'ordre des simples départage les ex æquo de classement
+  // par le rang mixte : forcer un « 5A » sans rang laissait le membre inalignable pour une
+  // raison qu'aucun écran ne pouvait corriger. `interclubRangMOverride` est facultatif pour un
+  // NC (les NC restent interchangeables entre eux, cf. interclub-order.ts).
+  //
+  // Chacun est prioritaire sur son homologue de `squashnetRanking` quand il est renseigné
+  // (cf. `memberClt` / `memberRangM` dans interclub-roster.ts) ; NULL = pas de correction, on
+  // se fie au rapprochement automatique.
   interclubCltOverride   String?
+  interclubRangMOverride Int?
   interclubsCreated      Interclub[]        @relation("InterclubCreator")
   interclubPlayed        InterclubMatch[]   @relation("InterclubHomePlayer")
   interclubScored        InterclubMatch[]   @relation("InterclubScorer")
@@ -601,19 +609,47 @@ model InterclubTeam {
 ///
 /// C'est donc un ROSTER, pas un compte : ni email, ni connexion, ni notification. L'admin le
 /// tient à jour depuis l'espace d'administration, au même endroit qu'il affecte les équipes.
+///
+/// ⚠️ « Sans compte » ne veut PAS dire « sans licence » : ces joueurs disputent le même
+/// championnat que les membres, donc squashnet les connaît. Leur classement est RAPPROCHÉ
+/// automatiquement, comme celui des membres (`snClt`/`snRangM`, cf. lib/squashnet/refresh.ts),
+/// et l'admin ne saisit à la main que ce que le rapprochement n'a pas su établir
+/// (`cltOverride`/`rangMOverride`). Deux jeux de colonnes plutôt qu'un seul champ : sans quoi
+/// le rafraîchissement mensuel écraserait la correction de l'admin — ou, symétriquement, une
+/// correction ancienne figerait un classement que la fédération a fait bouger depuis.
 model InterclubGuest {
-  id        String           @id @default(cuid())
-  team      InterclubTeam    @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  teamId    String
-  name      String // « Prénom Nom », saisi par l'admin — un seul champ, comme TricountGuest
-  // Classement fédéral, saisi À LA MAIN par l'admin (« 5A », « NC »…) : un invité n'a pas de
-  // compte, donc rien à rapprocher sur squashnet. Sert exclusivement à l'ORDRE des simples
-  // interclub (cf. lib/interclub-order.ts) — un joueur mieux classé doit jouer un numéro de
-  // simple antérieur. NULL = classement pas encore saisi ; le joueur reste alignable dans le
-  // roster, mais aucune composition qui l'utilise ne peut valider l'ordre tant qu'il manque.
-  clt       String?
-  createdAt DateTime         @default(now())
-  matches   InterclubMatch[] @relation("InterclubHomeGuest")
+  id             String           @id @default(cuid())
+  team           InterclubTeam    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId         String
+  name           String // « Prénom Nom », saisi par l'admin — un seul champ, comme TricountGuest
+  // --- Correction ADMIN (prioritaire) ---
+  // Classement fédéral (« 5A », « NC »…) et rang mixte forcés à la main, pour l'ORDRE des
+  // simples interclub (cf. lib/interclub-order.ts) : un joueur mieux classé doit jouer un
+  // numéro de simple antérieur, et à classement égal c'est le rang mixte qui départage.
+  // À ne remplir que quand le rapprochement squashnet échoue (homonymes, nom mal orthographié,
+  // joueur pas encore licencié). NULL = on se fie au rapprochement.
+  // ⚠️ Cette colonne s'appelait `clt` : elle portait DÉJÀ une saisie manuelle, d'où le renommage
+  // plutôt qu'une colonne de plus (cf. migration 39_interclub_rangm).
+  cltOverride    String?
+  rangMOverride  Int?
+  // --- Rapprochement SQUASHNET (automatique, jamais écrasé par l'admin et réciproquement) ---
+  // Mêmes champs que `SquashnetRanking` pour un membre, à plat : un invité n'a pas de `User`
+  // à qui accrocher la relation, et une table polymorphe coûterait plus qu'elle ne rapporte
+  // pour six colonnes.
+  snClt          String? // classement lu sur squashnet, ex. « 5A »
+  snRangM        Int? // rang national MIXTE (« M » = mixte, pas masculin) — départage les ex æquo
+  snLicence      String? // n° de licence FFSquash (traçabilité du rapprochement)
+  snClub         String? // libellé du club rapproché (audit)
+  snMonth        String? // période de classement, « YYYY-MM-DD »
+  // Verdict de la DERNIÈRE tentative (cf. `classifyRanking`) : « matched » (rapproché),
+  // « moved » (retrouvé, mais dans un autre club) ou « unknown » (introuvable ou homonymes
+  // ambigus). C'est ce que l'écran d'admin affiche pour dire « pas trouvable sur squashnet »
+  // au lieu de laisser une ligne muette, et donc pour savoir quand l'override est nécessaire.
+  // NULL = jamais tenté.
+  snStatus       String?
+  snCheckedAt    DateTime? // dernière TENTATIVE (réussie ou non), pas le dernier succès
+  createdAt      DateTime         @default(now())
+  matches        InterclubMatch[] @relation("InterclubHomeGuest")
 
   // Deux fois le même nom dans la même équipe est une faute de saisie, pas un cas d'usage.
   @@unique([teamId, name])

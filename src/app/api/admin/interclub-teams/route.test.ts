@@ -21,12 +21,18 @@ const h = vi.hoisted(() => ({
   duplicate: false,
   updated: null as null | Record<string, unknown>,
   updatedCount: 1,
+  /** Verdict que le rapprochement squashnet doit rendre — la couche réseau est mockée. */
+  matchStatus: "matched" as "matched" | "moved" | "unknown",
+  matchGuestRanking: vi.fn(),
 }));
 
 vi.mock("@/lib/features-server", () => ({
   getFeatures: async () => ({ interclub: h.interclub }),
 }));
 vi.mock("@/lib/admin", () => ({ requireAdmin: vi.fn(async () => h.admin) }));
+// Le rapprochement squashnet est éprouvé chez lui (`squashnet/refresh.test.ts`) : ici on
+// vérifie seulement que la route le DÉCLENCHE et rapporte son verdict, sans réseau.
+vi.mock("@/lib/squashnet/refresh", () => ({ matchGuestRanking: h.matchGuestRanking }));
 vi.mock("@/lib/db", () => ({
   prisma: {
     user: {
@@ -41,6 +47,9 @@ vi.mock("@/lib/db", () => ({
     },
     interclubGuest: {
       findMany: vi.fn(async () => h.guests),
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
+        (h.guests as Array<Record<string, unknown>>).find((g) => g.id === where.id) ?? null,
+      ),
       create: vi.fn(async (args: { data: Record<string, unknown> }) => {
         if (h.duplicate) {
           const { Prisma } = await import("@prisma/client");
@@ -82,13 +91,27 @@ beforeEach(() => {
     },
   ];
   h.whereMembres = null;
-  h.guests = [{ id: "g1", teamId: "t1", name: "Paul Hors-Appli", clt: null }];
+  h.guests = [
+    {
+      id: "g1",
+      teamId: "t1",
+      name: "Paul Hors-Appli",
+      cltOverride: null,
+      rangMOverride: null,
+      snClt: "5A",
+      snRangM: 1200,
+      snStatus: "matched",
+      snCheckedAt: null,
+    },
+  ];
   h.team = { id: "t1", _count: { guests: 1 } };
   h.created = null;
   h.deleted = 1;
   h.duplicate = false;
   h.updated = null;
   h.updatedCount = 1;
+  h.matchStatus = "matched";
+  h.matchGuestRanking.mockReset().mockImplementation(async () => h.matchStatus);
 });
 
 describe("GET /api/admin/interclub-teams", () => {
@@ -105,7 +128,42 @@ describe("GET /api/admin/interclub-teams", () => {
   it("rend les équipes avec leur effectif inscrit, et les joueurs hors appli", async () => {
     const body = await (await GET(get())).json();
     expect(body.teams).toEqual([{ id: "t1", name: "Équipe 1", memberCount: 1 }]);
-    expect(body.guests).toEqual([{ id: "g1", teamId: "t1", name: "Paul Hors-Appli", clt: null }]);
+    // `clt`/`rangM` EFFECTIFS, plus les deux étages qui les produisent : l'écran doit pouvoir
+    // dire d'où vient le classement, et préremplir la correction avec la CORRECTION existante
+    // (jamais avec la valeur rapprochée, qu'il figerait sinon au premier enregistrement).
+    expect(body.guests).toEqual([
+      {
+        id: "g1",
+        teamId: "t1",
+        name: "Paul Hors-Appli",
+        clt: "5A",
+        rangM: 1200,
+        cltOverride: null,
+        rangMOverride: null,
+        snClt: "5A",
+        snRangM: 1200,
+        snStatus: "matched",
+        snCheckedAt: null,
+      },
+    ]);
+  });
+
+  it("le classement d'un invité suit la correction admin quand il y en a une", async () => {
+    h.guests = [
+      {
+        id: "g1",
+        teamId: "t1",
+        name: "Paul Hors-Appli",
+        cltOverride: "4D",
+        rangMOverride: 800,
+        snClt: "5A",
+        snRangM: 1200,
+        snStatus: "matched",
+        snCheckedAt: null,
+      },
+    ];
+    const body = await (await GET(get())).json();
+    expect(body.guests[0]).toMatchObject({ clt: "4D", rangM: 800, snClt: "5A" });
   });
 
   // L'écran s'appelle « effectif » : un décompte ne dit ni QUI en fait partie, ni à quel
@@ -150,23 +208,27 @@ describe("POST /api/admin/interclub-teams", () => {
   it("inscrit un joueur sans compte au roster d'une équipe", async () => {
     const res = await POST(post({ action: "add_guest", teamId: "t1", name: "Jean Dupont" }));
     expect(res.status).toBe(201);
-    expect(h.created).toEqual({ teamId: "t1", name: "Jean Dupont", clt: null });
+    // Aucun classement à l'écriture : il est CHERCHÉ, pas saisi.
+    expect(h.created).toEqual({ teamId: "t1", name: "Jean Dupont" });
   });
 
-  it("inscrit un joueur avec son classement, et le normalise en MAJUSCULES", async () => {
-    const res = await POST(
-      post({ action: "add_guest", teamId: "t1", name: "Jean Dupont", clt: "5b" }),
+  it("cherche le classement sur squashnet dès l'inscription, et rapporte le verdict", async () => {
+    // C'est le seul moment où le nom est encore sous les yeux de l'admin, donc le seul où
+    // « pas trouvé » est actionnable : il corrige l'orthographe, ou force le classement.
+    const res = await POST(post({ action: "add_guest", teamId: "t1", name: "Jean Dupont" }));
+    // `objectContaining` : le faux `create` ignore le `select` de la route et rend toute la
+    // ligne, là où le vrai n'en rendrait que l'id et le nom.
+    expect(h.matchGuestRanking).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "g-new", name: "Jean Dupont" }),
     );
+    expect((await res.json()).status).toBe("matched");
+  });
+
+  it("inscrit quand même le joueur que squashnet ne retrouve pas — le repli manuel est là pour ça", async () => {
+    h.matchStatus = "unknown";
+    const res = await POST(post({ action: "add_guest", teamId: "t1", name: "Jean Dupont" }));
     expect(res.status).toBe(201);
-    expect(h.created).toMatchObject({ clt: "5B" });
-  });
-
-  it("refuse un classement mal formé à l'inscription", async () => {
-    const res = await POST(
-      post({ action: "add_guest", teamId: "t1", name: "Jean Dupont", clt: "cinq" }),
-    );
-    expect(res.status).toBe(400);
-    expect(h.created).toBeNull();
+    expect((await res.json()).status).toBe("unknown");
   });
 
   // Sans normalisation, « Jean  Dupont » et « Jean Dupont » seraient deux joueurs distincts
@@ -199,20 +261,32 @@ describe("POST /api/admin/interclub-teams", () => {
     expect(h.created).toBeNull();
   });
 
-  it("corrige le classement d'un invité déjà inscrit", async () => {
-    const res = await POST(post({ action: "set_guest_clt", guestId: "g1", clt: "4d" }));
+  it("force le classement ET le rang mixte d'un invité déjà inscrit", async () => {
+    const res = await POST(
+      post({ action: "set_guest_ranking", guestId: "g1", clt: "4d", rangM: "812" }),
+    );
     expect(res.status).toBe(200);
-    expect(h.updated).toEqual({ clt: "4D" });
+    // Les colonnes d'OVERRIDE, jamais celles du rapprochement : un classement forcé ne doit
+    // pas se faire passer pour une donnée squashnet, que le prochain run écraserait.
+    expect(h.updated).toEqual({ cltOverride: "4D", rangMOverride: 812 });
   });
 
-  it("efface le classement d'un invité avec une chaîne vide", async () => {
-    const res = await POST(post({ action: "set_guest_clt", guestId: "g1", clt: "" }));
+  it("efface la correction d'un invité avec des chaînes vides", async () => {
+    const res = await POST(post({ action: "set_guest_ranking", guestId: "g1", clt: "", rangM: "" }));
     expect(res.status).toBe(200);
-    expect(h.updated).toEqual({ clt: null });
+    expect(h.updated).toEqual({ cltOverride: null, rangMOverride: null });
   });
 
   it("refuse un classement mal formé à la correction", async () => {
-    const res = await POST(post({ action: "set_guest_clt", guestId: "g1", clt: "??" }));
+    const res = await POST(post({ action: "set_guest_ranking", guestId: "g1", clt: "??" }));
+    expect(res.status).toBe(400);
+    expect(h.updated).toBeNull();
+  });
+
+  it("refuse un rang mixte mal formé, sans rien écrire", async () => {
+    const res = await POST(
+      post({ action: "set_guest_ranking", guestId: "g1", clt: "5A", rangM: "0" }),
+    );
     expect(res.status).toBe(400);
     expect(h.updated).toBeNull();
   });
@@ -220,8 +294,25 @@ describe("POST /api/admin/interclub-teams", () => {
   it("404 en corrigeant le classement d'un invité qui n'existe pas", async () => {
     h.updatedCount = 0;
     expect(
-      (await POST(post({ action: "set_guest_clt", guestId: "gX", clt: "5A" }))).status,
+      (await POST(post({ action: "set_guest_ranking", guestId: "gX", clt: "5A" }))).status,
     ).toBe(404);
+  });
+
+  it("re-rapproche un invité à la demande, et rapporte le verdict", async () => {
+    // Sert juste après avoir corrigé une orthographe : le cron mensuel y arriverait, mais pas
+    // avant le prochain jeudi de championnat.
+    const res = await POST(post({ action: "rematch_guest", guestId: "g1" }));
+    expect(res.status).toBe(200);
+    expect(h.matchGuestRanking).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "g1", name: "Paul Hors-Appli" }),
+    );
+    expect((await res.json()).status).toBe("matched");
+  });
+
+  it("404 en re-rapprochant un invité qui n'existe pas", async () => {
+    const res = await POST(post({ action: "rematch_guest", guestId: "gX" }));
+    expect(res.status).toBe(404);
+    expect(h.matchGuestRanking).not.toHaveBeenCalled();
   });
 
   it("retire un joueur du roster", async () => {

@@ -161,11 +161,22 @@ export function PrivacyNotice() {
               {ranking && (
                 <p>
                   <strong>Classement fédéral.</strong> Ton classement FFSquash
-                  (<strong>squashnet.fr</strong>, source publique) peut s'afficher à côté de
-                  ton nom si tu es dans l'annuaire, et pré-remplir les têtes de série d'un
+                  (<strong>squashnet.fr</strong>, source publique) peut s&apos;afficher à côté de
+                  ton nom si tu es dans l&apos;annuaire, et pré-remplir les têtes de série d&apos;un
                   tournoi. On conserve aussi ton numéro de licence et ton club (vérification
                   du rapprochement) — <strong>jamais affichés</strong>. Retire-toi de
-                  l'annuaire pour le masquer.
+                  l&apos;annuaire pour le masquer.
+                  {interclub && (
+                    <>
+                      {" "}
+                      <strong>Une exception</strong>&nbsp;: si un administrateur t&apos;a
+                      rattaché à une <strong>équipe interclub</strong>, ton classement et ton
+                      rang continuent d&apos;être rapprochés même hors annuaire — la compétition
+                      impose de composer les simples dans l&apos;ordre du classement, et sans lui
+                      tu ne pourrais être aligné nulle part. Il reste alors visible des seuls
+                      membres qui composent une rencontre, pas dans l&apos;annuaire.
+                    </>
+                  )}
                 </p>
               )}
               <p>
@@ -202,6 +213,17 @@ export function PrivacyNotice() {
                   inscrits par un administrateur — n&apos;y porte que le nom sous lequel la personne
                   est déjà annoncée en championnat. C&apos;est aussi un administrateur qui décide de
                   l&apos;appartenance à une équipe.
+                </p>
+                <p>
+                  <strong>Interclub — le classement des joueurs sans compte.</strong> Pour ces
+                  joueurs-là, l&apos;appli recherche le <strong>classement fédéral</strong> publié
+                  par <strong>squashnet.fr</strong> à partir du nom inscrit, et en conserve le
+                  classement, le rang, le numéro de licence et le club (vérification du
+                  rapprochement). C&apos;est nécessaire pour composer une rencontre&nbsp;: la
+                  compétition impose l&apos;ordre du classement, et ces données sont <em>déjà
+                  publiques</em> côté fédération. Elles ne servent qu&apos;à la composition, ne
+                  s&apos;affichent pas dans l&apos;annuaire, et disparaissent dès qu&apos;un
+                  administrateur retire la personne du roster.
                 </p>
                 <p>
                   <strong>Interclub — ce qui reste après.</strong> Le nom du joueur demeure

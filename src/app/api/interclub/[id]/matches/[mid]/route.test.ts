@@ -283,7 +283,7 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
       displayName: "Jérôme Blanc",
       nickname: "Jéjé",
       teamId: "team-1",
-      squashnetRanking: { clt: "5A" },
+      squashnetRanking: { clt: "5A", rangM: 1200 },
     };
     await PATCH(patch({ homeUserId: "u9" }), ctx);
     expect(h.updated).toMatchObject({ homeDisplayName: "Jéjé" });
@@ -323,7 +323,7 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
       displayName: "Jérôme Blanc",
       nickname: "Jéjé",
       teamId: "team-1",
-      squashnetRanking: { clt: "5A" },
+      squashnetRanking: { clt: "5A", rangM: 1200 },
     };
     h.alignmentClash = { order: 2 };
     const res = await PATCH(patch({ homeUserId: "u9" }), ctx);
@@ -353,7 +353,7 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
       displayName: "Jérôme Blanc",
       nickname: "Jéjé",
       teamId: "team-1",
-      squashnetRanking: { clt: "5A" },
+      squashnetRanking: { clt: "5A", rangM: 1200 },
     };
     await PATCH(patch({ homeUserId: "u9", homeDisplayName: "Truc" }), ctx);
     expect(h.updated).toMatchObject({ homeDisplayName: "Jéjé" });
@@ -385,7 +385,7 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
       displayName: "Laurent Petit",
       nickname: null,
       teamId: "team-1",
-      squashnetRanking: { clt: "5A" },
+      squashnetRanking: { clt: "5A", rangM: 1200 },
     };
     await PATCH(
       patch({ homeUserId: "u9", awayName: "Gégé", games: [{ home: 11, away: 5 }] }),
@@ -569,7 +569,7 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
   // --- Joueurs sans compte -------------------------------------------------
 
   it("aligne un joueur hors appli du roster de l'équipe", async () => {
-    h.guest = { id: "g1", name: "Paul Hors-Appli", teamId: "team-1", clt: "4D" };
+    h.guest = { id: "g1", name: "Paul Hors-Appli", teamId: "team-1", snClt: "4D", snRangM: 812 };
     await PATCH(patch({ homeGuestId: "g1" }), ctx);
     expect(h.updated).toMatchObject({ homeDisplayName: "Paul Hors-Appli" });
     expect(h.updated?.homeGuest).toEqual({ connect: { id: "g1" } });
@@ -577,7 +577,7 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
   });
 
   it("refuse un joueur hors appli sans classement connu", async () => {
-    h.guest = { id: "g1", name: "Paul Hors-Appli", teamId: "team-1", clt: null };
+    h.guest = { id: "g1", name: "Paul Hors-Appli", teamId: "team-1", snClt: null, snRangM: null };
     const res = await PATCH(patch({ homeGuestId: "g1" }), ctx);
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/classement inconnu/);
@@ -627,11 +627,13 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
       nickname: null,
       teamId: "team-1",
       interclubCltOverride: null,
-      squashnetRanking: { clt: "4D" },
+      squashnetRanking: { clt: "4D", rangM: 800 },
     };
     // Albert (5A, moins bien classé que 4D) joue déjà le simple 1.
     h.orderSiblings = [{ order: 1, homeDisplayName: "Albert", homeUserId: "u-albert", homeGuestId: null }];
-    h.orderUsers = [{ id: "u-albert", interclubCltOverride: null, squashnetRanking: { clt: "5A" } }];
+    h.orderUsers = [
+      { id: "u-albert", interclubCltOverride: null, interclubRangMOverride: null, squashnetRanking: { clt: "5A", rangM: 1200 } },
+    ];
     const res = await PATCH(patch({ homeUserId: "u-benoit" }), ctx);
     expect(res.status).toBe(400);
     expect((await res.json()).error).toContain("Benoît");
@@ -646,11 +648,13 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
       nickname: null,
       teamId: "team-1",
       interclubCltOverride: null,
-      squashnetRanking: { clt: "5A" },
+      squashnetRanking: { clt: "5A", rangM: 1200 },
     };
     // Albert (4D, mieux classé) joue déjà le simple 1 : Benoît (5A) peut jouer le simple 2.
     h.orderSiblings = [{ order: 1, homeDisplayName: "Albert", homeUserId: "u-albert", homeGuestId: null }];
-    h.orderUsers = [{ id: "u-albert", interclubCltOverride: null, squashnetRanking: { clt: "4D" } }];
+    h.orderUsers = [
+      { id: "u-albert", interclubCltOverride: null, interclubRangMOverride: null, squashnetRanking: { clt: "4D", rangM: 800 } },
+    ];
     const res = await PATCH(patch({ homeUserId: "u-benoit" }), ctx);
     expect(res.status).toBe(200);
     expect(h.updated).toMatchObject({ homeDisplayName: "Benoît" });

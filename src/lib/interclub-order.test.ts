@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   classementPower,
   compareRosterOrder,
+  isNC,
   KNOWN_CLASSEMENTS,
   lineupOrderConflict,
   parseClassementInput,
+  parseRangMInput,
   type RankableRosterEntry,
 } from "./interclub-order";
 
@@ -97,27 +99,93 @@ describe("lineupOrderConflict", () => {
 
   it("accepte un ordre strictement décroissant en force", () => {
     const pb = lineupOrderConflict([
-      { order: 1, name: "Albert", clt: "4D" },
-      { order: 2, name: "Benoît", clt: "5A" },
-      { order: 3, name: "Carla", clt: "5D" },
-      { order: 4, name: "Denis", clt: "NC" },
+      { order: 1, name: "Albert", clt: "4D", rangM: 800 },
+      { order: 2, name: "Benoît", clt: "5A", rangM: 1200 },
+      { order: 3, name: "Carla", clt: "5D", rangM: 2600 },
+      { order: 4, name: "Denis", clt: "NC", rangM: null },
     ]);
     expect(pb).toBeNull();
   });
 
-  it("accepte des classements égaux dans n'importe quel ordre (interchangeables)", () => {
+  it("accepte deux joueurs de même classement rangés par rang mixte croissant", () => {
     expect(
       lineupOrderConflict([
-        { order: 1, name: "Albert", clt: "5A" },
-        { order: 2, name: "Benoît", clt: "5A" },
+        { order: 1, name: "Albert", clt: "5A", rangM: 1200 },
+        { order: 2, name: "Benoît", clt: "5A", rangM: 1500 },
       ]),
     ).toBeNull();
+  });
+
+  it("refuse deux joueurs de même classement rangés à l'envers — le rang mixte départage", () => {
+    const pb = lineupOrderConflict([
+      { order: 1, name: "Albert", clt: "5A", rangM: 1500 },
+      { order: 2, name: "Benoît", clt: "5A", rangM: 1200 },
+    ]);
+    expect(pb).not.toBeNull();
+    expect(pb).toContain("Benoît");
+    expect(pb).toContain("Albert");
+    expect(pb).toContain("1200");
+  });
+
+  it("tient deux joueurs de MÊME rang pour interchangeables", () => {
+    // Ne devrait pas arriver côté fédération, mais la règle est « strictement mieux placé »,
+    // pas « différent » : un ex æquo parfait ne casse aucun ordre.
     expect(
       lineupOrderConflict([
-        { order: 1, name: "Albert", clt: "NC" },
-        { order: 2, name: "Benoît", clt: "NC" },
+        { order: 1, name: "Albert", clt: "5A", rangM: 1200 },
+        { order: 2, name: "Benoît", clt: "5A", rangM: 1200 },
       ]),
     ).toBeNull();
+  });
+
+  it("tient les NC pour interchangeables, quel que soit leur rang mixte", () => {
+    // La SEULE exception : la fédération n'ordonne pas les non-classés entre eux.
+    expect(
+      lineupOrderConflict([
+        { order: 1, name: "Albert", clt: "NC", rangM: 3900 },
+        { order: 2, name: "Benoît", clt: "NC", rangM: 2100 },
+      ]),
+    ).toBeNull();
+  });
+
+  it("n'exige aucun rang mixte d'un NC", () => {
+    expect(
+      lineupOrderConflict([
+        { order: 1, name: "Albert", clt: "5D", rangM: 2600 },
+        { order: 2, name: "Benoît", clt: "NC", rangM: null },
+        { order: 3, name: "Carla", clt: "NC", rangM: null },
+      ]),
+    ).toBeNull();
+  });
+
+  it("refuse un rang mixte inconnu sur un joueur classé, même sans ex æquo à comparer", () => {
+    // Exigé de TOUS les non-NC désignés : ne le réclamer qu'en cas d'égalité ferait surgir le
+    // refus au troisième joueur composé, pour une donnée manquante depuis le premier.
+    const pb = lineupOrderConflict([
+      { order: 1, name: "Albert", clt: "4D", rangM: 800 },
+      { order: 2, name: "Benoît", clt: "5A", rangM: null },
+    ]);
+    expect(pb).toContain("Benoît");
+    expect(pb).toContain("rang mixte inconnu");
+  });
+
+  it("signale le classement inconnu AVANT le rang mixte manquant", () => {
+    const pb = lineupOrderConflict([
+      { order: 1, name: "Albert", clt: "5A", rangM: null },
+      { order: 2, name: "Mystère", clt: null, rangM: null },
+    ]);
+    expect(pb).toContain("Mystère");
+    expect(pb).toContain("classement inconnu");
+  });
+
+  it("signale le rang mixte manquant AVANT une inversion d'ordre", () => {
+    // Le trou d'information passe en premier : corriger l'ordre sans la donnée ne servirait
+    // à rien, puisqu'il resterait invérifiable.
+    const pb = lineupOrderConflict([
+      { order: 1, name: "Albert", clt: "5A", rangM: null },
+      { order: 2, name: "Benoît", clt: "4D", rangM: 800 },
+    ]);
+    expect(pb).toContain("rang mixte inconnu");
   });
 
   it("ignore les simples non consécutifs en numéro tant que l'ordre relatif est bon", () => {
@@ -125,27 +193,38 @@ describe("lineupOrderConflict", () => {
     // même respecter l'ordre entre eux.
     expect(
       lineupOrderConflict([
-        { order: 1, name: "Albert", clt: "4D" },
-        { order: 3, name: "Carla", clt: "5A" },
+        { order: 1, name: "Albert", clt: "4D", rangM: 800 },
+        { order: 3, name: "Carla", clt: "5A", rangM: 1200 },
       ]),
     ).toBeNull();
   });
 
   it("refuse Benoît (4D) après Albert (5A) — l'exemple exact de la règle du club", () => {
     const pb = lineupOrderConflict([
-      { order: 1, name: "Albert", clt: "5A" },
-      { order: 2, name: "Benoît", clt: "4D" },
+      { order: 1, name: "Albert", clt: "5A", rangM: 1200 },
+      { order: 2, name: "Benoît", clt: "4D", rangM: 800 },
     ]);
     expect(pb).not.toBeNull();
     expect(pb).toContain("Benoît");
     expect(pb).toContain("Albert");
   });
 
+  it("le classement prime le rang : un mieux classé au rang plus GRAND reste devant", () => {
+    // Cas réel et contre-intuitif : un « 4D » peut avoir un rang mixte plus grand qu'un « 5A »
+    // fraîchement redescendu. Le classement décide seul tant qu'il diffère.
+    expect(
+      lineupOrderConflict([
+        { order: 1, name: "Albert", clt: "4D", rangM: 1500 },
+        { order: 2, name: "Benoît", clt: "5A", rangM: 1200 },
+      ]),
+    ).toBeNull();
+  });
+
   it("refuse même si le mieux classé n'est pas au numéro le plus proche", () => {
     const pb = lineupOrderConflict([
-      { order: 1, name: "Albert", clt: "4D" },
-      { order: 2, name: "Benoît", clt: "NC" },
-      { order: 3, name: "Carla", clt: "3A" },
+      { order: 1, name: "Albert", clt: "4D", rangM: 800 },
+      { order: 2, name: "Benoît", clt: "NC", rangM: null },
+      { order: 3, name: "Carla", clt: "3A", rangM: 400 },
     ]);
     expect(pb).not.toBeNull();
     expect(pb).toContain("Carla");
@@ -153,8 +232,8 @@ describe("lineupOrderConflict", () => {
 
   it("refuse un classement inconnu (null) sur un simple désigné", () => {
     const pb = lineupOrderConflict([
-      { order: 1, name: "Albert", clt: "5A" },
-      { order: 2, name: "Mystère", clt: null },
+      { order: 1, name: "Albert", clt: "5A", rangM: 1200 },
+      { order: 2, name: "Mystère", clt: null, rangM: null },
     ]);
     expect(pb).toContain("Mystère");
     expect(pb).toContain("classement inconnu");
@@ -162,8 +241,8 @@ describe("lineupOrderConflict", () => {
 
   it("refuse un classement mal formé (correction admin fautive)", () => {
     const pb = lineupOrderConflict([
-      { order: 1, name: "Albert", clt: "cinq A" },
-      { order: 2, name: "Benoît", clt: "5A" },
+      { order: 1, name: "Albert", clt: "cinq A", rangM: 1200 },
+      { order: 2, name: "Benoît", clt: "5A", rangM: 1500 },
     ]);
     expect(pb).toContain("classement inconnu");
   });
@@ -171,15 +250,66 @@ describe("lineupOrderConflict", () => {
   it("signale le classement inconnu avant de comparer l'ordre", () => {
     // Même si l'ordre serait par ailleurs respecté, le trou d'information passe en premier.
     const pb = lineupOrderConflict([
-      { order: 1, name: "Albert", clt: "NC" },
-      { order: 2, name: "Mystère", clt: null },
+      { order: 1, name: "Albert", clt: "NC", rangM: null },
+      { order: 2, name: "Mystère", clt: null, rangM: null },
     ]);
     expect(pb).toContain("classement inconnu");
   });
 
-  it("un seul simple désigné n'a rien à comparer : son classement n'est pas exigé", () => {
-    expect(lineupOrderConflict([{ order: 1, name: "Albert", clt: null }])).toBeNull();
-    expect(lineupOrderConflict([{ order: 3, name: "Albert", clt: "n'importe quoi" }])).toBeNull();
+  it("un seul simple désigné n'a rien à comparer : ni classement ni rang exigés", () => {
+    expect(lineupOrderConflict([{ order: 1, name: "Albert", clt: null, rangM: null }])).toBeNull();
+    expect(
+      lineupOrderConflict([{ order: 3, name: "Albert", clt: "n'importe quoi", rangM: null }]),
+    ).toBeNull();
+    expect(lineupOrderConflict([{ order: 2, name: "Albert", clt: "5A", rangM: null }])).toBeNull();
+  });
+});
+
+describe("isNC", () => {
+  it("ne reconnaît que « NC », casse et espaces indifférents", () => {
+    expect(isNC("NC")).toBe(true);
+    expect(isNC(" nc ")).toBe(true);
+    expect(isNC("5A")).toBe(false);
+    // Une valeur non reconnue n'est PAS un NC : elle n'est rien du tout.
+    expect(isNC("R1")).toBe(false);
+    expect(isNC("")).toBe(false);
+  });
+});
+
+describe("parseRangMInput", () => {
+  it("accepte un entier, en nombre comme en chaîne", () => {
+    expect(parseRangMInput(2339)).toEqual({ ok: true, value: 2339 });
+    expect(parseRangMInput("2339")).toEqual({ ok: true, value: 2339 });
+  });
+
+  it("tolère l'espace de milliers, comme squashnet l'affiche", () => {
+    expect(parseRangMInput("2 339")).toEqual({ ok: true, value: 2339 });
+  });
+
+  it("traite le vide comme « pas de rang », sans erreur", () => {
+    expect(parseRangMInput("")).toEqual({ ok: true, value: null });
+    expect(parseRangMInput("   ")).toEqual({ ok: true, value: null });
+    expect(parseRangMInput(null)).toEqual({ ok: true, value: null });
+    expect(parseRangMInput(undefined)).toEqual({ ok: true, value: null });
+  });
+
+  it("refuse zéro, le négatif et le non-entier", () => {
+    // Un rang commence à 1 : un « 0 » est une case vide déguisée, et le laisser passer
+    // placerait son joueur EN TÊTE de l'ordre, devant les mieux classés du club.
+    expect(parseRangMInput("0").ok).toBe(false);
+    expect(parseRangMInput(0).ok).toBe(false);
+    expect(parseRangMInput(-3).ok).toBe(false);
+    expect(parseRangMInput(12.5).ok).toBe(false);
+  });
+
+  it("refuse ce qui n'est pas un nombre", () => {
+    expect(parseRangMInput("3184e").ok).toBe(false);
+    expect(parseRangMInput("NC").ok).toBe(false);
+    expect(parseRangMInput({}).ok).toBe(false);
+  });
+
+  it("refuse une valeur absurdement grande (faute de frappe, licence collée…)", () => {
+    expect(parseRangMInput("123456789").ok).toBe(false);
   });
 });
 
