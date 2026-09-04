@@ -131,7 +131,6 @@ export async function GET(req: NextRequest) {
     matchCount: f.matchCount,
     status: derivedStatus(f.matchCount, f.matches),
     score: fixtureScore(f.matches),
-    // Victoire / défaite / nul gagné ou perdu, avec les averages qui l'ont tranché.
     outcome: tieOutcome(
       f.matchCount,
       f.matches.map((m) => ({

@@ -27,9 +27,14 @@ export const maxDuration = 60;
 //  GET /api/cron/interclub-availability — l'appel de disponibilité, et sa relance.
 //
 //  Quotidien. Chaque jour, pour chaque rencontre à venir :
-//    * à J-10, ouvre l'appel auprès de TOUTE L'ÉQUIPE ;
-//    * à J-3, relance les SEULS non-répondants, et envoie au CAPITAINE le
-//      récapitulatif — dont la liste de ceux qu'aucune relance n'atteindra.
+//    * au plus tard à J-10, ouvre l'appel auprès de TOUTE L'ÉQUIPE ;
+//    * au plus tard à J-3, relance les SEULS non-répondants, et envoie au
+//      CAPITAINE le récapitulatif — dont la liste de ceux qu'aucune relance
+//      n'atteindra.
+//
+//  « Au plus tard » et non « à » : `dueAction` déclenche sur `jours <= seuil`,
+//  pas sur l'égalité. Une rencontre inscrite à J-4 reçoit son appel le jour
+//  même — sinon elle n'en recevrait jamais.
 //
 //  ⚠️ RIEN NE PART SUR UNE DATE NON CONFIRMÉE. La fédération publie les
 //  journées non planifiées avec une date bouchon commune ; convoquer l'équipe

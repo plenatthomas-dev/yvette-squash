@@ -395,8 +395,9 @@ Trois constats du site ont décidé de la conception, et ils se vérifient dans
    qui se cumulent. D'abord `roundid` : sans lui, la fédération rend la poule qu'elle veut —
    mesuré sur notre propre critérium, celle de Jeu de Paume, Montmartre, PUC et Vincennes, où
    l'Yvette ne figure pas. Ensuite `teamid`, qui ne filtre pas : on reçoit la poule entière, et
-   c'est `ownFixtures()` qui retient les lignes portant notre `data-teamid`. D'où **trois**
-   identifiants à renseigner par équipe (`snEventId`, `snRoundId`, `snTeamId`), jamais deux.
+   c'est `ownFixtures()` qui retient les lignes portant notre `data-teamid`. D'où **quatre**
+   identifiants à renseigner par équipe (`snEventId`, `snDrawId`, `snRoundId`, `snTeamId`) —
+   le quatrième, la division, n'est arrivé qu'avec le classement, cf. plus bas.
 
    La panne que ça évite est la plus vicieuse de toutes : sans la poule, l'import ne lève
    aucune erreur, ne rend aucun 502, et annonce simplement « 0 rencontre publiée » — ce qui
@@ -528,7 +529,7 @@ lundi : sans lui, celui qui vient de saisir l'ancrage attendrait jusqu'à six jo
 découvrir qu'il s'est trompé de division — précisément l'erreur qui rend un tableau crédible.
 
 À l'écran, le classement se place **entre le filtre d'équipe et la liste des résultats**, replié
-par défaut, un par onglet : c'est là que naît la question « on est où ? », et le résumé y répond
+par défaut, un par équipe concernée par l'onglet : c'est là que naît la question « on est où ? », et le résumé y répond
 déjà (« 2e sur 6 · au 4 sept. ») pour que déplier reste un choix.
 
 **Notre ligne est reconnue par `snTeamId`, jamais par le nom.** La ligue écrit « Squash de
@@ -870,11 +871,10 @@ code d'erreur qu'on lui a soufflé. C'est lui qui a tranché les deux soupçons 
     désormais au lieu de sortir en 500. Ce qu'aucun Postgres local ne peut dire, et qui reste à
     observer sur Recette un jour de base froide : combien de temps Neon met réellement à se
     réveiller.
-- **`Interclub.tsx` fait ~980 lignes** et concentre quatre écrans. Découpage à envisager si un
+- **`Interclub.tsx` fait ~1730 lignes** et concentre cinq écrans, le classement de poule
+  s'étant ajouté avec le calendrier. Le découpage n'est plus une éventualité. Découpage à
+  envisager si un
   cinquième s'ajoute.
-- **Pas de classement de division** : le calendrier de la saison est là, l'historique par
-  équipe aussi, mais la position au classement n'est pas récupérée (squashnet la publie sous
-  `ic_a=394242`).
 - **Hors périmètre du premier lot de disponibilités** : la convocation officielle (le capitaine
   retient N joueurs, chacun reçoit la sienne), l'export ICS / l'abonnement webcal, l'application
   automatique des dérives de calendrier, et le covoiturage.

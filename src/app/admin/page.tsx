@@ -91,8 +91,9 @@ type IcTeam = {
       deviendraient un bruit que chacun ignore. */
   captainId: string | null;
   captainName: string | null;
-  /** L'ancrage fédéral. Les deux vont ENSEMBLE : `snEventId` dit quoi télécharger, `snTeamId`
-      dit lesquelles des ~56 rencontres publiées sont les nôtres. */
+  /** L'ancrage fédéral. Les QUATRE vont ensemble (cf. `snDrawId` et `snRoundId` plus bas) :
+      `snEventId` dit quoi télécharger, `snTeamId` dit lesquelles des quinze rencontres de la
+      poule sont les nôtres. */
   snEventId: string | null;
   snTeamId: string | null;
   /** La POULE de l'épreuve. Sans elle, squashnet rend celle qu'il veut. */
@@ -259,7 +260,7 @@ export default function AdminPage() {
   const [icTeamId, setIcTeamId] = useState("");
   // L'ancrage se saisit en BROUILLON, une entrée par équipe, et ne part qu'au bouton.
   //
-  // Ce n'est pas de la prudence d'écran mais une leçon déjà payée : les deux identifiants
+  // Ce n'est pas de la prudence d'écran mais une leçon déjà payée : les identifiants
   // partent ENSEMBLE ou pas du tout (le serveur refuse un seul des deux), et une comparaison
   // à l'état SERVEUR pour décider quoi envoyer ne peut jamais être vraie — rien n'a encore
   // été écrit. Le même raisonnement avait rendu inerte la saisie du nom squashnet d'un membre.

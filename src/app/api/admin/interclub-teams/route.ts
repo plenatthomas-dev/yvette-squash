@@ -93,7 +93,6 @@ export async function GET(req: NextRequest) {
       snTeamId: t.snTeamId,
       snRoundId: t.snRoundId,
       snDrawId: t.snDrawId,
-      // Pour que l'admin sache si le classement affiché est frais ou figé.
       snStandingsAt: t.snStandingsAt ? t.snStandingsAt.toISOString() : null,
       snCheckedAt: t.snCheckedAt?.toISOString() ?? null,
     })),

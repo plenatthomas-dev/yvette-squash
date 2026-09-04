@@ -41,8 +41,15 @@ export const dynamic = "force-dynamic";
 // ============================================================================
 
 /**
- * Nombre de simples d'une rencontre importée. Le calendrier fédéral ne le publie pas ; c'est le
- * format habituel du championnat, et l'admin le corrige à la rencontre s'il diffère.
+ * Nombre de simples d'une rencontre importée. Le calendrier fédéral ne le publie pas.
+ *
+ * QUATRE, ET C'EST RÉCENT : la division 4 se jouait en CINQ simples jusqu'en 2025-26, où un nul
+ * était arithmétiquement hors d'atteinte. Ce chiffre commande donc la moitié des issues
+ * possibles — c'est lui qui rend le 2-2 réel et fait exister `tieOutcome` et son départage à
+ * l'average. Le changer sans y penser ferait afficher des points de classement faux.
+ *
+ * Il double le `@default(4)` du schéma à dessein : la boucle de création s'en sert aussi pour
+ * compter les lignes à écrire. L'admin le corrige à la rencontre si le format diffère.
  */
 const IMPORTED_MATCH_COUNT = 4;
 
@@ -99,8 +106,10 @@ async function anchoredTeam(teamId: unknown) {
   if (!team) {
     return { ok: false as const, response: NextResponse.json({ error: "Équipe inconnue" }, { status: 404 }) };
   }
-  // Les TROIS, ou rien. `snRoundId` désigne la POULE : sans lui, squashnet rend celle qu'il veut
-  // et le filtrage par `snTeamId` ne retient plus rien — un import de zéro rencontre, muet.
+  // LES TROIS DU CALENDRIER. `snRoundId` désigne la POULE : sans lui, squashnet rend celle
+  // qu'il veut et le filtrage par `snTeamId` ne retient plus rien — un import de zéro
+  // rencontre, muet. La division (`snDrawId`), quatrième pièce de l'ancrage, n'est PAS exigée
+  // ici : elle ne sert qu'au classement, et l'action « standings » la réclame pour son compte.
   if (!team.snEventId || !team.snTeamId || !team.snRoundId) {
     // Message explicite plutôt qu'un import vide : « 0 rencontre trouvée » enverrait chercher
     // la panne du côté de la fédération alors que la configuration manque ici.

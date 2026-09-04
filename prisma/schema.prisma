@@ -630,14 +630,15 @@ model InterclubTeam {
   // --- Ancrage du championnat sur squashnet -------------------------------------------------
   // De quel ÉVÉNEMENT fédéral cette équipe joue le calendrier, et sous quel identifiant elle y
   // figure. Les deux sont nécessaires : l'événement dit quoi télécharger, `snTeamId` dit
-  // lesquelles des ~56 rencontres rendues sont les nôtres (le paramètre `teamid` de squashnet
-  // ne filtre RIEN, il rend tout l'événement). NULL = pas d'import possible pour cette équipe.
+  // lesquelles des quinze rencontres de la POULE sont les nôtres (le paramètre `teamid` de
+  // squashnet ne filtre RIEN). NULL = pas d'import possible pour cette équipe.
   snEventId       String?
   snTeamId        String?
   // La POULE dans cette épreuve (l'identifiant du tableau `round_<id>` sur la page « Équipes »).
   // Sans elle, squashnet rend la poule de son choix : mesuré sur notre critérium, une poule où
-  // l'équipe ne figure pas — donc un import de zéro rencontre, muet. Les TROIS identifiants vont
-  // ensemble ou pas du tout.
+  // l'équipe ne figure pas — donc un import de zéro rencontre, muet. Avec `snDrawId` ci-dessous,
+  // les QUATRE identifiants vont ensemble ou pas du tout, garde tenue par la route d'admin :
+  // trois sur quatre donneraient l'impression d'être configuré.
   snRoundId       String?
   // La DIVISION (« Hommes 4 »), quatrième identifiant. Elle ne sert pas au calendrier mais au
   // CLASSEMENT : sans elle, `roundid` est ignoré et la fédération rend la division 1 — un
@@ -758,6 +759,8 @@ model Interclub {
   // de classement, où l'automatique et l'humain ne partagent aucune colonne.
   snMatchKey             String?
   season                 String? // ex. "2026/2027"
+  // Libellé d'AFFICHAGE, saisi à la main (« D2 Hommes ») — à ne pas confondre avec
+  // `InterclubTeam.snDrawId`, la division au sens de squashnet, dont dépend le classement.
   division               String? // ex. "D2 Hommes"
   opponent               String // nom du club adverse, saisi à la main
   home                   Boolean                 @default(true) // true = on reçoit

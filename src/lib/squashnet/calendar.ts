@@ -9,9 +9,10 @@ import { postAjax } from "./client";
 //
 //  TROIS CHOSES OBSERVÉES SUR LE VRAI SITE, et qui commandent tout ce module :
 //
-//   1. LE PARAMÈTRE `teamid` NE FILTRE RIEN. On reçoit l'événement ENTIER (une
-//      quinzaine de journées, quatre rencontres chacune). C'est donc à nous de
-//      retenir les lignes où notre équipe figure — d'où `ownFixtures`.
+//   1. LE PARAMÈTRE `teamid` NE FILTRE RIEN. Avec `roundid`, on reçoit la POULE
+//      ENTIÈRE — mesuré sur la nôtre : six équipes, cinq journées, quinze
+//      rencontres, dont cinq sont les nôtres. C'est donc à nous de retenir les
+//      lignes où notre équipe figure — d'où `ownFixtures`.
 //
 //   2. LES JOURNÉES NON PLANIFIÉES PORTENT UNE DATE BOUCHON. Sur l'événement
 //      d'essai, J11 à J14 tombent toutes le « mardi 30 juin 2026 ». Prendre
@@ -176,7 +177,7 @@ export function parseTeamCalendar(html: string): CalendarTie[] {
  * Réduit le calendrier de l'événement aux rencontres de NOTRE équipe, et marque celles dont la
  * date est un bouchon.
  *
- * La détection du bouchon se fait sur l'événement ENTIER, avant filtrage : c'est là que la
+ * La détection du bouchon se fait sur la POULE ENTIÈRE, avant filtrage : c'est là que la
  * signature est visible (quatre journées le même jour). La chercher après filtrage ne verrait
  * qu'une de nos rencontres par date, donc rien du tout.
  */
@@ -232,7 +233,8 @@ export function ownFixtures(ties: CalendarTie[], snTeamId: string): OwnTie[] {
  * page « Équipes » de l'équipe.
  *
  * Il reste typé nullable parce qu'une équipe peut n'être pas encore ancrée ; l'appel part alors
- * sans, et rend la poule par défaut. C'est aux routes d'exiger les trois identifiants.
+ * sans, et rend la poule par défaut. C'est aux routes d'exiger l'ancrage complet — QUATRE
+ * identifiants depuis que le classement existe, dont ce module n'utilise que les deux premiers.
  */
 export async function fetchTeamCalendar(
   eventId: string,

@@ -6,11 +6,15 @@ import { postAjax } from "./client";
 //  Même point d'entrée que le reste (`index.php`), seul `ic_a` change : 394242
 //  rend la section « Classement et rencontres » d'un événement par équipes.
 //
-//  TROIS IDENTIFIANTS, ET ILS NE SE VALENT PAS :
+//  TROIS IDENTIFIANTS POUR CETTE REQUÊTE, ET ILS NE SE VALENT PAS :
 //
 //    eventid  l'épreuve  (« Critérium IDF Équipes Hommes 2025-26 »)
 //    drawid   la DIVISION (47760 = Hommes 4)
 //    roundid  la POULE    (370138 = poule IVD)
+//
+//  L'ANCRAGE D'UNE ÉQUIPE EN COMPTE QUATRE — ces trois-là plus `teamid`, qui ne
+//  sert pas ici (la fédération l'ignore sur cette section) mais dit, à l'écran,
+//  laquelle des lignes rendues est la nôtre.
 //
 //  ⚠️ SANS `drawid`, LE `roundid` EST IGNORÉ et la fédération rend la division 1.
 //  Mesuré : en demandant la poule IVD (Hommes 4) sans préciser la division, on

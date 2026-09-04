@@ -364,7 +364,6 @@ export function serializeInterclub(f: FullInterclub, userId: string | null, isAd
     winGames: winGamesFor(f.bestOf),
     status: derivedStatus(f.matchCount, f.matches),
     score: fixtureScore(f.matches),
-    // Comment la LIGUE compte cette rencontre. NULL tant qu'elle n'est pas finie.
     outcome: tieOutcome(
       f.matchCount,
       f.matches.map((m) => ({

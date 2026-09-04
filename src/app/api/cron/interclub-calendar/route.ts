@@ -60,8 +60,13 @@ export async function GET(req: NextRequest) {
   }
 
   const teams = await prisma.interclubTeam.findMany({
-    // Les trois identifiants, sinon l'équipe n'est pas ancrée : interroger sans la POULE
-    // rendrait un calendrier qui n'est pas le sien, et le contrôle comparerait n'importe quoi.
+    // LES TROIS DU CALENDRIER SEULEMENT, ET C'EST VOLONTAIRE. L'ancrage complet en compte
+    // quatre, mais `snDrawId` ne sert qu'au CLASSEMENT : l'exiger ici priverait de contrôle
+    // hebdomadaire toute équipe ancrée avant la migration 44, dont le calendrier est pourtant
+    // parfaitement interrogeable. Le classement se garde tout seul, plus bas.
+    //
+    // Interroger sans la POULE, en revanche, rendrait un calendrier qui n'est pas le sien, et
+    // le contrôle comparerait n'importe quoi.
     where: { snEventId: { not: null }, snTeamId: { not: null }, snRoundId: { not: null } },
     select: {
       id: true,

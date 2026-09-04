@@ -121,8 +121,8 @@ function body(name: string, month: string | null): Record<string, string> {
 
 /**
  * Le POST « AJAX » de squashnet, brut : mêmes en-têtes, même délai de garde, même URL pour
- * TOUTES les sections du site — seul `ic_a` change (131079 = classements, 393986 = calendrier
- * d'un championnat par équipes). Exporté pour que le calendrier n'ait pas à recopier ces
+ * TOUTES les sections du site — seul `ic_a` change (131079 = classements de joueurs,
+ * 393986 = calendrier d'un championnat par équipes, 394242 = classement d'une poule). Exporté pour que le calendrier n'ait pas à recopier ces
  * quinze lignes : deux copies du même appel dériveraient, et c'est l'en-tête ou le délai de
  * l'une des deux qu'on oublierait de corriger le jour où squashnet change d'avis.
  *
