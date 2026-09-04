@@ -5259,3 +5259,12 @@ body[data-bottombar] .install-banner {
   margin: 0;
   width: auto;
 }
+
+/* Le refus d'accès aux disponibilités : une règle, pas une panne. Enfoncé comme les lignes du
+   bloc, pour qu'on voie qu'il s'agit du même endroit — simplement fermé. */
+.ic-dispo-refus {
+  margin: 0;
+  padding: 9px 12px;
+  background: var(--sunken);
+  border-radius: var(--radius-sm);
+}

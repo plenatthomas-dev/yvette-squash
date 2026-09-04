@@ -158,6 +158,18 @@ describe("bloc de disponibilité — lire l'état de l'équipe", () => {
     expect(appel.textContent).not.toContain("Alice");
   });
 
+  it("DIT pourquoi il n'y a rien, quand on n'est pas de cette équipe", async () => {
+    // Le bloc ne rendait rien du tout sur un 403 : un membre d'une autre équipe, ou un admin
+    // rattaché à aucune, voyait un espace vide et sans un mot. On cherche alors la panne dans
+    // le code alors qu'il n'y a qu'une règle — et une règle tue ressemble à un bug.
+    fetchMock.mockImplementation(async () => json({ error: "Réservé aux joueurs de cette équipe" }, 403));
+    render(<InterclubAvailability fixtureId="f1" toast={toast} onExpired={() => false} />);
+    await souffle();
+
+    expect(screen.getByText(/réservées aux joueurs de cette équipe/i)).toBeTruthy();
+    expect(screen.queryByRole("group")).toBeNull();
+  });
+
   it("ne montre pas de liste d'appels quand tout le monde est joignable", async () => {
     await monte([entree({ key: "u2", name: "Alice", reachable: true })]);
     expect(screen.queryByText(/Sans réponse et sans notification/)).toBeNull();

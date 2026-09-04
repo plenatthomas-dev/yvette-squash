@@ -103,12 +103,31 @@ export function InterclubAvailability({
   const [openFor, setOpenFor] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [conflict, setConflict] = useState<Conflict | null>(null);
+  /**
+   * Pourquoi il n'y a rien à montrer, quand il n'y a rien à montrer.
+   *
+   * Le bloc ne rendait RIEN sur un refus : les disponibilités sont réservées aux joueurs de
+   * l'équipe qui dispute la rencontre, et un membre d'une autre équipe — ou un admin qui n'est
+   * rattaché à aucune — voyait un espace vide, sans un mot. On cherche alors la panne dans le
+   * code alors qu'il n'y en a pas : c'est une règle, elle doit se dire.
+   */
+  const [refus, setRefus] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/interclub/${fixtureId}/availability`, { cache: "no-store" });
       if (onExpired(res.status)) return;
-      if (!res.ok) return;
+      if (res.status === 403) {
+        setRefus(
+          "Les disponibilités sont réservées aux joueurs de cette équipe. Demande à un admin de te rattacher à l'équipe pour y répondre.",
+        );
+        return;
+      }
+      if (!res.ok) {
+        setRefus("Disponibilités indisponibles pour le moment.");
+        return;
+      }
+      setRefus(null);
       const recu = asPayload(await res.json());
       setData((prev) => merge(prev, recu));
     } catch {
@@ -164,6 +183,15 @@ export function InterclubAvailability({
     }
   }
 
+  // Le refus se DIT, il ne se tait pas. Le silence était indiscernable d'un bloc qui n'existe
+  // pas, et envoyait chercher un défaut là où il n'y a qu'une règle.
+  if (refus) {
+    return (
+      <section className="ic-dispo">
+        <p className="muted tiny ic-dispo-refus">{refus}</p>
+      </section>
+    );
+  }
   if (!data) return null;
   const { entries, counts, matchCount } = data;
   const manque = counts.yes < matchCount;
