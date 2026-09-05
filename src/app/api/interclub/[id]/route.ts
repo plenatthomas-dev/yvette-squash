@@ -9,7 +9,6 @@ import {
   parseOptionalText,
   derivedStatus,
   MAX_OPPONENT_LEN,
-  MAX_DIVISION_LEN,
   MAX_VENUE_LEN,
   MAX_VENUE_ADDRESS_LEN,
   MAX_ROUND_LEN,
@@ -147,8 +146,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // même corps, `opponent` juste au-dessus rendait un 400 : un champ refusait, quatre effaçaient
   // en silence. Le nom du champ est dans le message, sans quoi un 400 sur un corps à six clés
   // n'apprend rien.
+  // La DIVISION n'est plus de la partie : le champ a été retiré de l'écran, et une route qui
+  // continuerait de l'écrire laisserait entrer par l'API ce qu'on vient d'ôter de la main.
   const textes: [string, unknown, number][] = [
-    ["division", body.division, MAX_DIVISION_LEN],
     // La JOURNÉE figurait dans le contrat de cette fonction sans y être traitée : une rencontre
     // importée dont la ligue renumérote la journée n'était corrigible d'aucune façon.
     ["round", body.round, MAX_ROUND_LEN],

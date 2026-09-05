@@ -34,7 +34,6 @@ function rencontre(statut: string) {
     teamName: "Équipe 1",
     opponent: "Massy",
     home: true,
-    division: "D2",
     status: statut,
     score: { home: 0, away: 0 },
     matches: [],

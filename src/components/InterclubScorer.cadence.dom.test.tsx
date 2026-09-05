@@ -50,6 +50,8 @@ const MATCH = {
   homeColor: null,
   awayColor: null,
   games: [] as { number: number; home: number; away: number }[],
+  // Aucun jeu en cours côté serveur : ces cas éprouvent le marquage à partir de rien.
+  live: null,
 };
 
 function monte() {

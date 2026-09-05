@@ -32,6 +32,8 @@ const MATCH = {
   homeColor: null,
   awayColor: null,
   games: [{ number: 1, home: 11, away: 5 }],
+  // Aucun jeu en cours côté serveur : ces cas éprouvent le marquage à partir de rien.
+  live: null,
 };
 
 type Envoi = { url: string; corps: Record<string, unknown> };
@@ -246,5 +248,93 @@ describe("InterclubScorer — quand la divergence est réelle, le journal se jet
     expect("knownGameCount" in envois[1].corps).toBe(false);
     expect(localStorage.getItem(LOG_KEY)).toBeNull();
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("InterclubScorer — reprendre un match entamé sur un autre appareil", () => {
+  // LE DÉFAUT. On marque le premier jeu jusqu'à 7-7, on revient au tableau. On rouvre la fiche
+  // sur un autre appareil — ou avec un autre compte : la fiche affiche bien 7-7, elle lit
+  // l'instantané du serveur. Le marquage, lui, ne le lisait pas, et repartait de 0-0. Sept
+  // échanges perdus, sans un mot à l'écran, et rien pour les retrouver.
+  //
+  // L'instantané ARRIVAIT pourtant : `serializeInterclub` le rend depuis toujours, le parent le
+  // passait dans l'objet du match. C'est le type d'entrée du marqueur qui ne le déclarait pas,
+  // et l'amorçage qui n'en tenait donc aucun compte.
+
+  const enCours = {
+    ...MATCH,
+    id: "m-reprise",
+    games: [] as { number: number; home: number; away: number }[],
+    live: { current: { home: 7, away: 7 }, serving: "away" as const, servingBox: "left" as const },
+  };
+
+  it("affiche le jeu en cours du serveur, journal local vide", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
+    const { container } = render(
+      <InterclubScorer
+        fixtureId="f1"
+        match={enCours}
+        bestOf={5}
+        onClose={vi.fn()}
+        onExpired={(status) => status === 401}
+        toast={vi.fn()}
+      />,
+    );
+    await souffle();
+
+    const points = [...container.querySelectorAll(".ics-points")].map((e) => e.textContent);
+    expect(points).toEqual(["7", "7"]);
+  });
+
+  it("reprend au point suivant, sans recommencer le jeu", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
+    const { container } = render(
+      <InterclubScorer
+        fixtureId="f1"
+        match={{ ...enCours, id: "m-reprise-2" }}
+        bestOf={5}
+        onClose={vi.fn()}
+        onExpired={(status) => status === 401}
+        toast={vi.fn()}
+      />,
+    );
+    await souffle();
+
+    // Le côté domicile marque : 8-7, et non 1-0.
+    await act(async () => {
+      fireEvent.click(container.querySelectorAll(".ics-side")[0]);
+      await souffle();
+    });
+    const points = [...container.querySelectorAll(".ics-points")].map((e) => e.textContent);
+    expect(points).toEqual(["8", "7"]);
+  });
+
+  it("le journal LOCAL reste prioritaire — il est plus frais que l'instantané", async () => {
+    // Le marqueur qui reprend sur SON téléphone a le journal complet, points compris. Le
+    // laisser écraser par l'instantané ferait perdre les points postérieurs au dernier envoi,
+    // c'est-à-dire jusqu'à cinq secondes de jeu.
+    localStorage.setItem(
+      "ic:log:m-reprise-3",
+      JSON.stringify([
+        { t: "serve", side: "home", box: "right" },
+        { t: "point", side: "home" },
+        { t: "point", side: "home" },
+      ]),
+    );
+    vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
+    const { container } = render(
+      <InterclubScorer
+        fixtureId="f1"
+        match={{ ...enCours, id: "m-reprise-3" }}
+        bestOf={5}
+        onClose={vi.fn()}
+        onExpired={(status) => status === 401}
+        toast={vi.fn()}
+      />,
+    );
+    await souffle();
+
+    const points = [...container.querySelectorAll(".ics-points")].map((e) => e.textContent);
+    expect(points).toEqual(["2", "0"]);
   });
 });

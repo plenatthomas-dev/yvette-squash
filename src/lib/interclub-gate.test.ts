@@ -87,7 +87,6 @@ function rencontre(over: Record<string, unknown> = {}) {
     team: { id: "t1", name: "Équipe 1" },
     opponent: "Massy",
     home: true,
-    division: "D2",
     status: "scheduled",
     matchCount: 4,
     matches: [],

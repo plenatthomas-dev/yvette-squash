@@ -32,7 +32,6 @@ export type FullInterclub = Prisma.InterclubGetPayload<{ include: typeof intercl
 export const MAX_OPPONENT_LEN = 60;
 export const MAX_PLAYER_NAME_LEN = 40;
 export const MAX_SEASON_LEN = 12;
-export const MAX_DIVISION_LEN = 30;
 /** Lieu de la rencontre : nom du club hôte, puis son adresse postale, tels que publiés. */
 export const MAX_VENUE_LEN = 80;
 export const MAX_VENUE_ADDRESS_LEN = 200;
@@ -373,7 +372,6 @@ export function serializeInterclub(f: FullInterclub, userId: string | null, isAd
       captainName: f.team.captain ? (f.team.captain.nickname ?? f.team.captain.displayName) : null,
     },
     season: f.season,
-    division: f.division,
     opponent: f.opponent,
     home: f.home,
     matchCount: f.matchCount,

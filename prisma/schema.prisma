@@ -761,6 +761,12 @@ model Interclub {
   season                 String? // ex. "2026/2027"
   // Libellé d'AFFICHAGE, saisi à la main (« D2 Hommes ») — à ne pas confondre avec
   // `InterclubTeam.snDrawId`, la division au sens de squashnet, dont dépend le classement.
+  // ⚠️ COLONNE MORTE depuis 2026-09-05. Plus rien ne l'écrit ni ne l'affiche : le champ était
+  // libre, facultatif, saisi à la main et jamais renseigné par l'import fédéral — une rencontre
+  // sur deux le portait, l'autre non, et il ne servait qu'à afficher « D2 Hommes » sous le
+  // score. Ne pas la confondre avec `InterclubTeam.snDrawId`, la division au sens de squashnet,
+  // bien vivante et dont dépend le classement : les deux n'ont jamais eu de rapport malgré leur
+  // nom commun. Conservée, et non supprimée, pour ne pas détruire les valeurs déjà saisies.
   division               String? // ex. "D2 Hommes"
   opponent               String // nom du club adverse, saisi à la main
   home                   Boolean                 @default(true) // true = on reçoit

@@ -41,7 +41,17 @@ type MatchInfo = {
   awayName: string;
   homeColor: string | null;
   awayColor: string | null;
+  /** Les jeux TERMINÉS, et eux seuls. Le jeu en cours vit dans `live`. */
   games: { number: number; home: number; away: number }[];
+  /**
+   * Le jeu EN COURS tel que le serveur le connaît, ou `null`.
+   *
+   * Il manquait ici, et c'est ce qui faisait perdre des points : ce champ existe depuis
+   * toujours dans la réponse de l'API (cf. `serializeInterclub`), la fiche de match l'affiche,
+   * mais le marquage ne le regardait pas. On marquait jusqu'à 7-7, on rouvrait sur un autre
+   * appareil, la fiche montrait 7-7 et le marquage repartait de 0-0.
+   */
+  live: { current: { home: number; away: number }; serving: Side | null; servingBox: Box | null } | null;
 };
 
 function loadLog(matchId: string): ScoreEvent[] | null {
@@ -186,9 +196,19 @@ export default function InterclubScorer({
     if (seededFor.current === match.id) return;
     seededFor.current = match.id;
     const local = loadLog(match.id);
-    // Pas de journal ici ? Le match a pu être entamé sur un autre téléphone, ou saisi à la
-    // main. On repart des jeux connus du serveur (score fidèle, déroulé reconstitué).
-    const seed = local ?? seedEvents(match.games.map((g) => ({ home: g.home, away: g.away })), bestOf);
+    // Pas de journal ici ? Le match a pu être entamé sur un autre téléphone, sur un autre
+    // compte, ou saisi à la main. On repart de ce que le serveur connaît : ses jeux terminés
+    // ET son jeu en cours (score fidèle, déroulé reconstitué, service rétabli tel quel).
+    //
+    // `match.live` est la moitié qui manquait. Sans elle, reprendre un match entamé ailleurs
+    // effaçait silencieusement le jeu en cours — la fiche affichait 7-7, le marquage 0-0.
+    const seed =
+      local ??
+      seedEvents(
+        match.games.map((g) => ({ home: g.home, away: g.away })),
+        bestOf,
+        match.live,
+      );
     eventsRef.current = seed;
     setEvents(seed);
     // Sur quel état du serveur ce journal est-il bâti ? Amorcé depuis le serveur, la réponse
@@ -198,7 +218,10 @@ export default function InterclubScorer({
     // du côté du SERVEUR, qui est la copie partagée.
     ackRef.current = (local ? loadAck(match.id) : null) ?? replay(seed, bestOf).games.length;
     setReady(true);
-  }, [match.id, match.games, bestOf]);
+    // `match.live` figure ici comme `match.games` : le verrou `seededFor` empêche de toute
+    // façon un second amorçage, et les lister honnêtement vaut mieux qu'une exception de lint
+    // qui masquerait le jour où le verrou disparaîtrait.
+  }, [match.id, match.games, match.live, bestOf]);
 
   useEffect(() => {
     if (ready) saveLog(match.id, events);

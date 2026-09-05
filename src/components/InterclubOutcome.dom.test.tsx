@@ -22,7 +22,6 @@ const carte = (over: Record<string, unknown>) => ({
   team: equipe,
   opponent: "Verrieres 3",
   home: true,
-  division: "D4",
   matchCount: 4,
   status: "done",
   score: { home: 2, away: 2 },
