@@ -6151,15 +6151,22 @@ body[data-bottombar] .install-banner {
   color: var(--pico-muted-color);
   font-style: italic;
 }
+/* GRILLE et non flex, à dessein. Pico pose `button[type=submit] { width: 100% }` — une
+   spécificité (0,1,1) qu'un simple `.forum-envoi { width: auto }` (0,1,0) ne bat PAS. En
+   flex, le bouton prenait donc toute la largeur sans pouvoir rétrécir, et le champ de saisie
+   tombait à quarante pixels. Avec `max-content`, la colonne du bouton est taillée sur son
+   texte : même si `width: 100%` s'appliquait, ce serait 100 % de cette colonne-là.
+   `minmax(0, 1fr)` sur la première colonne empêche le champ de déborder sur un mot long. */
 .forum-form {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
   gap: 8px;
-  align-items: flex-end;
+  align-items: end;
   margin-top: 6px;
 }
 .forum-input {
-  flex: 1;
   margin: 0;
+  min-width: 0;
   resize: none;
   max-height: 30dvh;
   font-size: 0.9rem;
@@ -6171,10 +6178,10 @@ body[data-bottombar] .install-banner {
     font-size: 16px;
   }
 }
-.forum-envoi {
+/* Deux classes (0,2,0) pour passer devant `button[type=submit]` de Pico (0,1,1). */
+.forum-form .forum-envoi {
   width: auto;
   margin: 0;
-  flex-shrink: 0;
   font-size: 0.85rem;
   min-height: 44px;
   padding: 0 16px;
