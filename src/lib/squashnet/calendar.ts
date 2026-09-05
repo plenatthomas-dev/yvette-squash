@@ -89,13 +89,22 @@ const MONTHS: Record<string, string> = {
   decembre: "12",
 };
 
-/** Retire les balises et normalise les espaces. `<br>` devient une espace, pas rien. */
+/**
+ * Retire les balises et normalise les espaces. `<br>` devient une espace, pas rien.
+ *
+ * Les entités décodées sont les MÊMES que celles du classement (`standings.texte`), apostrophe
+ * comprise. Les deux modules lisent les mêmes noms d'équipe : deux politiques de décodage, et
+ * ils cesseraient de les normaliser pareil le jour où squashnet arrêterait de servir de l'UTF-8
+ * brut — « Squash de l'Yvette » d'un côté, « Squash de &#39;Yvette » de l'autre, et un
+ * rapprochement qui échoue sans rien dire.
+ */
 function stripTags(s: string): string {
   return s
     .replace(/<br\s*\/?>/gi, " ")
     .replace(/<[^>]*>/g, "")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
+    .replace(/&#39;|&apos;/g, "'")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -107,9 +116,14 @@ function stripTags(s: string): string {
  * reviendrait à faire confiance à squashnet sur un point que la date tranche déjà.
  * Renvoie null sur tout ce qui ne ressemble pas à cette forme — une journée qu'on ne sait pas
  * dater ne doit pas entrer dans le calendrier avec une date inventée.
+ *
+ * ⚠️ LE PREMIER DU MOIS S'ÉCRIT « 1er » EN FRANÇAIS, et c'est la seule irrégularité de la
+ * langue qui touche ce format. « J07 - jeudi 1er octobre 2026 » ne se datait pas : la journée
+ * disparaissait en silence, puis se faisait annoncer « retirée du calendrier ». Le 1er octobre
+ * 2026 est un jeudi, c'est-à-dire un jour de championnat parfaitement ordinaire.
  */
 export function parseDayHeading(text: string): { round: string; date: string } | null {
-  const m = /^\s*(\S+)\s*-\s*\S+\s+(\d{1,2})\s+([^\s]+)\s+(\d{4})\s*$/.exec(stripTags(text));
+  const m = /^\s*(\S+)\s*-\s*\S+\s+(\d{1,2})(?:er)?\s+([^\s]+)\s+(\d{4})\s*$/.exec(stripTags(text));
   if (!m) return null;
   const [, round, day, monthWord, year] = m;
   const month = MONTHS[monthWord.toLowerCase()];
@@ -117,10 +131,65 @@ export function parseDayHeading(text: string): { round: string; date: string } |
   return { round, date: `${year}-${month}-${day.padStart(2, "0")}` };
 }
 
-/** Contenu texte du premier élément portant cette classe, ou « » s'il n'y en a pas. */
+// --- Lecture des classes : UNE SEULE POLITIQUE, tolérante ------------------
+//
+// Le module en appliquait deux. `classText` tolérait les classes supplémentaires, mais les
+// quatre DÉCOUPAGES exigeaient la classe EXACTE : `class='row'` et non `class='row mt-2'`. Une
+// classe utilitaire Bootstrap ajoutée n'importe où — exactement la retouche que squashnet a
+// déjà faite en silence le 2026-08-26, que l'en-tête de ce fichier cite trois fois — faisait
+// lire ZÉRO rencontre. Et zéro rencontre, ce n'est pas rien : l'écart classe alors TOUT le
+// calendrier en « retirée », et le capitaine reçoit « J01…J05 retirée du calendrier », message
+// parfaitement crédible sur un calendrier intact.
+//
+// La comparaison se fait AU JETON, et non au `\b` : `\brow\b` répondrait aussi à
+// `class='form-row'`, le tiret étant une frontière de mot. C'est le genre de tolérance qui
+// remplace une panne bruyante par un découpage faux, ce qui est pire.
+
+/** La valeur de l'attribut `class` d'une balise ouvrante, telle quelle. */
+const classAttr = (attrs: string) => /\bclass=['"]([^'"]*)['"]/.exec(attrs)?.[1] ?? "";
+
+/** « Cette balise porte-t-elle cette classe ? », au jeton près. */
+const hasClass = (attrs: string, cls: string) => classAttr(attrs).split(/\s+/).includes(cls);
+
+/**
+ * Contenu texte du premier élément portant cette classe, ou « » s'il n'y en a pas.
+ *
+ * On coupe à la première FERMANTE DE MÊME NOM, et non au premier `</` venu : l'adresse
+ * « 12 RUE <b>DU</b> STADE, 91440 - ORSAY » se lisait « 12 RUE DU » — une adresse tronquée qui
+ * a l'air d'une adresse, donc que personne ne rattrape. Cela ne tenait que parce que le seul
+ * balisage rencontré jusqu'ici dans une adresse est un `<br>`, qui n'a pas de fermante.
+ */
 function classText(html: string, cls: string): string {
-  const m = new RegExp(`class=['"][^'"]*\\b${cls}\\b[^'"]*['"][^>]*>([\\s\\S]*?)</`).exec(html);
-  return m ? stripTags(m[1]) : "";
+  for (const m of html.matchAll(/<(\w+)\b([^>]*)>/g)) {
+    if (!hasClass(m[2], cls)) continue;
+    const reste = html.slice(m.index + m[0].length);
+    const fin = reste.search(new RegExp(`</${m[1]}\\b`, "i"));
+    return stripTags(fin === -1 ? reste : reste.slice(0, fin));
+  }
+  return "";
+}
+
+/**
+ * Découpe le fragment aux balises ouvrantes portant cette classe, et rend ce qui SUIT chacune.
+ *
+ * Même sémantique que le `split(…).slice(1)` qu'elle remplace, la tolérance en plus.
+ *
+ * ⚠️ LE DERNIER MORCEAU N'EST PAS BORNÉ À DROITE : il court jusqu'à la fin du fragment reçu, y
+ * compris ce qui suit la fin réelle de l'élément. Sans analyse d'imbrication on ne peut pas
+ * faire mieux ici, et cela reste sans conséquence tant que ce qui suit ne contient ni
+ * `data-teamid` ni `<p class='mb-0'>` — ce qui est le cas aujourd'hui, et ce qui est à
+ * revérifier le jour où l'on recapture la fixture.
+ */
+function splitOn(html: string, tag: string, cls: string): string[] {
+  const parts: string[] = [];
+  let debut = -1;
+  for (const m of html.matchAll(new RegExp(`<${tag}\\b([^>]*)>`, "gi"))) {
+    if (!hasClass(m[1], cls)) continue;
+    if (debut >= 0) parts.push(html.slice(debut, m.index));
+    debut = m.index + m[0].length;
+  }
+  if (debut >= 0) parts.push(html.slice(debut));
+  return parts;
 }
 
 /**
@@ -134,15 +203,15 @@ function classText(html: string, cls: string): string {
  */
 export function parseTeamCalendar(html: string): CalendarTie[] {
   const ties: CalendarTie[] = [];
-  const days = html.split(/<div class=['"]b-day['"]>/).slice(1);
+  const days = splitOn(html, "div", "b-day");
   for (const day of days) {
     const heading = /<h2[^>]*>([\s\S]*?)<\/h2>/.exec(day);
     const parsed = heading ? parseDayHeading(heading[1]) : null;
     if (!parsed) continue;
 
-    for (const row of day.split(/<div class=['"]row['"]>/).slice(1)) {
+    for (const row of splitOn(day, "div", "row")) {
       const time = /^\d{2}:\d{2}$/.test(classText(row, "time")) ? classText(row, "time") : null;
-      for (const match of row.split(/<div class=['"]match['"]>/).slice(1)) {
+      for (const match of splitOn(row, "div", "match")) {
         // Les deux équipes sont les deux seuls liens porteurs d'un `data-teamid`, dans
         // l'ordre domicile puis extérieur — c'est ce que le rendu garantit, et c'est la seule
         // chose qui distingue « on reçoit » de « on se déplace ».
@@ -151,8 +220,11 @@ export function parseTeamCalendar(html: string): CalendarTie[] {
         // Le club hôte est le seul `<p>` de la rencontre qui ne contienne pas de lien : les
         // autres enveloppent les noms d'équipe. Chercher « le 3e <p> » marcherait aujourd'hui
         // et casserait au premier <p> ajouté.
-        const plainP = [...match.matchAll(/<p class=['"]mb-0['"]>([\s\S]*?)<\/p>/g)]
-          .map((m) => m[1])
+        const plainP = [...match.matchAll(/<p\b([^>]*)>([\s\S]*?)<\/p>/g)]
+          // L'adresse porte elle aussi `mb-0` (`<p class='tie-address mb-0'>`), et elle est
+          // lue à part : la compter ici ferait dépendre le lieu de l'ordre des paragraphes.
+          .filter((m) => hasClass(m[1], "mb-0") && !hasClass(m[1], "tie-address"))
+          .map((m) => m[2])
           .filter((inner) => !/<a\b/i.test(inner))
           .map(stripTags)
           .filter(Boolean);
@@ -211,13 +283,30 @@ export function ownFixtures(ties: CalendarTie[], snTeamId: string): OwnTie[] {
         //     confirmée — l'équipe serait convoquée sur une date bouchon.
         // Dans les deux cas le rattrapage est le même et il est à portée de main : l'admin
         // corrige `dateConfirmed` sur la rencontre (`PATCH /api/interclub/{id}`). C'est
-        // pourquoi ce champ est modifiable à la main et non déduit à chaque lecture.
+        // pourquoi ce champ est modifiable à la main — et pourquoi CETTE DÉDUCTION NE VAUT QUE
+        // POUR UNE RENCONTRE QU'ON DÉCOUVRE : sur une rencontre déjà en base, elle est
+        // rapportée (`CalendarDiff.confirmDrift`) et jamais réappliquée, sans quoi le premier
+        // « Appliquer » venu révoquerait la correction humaine.
         dateConfirmed: (roundsByDate.get(t.date)?.size ?? 1) === 1,
       };
     });
 }
 
 // --- Réseau ----------------------------------------------------------------
+
+/**
+ * Le calendrier a bien été REÇU, mais on n'a pas su le lire.
+ *
+ * Distincte de la panne réseau, parce qu'elle appelle une autre réaction : l'une se réessaie,
+ * l'autre demande de recapturer la fixture et de reprendre le parsing. Les confondre enverrait
+ * chercher la panne du côté de la fédération, où il n'y a rien à trouver.
+ */
+export class CalendarUnreadableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CalendarUnreadableError";
+  }
+}
 
 /**
  * Télécharge et parse le calendrier d'UNE POULE. Jette si squashnet ne répond pas — les
@@ -247,7 +336,24 @@ export async function fetchTeamCalendar(
     eventid: eventId,
     ...(roundId ? { roundid: roundId } : {}),
   });
-  return parseTeamCalendar(html);
+  const ties = parseTeamCalendar(html);
+  // « LA POULE EST VIDE » ET « ON NE SAIT PLUS LIRE » ÉTAIENT INDISCERNABLES, et c'est le
+  // second qui coûte cher : zéro rencontre fait classer TOUT le calendrier en « retirée » et
+  // annoncer « J01…J05 retirée du calendrier » sur un calendrier intact. Quand le fragment
+  // montre des journées datables mais qu'on n'en tire aucune rencontre, ce n'est pas un
+  // calendrier vide — c'est notre lecture qui est périmée, et cela se dit.
+  if (ties.length === 0 && dayHeadings(html) > 0) {
+    throw new CalendarUnreadableError(
+      "Le calendrier a été reçu mais n'a pas pu être lu : le rendu de squashnet a changé.",
+    );
+  }
+  return ties;
+}
+
+/** Le fragment est-il un calendrier ? Compté sur les en-têtes de journée réellement datables. */
+function dayHeadings(html: string): number {
+  return [...html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/g)].filter((m) => parseDayHeading(m[1]))
+    .length;
 }
 
 // --- Écart entre ce qu'on a et ce que la fédération publie ------------------
@@ -269,7 +375,7 @@ export interface StoredTie {
 
 /** Un champ qui diffère, dans les deux versions, pour l'afficher avant d'écrire. */
 export interface FieldChange {
-  field: "date" | "time" | "home" | "opponent" | "venue" | "venueAddress" | "dateConfirmed";
+  field: "date" | "time" | "home" | "opponent" | "venue" | "venueAddress";
   from: string | null;
   to: string | null;
 }
@@ -289,6 +395,25 @@ export interface CalendarDiff {
    * n'est publié » sans que ce soit vrai.
    */
   toDelete: { id: string; round: string | null; date: string; opponent: string }[];
+  /**
+   * Journées dont le STATUT DE LA DATE diverge — signalées, JAMAIS appliquées.
+   *
+   * `dateConfirmed` n'est pas un champ publié : c'est une DÉDUCTION (plusieurs journées le même
+   * jour = date bouchon), et l'en-tête de ce module reconnaît ses deux angles morts. Le
+   * rattrapage prévu est humain : l'admin corrige la rencontre au `PATCH`. Réappliquer la
+   * déduction par-dessus cette correction la révoquait sans un mot — l'équipe cessait d'être
+   * convoquée pour une rencontre réelle, ou l'était pour une date bouchon.
+   *
+   * On rapporte donc l'écart au lieu de l'écrire : la déduction informe, elle ne tranche plus.
+   */
+  confirmDrift: {
+    id: string;
+    round: string;
+    /** Ce que dit la base — la correction humaine, si elle a eu lieu. */
+    stored: boolean;
+    /** Ce que la déduction lit du calendrier publié aujourd'hui. */
+    published: boolean;
+  }[];
   /** Journées identiques des deux côtés — comptées, pour dire « rien n'a bougé ». */
   unchanged: number;
 }
@@ -320,7 +445,7 @@ export function diffCalendar(stored: StoredTie[], fetched: OwnTie[], eventId: st
   const byKey = new Map(
     stored.filter((s) => s.snMatchKey !== null).map((s) => [s.snMatchKey as string, s]),
   );
-  const diff: CalendarDiff = { toCreate: [], toUpdate: [], toDelete: [], unchanged: 0 };
+  const diff: CalendarDiff = { toCreate: [], toUpdate: [], toDelete: [], confirmDrift: [], unchanged: 0 };
   const publies = new Set(fetched.map((t) => matchKey(eventId, t.round)));
 
   // Ce qu'on a importé DE CET ÉVÉNEMENT et qui n'y figure plus. Le préfixe est vérifié : les
@@ -349,12 +474,25 @@ export function diffCalendar(stored: StoredTie[], fetched: OwnTie[], eventId: st
     compare("opponent", known.opponent, tie.opponent);
     compare("venue", known.venue, tie.venue);
     compare("venueAddress", known.venueAddress, tie.venueAddress);
-    compare("dateConfirmed", known.dateConfirmed, tie.dateConfirmed);
+    // `dateConfirmed` N'EST PAS COMPARÉ ICI, et c'est délibéré : il ne rejoint pas `changes`,
+    // donc l'application ne le réécrit jamais (cf. `confirmDrift`). Le comparer le rendait
+    // « à corriger » comme les autres, et l'`apply` révoquait la correction de l'admin.
+    if (known.dateConfirmed !== tie.dateConfirmed) {
+      diff.confirmDrift.push({
+        id: known.id,
+        round: tie.round,
+        stored: known.dateConfirmed,
+        published: tie.dateConfirmed,
+      });
+    }
     if (changes.length) diff.toUpdate.push({ id: known.id, tie, changes });
     else diff.unchanged++;
   }
   return diff;
 }
+
+/** « confirmée » / « prévisionnelle » — un booléen brut ne dit rien à personne. */
+const statutDate = (v: boolean) => (v ? "confirmée" : "prévisionnelle");
 
 /**
  * Résumé lisible d'un écart, pour l'écran comme pour la notification.
@@ -372,6 +510,13 @@ export function describeDiff(diff: CalendarDiff): string[] {
       (u) => `${u.tie.round} : ${u.changes.map((c) => `${c.field} ${c.from ?? "—"} → ${c.to ?? "—"}`).join(", ")}`,
     ),
     ...diff.toDelete.map((d) => `${d.round ?? "?"} n'est plus publiée (${d.date} c. ${d.opponent})`),
+    // Dit comme un CONSTAT, pas comme une action : rien ne sera écrit, et la phrase doit le
+    // faire comprendre sans qu'on ait à connaître le code.
+    ...diff.confirmDrift.map(
+      (c) =>
+        `${c.round} : la ligue la publie ${statutDate(c.published)}, la base la dit ` +
+        `${statutDate(c.stored)} — à corriger à la main si besoin`,
+    ),
   ];
 }
 
@@ -388,10 +533,19 @@ export function describeDiff(diff: CalendarDiff): string[] {
  *
  * Elle ne couvre que ce qui, en changeant, mérite de réveiller quelqu'un — pas l'ordre des
  * lignes, qui n'est pas garanti, ni l'adresse postale du club hôte.
+ *
+ * ⚠️ LE STATUT DE LA DATE EN FAIT PARTIE, bien qu'il ne soit pas publié mais déduit. Sans lui,
+ * une journée qui redevenait ferme côté fédération — l'autre journée de sa date replanifiée
+ * ailleurs — ne changeait AUCUN champ de l'empreinte : le contrôle hebdomadaire se taisait, la
+ * base gardait « prévisionnelle », et l'équipe n'était jamais convoquée pour une rencontre bien
+ * réelle. Deux calendriers ne différant que par ce statut rendaient la même empreinte, alors
+ * que c'est exactement l'écart qu'il faut faire remonter à un humain.
  */
 export function calendarFingerprint(ties: OwnTie[]): string {
   return ties
-    .map((t) => [t.round, t.date, t.time ?? "", t.home ? "H" : "A", t.opponent, t.venue ?? ""].join("|"))
+    .map((t) =>
+      [t.round, t.date, t.time ?? "", t.home ? "H" : "A", t.opponent, t.venue ?? "", t.dateConfirmed ? "C" : "P"].join("|"),
+    )
     .sort()
     .join("\n");
 }

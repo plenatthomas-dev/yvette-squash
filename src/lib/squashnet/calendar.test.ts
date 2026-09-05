@@ -1,5 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
+  fetchTeamCalendar,
+  CalendarUnreadableError,
   parseDayHeading,
   parseTeamCalendar,
   ownFixtures,
@@ -9,6 +11,10 @@ import {
   type StoredTie,
   type OwnTie,
 } from "./calendar";
+
+/** Ce que squashnet renverra : c'est le seul point d'entrée réseau du module. */
+const reseau = vi.hoisted(() => ({ html: "" }));
+vi.mock("./client", () => ({ postAjax: async () => reseau.html }));
 
 // Fragment RÉEL capté sur squashnet.fr (POST ic_a=393986, Critérium IDF équipes Hommes 2025-26).
 // La J1 est authentique, structure et libellés compris. Les journées suivantes sont bâties sur
@@ -99,6 +105,16 @@ describe("parseDayHeading", () => {
     expect(parseDayHeading("J2 - mardi 05 décembre 2026")).toEqual({ round: "J2", date: "2026-12-05" });
   });
 
+  it("date le PREMIER du mois, qui s'écrit « 1er » et pas « 1 »", () => {
+    // La seule irrégularité de la langue qui touche ce format, et elle tombe un jour de
+    // championnat comme un autre : le 1er octobre 2026 est un jeudi. L'en-tête ne se datait
+    // pas, la journée disparaissait en silence, puis se faisait annoncer « retirée ».
+    expect(parseDayHeading("J07 - jeudi 1er octobre 2026")).toEqual({
+      round: "J07",
+      date: "2026-10-01",
+    });
+  });
+
   it("renvoie null sur une forme inattendue plutôt qu'une date inventée", () => {
     // Une journée qu'on ne sait pas dater ne doit PAS entrer dans le calendrier : elle
     // convoquerait l'équipe un jour choisi par un bug.
@@ -146,6 +162,45 @@ describe.each([
 
   it("ne rend rien sur un fragment vide, sans jeter", () => {
     expect(parseTeamCalendar(q("<div>rien du tout</div>"))).toEqual([]);
+  });
+
+  it("TIENT quand squashnet ajoute des classes utilitaires à ses conteneurs", () => {
+    // Le mode de panne que ce module dit combattre, et qui l'atteignait quand même. Les quatre
+    // découpages exigeaient la classe EXACTE (`class='row'`, pas `class='row mt-2'`) : une
+    // classe Bootstrap ajoutée n'importe où faisait lire ZÉRO rencontre, l'écart classait TOUT
+    // le calendrier en « retirée », et le capitaine recevait « J01…J05 retirée du calendrier »
+    // sur un calendrier intact. C'est exactement la retouche que squashnet a déjà faite en
+    // silence le 2026-08-26 sur ses guillemets.
+    const bootstrappe = q(FRAGMENT)
+      .replace(/class=(['"])b-day\1/g, "class=$1b-day mb-3$1")
+      .replace(/class=(['"])row\1/g, "class=$1row mt-2 g-0$1")
+      .replace(/class=(['"])match\1/g, "class=$1match shadow-sm$1")
+      .replace(/class=(['"])mb-0\1/g, "class=$1mb-0 text-muted$1");
+    expect(parseTeamCalendar(bootstrappe)).toEqual(parseTeamCalendar(q(FRAGMENT)));
+  });
+
+  it("ne confond PAS une classe avec un morceau d'une autre", () => {
+    // Le revers de la tolérance : `\brow\b` répondrait aussi à `form-row`, le tiret étant une
+    // frontière de mot. Une rangée fantôme découperait le calendrier au mauvais endroit — un
+    // découpage faux est pire qu'une panne, parce qu'il se lit.
+    const leurre = q(FRAGMENT).replace(
+      /<div class=(['"])schedule\1>/g,
+      "<div class=$1form-row not-a-match$1>",
+    );
+    expect(parseTeamCalendar(leurre)).toEqual(parseTeamCalendar(q(FRAGMENT)));
+  });
+
+  it("lit une adresse en ENTIER, même balisée", () => {
+    // On coupait au premier `</` venu : « 12 RUE <b>DU</b> STADE, 91440 - ORSAY » se lisait
+    // « 12 RUE DU ». Une adresse tronquée a l'air d'une adresse — personne ne la rattrape, et
+    // c'est l'information la plus utile en déplacement.
+    const balisee = q(FRAGMENT).replace(
+      "BUREAUX DE LA COLLINE, 338 RUE ROYALE,",
+      "BUREAUX DE LA <b>COLLINE</b>, 338 RUE ROYALE,",
+    );
+    expect(parseTeamCalendar(balisee)[0].venueAddress).toBe(
+      "BUREAUX DE LA COLLINE, 338 RUE ROYALE, 92210 - ST CLOUD",
+    );
   });
 });
 
@@ -245,11 +300,27 @@ describe("diffCalendar", () => {
     ]);
   });
 
-  it("voit une date qui devient ferme, ou qui cesse de l'être", () => {
+  it("SIGNALE un statut de date qui diverge, sans jamais le mettre à corriger", () => {
+    // « confirmée » n'est pas publié : c'est une DÉDUCTION, avec deux angles morts que l'admin
+    // corrige à la main. La classer parmi les corrections la faisait réécrire par le premier
+    // « Appliquer » venu — celui d'un lieu changé trois semaines plus tard —, et l'équipe
+    // cessait d'être convoquée sans un mot. Elle se signale, elle ne s'applique pas.
     const d = diffCalendar([stored({ dateConfirmed: false })], [own()], EVENT);
-    expect(d.toUpdate[0].changes).toEqual([
-      { field: "dateConfirmed", from: "false", to: "true" },
-    ]);
+    expect(d.toUpdate).toEqual([]);
+    expect(d.unchanged).toBe(1);
+    expect(d.confirmDrift).toEqual([{ id: "f1", round: "J1", stored: false, published: true }]);
+  });
+
+  it("signale la divergence dans l'autre sens aussi", () => {
+    // Le symétrique compte autant : une correction « ferme » posée à la main sur une journée
+    // que la ligue publie encore comme bouchon ne doit pas être révoquée non plus.
+    const d = diffCalendar([stored()], [own({ dateConfirmed: false })], EVENT);
+    expect(d.toUpdate).toEqual([]);
+    expect(d.confirmDrift).toEqual([{ id: "f1", round: "J1", stored: true, published: false }]);
+  });
+
+  it("ne signale rien quand les deux s'accordent", () => {
+    expect(diffCalendar([stored()], [own()], EVENT).confirmDrift).toEqual([]);
   });
 
   it("NE TOUCHE JAMAIS une rencontre saisie à la main, même sur la même journée", () => {
@@ -266,9 +337,16 @@ describe("diffCalendar", () => {
     // Sans cette liste, une journée retirée du calendrier restait en base pour toujours, et le
     // cron quotidien ouvrait consciencieusement son appel de disponibilité pour une soirée qui
     // n'existe plus. On la signale ; on ne la supprime jamais d'office.
-    const d = diffCalendar([stored({ id: "x", snMatchKey: matchKey(EVENT, "J7") })], [own()], EVENT);
+    // La rencontre stockée porte la journée J7 — sa CLÉ et sa colonne `round` s'accordent.
+    // Elles se contredisaient (`ev1:J7` sur une ligne annoncée « J1 »), et le cas ne peut pas
+    // exister en base : une confusion entre les deux serait passée inaperçue ici.
+    const d = diffCalendar(
+      [stored({ id: "x", round: "J7", snMatchKey: matchKey(EVENT, "J7") })],
+      [own()],
+      EVENT,
+    );
     expect(d.toDelete).toEqual([
-      { id: "x", round: "J1", date: "2026-10-09", opponent: "Montmartre 1" },
+      { id: "x", round: "J7", date: "2026-10-09", opponent: "Montmartre 1" },
     ]);
   });
 
@@ -321,11 +399,50 @@ describe("calendarFingerprint", () => {
     expect(calendarFingerprint([own({ home: false })])).not.toBe(base);
   });
 
+  it("BOUGE quand le statut de la date change — c'est la seule voie qui reste", () => {
+    // L'empreinte porte `round|date|time|H/A|opponent|venue` : sans le statut, deux calendriers
+    // ne différant que par lui rendaient la même empreinte, et le contrôle hebdomadaire se
+    // taisait. Notre J3 devenue prévisionnelle parce qu'elle partageait sa date avec une
+    // journée où l'on est exempt, puis redevenue ferme quand la ligue replanifiait l'autre : la
+    // base gardait « prévisionnelle » et l'équipe n'était jamais convoquée pour une rencontre
+    // bien réelle. Et depuis que l'import ne réécrit plus ce champ, cette alerte est le seul
+    // chemin par lequel l'écart atteint un humain.
+    expect(calendarFingerprint([own({ dateConfirmed: false })])).not.toBe(
+      calendarFingerprint([own()]),
+    );
+  });
+
   it("ignore l'adresse, qui n'a jamais fait déplacer personne d'un jour", () => {
     // Une adresse reformatée côté fédération ne doit pas réveiller le capitaine un lundi
     // matin. Elle s'appliquera au prochain import réel.
     expect(calendarFingerprint([own({ venueAddress: "autre écriture" })])).toBe(
       calendarFingerprint([own()]),
     );
+  });
+});
+
+describe("fetchTeamCalendar — quand on ne sait plus lire", () => {
+  // « LA POULE EST VIDE » ET « LE RENDU A CHANGÉ » se ressemblent : dans les deux cas on rend
+  // zéro rencontre. Ils n'appellent pourtant pas la même réaction, et le second coûte cher —
+  // zéro rencontre fait classer TOUT le calendrier en « retirée », et le capitaine reçoit
+  // « J01…J05 retirée du calendrier » sur un calendrier parfaitement intact.
+
+  it("JETTE quand le fragment montre des journées mais qu'on n'en tire aucune rencontre", async () => {
+    // Les en-têtes sont datables, donc c'est bien un calendrier ; les rencontres, elles, ne se
+    // lisent plus. C'est notre lecture qui est périmée, et cela ne se réessaie pas.
+    reseau.html = FRAGMENT.replace(/data-teamid=/g, "data-equipe=");
+    await expect(fetchTeamCalendar("ev1", "r1")).rejects.toBeInstanceOf(CalendarUnreadableError);
+  });
+
+  it("rend une liste vide sans jeter quand il n'y a PAS de journée publiée", async () => {
+    // Une poule non encore planifiée est un cas normal : la signaler comme une panne enverrait
+    // chercher un bug là où il n'y a qu'une ligue en retard.
+    reseau.html = "<div class='schedule'>Aucune rencontre programmée</div>";
+    await expect(fetchTeamCalendar("ev1", "r1")).resolves.toEqual([]);
+  });
+
+  it("ne jette pas sur un calendrier qui se lit", async () => {
+    reseau.html = FRAGMENT;
+    await expect(fetchTeamCalendar("ev1", "r1")).resolves.toHaveLength(5);
   });
 });

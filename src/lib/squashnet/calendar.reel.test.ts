@@ -104,6 +104,26 @@ describe("critérium 2025-2026 — poule IVD, telle que la fédération la publi
     expect(notres.every((f) => f.dateConfirmed)).toBe(true);
   });
 
+  it("… et ce n'est pas un « true » écrit en dur : la même poule datée d'un seul jour bascule", () => {
+    // ⚠️ CE QUE CE FICHIER NE PEUT PAS PROUVER. L'assertion ci-dessus passerait à l'identique
+    // si `dateConfirmed` valait `true` en dur : notre poule est entièrement planifiée, aucune
+    // fixture réelle à dates bouchon n'a été captée, et la branche « bouchon » n'est éprouvée
+    // sur du vrai nulle part. C'est assumé, faute d'événement non planifié sous la main au
+    // moment de la capture — l'événement d'essai qui la montrait (J11 à J14 le 30 juin 2026)
+    // n'a jamais été enregistré en fixture.
+    //
+    // Ce qu'on peut prouver, et qui vaut mieux que rien : la déduction DISCRIMINE, et sur les
+    // vraies rencontres de la poule. On repousse les cinq journées au même jour — comme le fait
+    // une ligue qui n'a rien planifié —, et les cinq doivent basculer.
+    const memeJour = ties.map((t) => ({ ...t, date: "2026-06-30" }));
+    expect(ownFixtures(memeJour, YVETTE).every((f) => f.dateConfirmed)).toBe(false);
+    // Deux rencontres d'une MÊME journée partagent évidemment leur date : c'est le nombre de
+    // JOURNÉES qu'on compte, pas celui des rencontres. Sinon toute la poule serait bouchon.
+    const uneJournee = ties.filter((t) => t.round === "J01");
+    expect(uneJournee.length).toBeGreaterThan(1);
+    expect(ownFixtures(uneJournee, YVETTE).every((f) => f.dateConfirmed)).toBe(true);
+  });
+
   it("rend une empreinte stable, insensible à l'ordre des lignes", () => {
     // C'est elle qui décide si le contrôle hebdomadaire se tait. Sur le même calendrier lu
     // deux fois, elle doit être identique — y compris si squashnet réordonne ses journées.

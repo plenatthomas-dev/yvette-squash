@@ -26,6 +26,8 @@ const h = vi.hoisted(() => ({
   /** L'utilisateur que `user.findUnique` rend (le demandeur, puis le sujet visé). */
   users: {} as Record<string, { teamId: string | null } | null>,
   guestById: {} as Record<string, { teamId: string } | null>,
+  /** Les appels à `interclubAvailability` passés HORS transaction, dans l'ordre. */
+  horsTx: [] as string[],
   created: null as null | Record<string, unknown>,
   updated: null as null | { where: unknown; data: Record<string, unknown> },
 }));
@@ -35,12 +37,37 @@ vi.mock("@/lib/session", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/session")>()),
   getSession: vi.fn(async () => h.session),
 }));
+/**
+ * Un `where` de Prisma, HONORÉ champ par champ.
+ *
+ * Le faux l'ignorait et rendait la première réponse marquée d'un drapeau de test. Trois cas —
+ * le 409 sur réponse de première main, la correction sans confirmation, le relais remplacé —
+ * passaient donc à l'identique si la route était allée chercher la réponse de QUELQU'UN
+ * D'AUTRE, ou celle d'une AUTRE rencontre. La discrimination membre/invité n'était couverte par
+ * rien. Un faux qui ignore son `where` ne mesure pas la requête, il la suppose.
+ */
+const correspond = (row: Record<string, unknown>, where: Record<string, unknown>) =>
+  Object.entries(where).every(([k, v]) => (row[k] ?? null) === (v ?? null));
+
 vi.mock("@/lib/db", () => {
-  // `$transaction` passe le MÊME faux client au corps : l'écriture d'une réponse est désormais
-  // sérialisable (deux requêtes concurrentes sur la même personne passaient toutes deux par la
-  // branche « création » et la seconde violait l'unicité). Le faux ne simule pas l'isolation —
-  // ce n'est pas ce que ce fichier mesure —, il rend seulement le chemin exécutable.
-  const prisma: Record<string, unknown> = {
+  const dispos = {
+    findMany: vi.fn(async (args: { where: Record<string, unknown> }) =>
+      h.answers.filter((a) => correspond(a, args.where)),
+    ),
+    findFirst: vi.fn(async (args: { where: Record<string, unknown> }) =>
+      h.answers.find((a) => correspond(a, args.where)) ?? null,
+    ),
+    create: vi.fn(async (args: { data: Record<string, unknown> }) => {
+      h.created = args.data;
+      return args.data;
+    }),
+    update: vi.fn(async (args: { where: unknown; data: Record<string, unknown> }) => {
+      h.updated = args;
+      return args.data;
+    }),
+  };
+
+  const commun = () => ({
     interclub: { findUnique: vi.fn(async () => h.fixture) },
     user: {
       findMany: vi.fn(async () => h.members),
@@ -50,20 +77,24 @@ vi.mock("@/lib/db", () => {
       findMany: vi.fn(async () => h.guests),
       findUnique: vi.fn(async (args: { where: { id: string } }) => h.guestById[args.where.id] ?? null),
     },
-    interclubAvailability: {
-      findMany: vi.fn(async () => h.answers),
-      findFirst: vi.fn(async () => h.answers.find((a) => a.__existing) ?? null),
-      create: vi.fn(async (args: { data: Record<string, unknown> }) => {
-        h.created = args.data;
-        return args.data;
-      }),
-      update: vi.fn(async (args: { where: unknown; data: Record<string, unknown> }) => {
-        h.updated = args;
-        return args.data;
-      }),
-    },
-  };
-  prisma.$transaction = async (run: (tx: unknown) => Promise<unknown>) => run(prisma);
+  });
+
+  // DEUX CLIENTS DISTINCTS, et c'est ce qui rend la question mesurable. Tant que `$transaction`
+  // repassait le MÊME faux au corps, « lire dans la transaction » et « lire dehors » étaient
+  // indiscernables — or c'est exactement là que se jouait le défaut. Le client hors transaction
+  // note donc chaque appel qui passe par lui, et les tests peuvent l'exiger vide.
+  const tx = { ...commun(), interclubAvailability: dispos };
+  const dehors = Object.fromEntries(
+    Object.entries(dispos).map(([nom, fn]) => [
+      nom,
+      async (args: never) => {
+        h.horsTx.push(nom);
+        return fn(args);
+      },
+    ]),
+  );
+  const prisma: Record<string, unknown> = { ...commun(), interclubAvailability: dehors };
+  prisma.$transaction = async (run: (t: unknown) => Promise<unknown>) => run(tx);
   return { prisma };
 });
 
@@ -90,6 +121,7 @@ beforeEach(() => {
   h.answers = [];
   h.users = { u1: { teamId: "t1" }, u2: { teamId: "t1" } };
   h.guestById = {};
+  h.horsTx = [];
   h.created = null;
   h.updated = null;
 });
@@ -144,8 +176,8 @@ describe("GET /api/interclub/{id}/availability", () => {
     // Sur une réponse de première main, afficher « relayé par Alice » à Alice n'apprendrait
     // rien et sèmerait le doute sur ce qu'elle a elle-même déclaré.
     h.answers = [
-      { userId: "u1", guestId: null, status: "yes", comment: null, setById: "u1", setBy: { displayName: "Alice", nickname: null } },
-      { userId: "u2", guestId: null, status: "no", comment: "en déplacement", setById: "u1", setBy: { displayName: "Alice", nickname: null } },
+      { interclubId: "f1", userId: "u1", guestId: null, status: "yes", comment: null, setById: "u1", setBy: { displayName: "Alice", nickname: null } },
+      { interclubId: "f1", userId: "u2", guestId: null, status: "no", comment: "en déplacement", setById: "u1", setBy: { displayName: "Alice", nickname: null } },
     ];
     const { entries } = await (await GET(req(), ctx)).json();
     expect(entries.find((e: { name: string }) => e.name === "Alice").relayedBy).toBeNull();
@@ -158,7 +190,7 @@ describe("GET /api/interclub/{id}/availability", () => {
 
   it("compte les réponses et rappelle le nombre de simples à couvrir", async () => {
     h.answers = [
-      { userId: "u1", guestId: null, status: "yes", comment: null, setById: "u1", setBy: { displayName: "Alice", nickname: null } },
+      { interclubId: "f1", userId: "u1", guestId: null, status: "yes", comment: null, setById: "u1", setBy: { displayName: "Alice", nickname: null } },
     ];
     const { counts, matchCount } = await (await GET(req(), ctx)).json();
     expect(counts).toMatchObject({ yes: 1, no: 0, maybe: 0 });
@@ -192,14 +224,14 @@ describe("PUT /api/interclub/{id}/availability", () => {
     // Les trois boutons de l'écran envoient un statut seul. Traiter l'absence comme un
     // effacement supprimait « je peux, mais pas avant 20h30 » au passage de « dispo » à
     // « incertain » — c'est-à-dire au moment précis où la précision devenait utile.
-    h.answers = [{ __existing: true, id: "a1", userId: "u1", setById: "u1", status: "yes", comment: "pas avant 20h30", updatedAt: new Date() }];
+    h.answers = [{ interclubId: "f1", id: "a1", guestId: null, userId: "u1", setById: "u1", status: "yes", comment: "pas avant 20h30", updatedAt: new Date() }];
     await PUT(req({ status: "maybe" }), ctx);
     expect(h.updated?.data).toMatchObject({ status: "maybe" });
     expect(h.updated?.data).not.toHaveProperty("comment");
   });
 
   it("efface le commentaire quand on l'envoie VIDE — absent et vide ne sont pas la même chose", async () => {
-    h.answers = [{ __existing: true, id: "a1", userId: "u1", setById: "u1", status: "yes", comment: "pas avant 20h30", updatedAt: new Date() }];
+    h.answers = [{ interclubId: "f1", id: "a1", guestId: null, userId: "u1", setById: "u1", status: "yes", comment: "pas avant 20h30", updatedAt: new Date() }];
     await PUT(req({ status: "yes", comment: "   " }), ctx);
     expect(h.updated?.data).toMatchObject({ comment: null });
   });
@@ -229,6 +261,21 @@ describe("PUT /api/interclub/{id}/availability", () => {
     expect(h.created).toBeNull();
   });
 
+  it("refuse un `guestId` VIDE, qui traversait toutes les gardes", async () => {
+    // `""` est une chaîne, et une chaîne vide est falsy : elle passait le typage puis sautait
+    // chaque `if (guestId)` — le refus du couple membre+invité comme le contrôle d'équipe. La
+    // ligne partait en base avec `userId` ET `guestId`, soit une violation de clé étrangère et
+    // une réponse qui enfreint l'exclusivité des deux colonnes.
+    const res = await PUT(req({ status: "yes", guestId: "" }), ctx);
+    expect(res.status).toBe(400);
+    expect(h.created).toBeNull();
+  });
+
+  it("refuse un `guestId` mal typé plutôt que de répondre pour soi-même", async () => {
+    expect((await PUT(req({ status: "yes", guestId: 42 }), ctx)).status).toBe(400);
+    expect(h.created).toBeNull();
+  });
+
   it("refuse un membre ET un joueur sans compte dans la même requête", async () => {
     const res = await PUT(req({ status: "yes", userId: "u2", guestId: "g1" }), ctx);
     expect(res.status).toBe(400);
@@ -239,7 +286,7 @@ describe("PUT /api/interclub/{id}/availability", () => {
     // Le capitaine doit voir ce qu'il remplace. Un refus sec le laisserait croire à un bug ;
     // un remplacement silencieux ferait disparaître un « non » assumé.
     h.answers = [
-      { __existing: true, id: "a1", userId: "u2", setById: "u2", status: "no", updatedAt: new Date("2026-10-01T10:00:00Z"), comment: null, guestId: null, setBy: { displayName: "Bob", nickname: null } },
+      { interclubId: "f1", id: "a1", guestId: null, userId: "u2", setById: "u2", status: "no", updatedAt: new Date("2026-10-01T10:00:00Z"), comment: null, setBy: { displayName: "Bob", nickname: null } },
     ];
     const res = await PUT(req({ status: "yes", userId: "u2" }), ctx);
     expect(res.status).toBe(409);
@@ -251,7 +298,7 @@ describe("PUT /api/interclub/{id}/availability", () => {
 
   it("passe avec confirmOverride, et enregistre le nouveau signataire", async () => {
     h.answers = [
-      { __existing: true, id: "a1", userId: "u2", setById: "u2", status: "no", updatedAt: new Date(), comment: null, guestId: null, setBy: { displayName: "Bob", nickname: null } },
+      { interclubId: "f1", id: "a1", guestId: null, userId: "u2", setById: "u2", status: "no", updatedAt: new Date(), comment: null, setBy: { displayName: "Bob", nickname: null } },
     ];
     const res = await PUT(req({ status: "yes", userId: "u2", confirmOverride: true }), ctx);
     expect(res.status).toBe(200);
@@ -260,7 +307,7 @@ describe("PUT /api/interclub/{id}/availability", () => {
 
   it("l'intéressé se corrige SANS confirmation — c'est sa réponse", async () => {
     h.answers = [
-      { __existing: true, id: "a1", userId: "u1", setById: "u1", status: "no", updatedAt: new Date(), comment: null, guestId: null, setBy: { displayName: "Alice", nickname: null } },
+      { interclubId: "f1", id: "a1", guestId: null, userId: "u1", setById: "u1", status: "no", updatedAt: new Date(), comment: null, setBy: { displayName: "Alice", nickname: null } },
     ];
     const res = await PUT(req({ status: "yes" }), ctx);
     expect(res.status).toBe(200);
@@ -269,9 +316,52 @@ describe("PUT /api/interclub/{id}/availability", () => {
 
   it("remplacer un relais par un autre ne demande rien : deux ouï-dire se valent", async () => {
     h.answers = [
-      { __existing: true, id: "a1", userId: "u2", setById: "u3", status: "no", updatedAt: new Date(), comment: null, guestId: null, setBy: { displayName: "Chloé", nickname: null } },
+      { interclubId: "f1", id: "a1", guestId: null, userId: "u2", setById: "u3", status: "no", updatedAt: new Date(), comment: null, setBy: { displayName: "Chloé", nickname: null } },
     ];
     expect((await PUT(req({ status: "yes", userId: "u2" }), ctx)).status).toBe(200);
+  });
+
+  it("lit la réponse existante DANS la transaction, jamais avant", async () => {
+    // Le corps d'une transaction Serializable est REJOUÉ TEL QUEL sur conflit (`http-tx.ts`).
+    // Une lecture faite dehors est capturée par la closure : le réessai rejouerait « créer »
+    // sur un état déjà périmé, violerait l'unicité `(interclubId, userId)`, et sortirait en
+    // `P2002` — que la boucle ne rejoue pas, donc un 500, précisément le cas que cette
+    // transaction est là pour éviter. Seul le relevé des réponses de l'écran, qui n'écrit
+    // rien, a le droit de passer hors transaction.
+    await PUT(req({ status: "yes" }), ctx);
+    expect(h.horsTx).toEqual(["findMany"]);
+  });
+
+  it("ne confond pas la réponse d'une AUTRE rencontre", async () => {
+    // La ligne existe, mais pour la rencontre d'à côté : on doit créer, pas corriger.
+    h.answers = [
+      { interclubId: "f9", id: "a9", guestId: null, userId: "u1", setById: "u1", status: "no", updatedAt: new Date(), comment: null, setBy: { displayName: "Alice", nickname: null } },
+    ];
+    await PUT(req({ status: "yes" }), ctx);
+    expect(h.created).toMatchObject({ interclubId: "f1", userId: "u1", status: "yes" });
+    expect(h.updated).toBeNull();
+  });
+
+  it("ne confond pas la réponse de QUELQU'UN D'AUTRE", async () => {
+    // Bob a répondu de première main ; Alice répond pour elle-même. Aller chercher la ligne de
+    // Bob rendrait un 409 de confirmation sur une réponse qui n'a rien à voir.
+    h.answers = [
+      { interclubId: "f1", id: "a1", guestId: null, userId: "u2", setById: "u2", status: "no", updatedAt: new Date(), comment: null, setBy: { displayName: "Bob", nickname: null } },
+    ];
+    const res = await PUT(req({ status: "yes" }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.created).toMatchObject({ userId: "u1", status: "yes" });
+  });
+
+  it("ne confond pas la réponse d'un MEMBRE avec celle d'un joueur sans compte", async () => {
+    // `userId` et `guestId` cohabitent dans la même table : c'est le `where` qui les sépare.
+    h.guestById = { g1: { teamId: "t1" } };
+    h.answers = [
+      { interclubId: "f1", id: "a1", guestId: null, userId: "u1", setById: "u1", status: "no", updatedAt: new Date(), comment: null, setBy: { displayName: "Alice", nickname: null } },
+    ];
+    await PUT(req({ status: "yes", guestId: "g1" }), ctx);
+    expect(h.created).toMatchObject({ guestId: "g1", userId: null });
+    expect(h.updated).toBeNull();
   });
 
   it("403 pour un membre d'une autre équipe, comme en lecture", async () => {

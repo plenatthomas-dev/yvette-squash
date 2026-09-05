@@ -274,6 +274,39 @@ describe("bloc de disponibilité — répondre", () => {
 
     expect(puts()).toEqual([{ status: "yes", comment: "pas avant 20h30" }]);
   });
+
+  it("GARDE le brouillon quand on change de réponse sans l'avoir envoyé", async () => {
+    // Tout PUT réussi vidait le champ, y compris celui d'un simple clic sur « Incertain ». Une
+    // précision tapée puis mise de côté le temps de corriger sa réponse disparaissait sans un
+    // mot — alors que le serveur, lui, préserve le commentaire existant quand la requête n'en
+    // porte pas. Le brouillon ne se vide que s'il a été envoyé.
+    await monte([entree({ key: "u1", name: "Thomas", status: "yes" })]);
+
+    fireEvent.click(screen.getByRole("button", { name: /Ajouter une précision/i }));
+    fireEvent.change(screen.getByLabelText("Précision sur ma disponibilité"), {
+      target: { value: "pas avant 20h30" },
+    });
+    await act(async () => {
+      fireEvent.click(within(boutonsDe("Thomas")).getByRole("button", { name: "Incertain" }));
+      await souffle();
+    });
+
+    const champ = screen.getByLabelText("Précision sur ma disponibilité") as HTMLInputElement;
+    expect(champ.value).toBe("pas avant 20h30");
+    // Et la réponse est bien partie SANS commentaire : c'est ce qui protège la précision déjà
+    // enregistrée côté serveur.
+    expect(puts().at(-1)).toEqual({ status: "maybe" });
+  });
+
+  it("dit POURQUOI « Enregistrer » est grisé tant qu'on n'a pas répondu", async () => {
+    // Partout ailleurs dans cet écran, un bouton grisé porte son explication. Muet, il envoie
+    // chercher une panne là où il n'y a qu'un ordre à respecter.
+    await monte([entree({ key: "u1", name: "Thomas" })]);
+    fireEvent.click(screen.getByRole("button", { name: /Ajouter une précision/i }));
+    const bouton = screen.getByRole("button", { name: "Enregistrer" });
+    expect(bouton.hasAttribute("disabled")).toBe(true);
+    expect(bouton.getAttribute("title")).toMatch(/Réponds d'abord/i);
+  });
 });
 
 describe("bloc de disponibilité — écraser une réponse de première main", () => {

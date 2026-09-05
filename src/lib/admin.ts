@@ -44,12 +44,22 @@ export async function requireAdmin(
   return { userId: session.userId, email: user.email };
 }
 
-/** Ids des Users admin (ceux dont l'email est dans l'allowlist), pour les notifier. */
-async function adminUserIds(): Promise<string[]> {
+/**
+ * Ids des Users admin (ceux dont l'email est dans l'allowlist), pour les notifier.
+ *
+ * EXPORTÉE parce qu'elle avait déjà un jumeau. Le cron du calendrier chargeait TOUS les emails
+ * du club — dans sa boucle, une fois par équipe — pour n'en retenir que deux ou trois en
+ * mémoire. Deux définitions de « qui est admin » côté requête, c'est deux occasions de diverger
+ * en silence : celle-ci filtre en base, et c'est la seule.
+ *
+ * Les comptes désactivés sont exclus : les notifier ne produit rien, et c'est ce que faisait
+ * déjà le jumeau du cron.
+ */
+export async function adminUserIds(): Promise<string[]> {
   const emails = [...adminEmails()];
   if (emails.length === 0) return [];
   const users = await prisma.user.findMany({
-    where: { email: { in: emails } },
+    where: { email: { in: emails }, disabledAt: null },
     select: { id: true },
   });
   return users.map((u) => u.id);

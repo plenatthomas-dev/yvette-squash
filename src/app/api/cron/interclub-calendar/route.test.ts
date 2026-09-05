@@ -32,7 +32,11 @@ const h = vi.hoisted(() => ({
 vi.mock("@/lib/features-server", () => ({ getFeatures: async () => ({ interclub: h.interclub }) }));
 vi.mock("@/lib/cron-auth", () => ({ cronAuthorized: () => h.authorized }));
 vi.mock("@/lib/cron-run", () => ({ recordCronRun: vi.fn() }));
-vi.mock("@/lib/admin", () => ({ isAdminEmail: (e: string | null) => e === "chef@ex.com" }));
+// « Qui est admin » se lit désormais EN BASE, en une requête et hors boucle : le cron chargeait
+// tous les emails du club, une fois par équipe, pour n'en retenir que deux ou trois.
+vi.mock("@/lib/admin", () => ({
+  adminUserIds: async () => h.admins.map((a) => a.id),
+}));
 // Le parsing est éprouvé chez lui (`squashnet/calendar.test.ts`, sur fragment réel) : ici on
 // mocke le RÉSEAU seulement, et on garde le vrai `diffCalendar` / `calendarFingerprint`.
 vi.mock("@/lib/squashnet/calendar", async (importOriginal) => ({
@@ -164,7 +168,10 @@ describe("contrôle de dérive", () => {
     h.published = [tie({ date: "2026-10-16" })];
     const body = await (await GET(req())).json();
     expect(body.drifted).toBe(1);
-    expect(h.drifts[0][1]).toBe("Équipe 1");
+    // L'ÉQUIPE ENTIÈRE, et non son seul nom : le tag de la notification est bâti sur son
+    // identifiant, comme tous les autres tags du module. Sur le nom, un renommage faisait
+    // cohabiter deux alertes pour la même équipe.
+    expect(h.drifts[0][1]).toMatchObject({ id: "t1", name: "Équipe 1" });
     expect(h.drifts[0][2]).toEqual(["J1 déplacée au 2026-10-16"]);
   });
 

@@ -91,6 +91,22 @@ describe("parseStandings — ce qu'il refuse de deviner", () => {
     expect(parseStandings("<div>Classement non publié</div>")).toEqual([]);
   });
 
+  it("saute un tableau qui n'est PAS le classement, au lieu de le lire", () => {
+    // On prenait le premier `<table>` venu, en affirmant que les rencontres « suivent dans le
+    // même fragment ». La fixture n'en contient qu'un seul : l'affirmation n'était appuyée par
+    // rien. Une légende ou un encart intercalé AU-DESSUS aurait rendu un classement faux sans
+    // la moindre erreur — et un classement faux, ça s'affiche.
+    const legende = `<table><tr><td>Pts</td><td>points de classement</td></tr>
+      <tr><td>E+</td><td>nul gagné à l'average</td></tr></table>`;
+    expect(parseStandings(legende + html).map((r) => r.rank)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("rend une liste vide quand AUCUN tableau n'est un classement", () => {
+    // Le revers : ne pas se rabattre sur n'importe quel tableau faute de mieux. Zéro ligne dit
+    // « je n'ai pas trouvé » ; six lignes tirées d'une légende diraient une contrevérité.
+    expect(parseStandings("<table><tr><td>Règlement</td></tr></table>")).toEqual([]);
+  });
+
   it("s'accroche aux data-label, PAS à l'ordre des colonnes", () => {
     // Dix-huit colonnes dans un ordre que rien ne garantit : une colonne insérée en tête
     // décalerait tout un parsing positionnel sans rien casser de visible — on lirait les jeux

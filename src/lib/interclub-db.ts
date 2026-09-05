@@ -58,11 +58,28 @@ export function parseTimeInput(v: unknown): { ok: true; value: string | null } |
   return { ok: true, value: `${String(h).padStart(2, "0")}:${m[2]}` };
 }
 
-/** Champ texte facultatif : compacté, tronqué, vide ⇒ null. */
-export function parseOptionalText(v: unknown, max: number): string | null {
-  if (typeof v !== "string") return null;
+/**
+ * Champ texte facultatif : compacté, tronqué, vide ⇒ null — et MAL TYPÉ ⇒ refus.
+ *
+ * TROIS CAS, ET ILS SE DISTINGUENT. La version précédente rendait `null` pour tout ce qui
+ * n'était pas une chaîne, ce qui confondait « efface ce champ » avec « ce corps est faux » :
+ * `PATCH {"venue": 42}` répondait 200 et le lieu disparaissait. Sur le même corps, `opponent`
+ * refusait en 400 et quatre champs effaçaient en silence — une asymétrie qui ne se voyait que
+ * dans le code, jamais à l'usage.
+ *
+ * La forme discriminée est celle de `parseTimeInput` juste au-dessus, et pour la même raison :
+ * un refus doit être une valeur qu'on ne peut pas oublier de regarder. L'appelant garde la
+ * distinction restante — champ ABSENT (`undefined`, on ne touche pas) contre `null` explicite
+ * (on efface) —, que seule la présence de la clé dans le corps peut trancher.
+ */
+export function parseOptionalText(
+  v: unknown,
+  max: number,
+): { ok: true; value: string | null } | { ok: false } {
+  if (v === null) return { ok: true, value: null };
+  if (typeof v !== "string") return { ok: false };
   const t = v.trim().replace(/\s+/g, " ").slice(0, max);
-  return t || null;
+  return { ok: true, value: t || null };
 }
 
 /**

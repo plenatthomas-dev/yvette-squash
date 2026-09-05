@@ -182,7 +182,26 @@ export async function POST(req: NextRequest) {
     }
     // Les rencontres passées ne bougent pas : `homeDisplayName` y est figé et `homeUserId`
     // garde le lien. Changer d'équipe n'engage que les compositions À VENIR.
-    await prisma.user.update({ where: { id: target.id }, data: { teamId } });
+    //
+    // ON QUITTE AUSSI SON BRASSARD. `captainId` ne pointe nulle part ailleurs : le schéma ne
+    // pose `SetNull` que sur la suppression du compte, et rien ne remettait ce champ en cause
+    // quand la personne changeait d'équipe. Le sélecteur de l'admin, lui, ne liste que les
+    // membres de l'équipe : privé de son option, le navigateur affichait « — aucun — » et
+    // l'admin en concluait qu'il n'y avait pas de capitaine. `captainId` restait pourtant
+    // renseigné, et le cron continuait d'envoyer à cette personne le récapitulatif nominatif
+    // des disponibilités d'une équipe dont elle ne faisait plus partie.
+    //
+    // `updateMany` et non `update` : il n'y a le plus souvent RIEN à démettre, et `update` sur
+    // une ligne absente lèverait un `P2025`.
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: target.id }, data: { teamId } });
+      await tx.interclubTeam.updateMany({
+        // Toutes les équipes SAUF la nouvelle : on démet du brassard qu'on quitte, jamais de
+        // celui qu'on prend. Rattacher un capitaine à sa propre équipe ne doit rien changer.
+        where: { captainId: target.id, ...(teamId ? { NOT: { id: teamId } } : {}) },
+        data: { captainId: null },
+      });
+    });
     return NextResponse.json({ ok: true, teamId });
   }
 

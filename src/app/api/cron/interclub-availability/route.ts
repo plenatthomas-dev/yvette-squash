@@ -46,10 +46,7 @@ export const maxDuration = 60;
 // ============================================================================
 
 /** Les mêmes entrées que l'écran, réduites à ce dont les décisions ont besoin. */
-async function entriesFor(
-  teamId: string,
-  fixtureId: string,
-): Promise<{ entries: AvailabilityEntry[]; answeredUserIds: Set<string> }> {
+async function entriesFor(teamId: string, fixtureId: string): Promise<AvailabilityEntry[]> {
   const [members, guests, answers] = await Promise.all([
     prisma.user.findMany({
       where: { teamId, disabledAt: null },
@@ -91,7 +88,10 @@ async function entriesFor(
       reachable: false,
     });
   }
-  return { entries, answeredUserIds: new Set(byUser.keys()) };
+  // Les répondants ne sont plus rendus à part : `status === null` dit déjà « n'a pas répondu »,
+  // et un second jeu tiré des mêmes réponses ne pouvait que redire la même chose — ou la
+  // contredire un jour, ce qui est le vrai risque.
+  return entries;
 }
 
 export async function GET(req: NextRequest) {
@@ -153,7 +153,7 @@ export async function GET(req: NextRequest) {
     }
 
     // --- RELANCE + RÉCAPITULATIF AU CAPITAINE -------------------------------------------
-    const { entries, answeredUserIds } = await entriesFor(f.teamId, f.id);
+    const entries = await entriesFor(f.teamId, f.id);
     const counts = tally(entries);
 
     // Les SEULS non-répondants — mais TOUS les non-répondants qui ont un compte, joignables par
@@ -167,9 +167,11 @@ export async function GET(req: NextRequest) {
     //
     // Ils restent par ailleurs dans la liste d'appels du capitaine : une entrée dans la cloche
     // n'est pas une garantie d'avoir été vu.
-    const aRelancer = entries
-      .filter((e) => e.isMember && e.status === null && !answeredUserIds.has(e.key))
-      .map((e) => e.key);
+    // `status === null` DIT DÉJÀ « n'a pas répondu » : `answeredUserIds` était construit à
+    // partir des mêmes réponses, et la seconde moitié de la condition ne pouvait jamais être
+    // fausse quand la première était vraie. Une condition morte se lit comme une garde, et fait
+    // chercher une subtilité qui n'existe pas.
+    const aRelancer = entries.filter((e) => e.isMember && e.status === null).map((e) => e.key);
     if (aRelancer.length) {
       await notifyAvailabilityReminder(aRelancer, ctx, { date: f.date });
       reminded += aRelancer.length;

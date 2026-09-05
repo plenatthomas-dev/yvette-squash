@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { onForeground } from "@/lib/onForeground";
 import {
   AVAILABILITY_LABELS,
   AVAILABILITY_ORDER,
@@ -165,6 +166,23 @@ export function InterclubAvailability({
     void load();
   }, [load]);
 
+  // AU RETOUR AU PREMIER PLAN, comme l'écran qui porte ce bloc.
+  //
+  // Il ne s'y abonnait pas : le capitaine déverrouillait son téléphone au bord du terrain, la
+  // liste des rencontres et le détail se rafraîchissaient — et le compteur « 2/4 dispo » restait
+  // celui d'il y a une heure. Il relançait alors deux personnes qui avaient déjà répondu, ce
+  // qui est exactement ce que ce bloc existe pour éviter.
+  //
+  // `onForeground` dédoublonne la rafale `focus` + `visibilitychange` : sans lui, chaque retour
+  // partirait en double. On ne recharge pas pendant une écriture — la réponse du PUT est plus
+  // fraîche que ce qu'un GET concurrent rapporterait.
+  useEffect(() => {
+    return onForeground(() => {
+      if (busy) return;
+      void load();
+    });
+  }, [load, busy]);
+
   /**
    * Poser une réponse. `key` est la mienne par défaut ; un `guest:` ou l'identifiant d'un
    * coéquipier en fait un relais. `confirm` ne part qu'après que l'écran a montré ce qu'il
@@ -199,9 +217,15 @@ export function InterclubAvailability({
       }
       const recu = asPayload(await res.json());
       setData((prev) => merge(prev, recu));
-      setOpenFor(null);
-      setDraft("");
       setConflict(null);
+      // LE BROUILLON NE SE VIDE QUE S'IL A ÉTÉ ENVOYÉ. Tout PUT réussi le jetait, y compris
+      // celui d'un simple clic sur « Incertain » : une précision tapée puis laissée de côté le
+      // temps de changer de réponse disparaissait sans un mot, alors que le serveur, lui,
+      // préserve le commentaire existant quand la requête n'en porte pas.
+      if (comment !== undefined) {
+        setOpenFor(null);
+        setDraft("");
+      }
     } catch {
       toast("err", "Réseau indisponible.");
     } finally {
@@ -295,9 +319,18 @@ export function InterclubAvailability({
                         aria-label="Précision sur ma disponibilité"
                         onChange={(ev) => setDraft(ev.target.value)}
                       />
+                      {/* Grisé tant qu'on n'a pas répondu : une précision sans réponse
+                          n'aurait rien à quoi se rattacher. Le `title` le DIT — partout
+                          ailleurs dans cet écran, un bouton grisé explique pourquoi, et un
+                          bouton muet envoie chercher une panne là où il n'y a qu'un ordre. */}
                       <button
                         type="button"
                         disabled={busy === e.key || !e.status}
+                        title={
+                          e.status
+                            ? "Enregistre la précision avec ta réponse"
+                            : "Réponds d'abord (Dispo, Incertain ou Absent) : la précision accompagne une réponse."
+                        }
                         onClick={() => e.status && answer(e.key, e.status, draft)}
                       >
                         Enregistrer

@@ -209,6 +209,17 @@ describe("prévisualisation", () => {
     expect(body.frozen).toEqual(["J1"]);
   });
 
+  it("SIGNALE un statut de date qui diverge, sans le mettre dans les corrections", async () => {
+    // L'admin a corrigé à la main une J1 que la déduction croyait prévisionnelle. La
+    // prévisualisation doit le dire — sinon l'écart n'atteint personne — mais l'annoncer comme
+    // une correction à appliquer serait annoncer qu'on va révoquer sa correction.
+    h.fixtures = [enBase({ dateConfirmed: false })];
+    h.published = [publiee()];
+    const body = await (await POST(req({ action: "preview", teamId: "t1" }))).json();
+    expect(body.confirmDrift).toEqual([{ id: "f1", round: "J1", stored: false, published: true }]);
+    expect(body.toUpdate).toEqual([]);
+  });
+
   it("ne gèle rien quand la rencontre n'a pas commencé", async () => {
     h.fixtures = [enBase()];
     h.published = [publiee({ date: "2026-10-16" })];
@@ -252,6 +263,27 @@ describe("application", () => {
     h.published = [publiee({ venue: "SQUASH DE MASSY" })];
     await POST(req({ action: "apply", teamId: "t1" }));
     expect(h.updated[0].data).toMatchObject({ venue: "SQUASH DE MASSY" });
+  });
+
+  it("NE RÉVOQUE JAMAIS la correction manuelle du statut de la date", async () => {
+    // LE DÉFAUT LE PLUS GRAVE DE LA BRANCHE, et il était silencieux. La ligue programme deux
+    // journées le même soir, la déduction les classe prévisionnelles, l'appel de disponibilité
+    // se tait ; l'admin corrige les deux à la main et l'appel repart. Trois semaines plus tard
+    // la ligue corrige le LIEU d'une autre journée, l'admin clique « Appliquer » — et les deux
+    // repassaient à « prévisionnelle » : l'équipe cessait d'être convoquée, sans un mot.
+    h.fixtures = [enBase({ dateConfirmed: false })];
+    h.published = [publiee({ venue: "SQUASH DE MASSY" })];
+    await POST(req({ action: "apply", teamId: "t1" }));
+    expect(h.updated[0].data).toMatchObject({ venue: "SQUASH DE MASSY" });
+    expect(h.updated[0].data).not.toHaveProperty("dateConfirmed");
+  });
+
+  it("pose en revanche la déduction sur une rencontre qu'il DÉCOUVRE", async () => {
+    // Le pendant : il n'y a là aucune correction humaine à préserver, et une date bouchon doit
+    // naître prévisionnelle sous peine de convoquer l'équipe un 30 juin.
+    h.published = [publiee({ dateConfirmed: false })];
+    await POST(req({ action: "apply", teamId: "t1" }));
+    expect(h.created[0]).toMatchObject({ dateConfirmed: false });
   });
 
   it("ne SUPPRIME jamais une journée retirée du calendrier, il la compte", async () => {

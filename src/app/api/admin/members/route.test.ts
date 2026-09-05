@@ -29,6 +29,8 @@ const h = vi.hoisted(() => ({
   passkeyDeleteMany: vi.fn(),
   createEmailToken: vi.fn(),
   alertsChanged: vi.fn(),
+  /** Les démissions de capitaine posées par `set_team`. */
+  teamUpdateMany: vi.fn(async () => ({ count: 1 })),
 }));
 
 vi.mock("@/lib/admin", () => ({
@@ -80,11 +82,15 @@ vi.mock("@/lib/db", () => ({
         session: { deleteMany: h.sessionDeleteMany },
         expense: { findMany: vi.fn(async () => h.payePar) },
         tricountApproval: { createMany: h.approvalsCreated },
+        // Changer un membre d'équipe le démet du brassard qu'il quitte : les deux écritures
+        // vont ensemble, et le mock les exécute sur les mêmes doubles.
+        interclubTeam: { updateMany: h.teamUpdateMany },
       }),
     passkey: { deleteMany: h.passkeyDeleteMany },
     interclubTeam: {
       findMany: vi.fn(async () => h.teams),
       findUnique: vi.fn(async () => h.team),
+      updateMany: h.teamUpdateMany,
     },
   },
 }));
@@ -284,6 +290,30 @@ describe("POST /api/admin/members", () => {
 
   // On refuse plutôt qu'on ignore : un écran resté ouvert après la suppression d'une équipe
   // doit l'apprendre, pas croire son geste enregistré.
+  it("set_team : DÉMET du brassard de l'équipe qu'on quitte", async () => {
+    // Rien ne remettait `captainId` en cause : le schéma ne pose `SetNull` que sur la
+    // suppression du compte. Le sélecteur de l'admin ne listant que les membres de l'équipe,
+    // il affichait « — aucun — » sur une équipe qui avait toujours un capitaine — et le cron
+    // continuait d'envoyer à cette personne le récapitulatif nominatif des disponibilités
+    // d'une équipe dont elle ne faisait plus partie.
+    //
+    // Le `NOT` compte autant que le reste : rattacher un capitaine à SA PROPRE équipe — le
+    // geste anodin, corriger un rattachement déjà juste — ne doit pas décapiter l'équipe.
+    await POST(postReq({ id: "u1", action: "set_team", teamId: "t1" }));
+    expect(h.teamUpdateMany).toHaveBeenCalledWith({
+      where: { captainId: "u1", NOT: { id: "t1" } },
+      data: { captainId: null },
+    });
+  });
+
+  it("set_team : sorti de TOUTE équipe, il perd tous ses brassards", async () => {
+    await POST(postReq({ id: "u1", action: "set_team", teamId: null }));
+    expect(h.teamUpdateMany).toHaveBeenCalledWith({
+      where: { captainId: "u1" },
+      data: { captainId: null },
+    });
+  });
+
   it("set_team : refuse une équipe inconnue", async () => {
     h.team = null;
     const res = await POST(postReq({ id: "u1", action: "set_team", teamId: "fantome" }));

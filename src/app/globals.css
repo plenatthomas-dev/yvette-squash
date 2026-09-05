@@ -5038,10 +5038,19 @@ body[data-bottombar] .install-banner {
   border: 1px solid var(--pico-card-border-color);
   border-radius: var(--radius-sm);
 }
+/* Même cause, même correctif : `details[open] > summary` de Pico (0,1,2) l'emporte sur le
+   `margin-bottom: 8px` ci-dessus (0,1,0), et le bloc s'ouvrait avec 24 px de vide. */
+.ic-dispo[open] > .ic-dispo-head {
+  margin-bottom: 8px;
+}
 .ic-dispo-head h4 {
   margin: 0;
   margin-right: auto;
-  font-size: 0.95rem;
+  /* 0,90rem et non 0,95 : DESIGN.md range 0,95rem parmi les survivances qui « ne doivent pas
+     servir de précédent », et les deux autres en-têtes de bloc repliable de cet écran sont à
+     0,90rem. Règle du Cran Voisin — deux crans voisins dans un même écran se lisent comme une
+     erreur, pas comme une hiérarchie. */
+  font-size: 0.9rem;
 }
 /* MA réponse, en pastille. Même vocabulaire de couleurs que les vignettes en dessous : ce
    qu'on voit replié doit être ce qu'on retrouve déplié. */
@@ -5153,9 +5162,47 @@ body[data-bottombar] .install-banner {
   white-space: nowrap;
 }
 
+/* LES TROIS RÈGLES DE PICO SUR [role="group"], ANNULÉES ICI.
+ *
+ * Pico habille tout [role="group"] en COMMANDE SEGMENTÉE : boutons joints, coins arrondis aux
+ * seules extrémités, halo de focus posé sur le conteneur entier. Nos trois réponses sont
+ * DÉTACHÉES (gap: 4px), et l'habillage se retournait contre elles. Le rôle, lui, reste : c'est
+ * lui qui porte le groupement et l'`aria-label` « Disponibilité de X ».
+ *
+ * La leçon avait déjà été payée et écrite pour `.viewtabs` (cf. plus haut, même rôle, même
+ * marge fantôme). On la repayait ici. */
 .ic-dispo-buttons {
   display: flex;
   gap: 4px;
+  /* (1) `[role=group] { margin-bottom: var(--pico-spacing) }` — 16 px de marge fantôme sous
+     chaque groupe. `.ic-dispo-row` étant une grille `align-items: center`, le nom se retrouvait
+     ~10 px plus bas que ses boutons, sur toutes les lignes. */
+  margin: 0;
+  /* (2) le halo de focus que Pico pose sur le CONTENEUR quand un bouton est actif, via
+     `--pico-group-box-shadow`. Trois boutons entourés d'un seul halo, c'est ne pas savoir
+     lequel Entrée va activer. Il se déclenche de surcroît sur `:focus` et non
+     `:focus-visible` : il restait donc affiché après un simple appui au doigt. */
+  box-shadow: none;
+}
+/* (3) l'indicateur de focus INDIVIDUEL, que Pico supprime (`[role=group] button:focus {
+   box-shadow: none }`). Sans lui, la navigation au clavier devient aveugle. Sur
+   `:focus-visible` seulement : au doigt, on sait déjà où l'on a tapé. */
+.ic-dispo-buttons button:focus-visible {
+  box-shadow: 0 0 0 var(--pico-outline-width, 3px) var(--pico-primary-focus);
+  /* Le halo passe AU-DESSUS des boutons voisins, sinon leur fond le tronque. */
+  z-index: 2;
+}
+/* Et les coins : Pico n'arrondit que les extrémités du groupe et tire chaque bouton d'un pixel
+   sur le précédent, pour les souder. Détachés, « Incertain » devenait un rectangle coincé entre
+   deux demi-pilules. */
+.ic-dispo-buttons button:not(:first-child) {
+  margin-left: 0;
+  border-top-left-radius: var(--pico-border-radius);
+  border-bottom-left-radius: var(--pico-border-radius);
+}
+.ic-dispo-buttons button:not(:last-child) {
+  border-top-right-radius: var(--pico-border-radius);
+  border-bottom-right-radius: var(--pico-border-radius);
 }
 .ic-dispo-buttons button {
   margin: 0;
@@ -5238,6 +5285,31 @@ body[data-bottombar] .install-banner {
 /* Sous 380 px, trois boutons et un nom ne tiennent plus sur une ligne sans hacher le nom.
    Les réponses passent alors dessous, pleine largeur, et gagnent au passage une cible
    tactile plus franche. */
+/* LA CIBLE TACTILE, RÉGLÉE SUR LE POINTEUR ET NON SUR LA LARGEUR.
+ *
+ * Ces trois boutons faisaient 24,4 px de haut (0,75rem × 1,2 + 8 px de padding + les bordures),
+ * soit le strict minimum de WCAG 2.2 AA et très loin des 44 px confortables. Le repli prévu
+ * était une media query `max-width: 380px` — qui ne s'applique à AUCUN téléphone courant :
+ * iPhone 12 à 16, 390 à 430 px ; Pixel, 412 px. Elle ne servait donc que sur les rares écrans
+ * plus étroits que tous ceux qu'on tient dans la main.
+ *
+ * `pointer: coarse` pose la question qu'il fallait poser — « est-ce un doigt qui vise ? » —,
+ * indépendamment de la largeur. C'est le seul geste répété de cet écran : le capitaine parcourt
+ * le roster et tape trois fois par ligne. */
+@media (pointer: coarse) {
+  .ic-dispo-buttons button {
+    min-height: 44px;
+    padding-inline: 12px;
+  }
+  /* Le lien « Ajouter une précision » et le bouton qui l'enregistre sont sur le même geste. */
+  .ic-dispo-comment button {
+    min-height: 44px;
+  }
+}
+
+/* Le repli des écrans vraiment étroits : les boutons passent sous le nom et se partagent la
+   largeur. Il reste utile SOUS les tailles courantes, où trois cibles de 44 px et un nom ne
+   tiennent plus sur une ligne. */
 @media (max-width: 380px) {
   .ic-dispo-row { grid-template-columns: 1fr; }
   .ic-dispo-buttons { grid-column: 1 / -1; }
@@ -5535,6 +5607,30 @@ body[data-bottombar] .install-banner {
   color: var(--pico-contrast);
 }
 
+/* SUR ÉCRAN ÉTROIT, LE TABLEAU DÉFILE PLUTÔT QUE DE COUPER LES NOMS.
+ *
+ * `max-width: 0` + `text-overflow: ellipsis` empêchaient PAR CONSTRUCTION la table de dépasser
+ * son conteneur : l'`overflow-x: auto` posé au-dessus était donc du code mort, et sur 320 px
+ * « Liberty Country Club 3 » devenait « Liberty Country C… ». Le seul repli était un `title`,
+ * c'est-à-dire une infobulle de survol — inatteignable au doigt, là où l'écran est le plus
+ * étroit et où l'on en a le plus besoin.
+ *
+ * On rend donc au conteneur son défilement, et au nom sa largeur. Les mêmes réglages restent
+ * en vigueur au-dessus du seuil, où ils ne se déclenchent jamais. */
+@media (max-width: 520px) {
+  .ic-standings-table {
+    width: max-content;
+    min-width: 100%;
+  }
+  .ic-standings-table th.ic-st-team,
+  .ic-standings-table td.ic-st-team {
+    width: auto;
+    max-width: none;
+    overflow: visible;
+    white-space: nowrap;
+  }
+}
+
 /* NOTRE ligne. Reconnue par l'identifiant fédéral, jamais par le nom. Pas de vert (Règle du
    Vert Actionnable : être dans le tableau n'est pas une action) et pas de fond de couleur, qui
    entrerait en concurrence avec le voile « en cours » des rencontres juste en dessous : un
@@ -5587,6 +5683,13 @@ body[data-bottombar] .install-banner {
   background: var(--pico-card-background-color);
   border: 1px solid var(--pico-card-border-color);
   border-radius: var(--radius-sm);
+}
+/* Même correctif que `.ic-standings[open] > summary` : Pico pose
+   `details[open] > summary { margin-bottom: var(--pico-spacing) }` en (0,1,2), qui battait la
+   règle ci-dessus en (0,1,1) et ouvrait 24 px de vide sous l'en-tête au dépliage. Les deux
+   blocs repliables sont jumeaux ; l'un avait le correctif, l'autre pas. */
+.ic-stats[open] > summary {
+  margin-bottom: 0;
 }
 .ic-stats-title {
   font-weight: 700;
@@ -5654,6 +5757,22 @@ body[data-bottombar] .install-banner {
 .ic-stats-pct {
   font-weight: 700;
   color: var(--pico-contrast);
+}
+
+/* Même correctif que le classement, pour la même raison : c'est le tableau jumeau, avec la
+   même colonne élastique et le même `overflow-x` rendu inopérant par elle. */
+@media (max-width: 520px) {
+  .ic-stats-table {
+    width: max-content;
+    min-width: 100%;
+  }
+  .ic-stats-table th.ic-stats-name,
+  .ic-stats-table td.ic-stats-name {
+    width: auto;
+    max-width: none;
+    overflow: visible;
+    white-space: nowrap;
+  }
 }
 /* « hors appli » : une précision, pas un statut. Elle ne doit jamais peser autant que le nom. */
 .ic-stats-tag {

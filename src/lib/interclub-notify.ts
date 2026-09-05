@@ -233,11 +233,19 @@ export async function teamMemberIds(teamId: string): Promise<string[]> {
 /**
  * Date lisible : « jeudi 9 octobre ». L'année est tue — une rencontre annoncée se joue dans les
  * semaines qui viennent, et « 2026 » n'apprend rien à personne dans une notification courte.
+ *
+ * Une date HORS BORNES ressort telle quelle, comme une date illisible. `Date.UTC` déborde
+ * volontiers — « 2026-13-45 » devenait « samedi 14 février », une date parfaitement crédible et
+ * fausse de six semaines, dans un message qui convoque une équipe. Mieux vaut afficher
+ * « 2026-13-45 », qu'on ne peut pas prendre pour un rendez-vous.
  */
 export function frenchDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
   if (!y || !m || !d) return iso;
+  if (m > 12 || d > 31) return iso;
   const dt = new Date(Date.UTC(y, m - 1, d));
+  // Le débordement de jour se voit après coup : le 31 février devient le 3 mars.
+  if (dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return iso;
   return dt.toLocaleDateString("fr-FR", {
     weekday: "long",
     day: "numeric",
@@ -345,9 +353,10 @@ export async function notifyCaptainDigest(
  */
 export async function notifyCalendarDrift(
   userIds: string[],
-  teamName: string,
+  team: { id: string; name: string },
   changes: string[],
 ): Promise<void> {
+  const teamName = team.name;
   if (userIds.length === 0) return;
   const head = changes.slice(0, 3).join(" · ");
   const rest = changes.length > 3 ? ` (+${changes.length - 3})` : "";
@@ -358,7 +367,11 @@ export async function notifyCalendarDrift(
       url: "/admin",
       // Un tag par ÉQUIPE et non par rencontre : la dérive porte sur le calendrier entier,
       // et deux alertes successives doivent se remplacer l'une l'autre.
-      tag: `interclub-calendrier-${teamName}`,
+      //
+      // Bâti sur l'IDENTIFIANT, comme tous les autres tags de ce fichier. Sur le NOM, renommer
+      // « Équipe 2 » en « Équipe B » faisait cohabiter deux alertes pour la même équipe — et
+      // deux équipes homonymes n'auraient jamais pu se remplacer l'une l'autre.
+      tag: `interclub-calendrier-${team.id}`,
       renotify: true,
     });
   } catch {

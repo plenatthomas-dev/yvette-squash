@@ -67,7 +67,20 @@ export interface StandingRow {
   /** Nul PERDU à l'average (`E-`) : 1 point. */
   drawLost: number;
   lost: number;
-  /** Pénalités. Une équipe peut finir avec un total négatif — vu en 2025-26. */
+  /**
+   * La colonne « P » du tableau fédéral, lue TELLE QUELLE — et dont l'interprétation
+   * n'est PAS établie.
+   *
+   * On la nomme « pénalités » par analogie, sans preuve : sur notre poule elle n'explique pas
+   * les points (UCPA Meudon affiche V=1, P=0 et Pts=1, alors qu'une victoire vaut 3), et
+   * `standings.test.ts` le constate noir sur blanc. Deux équipes finissent d'ailleurs sous le
+   * barème sans que cette colonne en porte la trace — l'une à -3.
+   *
+   * Elle n'est affichée nulle part, et c'est délibéré tant que sa signification n'est pas
+   * vérifiée : montrer un chiffre qu'on ne sait pas lire, sous un intitulé qu'on a deviné,
+   * ferait conclure quelque chose de faux à qui le regarde. On la conserve parce qu'un
+   * classement relu dans six mois se compare à ce qui a été capté, pas à ce qu'on en a retenu.
+   */
   penalties: number;
   /** Matchs, jeux, points de jeu. */
   matches: StandingTally;
@@ -89,9 +102,17 @@ function texte(html: string): string {
     .trim();
 }
 
-/** Un entier, ou 0. Les écarts sont signés (« -495 » existe). */
+/**
+ * Un entier, ou 0. Les écarts sont signés (« -495 » existe).
+ *
+ * Le MOINS TYPOGRAPHIQUE (U+2212) est ramené au tiret ASCII avant le filtrage. Sans cela il
+ * tombait avec le reste de la ponctuation : « −3 » devenait « 3 », et une équipe pénalisée
+ * sous zéro remontait de six places. La fixture n'a que de l'ASCII aujourd'hui — mais un total
+ * négatif est précisément ce que `standings.test.ts` dit vouloir protéger, et une correction
+ * copiée depuis un traitement de texte suffit à faire entrer ce caractère.
+ */
 function entier(v: string | undefined): number {
-  const n = Number.parseInt((v ?? "").replace(/[^\d-]/g, ""), 10);
+  const n = Number.parseInt((v ?? "").replace(/−/g, "-").replace(/[^\d-]/g, ""), 10);
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -107,17 +128,32 @@ function tally(cells: Map<string, string>, prefixe: string): StandingTally {
  * Le classement, lu dans le fragment rendu par la fédération.
  *
  * Ne rend QUE les lignes exploitables : une ligne sans rang ni nom n'est pas un classement
- * partiel, c'est du bruit. Les tableaux annexes (les rencontres, qui suivent dans le même
- * fragment) sont ignorés — seul le PREMIER tableau est le classement.
+ * partiel, c'est du bruit.
+ *
+ * LE TABLEAU EST CHOISI SUR SON CONTENU, ET NON SUR SA POSITION. On prenait le PREMIER `<table>`
+ * venu, en affirmant que les rencontres « suivent dans le même fragment » — affirmation
+ * qu'aucune fixture n'appuie (elle n'en contient qu'un seul) et qu'aucun test ne vérifie. Une
+ * légende, un encart ou un tableau de règlement intercalé au-dessus aurait rendu un classement
+ * FAUX sans la moindre erreur : le pire des résultats, parce qu'il s'affiche.
+ *
+ * Le critère est celui qui compte : le premier tableau dont on tire au moins une ligne de
+ * classement. Un tableau qui n'en est pas un n'en produit aucune, par construction — les
+ * cellules sont indexées sur `data-label`, et il faut un rang ET un nom d'équipe.
  */
 export function parseStandings(html: string): StandingRow[] {
-  const table = /<table[^>]*>[\s\S]*?<\/table>/i.exec(html);
-  if (!table) return [];
+  for (const table of html.matchAll(/<table[^>]*>[\s\S]*?<\/table>/gi)) {
+    const rows = lignesDe(table[0]);
+    if (rows.length > 0) return rows;
+  }
+  return [];
+}
 
+/** Les lignes de classement d'UN tableau — vide si ce tableau n'en est pas un. */
+function lignesDe(table: string): StandingRow[] {
   const rows: StandingRow[] = [];
   TR.lastIndex = 0;
   let tr: RegExpExecArray | null;
-  while ((tr = TR.exec(table[0])) !== null) {
+  while ((tr = TR.exec(table)) !== null) {
     const brut = tr[1];
     const cells = new Map<string, string>();
     TD.lastIndex = 0;

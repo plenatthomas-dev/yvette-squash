@@ -9,10 +9,12 @@ import {
   describeDiff,
   calendarFingerprint,
   matchKey,
+  CalendarUnreadableError,
   type OwnTie,
   type StoredTie,
 } from "@/lib/squashnet/calendar";
 import { interclubChanged } from "@/lib/interclub-gate";
+import { isUniqueViolation } from "@/lib/http-tx";
 import { UNSET_PLAYER, derivedStatus } from "@/lib/interclub-db";
 import { notifyFixtureMoved } from "@/lib/interclub-notify";
 import { fetchStandings } from "@/lib/squashnet/standings";
@@ -195,7 +197,13 @@ export async function POST(req: NextRequest) {
       await fetchTeamCalendar(team.snEventId, team.snRoundId),
       team.snTeamId,
     );
-  } catch {
+  } catch (e) {
+    // DEUX PANNES, DEUX PHRASES. « Réessaie » sur un rendu qu'on ne sait plus lire enverrait
+    // l'admin cliquer dix fois avant d'aller voir le code ; « le format a changé » sur un
+    // hoquet réseau enverrait rouvrir le parsing pour rien.
+    if (e instanceof CalendarUnreadableError) {
+      return NextResponse.json({ error: e.message }, { status: 502 });
+    }
     // L'échec réseau se DIT. Le confondre avec un calendrier vide ferait croire que la ligue
     // n'a rien publié, et l'admin attendrait une publication déjà faite.
     return NextResponse.json(
@@ -220,6 +228,9 @@ export async function POST(req: NextRequest) {
       toCreate: diff.toCreate,
       toUpdate: diff.toUpdate,
       toDelete: diff.toDelete,
+      // Rapporté, jamais appliqué : c'est une déduction qui ne doit pas écraser une correction
+      // humaine (cf. `CalendarDiff.confirmDrift`).
+      confirmDrift: diff.confirmDrift,
       frozen: frozen.map((u) => u.tie.round),
       unchanged: diff.unchanged,
       summary: describeDiff(diff),
@@ -237,29 +248,38 @@ export async function POST(req: NextRequest) {
     // la colonne à son défaut tout en créant « 4 » matchs en dur ferait diverger les deux le
     // jour où une division en compte cinq, et la rencontre se croirait incomplète pour
     // toujours. La ligue ne publie pas cette information — l'admin la corrige si besoin.
-    await prisma.interclub.create({
-      data: {
-        matchCount: IMPORTED_MATCH_COUNT,
-        date: tie.date,
-        time: tie.time,
-        teamId: team.id,
-        opponent: tie.opponent,
-        home: tie.home,
-        venue: tie.venue,
-        venueAddress: tie.venueAddress,
-        round: tie.round,
-        dateConfirmed: tie.dateConfirmed,
-        snMatchKey: matchKey(team.snEventId, tie.round),
-        createdById: admin.userId,
-        matches: {
-          create: Array.from({ length: IMPORTED_MATCH_COUNT }, (_, i) => ({
-            order: i + 1,
-            homeDisplayName: UNSET_PLAYER,
-            awayName: UNSET_PLAYER,
-          })),
+    // DEUX CLICS SUR « APPLIQUER » NE SONT PAS UNE FAUTE. Le second repassait par le même
+    // `create`, violait l'index unique `(teamId, snMatchKey)` et sortait en 500 — APRÈS des
+    // écritures partielles, et sans poser l'empreinte, si bien que le contrôle hebdomadaire
+    // re-signalait ensuite un écart déjà appliqué. La rencontre est déjà là : il n'y a rien à
+    // faire, et c'est exactement ce qu'on fait.
+    try {
+      await prisma.interclub.create({
+        data: {
+          matchCount: IMPORTED_MATCH_COUNT,
+          date: tie.date,
+          time: tie.time,
+          teamId: team.id,
+          opponent: tie.opponent,
+          home: tie.home,
+          venue: tie.venue,
+          venueAddress: tie.venueAddress,
+          round: tie.round,
+          dateConfirmed: tie.dateConfirmed,
+          snMatchKey: matchKey(team.snEventId, tie.round),
+          createdById: admin.userId,
+          matches: {
+            create: Array.from({ length: IMPORTED_MATCH_COUNT }, (_, i) => ({
+              order: i + 1,
+              homeDisplayName: UNSET_PLAYER,
+              awayName: UNSET_PLAYER,
+            })),
+          },
         },
-      },
-    });
+      });
+    } catch (e) {
+      if (!isUniqueViolation(e)) throw e;
+    }
   }
 
   for (const u of diff.toUpdate) {
@@ -286,7 +306,12 @@ export async function POST(req: NextRequest) {
           opponent: u.tie.opponent,
           venue: u.tie.venue,
           venueAddress: u.tie.venueAddress,
-          dateConfirmed: u.tie.dateConfirmed,
+          // `dateConfirmed` N'EST PAS RÉÉCRIT. Il l'était sans condition, et le gel des
+          // rencontres commencées ne protégeait que `date` : la ligue programmait deux journées
+          // le même soir, l'admin corrigeait les deux à la main pour rouvrir l'appel, puis le
+          // premier « Appliquer » suivant — pour un lieu changé trois semaines plus tard — les
+          // remettait à « prévisionnelle », et l'équipe cessait d'être convoquée sans un mot.
+          // L'écart est désormais SIGNALÉ (`confirmDrift`) et corrigé à la main s'il le faut.
           ...(dateChanged ? { availabilityOpenedAt: null, availabilityRemindedAt: null } : {}),
         },
       });

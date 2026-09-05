@@ -435,4 +435,31 @@ describe("PATCH /api/interclub/{id}", () => {
     await PATCH(patchReq({ dateConfirmed: true }), ctx);
     expect(h.patched).toMatchObject({ dateConfirmed: true });
   });
+
+  it("REFUSE un champ texte mal typé au lieu d'EFFACER la colonne", async () => {
+    // `PATCH {"venue": 42}` répondait 200 et le lieu disparaissait : « ce n'est pas une chaîne »
+    // et « efface ce champ » étaient le même cas. Sur le même corps, `opponent` rendait déjà un
+    // 400 — un champ refusait, quatre effaçaient en silence.
+    for (const champ of ["venue", "venueAddress", "division", "round"]) {
+      h.patched = null;
+      const res = await PATCH(patchReq({ [champ]: 42 }), ctx);
+      expect([champ, res.status]).toEqual([champ, 400]);
+      expect(h.patched).toBeNull();
+    }
+  });
+
+  it("efface bien la colonne sur un `null` explicite, et sur une chaîne vide", async () => {
+    // L'autre moitié de la distinction : refuser le mal typé ne doit pas empêcher d'effacer.
+    await PATCH(patchReq({ venue: null }), ctx);
+    expect(h.patched).toMatchObject({ venue: null });
+    h.patched = null;
+    await PATCH(patchReq({ venue: "   " }), ctx);
+    expect(h.patched).toMatchObject({ venue: null });
+  });
+
+  it("ne touche PAS à un champ absent du corps", async () => {
+    await PATCH(patchReq({ venue: "Club" }), ctx);
+    expect(h.patched).not.toHaveProperty("division");
+    expect(h.patched).not.toHaveProperty("venueAddress");
+  });
 });

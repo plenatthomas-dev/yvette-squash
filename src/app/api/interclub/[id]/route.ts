@@ -117,23 +117,42 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const v = parseOptionalText(body.opponent, MAX_OPPONENT_LEN);
     // Seul champ NON nullable du lot : une rencontre sans adversaire ne veut rien dire, et la
     // colonne le refuserait de toute façon — autant le dire ici, en français.
-    if (!v) return NextResponse.json({ error: "Nom du club adverse manquant" }, { status: 400 });
-    data.opponent = v;
+    if (!v.ok || !v.value) {
+      return NextResponse.json({ error: "Nom du club adverse manquant" }, { status: 400 });
+    }
+    data.opponent = v.value;
   }
-  if (body.division !== undefined) data.division = parseOptionalText(body.division, MAX_DIVISION_LEN);
-  // La JOURNÉE figurait dans le contrat de cette fonction sans y être traitée : une rencontre
-  // importée dont la ligue renumérote la journée n'était corrigible d'aucune façon.
-  if (body.round !== undefined) data.round = parseOptionalText(body.round, MAX_ROUND_LEN);
-  if (body.venue !== undefined) data.venue = parseOptionalText(body.venue, MAX_VENUE_LEN);
-  if (body.venueAddress !== undefined) {
-    data.venueAddress = parseOptionalText(body.venueAddress, MAX_VENUE_ADDRESS_LEN);
+
+  // LES QUATRE CHAMPS TEXTE FACULTATIFS, et la distinction qui manquait.
+  //
+  // « Absent » (on ne touche pas), « `null` explicite » (on efface) et « mal typé » (on refuse)
+  // se confondaient en un seul cas : `parseOptionalText` rendait `null` pour tout ce qui n'était
+  // pas une chaîne, donc `PATCH {"venue": 42}` répondait 200 et le lieu disparaissait. Sur le
+  // même corps, `opponent` juste au-dessus rendait un 400 : un champ refusait, quatre effaçaient
+  // en silence. Le nom du champ est dans le message, sans quoi un 400 sur un corps à six clés
+  // n'apprend rien.
+  const textes: [string, unknown, number][] = [
+    ["division", body.division, MAX_DIVISION_LEN],
+    // La JOURNÉE figurait dans le contrat de cette fonction sans y être traitée : une rencontre
+    // importée dont la ligue renumérote la journée n'était corrigible d'aucune façon.
+    ["round", body.round, MAX_ROUND_LEN],
+    ["venue", body.venue, MAX_VENUE_LEN],
+    ["venueAddress", body.venueAddress, MAX_VENUE_ADDRESS_LEN],
+  ];
+  for (const [nom, brut, max] of textes) {
+    if (brut === undefined) continue;
+    const v = parseOptionalText(brut, max);
+    if (!v.ok) return NextResponse.json({ error: `Champ « ${nom} » invalide` }, { status: 400 });
+    data[nom] = v.value;
   }
   if (typeof body.home === "boolean") data.home = body.home;
   // LE RATTRAPAGE DE LA DATE PRÉVISIONNELLE. La détection automatique a deux angles morts
   // (cf. `ownFixtures`, lib/squashnet/calendar.ts) : deux vraies journées le même soir passent
   // pour prévisionnelles, et une seule journée non planifiée passe pour ferme. C'est ce booléen,
   // posé à la main, qui les corrige — et c'est pour lui que `dateConfirmed` est une colonne et
-  // non un calcul refait à chaque lecture.
+  // non un calcul refait à chaque lecture. L'import le SAIT : il pose la déduction sur une
+  // rencontre qu'il découvre, mais ne réécrit jamais celle-ci sur une rencontre connue ; il
+  // signale l'écart et laisse la correction en place (`CalendarDiff.confirmDrift`).
   if (typeof body.dateConfirmed === "boolean") data.dateConfirmed = body.dateConfirmed;
 
   if (Object.keys(data).length === 0) {

@@ -163,7 +163,14 @@ export async function POST(req: NextRequest) {
         );
       }
     }
-    await prisma.interclubTeam.update({ where: { id: body.teamId }, data: { captainId: userId } });
+    // `updateMany` + `count`, comme les quatre autres actions de ce fichier : un `update` sur
+    // un `teamId` inconnu lève `P2025` et sort en 500, là où le geste — un écran resté ouvert
+    // après la suppression d'une équipe — mérite un 404 qui se lit.
+    const { count } = await prisma.interclubTeam.updateMany({
+      where: { id: body.teamId },
+      data: { captainId: userId },
+    });
+    if (count === 0) return NextResponse.json({ error: "Équipe introuvable" }, { status: 404 });
     return NextResponse.json({ ok: true, captainId: userId });
   }
 
@@ -218,7 +225,8 @@ export async function POST(req: NextRequest) {
     if (drawId && !/^\d{1,12}$/.test(drawId)) {
       return NextResponse.json({ error: "Identifiant de division invalide." }, { status: 400 });
     }
-    await prisma.interclubTeam.update({
+    // Même parade qu'au-dessus : une équipe supprimée entre-temps rend un 404, pas un 500.
+    const { count } = await prisma.interclubTeam.updateMany({
       where: { id: body.teamId },
       data: {
         snEventId: eventId || null,
@@ -236,6 +244,7 @@ export async function POST(req: NextRequest) {
         snStandingsAt: null,
       },
     });
+    if (count === 0) return NextResponse.json({ error: "Équipe introuvable" }, { status: 404 });
     return NextResponse.json({ ok: true, snEventId: eventId || null, snTeamId: snTeamId || null });
   }
 

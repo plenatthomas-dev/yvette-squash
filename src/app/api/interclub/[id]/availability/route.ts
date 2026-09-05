@@ -194,7 +194,17 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const commentGiven = Object.prototype.hasOwnProperty.call(body, "comment");
   const comment = parseComment(body.comment);
 
-  const guestId = typeof body.guestId === "string" ? body.guestId : null;
+  // `""` EST UNE CHAÎNE, ET UNE CHAÎNE VIDE EST FALSY. `typeof … === "string"` la laissait
+  // entrer, puis chaque garde suivante — toutes écrites `if (guestId)` — la sautait : ni le
+  // refus du couple membre+invité, ni le contrôle d'équipe de l'invité. La ligne partait en base
+  // avec `userId` ET `guestId` renseignés, c'est-à-dire une violation de clé étrangère (500) et
+  // une réponse qui enfreint l'exclusivité membre/invité. Un identifiant vide n'en est pas un.
+  if (body.guestId !== undefined && body.guestId !== null) {
+    if (typeof body.guestId !== "string" || body.guestId === "") {
+      return NextResponse.json({ error: "Joueur sans compte invalide." }, { status: 400 });
+    }
+  }
+  const guestId = typeof body.guestId === "string" && body.guestId !== "" ? body.guestId : null;
   const subjectUserId = guestId ? null : typeof body.userId === "string" ? body.userId : session.userId;
   if (guestId && typeof body.userId === "string") {
     return NextResponse.json({ error: "Un membre OU un joueur sans compte, pas les deux." }, { status: 400 });
@@ -214,40 +224,43 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
   }
 
-  const existing = await prisma.interclubAvailability.findFirst({
-    where: guestId ? { interclubId: id, guestId } : { interclubId: id, userId: subjectUserId! },
-    select: { id: true, userId: true, setById: true, status: true, updatedAt: true },
-  });
-
-  // ÉCRASER UNE RÉPONSE DE PREMIÈRE MAIN SE CONFIRME. Ce n'est pas un verrou — le capitaine
-  // qui a eu la personne au téléphone confirme et passe — mais personne ne doit faire
-  // disparaître un « non » assumé sans l'avoir vu. On renvoie ce qu'elle disait et quand,
-  // pour que l'écran puisse le montrer plutôt que d'annoncer un refus sec.
-  if (
-    body.confirmOverride !== true &&
-    needsOverrideConfirm(existing, subjectUserId, session.userId)
-  ) {
-    return NextResponse.json(
-      {
-        error: "confirm_override",
-        existing: { status: existing!.status, updatedAt: existing!.updatedAt.toISOString() },
-      },
-      { status: 409 },
-    );
-  }
-
   const data = {
     status: body.status,
     ...(commentGiven ? { comment } : {}),
     setById: session.userId,
   };
-  // La lecture d'`existing` et l'écriture qui en dépend sont deux instants distincts : deux
-  // requêtes concurrentes sur la même personne — un double-clic depuis deux onglets, le
-  // capitaine et l'intéressé en même temps — passaient toutes deux par la branche « création »
-  // et la seconde violait l'unicité, donc un 500. Même parade que les trois autres routes
-  // d'écriture de ce module, plutôt qu'un rattrapage de code d'erreur.
+
+  // LA LECTURE EST DANS LA TRANSACTION, et c'est tout l'intérêt.
+  //
+  // Lue dehors, `existing` aurait été capturé par la closure : la transaction étant REJOUÉE
+  // TELLE QUELLE sur conflit (cf. `http-tx.ts`), le réessai aurait redécidé « créer » sur une
+  // lecture antérieure au conflit — soit exactement la violation d'unicité qu'on prétend
+  // éviter, remontée en `P2002` que la boucle ne rejoue pas, donc un 500. Les trois autres
+  // routes d'écriture de ce module lisent de même en première instruction du `tx`.
+  //
+  // Le 409 de confirmation en SORT plutôt que de s'y lever : il ne porte pas qu'un message mais
+  // la réponse qu'on s'apprêtait à écraser, et `HttpError` ne transporte pas de corps. Rendre
+  // une valeur referme la transaction sans écriture, ce qu'un refus doit faire de toute façon.
+  type Refus = { status: AvailabilityStatus; updatedAt: Date };
+  let refus: Refus | null;
   try {
-    await serializableTransaction(async (tx) => {
+    refus = await serializableTransaction(async (tx) => {
+      const existing = await tx.interclubAvailability.findFirst({
+        where: guestId ? { interclubId: id, guestId } : { interclubId: id, userId: subjectUserId! },
+        select: { id: true, userId: true, setById: true, status: true, updatedAt: true },
+      });
+
+      // ÉCRASER UNE RÉPONSE DE PREMIÈRE MAIN SE CONFIRME. Ce n'est pas un verrou — le capitaine
+      // qui a eu la personne au téléphone confirme et passe — mais personne ne doit faire
+      // disparaître un « non » assumé sans l'avoir vu. On renvoie ce qu'elle disait et quand,
+      // pour que l'écran puisse le montrer plutôt que d'annoncer un refus sec.
+      if (
+        body.confirmOverride !== true &&
+        needsOverrideConfirm(existing, subjectUserId, session.userId)
+      ) {
+        return { status: existing!.status as AvailabilityStatus, updatedAt: existing!.updatedAt };
+      }
+
       if (existing) {
         await tx.interclubAvailability.update({ where: { id: existing.id }, data });
       } else {
@@ -255,6 +268,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           data: { interclubId: id, userId: subjectUserId, guestId, comment: null, ...data },
         });
       }
+      return null;
     }, "Deux réponses en même temps, réessaie");
   } catch (e) {
     // Le 409 de conflit se rend TEL QUEL, comme dans les trois autres routes d'écriture : c'est
@@ -262,6 +276,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const res = httpErrorResponse(e);
     if (res) return res;
     throw e;
+  }
+
+  if (refus) {
+    return NextResponse.json(
+      { error: "confirm_override", existing: { status: refus.status, updatedAt: refus.updatedAt.toISOString() } },
+      { status: 409 },
+    );
   }
 
   const entries = await readEntries(fixture.teamId, id);

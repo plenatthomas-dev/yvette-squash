@@ -96,6 +96,30 @@ describe("InterclubStats", () => {
     expect(appels[0]).toContain("teamId=t7");
   });
 
+  it("SUIT L'ONGLET : changer d'équipe recharge le palmarès déjà ouvert", async () => {
+    // Monter directement avec « t7 » ne prouve rien : le composant n'a pas de `key`, il n'est
+    // jamais remonté. C'est le CHANGEMENT de `teamId` sur un composant vivant qui doit relancer
+    // la requête — sans quoi le classement et les rencontres changent d'équipe et le palmarès
+    // reste celui de l'onglet précédent, sans rien qui le signale.
+    const { rerender } = rendre(null);
+    await ouvrir();
+    await waitFor(() => expect(screen.getByText("Thomas")).toBeTruthy());
+    expect(appels[0]).not.toContain("teamId=");
+
+    rerender(<InterclubStats teamId="t7" onExpired={() => false} />);
+    await waitFor(() => expect(appels).toHaveLength(2));
+    expect(appels[1]).toContain("teamId=t7");
+  });
+
+  it("ne charge RIEN en changeant d'onglet tant que le bloc n'a pas été ouvert", async () => {
+    // Le corollaire : un bloc jamais déplié ne doit rien coûter, y compris quand on navigue
+    // d'un onglet à l'autre. Sinon l'effet ferait payer la requête à chaque écran interclub.
+    const { rerender } = rendre(null);
+    rerender(<InterclubStats teamId="t7" onExpired={() => false} />);
+    await waitFor(() => expect(screen.getByText("Statistiques des joueurs")).toBeTruthy());
+    expect(appels).toEqual([]);
+  });
+
   it("recharge en changeant de saison, et le dit au serveur", async () => {
     rendre();
     await ouvrir();

@@ -15,8 +15,9 @@ import { fetchTeamCalendar, ownFixtures } from "./calendar";
 //     npx vitest run src/lib/squashnet/calendar.live.test.ts -t "" --reporter=verbose
 //
 // en remplaçant `describe.skip` par `describe` le temps de la mesure. Ce qu'on regarde : le
-// nombre de rencontres (~4 par journée), les dates, et que les journées non planifiées
-// ressortent bien en `dateConfirmed: false`.
+// nombre de rencontres (TROIS par journée dans notre poule — six équipes, donc trois
+// rencontres ; la fixture figée en compte quinze pour cinq journées), les dates, et que les
+// journées non planifiées ressortent bien en `dateConfirmed: false`.
 //
 // L'événement visé est le Critérium IDF Hommes 2025-26, Hommes 4, poule IVD — CELUI DE NOTRE
 // ÉQUIPE, et c'est important : une sonde branchée sur la poule de quelqu'un d'autre resterait

@@ -80,6 +80,7 @@ type StandingRow = {
   drawWon: number;
   drawLost: number;
   lost: number;
+  /** Colonne « P », lue mais NON INTERPRÉTÉE — et donc jamais affichée (cf. `standings.ts`). */
   penalties: number;
   matches: { won: number; lost: number; diff: number };
   games: { won: number; lost: number; diff: number };
@@ -347,21 +348,25 @@ function StandingsTable({ team }: { team: Team }) {
         <table className="ic-standings-table">
           <thead>
             <tr>
-              <th scope="col" className="ic-st-rank">
+              <th scope="col" className="ic-st-rank" title="Rang dans la poule">
                 #
               </th>
               <th scope="col" className="ic-st-team">
                 Équipe
               </th>
-              <th scope="col">J</th>
-              <th scope="col">V</th>
+              {/* RÈGLE DU MICRO ÉTIQUETÉ (DESIGN.md) : sous 0,8rem, une abréviation porte son
+                  intitulé. `E+` et `E-` en avaient un, `J`, `V` et `D` non — trois colonnes
+                  d'un même tableau, deux traitements. Le tableau jumeau (`InterclubStats`)
+                  étiquette toutes les siennes. */}
+              <th scope="col" title="Rencontres jouées">J</th>
+              <th scope="col" title="Victoires — 3 points">V</th>
               <th scope="col" title="Nul gagné à l'average — 2 points">
                 E+
               </th>
               <th scope="col" title="Nul perdu à l'average — 1 point">
                 E-
               </th>
-              <th scope="col">D</th>
+              <th scope="col" title="Défaites — 0 point">D</th>
               <th scope="col" className="ic-st-pts">
                 Pts
               </th>
@@ -784,13 +789,25 @@ export default function Interclub({
           </div>
         ))}
 
-      {/* Le palmarès suit l'onglet comme le classement, et se place juste après lui : les deux
+      {/* Le palmarès suit l'onglet comme le classement — il se recharge sur `teamId`, faute de
+          `key` qui le remonterait —, et se place juste après lui : les deux
           répondent à la même curiosité — « où en est-on ? » — l'une pour l'équipe, l'autre pour
           les joueurs. Il ne charge rien tant qu'on ne l'ouvre pas. */}
       <InterclubStats teamId={activeTab === "all" ? null : activeTab} onExpired={stableExpired} />
 
+      {/* L'ÉTAT VIDE PORTE LE PANNEAU, LUI AUSSI. Les onglets pointent tous sur
+          `aria-controls="ic-fixtures"` : quand l'`<ul>` cédait la place à l'`EmptyState`,
+          l'identifiant ne désignait plus rien et chaque onglet annonçait un panneau
+          introuvable. Un club sans aucune rencontre est l'état où l'on a le plus besoin que
+          l'écran se laisse explorer. */}
       {rows.length === 0 ? (
-        <EmptyState icon="🏸" text="Aucune rencontre pour le moment." />
+        <div
+          id="ic-fixtures"
+          role={teams.length > 1 ? "tabpanel" : undefined}
+          aria-labelledby={teams.length > 1 ? `ic-tab-${activeTab}` : undefined}
+        >
+          <EmptyState icon="🏸" text="Aucune rencontre pour le moment." />
+        </div>
       ) : (
         <ul
           className="ic-list"

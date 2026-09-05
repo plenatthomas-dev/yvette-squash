@@ -130,10 +130,37 @@ type CalPreview = {
   /** Journées importées de cet événement que la ligue ne publie PLUS. Signalées, jamais
       supprimées : une rencontre peut déjà porter une composition et des réponses. */
   toDelete: { id: string; round: string | null; date: string; opponent: string }[];
+  /**
+   * Journées dont le STATUT DE LA DATE diverge. Signalées, jamais écrites : « confirmée » est
+   * une déduction, et l'admin est justement celui qui la corrige quand elle se trompe. La
+   * réappliquer révoquerait sa correction, et l'équipe cesserait d'être convoquée.
+   */
+  confirmDrift: { id: string; round: string; stored: boolean; published: boolean }[];
   /** Journées dont la date NE BOUGERA PAS : la rencontre est déjà commencée. */
   frozen: string[];
   unchanged: number;
 };
+
+/**
+ * CE QUI MANQUE À L'ANCRAGE, nommé — ou null s'il est complet.
+ *
+ * Les quatre identifiants ne servent pas à la même chose et ne se devinent pas l'un l'autre :
+ * une infobulle qui n'en teste qu'un promet une action sur un bouton mort.
+ */
+function ancrageManquant(t: {
+  snEventId: string | null;
+  snDrawId: string | null;
+  snRoundId: string | null;
+  snTeamId: string | null;
+}): string | null {
+  const manque = [
+    !t.snEventId && "l'épreuve",
+    !t.snDrawId && "la division",
+    !t.snRoundId && "la poule",
+    !t.snTeamId && "l'équipe",
+  ].filter((x): x is string => typeof x === "string");
+  return manque.length === 0 ? null : `Renseigne d'abord ${manque.join(", ")}.`;
+}
 
 /** Les champs du calendrier, en français : l'écran ne parle pas le nom de colonne. */
 const CAL_FIELDS: Record<string, string> = {
@@ -143,14 +170,12 @@ const CAL_FIELDS: Record<string, string> = {
   opponent: "adversaire",
   venue: "lieu",
   venueAddress: "adresse",
-  dateConfirmed: "statut de la date",
 };
 
 /** Une valeur d'écart, rendue lisible — un booléen brut ne dit rien à personne. */
 function calValue(field: string, v: string | null): string {
   if (v === null || v === "") return "—";
   if (field === "home") return v === "true" ? "à domicile" : "à l'extérieur";
-  if (field === "dateConfirmed") return v === "true" ? "confirmée" : "prévisionnelle";
   return v;
 }
 /** Membre inscrit rattaché à une équipe : listé ici en LECTURE (rattachement page Membres). */
@@ -268,7 +293,15 @@ export default function AdminPage() {
     Record<string, { eventId: string; drawId: string; roundId: string; snTeamId: string }>
   >({});
   const [icCal, setIcCal] = useState<CalPreview | null>(null);
-  const [icCalBusy, setIcCalBusy] = useState(false);
+  /**
+   * L'équipe dont un import est EN COURS, ou null.
+   *
+   * Un booléen global faisait passer le bouton de TOUTES les équipes en « … » dès qu'on
+   * prévisualisait l'import de l'une d'elles : l'écran annonçait trois travaux là où il n'y en
+   * avait qu'un, et on ne savait plus lequel on attendait. Les boutons des autres équipes
+   * restent désactivés — on n'importe qu'une équipe à la fois —, mais ils le disent autrement.
+   */
+  const [icCalBusy, setIcCalBusy] = useState<string | null>(null);
   const [icName, setIcName] = useState("");
 
   useEffect(() => {
@@ -726,7 +759,7 @@ export default function AdminPage() {
    * division — et une division fausse rend le tableau d'une AUTRE poule, parfaitement crédible.
    */
   const refreshStandings = async (t: IcTeam) => {
-    setIcCalBusy(true);
+    setIcCalBusy(t.id);
     setIcResult(null);
     try {
       const res = await fetch("/api/admin/interclub-calendar", {
@@ -752,12 +785,12 @@ export default function AdminPage() {
     } catch {
       setIcResult({ ok: false, text: "Réseau indisponible." });
     } finally {
-      setIcCalBusy(false);
+      setIcCalBusy(null);
     }
   };
 
   const previewCalendar = async (t: IcTeam) => {
-    setIcCalBusy(true);
+    setIcCalBusy(t.id);
     setIcResult(null);
     setIcCal(null);
     try {
@@ -778,18 +811,19 @@ export default function AdminPage() {
         toCreate: data.toCreate ?? [],
         toUpdate: data.toUpdate ?? [],
         toDelete: data.toDelete ?? [],
+        confirmDrift: data.confirmDrift ?? [],
         frozen: data.frozen ?? [],
         unchanged: data.unchanged ?? 0,
       });
     } catch {
       setIcResult({ ok: false, text: "Récupération impossible." });
     } finally {
-      setIcCalBusy(false);
+      setIcCalBusy(null);
     }
   };
 
   const applyCalendar = async (t: IcTeam) => {
-    setIcCalBusy(true);
+    setIcCalBusy(t.id);
     setIcResult(null);
     try {
       const res = await fetch("/api/admin/interclub-calendar", {
@@ -831,7 +865,7 @@ export default function AdminPage() {
     } catch {
       setIcResult({ ok: false, text: "Import impossible." });
     } finally {
-      setIcCalBusy(false);
+      setIcCalBusy(null);
     }
   };
 
@@ -1454,6 +1488,22 @@ export default function AdminPage() {
                                 ))}
                               </select>
                             </label>
+                            {/* LE CAPITAINE ENREGISTRÉ, quand le sélecteur ne peut pas le
+                                montrer. Le sélecteur ne liste que les membres de l'équipe :
+                                un capitaine rattaché ailleurs depuis n'y a plus d'option, et le
+                                navigateur retombe sur la première — « — aucun — ». L'admin en
+                                concluait qu'il n'y avait pas de capitaine, alors que `captainId`
+                                était toujours renseigné et que le cron continuait d'écrire à
+                                cette personne. On montre l'incohérence au lieu de la masquer.
+                                La cause racine est réglée côté `set_team`, qui démet du brassard
+                                qu'on quitte ; ceci rattrape les équipes ancrées avant. */}
+                            {t.captainId && !siens.some((m) => m.id === t.captainId) && (
+                              <p className="muted tiny">
+                                ⚠️ Capitaine enregistré : <strong>{t.captainName ?? "inconnu"}</strong>,
+                                qui ne fait plus partie de cette équipe. Il reçoit toujours ses
+                                récapitulatifs — choisis-en un autre, ou « — aucun — ».
+                              </p>
+                            )}
                             {/* Le capitaine doit JOUER dans l'équipe : le serveur refuse un
                                 membre extérieur. Quand la liste est vide, on le DIT plutôt que
                                 de laisser un sélecteur inerte dont on cherche la panne. */}
@@ -1554,20 +1604,22 @@ export default function AdminPage() {
                                 type="button"
                                 className="secondary ic-sn-standings"
                                 disabled={
-                                  icCalBusy ||
+                                  icCalBusy !== null ||
                                   !t.snEventId ||
                                   !t.snTeamId ||
                                   !t.snRoundId ||
                                   !t.snDrawId
                                 }
                                 onClick={() => refreshStandings(t)}
+                                // Le bouton est grisé si L'UN DES QUATRE identifiants manque ;
+                                // l'infobulle n'en testait qu'un et promettait « retélécharge
+                                // maintenant » sur un bouton mort, sans dire ce qui manquait.
                                 title={
-                                  t.snDrawId
-                                    ? "Retélécharge le classement de la poule maintenant."
-                                    : "Renseigne d'abord la division."
+                                  ancrageManquant(t) ??
+                                  "Retélécharge le classement de la poule maintenant."
                                 }
                               >
-                                Relire le classement
+                                {icCalBusy === t.id ? "Lecture…" : "Relire le classement"}
                                 {t.snStandingsAt && (
                                   <span className="muted tiny">
                                     {" "}
@@ -1584,15 +1636,20 @@ export default function AdminPage() {
                               <button
                                 type="button"
                                 className="secondary"
-                                disabled={icCalBusy || !t.snEventId || !t.snTeamId || !t.snRoundId}
+                                disabled={
+                                  icCalBusy !== null || !t.snEventId || !t.snTeamId || !t.snRoundId
+                                }
                                 onClick={() => previewCalendar(t)}
                                 title={
+                                  // Le calendrier n'exige que TROIS identifiants : la division
+                                  // ne sert qu'au classement, et l'exiger ici priverait
+                                  // d'import les équipes ancrées avant qu'elle existe.
                                   t.snEventId && t.snRoundId && t.snTeamId
                                     ? "Télécharge le calendrier publié et montre l'écart, sans rien écrire."
-                                    : "Renseigne d'abord les quatre identifiants."
+                                    : "Renseigne d'abord l'épreuve, la poule et l'équipe."
                                 }
                               >
-                                {icCalBusy && icCal?.teamId !== t.id ? "…" : "Prévisualiser l'import"}
+                                {icCalBusy === t.id ? "…" : "Prévisualiser l'import"}
                               </button>
 
                               {/* L'APERÇU. Il montre ce qui serait écrit, en français et champ
@@ -1611,7 +1668,8 @@ export default function AdminPage() {
 
                                   {icCal.toCreate.length === 0 &&
                                   icCal.toUpdate.length === 0 &&
-                                  icCal.toDelete.length === 0 ? (
+                                  icCal.toDelete.length === 0 &&
+                                  icCal.confirmDrift.length === 0 ? (
                                     <p className="muted tiny">
                                       Rien à changer : la base est à jour.
                                     </p>
@@ -1649,6 +1707,23 @@ export default function AdminPage() {
                                           )}
                                         </li>
                                       ))}
+                                      {/* LE STATUT DE LA DATE, qui se signale sans s'appliquer.
+                                          C'est une déduction (plusieurs journées le même jour =
+                                          date bouchon), et elle a deux angles morts connus : un
+                                          rattrapage à deux journées le même soir passe pour
+                                          prévisionnel, une journée non planifiée seule passe
+                                          pour ferme. L'admin est celui qui tranche — réécrire
+                                          par-dessus lui révoquerait sa correction en silence. */}
+                                      {icCal.confirmDrift.map((c) => (
+                                        <li key={`s${c.id}`}>
+                                          <strong>{c.round}</strong> — la ligue la publie{" "}
+                                          {c.published ? "confirmée" : "prévisionnelle"}, la base la
+                                          dit {c.stored ? "confirmée" : "prévisionnelle"}.{" "}
+                                          <em className="muted">
+                                            Non appliqué : à corriger sur la rencontre si besoin.
+                                          </em>
+                                        </li>
+                                      ))}
                                       {/* Une journée RETIRÉE du calendrier fédéral. On la montre
                                           sans jamais la supprimer : elle porte peut-être déjà une
                                           composition et des réponses, et « plus rien n'est
@@ -1678,17 +1753,28 @@ export default function AdminPage() {
                                     <button
                                       type="button"
                                       disabled={
-                                        icCalBusy ||
-                                        (icCal.toCreate.length === 0 && icCal.toUpdate.length === 0)
+                                        icCalBusy !== null ||
+                                        (icCal.toCreate.length === 0 &&
+                                          icCal.toUpdate.length === 0 &&
+                                          icCal.confirmDrift.length === 0)
+                                      }
+                                      title={
+                                        icCal.toCreate.length === 0 &&
+                                        icCal.toUpdate.length === 0 &&
+                                        icCal.confirmDrift.length === 0
+                                          ? "Rien à appliquer : la base est déjà à jour."
+                                          : icCal.toCreate.length === 0 && icCal.toUpdate.length === 0
+                                            ? "Rien à écrire — enregistre seulement que ce calendrier a été vu, pour que le contrôle hebdomadaire cesse de le signaler."
+                                            : "Écrit les créations et corrections listées ci-dessus."
                                       }
                                       onClick={() => applyCalendar(t)}
                                     >
-                                      {icCalBusy ? "Import…" : "Appliquer"}
+                                      {icCalBusy === t.id ? "Import…" : "Appliquer"}
                                     </button>
                                     <button
                                       type="button"
                                       className="secondary"
-                                      disabled={icCalBusy}
+                                      disabled={icCalBusy !== null}
                                       onClick={() => setIcCal(null)}
                                     >
                                       Fermer

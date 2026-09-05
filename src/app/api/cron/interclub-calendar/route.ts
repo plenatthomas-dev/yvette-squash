@@ -3,7 +3,7 @@ import { cronAuthorized } from "@/lib/cron-auth";
 import { recordCronRun } from "@/lib/cron-run";
 import { getFeatures } from "@/lib/features-server";
 import { prisma } from "@/lib/db";
-import { isAdminEmail } from "@/lib/admin";
+import { adminUserIds } from "@/lib/admin";
 import {
   fetchTeamCalendar,
   ownFixtures,
@@ -40,13 +40,16 @@ export const maxDuration = 60;
 //  est exactement le moment où elle doit s'arrêter.
 // ============================================================================
 
-/** Le capitaine de l'équipe et les admins : ceux qui peuvent faire quelque chose de l'alerte. */
-async function recipients(captainId: string | null): Promise<string[]> {
-  const admins = await prisma.user.findMany({
-    where: { email: { not: null }, disabledAt: null },
-    select: { id: true, email: true },
-  });
-  const ids = new Set(admins.filter((a) => isAdminEmail(a.email)).map((a) => a.id));
+/**
+ * Le capitaine de l'équipe et les admins : ceux qui peuvent faire quelque chose de l'alerte.
+ *
+ * La liste des admins est passée EN ARGUMENT, lue une seule fois avant la boucle : elle ne
+ * dépend pas de l'équipe. On chargeait ici tous les emails du club, une fois par équipe, pour
+ * n'en retenir que deux ou trois — et avec une seconde définition de « qui est admin »,
+ * à dix lignes de celle qui fait le filtre en base (`adminUserIds`).
+ */
+function recipients(adminIds: string[], captainId: string | null): string[] {
+  const ids = new Set(adminIds);
   if (captainId) ids.add(captainId);
   return [...ids];
 }
@@ -79,6 +82,9 @@ export async function GET(req: NextRequest) {
       captainId: true,
     },
   });
+
+  // Une seule fois, hors boucle : « qui est admin » ne change pas d'une équipe à l'autre.
+  const adminIds = await adminUserIds();
 
   let checked = 0;
   let drifted = 0;
@@ -144,7 +150,18 @@ export async function GET(req: NextRequest) {
     // On décrit l'écart RÉEL par rapport à ce qu'on a en base, pas seulement « ça a changé » :
     // le lecteur doit pouvoir juger de l'urgence sans ouvrir l'appli.
     const stored = await prisma.interclub.findMany({
-      where: { teamId: team.id },
+      // LES RENCONTRES DE CET ÉVÉNEMENT SEULEMENT. On chargeait toutes les saisons de l'équipe
+      // pour n'en retenir ensuite que les clés préfixées `${eventId}:` — le filtre existait
+      // déjà, mais en mémoire, une fois toutes les lignes rapatriées.
+      //
+      // Les rencontres SAISIES À LA MAIN (`snMatchKey` nul) restent du lot, alors que
+      // `diffCalendar` les ignore aujourd'hui de bout en bout : c'est ce que dit son contrat —
+      // « l'automatique et l'humain ne partagent aucune colonne » —, et lui passer un jeu
+      // amputé ferait dépendre cette doctrine de l'appelant plutôt que d'elle-même.
+      where: {
+        teamId: team.id,
+        OR: [{ snMatchKey: null }, { snMatchKey: { startsWith: `${team.snEventId!}:` } }],
+      },
       select: {
         id: true,
         round: true,
@@ -169,12 +186,21 @@ export async function GET(req: NextRequest) {
       // base pour toujours et le cron quotidien ouvrait son appel de disponibilité pour une
       // soirée qui n'existe plus.
       ...diff.toDelete.map((d) => `${d.round ?? "?"} retirée du calendrier (${d.date})`),
+      // LE STATUT DE LA DATE, qui n'est pas publié mais déduit, et que l'import ne réécrit plus
+      // pour ne pas révoquer une correction humaine. C'est donc la seule voie par laquelle une
+      // journée redevenue ferme — ou devenue bouchon — atteint quelqu'un : sans cette ligne, la
+      // base garderait « prévisionnelle » et l'équipe ne serait jamais convoquée.
+      ...diff.confirmDrift.map(
+        (c) =>
+          `${c.round} : la ligue la publie ${c.published ? "confirmée" : "prévisionnelle"}, ` +
+          `la base la dit ${c.stored ? "confirmée" : "prévisionnelle"} (à corriger à la main)`,
+      ),
     ];
     // L'empreinte a bougé mais rien de ce qu'on suit n'a changé (une rencontre saisie à la
     // main couvre déjà la journée, par exemple) : se taire plutôt que d'alerter à vide.
     if (changes.length === 0) continue;
 
-    await notifyCalendarDrift(await recipients(team.captainId), team.name, changes);
+    await notifyCalendarDrift(recipients(adminIds, team.captainId), team, changes);
     drifted++;
   }
 

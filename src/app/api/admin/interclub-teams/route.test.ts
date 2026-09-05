@@ -53,6 +53,13 @@ vi.mock("@/lib/db", () => ({
         h.teamUpdated = args;
         return args.data;
       }),
+      // `updateMany` + `count`, comme les autres actions du fichier : un identifiant inconnu
+      // doit rendre un 404 qui se lit, et non le `P2025` d'`update` remonté en 500.
+      updateMany: vi.fn(async (args: { where: { id: string }; data: Record<string, unknown> }) => {
+        const existe = h.team !== null && (h.team as { id?: string }).id === args.where.id;
+        if (existe) h.teamUpdated = args;
+        return { count: existe ? 1 : 0 };
+      }),
     },
     interclubGuest: {
       findMany: vi.fn(async () => h.guests),
@@ -410,6 +417,15 @@ describe("POST set_captain", () => {
     const res = await POST(post({ action: "set_captain", teamId: "t1", userId: "" }));
     expect(res.status).toBe(200);
     expect(h.teamUpdated?.data).toMatchObject({ captainId: null });
+  });
+
+  it("404 sur une ÉQUIPE inconnue, et non un 500", async () => {
+    // Un écran resté ouvert après la suppression d'une équipe. `update` levait `P2025`, que
+    // rien ne rattrape : l'admin voyait « erreur serveur » là où les quatre autres actions du
+    // même fichier disent proprement ce qui manque.
+    h.user = { teamId: "fantome", displayName: "Thomas", nickname: null };
+    const res = await POST(post({ action: "set_captain", teamId: "fantome", userId: "u1" }));
+    expect(res.status).toBe(404);
   });
 
   it("403 si l'appelant n'est pas admin", async () => {

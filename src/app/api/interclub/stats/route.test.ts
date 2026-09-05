@@ -95,20 +95,24 @@ describe("GET /api/interclub/stats", () => {
     expect(h.lastWhere).toMatchObject({ status: "done" });
   });
 
-  it("filtre sur l'équipe quand on la demande", async () => {
+  it("filtre sur l'équipe quand on la demande, et sur RIEN d'autre", async () => {
     await GET(req("teamId=t1"));
-    expect(h.lastWhere).toMatchObject({ interclub: { teamId: "t1" } });
+    expect(h.lastWhere).toEqual({ status: "done", interclub: { teamId: "t1" } });
   });
 
-  it("filtre sur la saison quand on la demande", async () => {
+  it("filtre sur la saison quand on la demande, et sur RIEN d'autre", async () => {
     await GET(req("season=2025-2026"));
-    expect(h.lastWhere).toMatchObject({ interclub: { season: "2025-2026" } });
+    expect(h.lastWhere).toEqual({ status: "done", interclub: { season: "2025-2026" } });
   });
 
   it("sans filtre, ne restreint NI l'équipe NI la saison", async () => {
     // Un joueur qui dépanne en équipe 2 doit retrouver ses matchs quelque part.
+    //
+    // `toEqual` et non `toMatchObject` : celui-ci ne vérifiait que « `interclub` est un objet »,
+    // et passait donc à l'identique si la route avait posé un `teamId` en dur — c'est-à-dire
+    // dans le cas exact que ce test prétend interdire.
     await GET(req());
-    expect(h.lastWhere).toMatchObject({ interclub: {} });
+    expect(h.lastWhere).toEqual({ status: "done", interclub: {} });
   });
 
   it("rend les saisons saisies, pour alimenter le filtre", async () => {

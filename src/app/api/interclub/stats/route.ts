@@ -28,6 +28,16 @@ export async function GET(req: NextRequest) {
   const season = req.nextUrl.searchParams.get("season") || undefined;
 
   const matches = await prisma.interclubMatch.findMany({
+    // UNE BORNE, PARCE QUE CETTE REQUÊTE N'EN AVAIT AUCUNE. Sans filtre, elle joint le jeu par
+    // jeu de TOUTE l'histoire du club, et rien ne l'arrêtait — c'est le genre de requête qui
+    // tient trois ans puis fait tomber une page un soir de match.
+    //
+    // Le chiffre est dimensionné très au-dessus du réel, à dessein : quatre simples par
+    // rencontre, une dizaine de rencontres par équipe et par saison, trois équipes — de l'ordre
+    // de 120 simples par saison, soit un siècle de championnat avant d'y toucher. Une borne
+    // qu'on n'atteint pas protège sans jamais tronquer un palmarès en silence, ce qui serait
+    // pire que lent.
+    take: 20_000,
     where: {
       // Seuls les simples TERMINÉS remontent : `playerStats` refiltre, mais le faire ici évite
       // de charger et de joindre le jeu par jeu de toutes les soirées en cours.

@@ -61,6 +61,20 @@ function isSerializationConflict(e: unknown): boolean {
 }
 
 /**
+ * P2002 = violation d'unicité. « Quelqu'un l'a déjà écrit », et non « c'est cassé ».
+ *
+ * Exportée pour les écritures IDEMPOTENTES par nature — celles qu'on peut rejouer parce que le
+ * second passage n'a plus rien à faire. Deux clics sur « Appliquer » ne sont pas une faute de
+ * l'admin : c'est un bouton qui a mis deux secondes à répondre.
+ *
+ * ⚠️ À ne pas confondre avec un rattrapage général : avaler un P2002 là où l'unicité EXPRIME une
+ * règle métier (« une seule réponse par personne ») masquerait le conflit au lieu de le régler.
+ */
+export function isUniqueViolation(e: unknown): boolean {
+  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
+}
+
+/**
  * Recul entre deux tentatives : croissant, et TIRÉ AU SORT sur toute sa largeur.
  *
  * Le raisonnement qui justifie le nombre de tentatives — « au-delà, l'écriture n'est plus en

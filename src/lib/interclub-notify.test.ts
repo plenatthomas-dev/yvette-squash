@@ -26,6 +26,8 @@ vi.mock("./push", () => ({
 }));
 
 import {
+  frenchDate,
+  notifyCalendarDrift,
   notifyAvailabilityReminder,
   notifyCaptainDigest,
   notifyFixtureDone,
@@ -178,6 +180,62 @@ describe("contenu et garde-fous", () => {
   it("une panne de base ne remonte pas : notifier reste best-effort", async () => {
     h.throwOnQuery = true;
     await expect(notifyFixtureDone(ctx, { home: 3, away: 1 })).resolves.toBeUndefined();
+    expect(h.sent).toEqual([]);
+  });
+});
+
+describe("frenchDate", () => {
+  it("écrit la date en toutes lettres, sans l'année", () => {
+    // Une rencontre annoncée se joue dans les semaines qui viennent : « 2026 » n'apprend rien
+    // dans une notification qu'on lit d'un coup d'œil.
+    expect(frenchDate("2026-10-09")).toBe("vendredi 9 octobre");
+  });
+
+  it("ne dépend pas du fuseau de la machine", () => {
+    // Un décalage d'un jour se lit comme un rendez-vous manqué. La date est composée en UTC de
+    // bout en bout, et le 1er du mois est le cas où l'erreur se voit.
+    expect(frenchDate("2026-01-01")).toBe("jeudi 1 janvier");
+  });
+
+  it("REND LA CHAÎNE TELLE QUELLE sur une date hors bornes, au lieu d'en inventer une", () => {
+    // `Date.UTC` déborde volontiers : « 2026-13-45 » devenait « samedi 14 février », crédible
+    // et faux de six semaines — dans un message qui convoque une équipe. Une date illisible se
+    // remarque, une date fausse non.
+    expect(frenchDate("2026-13-45")).toBe("2026-13-45");
+    expect(frenchDate("2026-02-31")).toBe("2026-02-31");
+    expect(frenchDate("pas une date")).toBe("pas une date");
+  });
+});
+
+describe("notifyCalendarDrift", () => {
+  const equipe = { id: "t1", name: "Équipe 1" };
+
+  it("annonce les écarts et renvoie vers l'espace admin, sans rien appliquer", async () => {
+    await notifyCalendarDrift(["a"], equipe, ["J1 déplacée au 2026-10-16"]);
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0].payload).toMatchObject({ url: "/admin" });
+    expect(h.sent[0].payload.title).toContain("Équipe 1");
+    expect(h.sent[0].payload.body).toContain("J1 déplacée au 2026-10-16");
+  });
+
+  it("étiquette sur l'IDENTIFIANT de l'équipe, jamais sur son nom", async () => {
+    // Le tag fait qu'une alerte remplace la précédente. Bâti sur le nom, un renommage faisait
+    // cohabiter deux alertes pour la même équipe, et deux équipes homonymes n'auraient jamais
+    // pu se remplacer l'une l'autre.
+    await notifyCalendarDrift(["a"], equipe, ["J1 modifiée"]);
+    expect(h.sent[0].payload.tag).toBe("interclub-calendrier-t1");
+  });
+
+  it("ne garde que les trois premiers écarts, et COMPTE le reste", async () => {
+    // Une notification tronquée sans le compte laisserait croire qu'il n'y a que trois lignes.
+    await notifyCalendarDrift(["a"], equipe, ["J1", "J2", "J3", "J4", "J5"]);
+    expect(h.sent[0].payload.body).toContain("J1 · J2 · J3 (+2)");
+  });
+
+  it("n'envoie RIEN quand personne ne peut agir", async () => {
+    // Sans capitaine ni admin joignable, il n'y a pas de destinataire : pousser dans le vide
+    // consommerait le quota et masquerait un vrai problème de configuration.
+    await notifyCalendarDrift([], equipe, ["J1 modifiée"]);
     expect(h.sent).toEqual([]);
   });
 });

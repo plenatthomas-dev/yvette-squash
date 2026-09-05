@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { readOk } from "@/lib/apiFetch";
 import type { PlayerStatRow } from "@/lib/interclub-stats";
 
@@ -58,6 +58,25 @@ export function InterclubStats({
     },
     [teamId, onExpired],
   );
+
+  // LE PALMARÈS SUIT L'ONGLET.
+  //
+  // Le composant est monté SANS `key` : changer d'onglet ne le remonte pas, il recrée seulement
+  // `charge` — et plus personne ne l'appelait, `onToggle` étant gardé par `!data`. Le classement
+  // et les rencontres changeaient d'équipe, le palmarès gardait celui de l'onglet précédent : on
+  // lisait les chiffres de tout le club en croyant lire ceux de l'Équipe 2, et replier puis
+  // rouvrir n'y changeait rien.
+  //
+  // Seulement SI LE BLOC A DÉJÀ ÉTÉ OUVERT (`data` non nul). Un bloc jamais déplié ne doit rien
+  // coûter — c'est toute la raison du chargement au dépliage —, et un effet qui partirait au
+  // montage ferait payer la requête à chaque affichage de l'écran interclub. D'où le repère du
+  // dernier `teamId` servi : il distingue « l'onglet a changé » de « l'effet vient de tourner ».
+  const teamServi = useRef(teamId);
+  useEffect(() => {
+    if (teamServi.current === teamId) return;
+    teamServi.current = teamId;
+    if (data) void charge(saison);
+  }, [teamId, data, saison, charge]);
 
   return (
     <details
