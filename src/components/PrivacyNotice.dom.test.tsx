@@ -32,6 +32,7 @@ const TOUT_OFF: Features = {
   ranking: false,
   externalBookings: false,
   interclub: false,
+  forum: false,
 };
 
 /** Ouvre la note et rend son texte entier, espaces normalisés. */

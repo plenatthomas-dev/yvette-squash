@@ -6041,3 +6041,159 @@ body[data-bottombar] .install-banner {
   color: var(--pico-muted-color);
   white-space: nowrap;
 }
+
+/* --- Le fil de discussion du club ------------------------------------- */
+/* Mise en page en TROIS BANDES : en-tête figé, liste qui défile, saisie collée en bas. La
+   liste est le seul élément élastique, pour que la zone de saisie reste atteignable au pouce
+   sans faire défiler la page — c'est la posture réelle : debout, dans une salle, une main. */
+.forum {
+  display: flex;
+  flex-direction: column;
+  /* Le chrome du planning est masqué sur cette vue (isSpecial) : on prend la hauteur utile,
+     `dvh` et non `vh` pour que la barre d'URL mobile ne rogne pas la saisie. */
+  height: calc(100dvh - 150px);
+  min-height: 320px;
+}
+.forum-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.forum-head h2 {
+  margin: 0;
+  font-size: 1.02rem;
+}
+/* La présence est une information d'ambiance : elle ne doit jamais concurrencer un message. */
+.forum-presents {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+}
+.forum-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 0;
+}
+.forum-plus {
+  width: auto;
+  margin: 0 auto 10px;
+  display: block;
+  font-size: 0.8rem;
+  padding: 8px 14px;
+}
+.forum-erreur {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+  text-align: center;
+}
+.forum-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* Bulle. Pas de fond coloré pour les siens : la Règle du Fond et de l'Encre réserve la
+   couleur à l'état, et « c'est moi qui parle » n'est pas un état. C'est l'alignement et un
+   filet qui le disent — même dispositif que l'issue d'une rencontre. */
+.forum-msg {
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-card-border-color);
+}
+.forum-msg.is-mine {
+  align-self: flex-end;
+  border-left: 3px solid var(--good-edge);
+}
+.forum-msg-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.forum-msg-head strong {
+  font-size: 0.85rem;
+}
+.forum-msg-head small {
+  color: var(--pico-muted-color);
+  font-size: 0.72rem;
+}
+.forum-suppr {
+  margin: 0 0 0 auto;
+  padding: 4px 8px;
+  width: auto;
+  background: none;
+  border: none;
+  color: var(--pico-muted-color);
+  font-size: 0.72rem;
+  /* Cible tactile : 24 px de haut se rate un doigt sur deux, debout dans une salle. */
+  min-height: 44px;
+  min-width: 44px;
+}
+.forum-msg-body {
+  margin: 2px 0 0;
+  font-size: 0.9rem;
+  white-space: pre-wrap; /* les retours à la ligne que parseForumBody a préservés */
+  overflow-wrap: anywhere; /* une URL collée ne doit pas élargir la bulle */
+}
+/* Hauteur RÉSERVÉE, même vide (l'espace insécable du composant) : sans elle, l'apparition de
+   « X écrit… » pousserait tout le fil d'une ligne à chaque frappe. */
+.forum-typing {
+  margin: 4px 0 0;
+  min-height: 1.1em;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+  font-style: italic;
+}
+.forum-form {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  margin-top: 6px;
+}
+.forum-input {
+  flex: 1;
+  margin: 0;
+  resize: none;
+  max-height: 30dvh;
+  font-size: 0.9rem;
+  /* 16px minimum sur iOS sinon Safari zoome au focus et casse la mise en page. La règle ne
+     s'applique qu'au pointeur grossier : au clavier-souris, 0,9rem reste plus dense. */
+}
+@media (pointer: coarse) {
+  .forum-input {
+    font-size: 16px;
+  }
+}
+.forum-envoi {
+  width: auto;
+  margin: 0;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  min-height: 44px;
+  padding: 0 16px;
+}
+.forum-restant {
+  margin: 4px 0 0;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+  text-align: right;
+}
+.forum-head-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.forum-mute {
+  width: auto;
+  margin: 0;
+  padding: 0 12px;
+  min-height: 44px;
+  font-size: 0.72rem;
+}

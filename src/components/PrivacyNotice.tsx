@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { Dialog } from "@/components/Dialog";
 import { useFeatures } from "@/components/FeatureProvider";
-import { MODERATION_RETENTION_LABEL, SNAPSHOT_RETENTION_LABEL } from "@/lib/retention";
+import {
+  MODERATION_RETENTION_LABEL,
+  SNAPSHOT_RETENTION_LABEL,
+  FORUM_RETENTION_LABEL,
+} from "@/lib/retention";
 
 // Responsable du traitement (art. 13 RGPD) : son identité ET ses coordonnées doivent figurer
 // dans la note — le but est qu'on sache à qui l'on confie ses données, et à qui s'adresser.
@@ -52,7 +56,8 @@ export function InfoIcon() {
 // comme sur l'appli. La modale réutilise le style .modal existant.
 export function PrivacyNotice() {
   const [open, setOpen] = useState(false);
-  const { directory, ranking, tricount, tournament, delegation, interclub } = useFeatures();
+  const { directory, ranking, tricount, tournament, delegation, interclub, forum } =
+    useFeatures();
   return (
     <footer className="app-footer">
       <button
@@ -119,8 +124,15 @@ export function PrivacyNotice() {
                 {" "}(envoi des e-mails — il reçoit ton nom et ton adresse quand tu nous écris),
                 et sur les outils de Vercel : mesure d'audience
                 (<strong>Analytics</strong>, sans cookie ni profilage) et détection de robots
-                (<strong>BotID</strong>, à l'inscription). Rien n'est vendu, ni transmis à des
-                tiers en dehors de ça.
+                (<strong>BotID</strong>, à l'inscription).{" "}
+                {forum && (
+                  <>
+                    Le fil de discussion passe par <strong>Pusher</strong> (Irlande, Union
+                    européenne) pour l&apos;affichage instantané&nbsp;: il achemine les messages
+                    vers les membres connectés, et sait qui l&apos;est.{" "}
+                  </>
+                )}
+                Rien n'est vendu, ni transmis à des tiers en dehors de ça.
               </p>
               <p>
                 <strong>Administrateurs.</strong> Un ou deux membres ont un accès
@@ -145,6 +157,12 @@ export function PrivacyNotice() {
                 <strong>Combien de temps.</strong> Tes données de membre vivent
                 <strong> aussi longtemps que ton compte</strong> et disparaissent avec lui.
                 Les traces de modération ci-dessus : <strong>{MODERATION_RETENTION_LABEL}</strong>.
+                {forum && (
+                  <>
+                    {" "}Les messages du fil de discussion :{" "}
+                    <strong>{FORUM_RETENTION_LABEL}</strong>, puis effacés automatiquement.
+                  </>
+                )}
                 Le planning du club est mis en cache (pour l'afficher aux comptes sans accès
                 ResaMania) et effacé <strong>{SNAPSHOT_RETENTION_LABEL}</strong> après le jour
                 concerné. Les données anti-abus sont éphémères (quelques minutes à 24 h), et une
@@ -271,6 +289,24 @@ export function PrivacyNotice() {
                   tout moment depuis l&apos;onglet Interclub.
                 </p>
                 </>
+              )}
+              {forum && (
+                <p>
+                  <strong>Le fil de discussion.</strong> Ce que tu y écris est visible de{" "}
+                  <strong>tous les membres connectés</strong> — c&apos;est un fil unique, il
+                  n&apos;y a pas de conversation privée dans l&apos;appli. Ton{" "}
+                  <strong>nom d&apos;affichage</strong> accompagne chaque message, jamais ton
+                  pseudo ni ton adresse. Tu peux <strong>supprimer les tiens</strong> à tout
+                  moment&nbsp;; un administrateur peut supprimer <strong>n&apos;importe
+                  lequel</strong>, parce qu&apos;un fil lu par tout le club a besoin de
+                  quelqu&apos;un pour retirer ce qui n&apos;a rien à y faire. Tant que le fil est
+                  ouvert devant toi, les autres membres présents{" "}
+                  <strong>voient que tu es en ligne et que tu es en train d&apos;écrire</strong>
+                  &nbsp;; cela ne laisse aucune trace une fois l&apos;onglet fermé. Les messages
+                  sont conservés <strong>{FORUM_RETENTION_LABEL}</strong>, puis effacés. Les
+                  notifications du fil se coupent depuis le fil lui-même, et tout ce que tu y as
+                  écrit disparaît avec ton compte.
+                </p>
               )}
               {delegation && (
                 <p>

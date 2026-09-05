@@ -29,6 +29,7 @@ import {
   RefreshIcon,
   CalendarIcon,
   MultiSelectIcon,
+  ChatIcon,
 } from "@/components/icons";
 // Tricount chargé à la demande (seulement à l'ouverture de la vue « Frais ») : son JS ne
 // pèse plus sur le bundle initial de la page. Rendu client uniquement (déjà dans "use client").
@@ -36,6 +37,9 @@ const Tricount = dynamic(() => import("@/components/Tricount"), { ssr: false });
 // Idem pour le module Tournoi (vue « Tournoi ») : chargé seulement à l'ouverture.
 const Tournament = dynamic(() => import("@/components/Tournament"), { ssr: false });
 const Interclub = dynamic(() => import("@/components/Interclub"), { ssr: false });
+// Idem pour le fil de discussion : son JS embarque le client temps réel, qui n'a aucune
+// raison de peser sur le premier chargement de quelqu'un qui vient réserver un terrain.
+const Forum = dynamic(() => import("@/components/Forum"), { ssr: false });
 import { fmtTime, slotMinutes, stampFR } from "@/lib/time";
 import { NOTIFICATION_RETENTION_DAYS } from "@/lib/notifications-shared";
 import { downloadIcs } from "@/lib/ics";
@@ -175,7 +179,7 @@ interface AlertItem {
 const SPLASH_MIN_MS = 250;
 
 export default function Home() {
-  const { tricount, directory, delegation, tournament, interclub } = useFeatures();
+  const { tricount, directory, delegation, tournament, interclub, forum } = useFeatures();
   const [me, setMe] = useState<string | null | undefined>(undefined); // undefined = chargement
   const [splashDone, setSplashDone] = useState(false); // plancher anti-flash de l'écran de chargement écoulé
   const [myId, setMyId] = useState<string | null>(null); // id interne (se reconnaître dans l'annuaire)
@@ -196,9 +200,12 @@ export default function Home() {
   const [range, setRange] = useState<Range>("all");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
-  const [view, setView] = useState<"day" | "week" | "money" | "tourney" | "interclub">("day");
+  const [view, setView] = useState<"day" | "week" | "money" | "tourney" | "interclub" | "forum">(
+    "day",
+  );
   // Vues « plein écran » sans le chrome planning (Frais, Tournoi).
-  const isSpecial = view === "money" || view === "tourney" || view === "interclub";
+  const isSpecial =
+    view === "money" || view === "tourney" || view === "interclub" || view === "forum";
   const [week, setWeek] = useState<{ date: string; planning: PlanningDay }[]>([]);
   const [busy, setBusy] = useState(false);
   // Retour visuel de `busy` DANS la grille. `busy` seul ne se voit nulle part : entre le tap
@@ -544,7 +551,8 @@ export default function Home() {
     if (view === "money" && !tricount) setView("day");
     if (view === "tourney" && !tournament) setView("day");
     if (view === "interclub" && !interclub) setView("day");
-  }, [view, tricount, tournament, interclub]);
+    if (view === "forum" && !forum) setView("day");
+  }, [view, tricount, tournament, interclub, forum]);
 
   // Reflète l'état dans l'URL (partageable, survit au refresh) et le persiste.
   useEffect(() => {
@@ -560,7 +568,8 @@ export default function Home() {
 
   useEffect(() => {
     if (!me || !hydrated) return;
-    if (view === "money" || view === "tourney" || view === "interclub") return; // ces vues chargent leurs propres données
+    if (view === "money" || view === "tourney" || view === "interclub" || view === "forum")
+      return; // ces vues chargent leurs propres données
     if (view === "week") loadWeek(date);
     else load(date);
   }, [me, hydrated, date, view, load, loadWeek]);
@@ -577,7 +586,8 @@ export default function Home() {
   // actualiser plusieurs fois ».
   const reload = useCallback(
     (fresh = false) => {
-      if (view === "money" || view === "tourney" || view === "interclub") return; // ces vues se rechargent seules
+      if (view === "money" || view === "tourney" || view === "interclub" || view === "forum")
+        return; // ces vues se rechargent seules
       if (view === "week") loadWeek(date, fresh);
       else load(date, fresh);
     },
@@ -1246,6 +1256,15 @@ export default function Home() {
                   onClick: () => setView(view === "interclub" ? "day" : "interclub"),
                 },
                 {
+                  key: "forum",
+                  label: "Le fil",
+                  icon: <ChatIcon />,
+                  active: view === "forum",
+                  disabled: !forum,
+                  comingSoon: !forum,
+                  onClick: () => setView(view === "forum" ? "day" : "forum"),
+                },
+                {
                   key: "directory",
                   label: "Annuaire",
                   icon: <UsersIcon />,
@@ -1492,6 +1511,8 @@ export default function Home() {
       {interclub && view === "interclub" && (
         <Interclub toast={toast} onExpired={handleExpired} />
       )}
+
+      {forum && view === "forum" && <Forum toast={toast} onExpired={handleExpired} />}
 
       {isSpecial
         ? null

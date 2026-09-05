@@ -53,6 +53,17 @@ model User {
   // Les deux sont indépendants : on peut fermer la modale et garder le bandeau.
   bannerDismissedVersion   String?
   bannerModalSeenVersion   String?
+  // FIL DE DISCUSSION.
+  //  - forumReadAt : dernière ouverture du fil, pour la pastille « non lus ». NULL = jamais
+  //    ouvert, donc tout est neuf. Rattaché au COMPTE et non au navigateur, pour la même
+  //    raison que les deux lignes au-dessus : un téléphone partagé fuitait d'un membre à
+  //    l'autre. Écrit avec throttle (cf. touchLastSeen) — la précision à la seconde n'a
+  //    aucune valeur ici et chaque écriture réveille la base.
+  //  - forumMuted : OPT-OUT des notifications du fil. L'inverse d'`InterclubFollow`, qui est
+  //    un opt-in : un fil de club que personne ne reçoit ne vit pas, alors qu'un suivi de
+  //    rencontre auquel personne n'a souscrit reste légitime. Le membre garde la main.
+  forumReadAt              DateTime?
+  forumMuted               Boolean                 @default(false)
   createdAt                DateTime                @default(now())
   sessions                 Session[]
   passkeys                 Passkey[] // connexion biométrique (WebAuthn / passkeys) — comptes « email seul »
@@ -65,6 +76,7 @@ model User {
   expenseShares            ExpenseShare[]
   tricountApprovals        TricountApproval[]
   tricountComments         TricountComment[]
+  forumMessages            ForumMessage[]
   // Délégation temporaire de droits (idée 4) : ce que je donne / ce qu'on me donne.
   delegationsGiven         Delegation[]            @relation("DelegationGiven")
   delegationsReceived      Delegation[]            @relation("DelegationReceived")
@@ -957,4 +969,40 @@ model AppNotification {
   readAt    DateTime? // NULL = non lue, alimente la pastille de la cloche
 
   @@index([userId, createdAt])
+}
+
+// LE FIL DE DISCUSSION DU CLUB.
+//
+// UN SEUL fil pour toute l'association — pas de salons. Quarante personnes ne produisent pas
+// assez de trafic pour qu'un tri par sujet rapporte plus qu'il ne coûte en navigation : on
+// aurait quatre salons dont trois vides, et la conversation se tiendrait dans le quatrième.
+// Si le volume l'imposait un jour, ce modèle gagnerait un `channelId` nullable sans rien
+// casser (NULL = le fil historique).
+//
+// Ce qui vit AILLEURS, et pourquoi :
+//  * l'historique fait foi ICI (Postgres). Le courtier temps réel (Pusher) ne transporte que
+//    des copies : une panne de sa part fait perdre l'instantanéité, jamais un message.
+//  * « qui est en ligne » et « X écrit… » ne sont PAS en base. Ce sont des états éphémères,
+//    portés par la présence du canal et par des événements client — ils ne survivent pas à
+//    une déconnexion, et c'est exactement ce qu'on veut. Les mettre ici coûterait une
+//    écriture par frappe de touche.
+//
+// Conservation : 12 mois (cf. lib/retention.ts), appliquée par une purge opportuniste à
+// l'écriture — le plan Vercel plafonne les crons, cf. le même choix dans lib/moderation.ts.
+model ForumMessage {
+  id        String   @id @default(cuid())
+  // Cascade, comme TricountComment : la note de confidentialité promet que les données du
+  // membre disparaissent avec son compte, et un message signé EST une donnée personnelle. Le
+  // fil gardera donc des trous là où quelqu'un est parti — c'est le prix assumé de la
+  // promesse, et le contraire (garder le texte en anonymisant l'auteur) la trahirait.
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+
+  // Le fil se lit toujours du plus récent au plus ancien, et la purge balaie par date : cet
+  // index sert les deux.
+  @@index([createdAt])
+  // Sert la limite de débit (compter les messages d'UN membre sur une fenêtre glissante).
+  @@index([authorId, createdAt])
 }

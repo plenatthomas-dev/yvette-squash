@@ -25,3 +25,18 @@ export const MODERATION_RETENTION_LABEL = "12 mois";
 export const SNAPSHOT_RETENTION_DAYS = 7;
 /** Formulation affichée aux membres. Doit décrire la constante ci-dessus. */
 export const SNAPSHOT_RETENTION_LABEL = "7 jours";
+
+/**
+ * Messages du fil de discussion : 12 mois.
+ *
+ * Un fil de club sert à se coordonner, pas à archiver : personne ne relit un « qui prend la
+ * voiture ? » d'il y a un an. Borner la durée borne aussi ce qu'une fuite exposerait, et rend
+ * la base prévisible — c'est la seule table du fil, et elle ne fait que grossir.
+ *
+ * Appliquée par une purge OPPORTUNISTE à l'écriture (api/forum), pas par un cron : le plan
+ * Vercel les plafonne, cf. le même arbitrage dans moderation.ts.
+ */
+export const FORUM_RETENTION_DAYS = 365;
+export const FORUM_RETENTION_MS = FORUM_RETENTION_DAYS * 24 * 60 * 60_000;
+/** Formulation affichée aux membres. Doit décrire la constante ci-dessus. */
+export const FORUM_RETENTION_LABEL = "12 mois";

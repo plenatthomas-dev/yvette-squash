@@ -54,6 +54,18 @@ const IS_DEV = process.env.NODE_ENV !== "production";
 // concernée (IS_DEV et IS_PREVIEW y sont faux : elle garde nonce + strict-dynamic).
 const LIVE_DEV = IS_DEV ? " http://localhost:8400" : "";
 
+// LE COURTIER DU FIL DE DISCUSSION.
+//
+// Sans ces deux hôtes, la WebSocket est refusée par la CSP et le temps réel échoue EN
+// SILENCE — pas d'erreur visible, juste un fil qui ne bouge plus. Ils ne s'ouvrent que si un
+// cluster est configuré : pas de clé, pas d'ouverture. On nomme le CLUSTER exact (`eu`,
+// Irlande, choisi pour la résidence des données annoncée dans la note de confidentialité)
+// plutôt qu'un joker sur pusher.com, qui autoriserait aussi les régions hors Union.
+const FORUM_REALTIME = process.env.NEXT_PUBLIC_PUSHER_CLUSTER
+  ? ` https://sockjs-${process.env.NEXT_PUBLIC_PUSHER_CLUSTER}.pusher.com` +
+    ` wss://ws-${process.env.NEXT_PUBLIC_PUSHER_CLUSTER}.pusher.com`
+  : "";
+
 function buildCsp(nonce: string): string {
   const live = IS_PREVIEW ? " https://vercel.live" : "";
   const evalDev = IS_DEV ? " 'unsafe-eval'" : "";
@@ -71,7 +83,8 @@ function buildCsp(nonce: string): string {
     `font-src 'self'${IS_PREVIEW ? " https://vercel.live https://assets.vercel.com" : ""}`,
     // API interne + beacons Vercel (insights/vitals) + BotID : tous en same-origin.
     // Preview : + vercel.live et son websocket Pusher (temps réel de la barre d'outils).
-    `connect-src 'self'${IS_PREVIEW ? " https://vercel.live https://*.pusher.com wss://*.pusher.com" : ""}${LIVE_DEV}${IS_DEV ? " ws://localhost:8400" : ""}`,
+    // Partout : + le courtier du fil de discussion, si un cluster est configuré (cf. FORUM_REALTIME).
+    `connect-src 'self'${FORUM_REALTIME}${IS_PREVIEW ? " https://vercel.live https://*.pusher.com wss://*.pusher.com" : ""}${LIVE_DEV}${IS_DEV ? " ws://localhost:8400" : ""}`,
     "worker-src 'self'", // service worker /sw.js (web push)
     "manifest-src 'self'", // /manifest.webmanifest (PWA)
     // Preview : la barre d'outils s'affiche dans une iframe vercel.live. Prod : retombe sur default-src 'self'.
