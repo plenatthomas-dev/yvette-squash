@@ -2427,16 +2427,79 @@ td.cell.past {
   font-weight: 600;
 }
 
-/* La barre de liens vers les autres pages d'admin.
-   `justify-content` est explicite parce que Pico pose `space-between` sur TOUT `nav` : trois
-   liens s'y retrouvaient plaqués aux deux bords de la page, à lire comme trois rubriques
-   séparées alors qu'ils forment une seule rangée. */
+/* LES AUTRES PAGES DE L'ADMIN, en tuiles et non en liens soulignés.
+   Trois liens nus posés sur la page ne disaient ni où ils mènent ni ce qu'on y trouve : le
+   libellé « Historique & blocklist » ne renseigne que celui qui connaît déjà la page. Une
+   tuile a la place d'écrire la phrase, et se vise au pouce.
+
+   `justify-content` reste explicite : Pico pose `space-between` sur TOUT `nav`, et les trois
+   liens s'y retrouvaient plaqués aux deux bords de la page. */
 .adm-liens {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   justify-content: flex-start;
-  flex-wrap: wrap;
-  gap: 16px;
+  gap: 10px;
   margin: 0 0 18px;
+}
+
+/* Une tuile EST actionnable : elle a donc droit au vert, et le prend au survol comme au focus
+   clavier (Règle du Vert Actionnable). Le soulèvement reprend celui du journal — `transform`,
+   donc composé par le GPU, et rien à l'exécution (Règle du Coût Nul). */
+.adm-lien {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: var(--radius);
+  background: var(--card-grad), var(--pico-card-background-color);
+  box-shadow: var(--elev-1);
+  color: inherit;
+  text-decoration: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.adm-lien:hover {
+  transform: translateY(var(--lift));
+  box-shadow: var(--elev-2);
+  border-color: var(--pico-primary);
+  text-decoration: none;
+}
+
+.adm-lien:focus-visible {
+  outline: 2px solid var(--pico-primary);
+  outline-offset: 2px;
+}
+
+.adm-lien-icone {
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.adm-lien-titre {
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+/* Ce qu'on trouve derrière, en une ligne — c'est tout ce que le libellé seul ne disait pas. */
+.adm-lien-quoi {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--pico-muted-color);
+  margin-top: 2px;
+}
+
+/* Le chevron suit la couleur d'action au survol : c'est lui qui dit « ça mène ailleurs ». */
+.adm-lien-fleche {
+  color: var(--pico-muted-color);
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.adm-lien:hover .adm-lien-fleche {
+  color: var(--primary-fg);
+  transform: translateX(2px);
 }
 
 /* LES TUILES DU TABLEAU DE BORD S'ENFONCENT, elles ne reçoivent pas une carte à elles.

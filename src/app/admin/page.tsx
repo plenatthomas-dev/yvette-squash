@@ -233,6 +233,43 @@ function purposeLabel(p: PendingRequest["purpose"]): string {
 }
 
 /**
+ * UNE TUILE VERS UNE AUTRE PAGE DE L'ADMIN.
+ *
+ * Trois liens nus posés sur la page ne disaient ni où ils mènent ni ce qu'on y trouve —
+ * « Historique & blocklist » ne renseigne que celui qui connaît déjà la page. La tuile a la
+ * place d'écrire la phrase, et se vise au pouce plutôt qu'au pixel.
+ *
+ * Le chevron est décoratif : le lien porte déjà son libellé, et un lecteur d'écran qui
+ * annoncerait « flèche vers la droite » n'apprendrait rien de plus.
+ */
+function PageLien({
+  href,
+  icone,
+  titre,
+  quoi,
+}: {
+  href: string;
+  icone: string;
+  titre: string;
+  quoi: string;
+}) {
+  return (
+    <Link className="adm-lien" href={href}>
+      <span className="adm-lien-icone" aria-hidden="true">
+        {icone}
+      </span>
+      <span className="adm-lien-titre">
+        {titre}
+        <span className="adm-lien-quoi">{quoi}</span>
+      </span>
+      <span className="adm-lien-fleche" aria-hidden="true">
+        →
+      </span>
+    </Link>
+  );
+}
+
+/**
  * UN GROUPE D'OPTIONS, et le filet qui dit ce qu'il touche.
  *
  * Cette page alignait sept cartes identiques dans une seule coulée : même encadré, même
@@ -1085,12 +1122,29 @@ export default function AdminPage() {
             </section>
           )}
 
-          {/* Les autres pages de l'admin. Ce ne sont pas des options : elles n'ont donc ni
-              carte ni filet, seulement leur propre rangée. */}
+          {/* Les autres pages de l'admin. Ce ne sont pas des options : elles n'ont donc pas de
+              filet de portée — mais elles mènent quelque part, et une tuile le dit mieux qu'un
+              lien souligné. La ligne de dessous existe parce que le libellé seul ne renseigne
+              que celui qui connaît déjà la page. */}
           <nav className="adm-liens" aria-label="Autres pages d'administration">
-            <Link href="/admin/membres">👥 Gérer les membres →</Link>
-            <Link href="/admin/demandes">📜 Historique &amp; blocklist →</Link>
-            <Link href="/admin/tricounts">💶 Tricounts →</Link>
+            <PageLien
+              href="/admin/membres"
+              icone="👥"
+              titre="Membres"
+              quoi="Rattacher, désactiver, rapprocher sur squashnet"
+            />
+            <PageLien
+              href="/admin/demandes"
+              icone="📜"
+              titre="Historique"
+              quoi="Demandes déjà traitées et adresses bloquées"
+            />
+            <PageLien
+              href="/admin/tricounts"
+              icone="💶"
+              titre="Tricounts"
+              quoi="Les dépenses partagées de tous les groupes"
+            />
           </nav>
 
           {/* Demandes en attente : tâche quotidienne de l'admin → mise en avant, pleine largeur.

@@ -148,12 +148,20 @@ describe("/admin — les options sont rangées en groupes", () => {
     expect(screen.queryByRole("region", { name: /Diffusion/ })).toBeNull();
   });
 
-  it("laisse les liens vers les autres pages hors des groupes", async () => {
-    // Ce ne sont pas des options : leur donner une carte et un filet ferait croire qu'on
-    // règle quelque chose en cliquant.
+  it("mène aux autres pages par des tuiles, hors des groupes", async () => {
+    // Ce ne sont pas des options : pas de filet de portée, sinon on croirait régler quelque
+    // chose en cliquant. Mais chaque tuile DIT ce qu'on trouve derrière — trois liens nus ne
+    // renseignaient que celui qui connaissait déjà les pages.
     await monte();
     const nav = screen.getByRole("navigation", { name: /Autres pages/ });
-    expect(within(nav).getByRole("link", { name: /Gérer les membres/ })).toBeTruthy();
-    expect(within(nav).getByRole("link", { name: /Tricounts/ })).toBeTruthy();
+    const membres = within(nav).getByRole("link", { name: /Membres/ });
+    expect(membres.getAttribute("href")).toBe("/admin/membres");
+    expect(membres.textContent).toContain("rapprocher sur squashnet");
+    const historique = within(nav).getByRole("link", { name: /Historique/ });
+    expect(historique.getAttribute("href")).toBe("/admin/demandes");
+    expect(historique.textContent).toContain("adresses bloquées");
+    expect(within(nav).getByRole("link", { name: /Tricounts/ }).textContent).toContain(
+      "dépenses partagées",
+    );
   });
 });
