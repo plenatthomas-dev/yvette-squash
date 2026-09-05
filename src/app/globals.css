@@ -4345,10 +4345,6 @@ body[data-bottombar] .install-banner {
 }
 /* « reçoit » / « se déplace à » n'est pas un nom : il relie les deux qui comptent. */
 .ic-vs-word { font-weight: 400; color: var(--pico-muted-color); }
-.ic-division {
-  font-size: 0.8rem;
-  color: var(--pico-muted-color);
-}
 .ic-score, .ic-games {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
@@ -4873,18 +4869,29 @@ body[data-bottombar] .install-banner {
    montrer. C'est la seule information de l'écran qui doit tenir à trois mètres, donc la seule
    dont la taille est calculée pour remplir la case plutôt que pour suivre l'échelle
    typographique du système. Centré sur la case ENTIÈRE, les libellés étant hors de son chemin.
-   Les deux bornes cadrent le calcul : 66 % de la largeur laisse passer un score à deux
-   chiffres sans le tronquer (12-10, 13-11) même sur un écran de 320 px, et 70 % de la hauteur
-   laisse aux libellés de coin la marge qu'il leur faut, y compris téléphone couché ET panneau
-   du bas ouvert. */
+
+   LES DEUX BORNES SONT MESURÉES, pas estimées. Sur cinq formats de téléphone (paysage 844×390,
+   740×360, 667×375 ; portrait 390×844, 360×640), les valeurs précédentes — 66 % / 70 % —
+   laissaient 64 à 107 px de hauteur inoccupée et 130 à 210 px de largeur. C'est la HAUTEUR qui
+   borne dans les cinq cas, et le score se lisait donc plus petit qu'il ne pouvait, surtout
+   téléphone couché où la case est large et basse.
+
+   Le calcul : l'encre des chiffres vaut 0,718 fois la taille de police, et la bande libre entre
+   le nom et la barre du bas vaut 0,73 fois la hauteur de case. Viser 85 % de cette bande donne
+   86 % de la hauteur ; viser 80 % de la largeur pour deux chiffres donne 82 % de la largeur.
+   Vérifié après coup sur les cinq formats : l'encre garde 31 à 47 px de marge verticale et au
+   moins 25 % de la largeur. Le score gagne environ un quart de sa taille partout.
+
+   La première déclaration reste le repli des navigateurs sans requêtes de conteneur : elle se
+   règle sur l'ÉCRAN et non sur la case, donc plus prudemment. */
 .ics-points {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: clamp(3rem, 30vmin, 15rem);
-  font-size: clamp(2.5rem, min(66cqw, 70cqh), 22rem);
+  font-size: clamp(3rem, 42vmin, 18rem);
+  font-size: clamp(2.5rem, min(82cqw, 86cqh), 26rem);
   font-weight: 800;
   line-height: 0.95;
   letter-spacing: -0.02em;

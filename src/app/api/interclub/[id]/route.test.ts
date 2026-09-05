@@ -162,7 +162,6 @@ const fixture = (over: Record<string, unknown> = {}) => ({
   teamId: "t1",
   team: { id: "t1", name: "Équipe 1" },
   season: null,
-  division: null,
   opponent: "Massy",
   home: true,
   matchCount: 4,
@@ -519,7 +518,7 @@ describe("PATCH /api/interclub/{id}", () => {
     // `PATCH {"venue": 42}` répondait 200 et le lieu disparaissait : « ce n'est pas une chaîne »
     // et « efface ce champ » étaient le même cas. Sur le même corps, `opponent` rendait déjà un
     // 400 — un champ refusait, quatre effaçaient en silence.
-    for (const champ of ["venue", "venueAddress", "division", "round"]) {
+    for (const champ of ["venue", "venueAddress", "round"]) {
       h.patched = null;
       const res = await PATCH(patchReq({ [champ]: 42 }), ctx);
       expect([champ, res.status]).toEqual([champ, 400]);
@@ -538,8 +537,22 @@ describe("PATCH /api/interclub/{id}", () => {
 
   it("ne touche PAS à un champ absent du corps", async () => {
     await PATCH(patchReq({ venue: "Club" }), ctx);
-    expect(h.patched).not.toHaveProperty("division");
+    expect(h.patched).not.toHaveProperty("round");
     expect(h.patched).not.toHaveProperty("venueAddress");
+  });
+
+  it("IGNORE une division, que l'écran ne propose plus", async () => {
+    // Le champ a été retiré de la création et de la fiche ; la colonne survit en base pour ne
+    // pas détruire ce qui y est déjà saisi. Une route qui continuerait de l'écrire laisserait
+    // entrer par l'API ce qu'on vient d'ôter de la main — et ne le montrerait nulle part.
+    const res = await PATCH(patchReq({ division: "D2" }), ctx);
+    expect(res.status).toBe(400); // « Rien à modifier » : le corps ne demande plus rien
+    expect(h.patched).toBeNull();
+
+    // Accompagnée d'un champ valide, elle est simplement laissée de côté.
+    await PATCH(patchReq({ division: "D2", venue: "Club" }), ctx);
+    expect(h.patched).toMatchObject({ venue: "Club" });
+    expect(h.patched).not.toHaveProperty("division");
   });
 });
 

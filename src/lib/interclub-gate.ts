@@ -85,7 +85,6 @@ export interface LiveFixture {
   teamName: string;
   opponent: string;
   home: boolean;
-  division: string | null;
   status: string;
   score: { home: number; away: number };
   matches: LiveMatch[];
@@ -117,7 +116,6 @@ async function readLive(): Promise<LiveFixture[]> {
     teamName: f.team.name,
     opponent: f.opponent,
     home: f.home,
-    division: f.division,
     // Statut DÉDUIT des matchs, pas la colonne stockée. Deux marqueurs qui écrivent en même
     // temps sur deux matchs de la même rencontre peuvent laisser cette colonne en retard
     // (chacun relit les matchs voisins avant que l'autre n'ait écrit). La colonne se

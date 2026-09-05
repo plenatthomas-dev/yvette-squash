@@ -9,7 +9,6 @@ import {
   fixtureScore,
   derivedStatus,
   tieOutcome,
-  MAX_DIVISION_LEN,
   MAX_OPPONENT_LEN,
   MAX_PLAYER_NAME_LEN,
   MAX_SEASON_LEN,
@@ -134,7 +133,6 @@ export async function GET(req: NextRequest) {
     },
     opponent: f.opponent,
     home: f.home,
-    division: f.division,
     matchCount: f.matchCount,
     status: derivedStatus(f.matchCount, f.matches),
     score: fixtureScore(f.matches),
@@ -153,7 +151,7 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/interclub : crée une rencontre et ses N simples d'un coup.
-// { date, teamId, opponent, home?, season?, division?, matchCount?, bestOf?,
+// { date, teamId, opponent, home?, season?, matchCount?, bestOf?,
 //   matches?: [{ userId? | guestId?, awayName?, homeColor?, awayColor? }] }
 // Ouvert à TOUT membre connecté : dans un club de cette taille, exiger un rôle bloquerait la
 // saisie les soirs où le capitaine joue.
@@ -163,13 +161,12 @@ export async function POST(req: NextRequest) {
   const { session } = access;
 
   const body = await readJsonBody(req);
-  const { date, teamId, opponent, home, season, division, matchCount, bestOf, matches } = body as {
+  const { date, teamId, opponent, home, season, matchCount, bestOf, matches } = body as {
     date?: unknown;
     teamId?: unknown;
     opponent?: unknown;
     home?: unknown;
     season?: unknown;
-    division?: unknown;
     matchCount?: unknown;
     bestOf?: unknown;
     matches?: unknown;
@@ -292,8 +289,6 @@ export async function POST(req: NextRequest) {
       opponent: opponent.trim().slice(0, MAX_OPPONENT_LEN),
       home: home === undefined ? true : !!home,
       season: typeof season === "string" && season.trim() ? season.trim().slice(0, MAX_SEASON_LEN) : null,
-      division:
-        typeof division === "string" && division.trim() ? division.trim().slice(0, MAX_DIVISION_LEN) : null,
       matchCount: nb as number,
       bestOf: nbBestOf as number,
       status: "scheduled",

@@ -262,6 +262,83 @@ describe("seedEvents — reprendre un match déjà entamé", () => {
   });
 });
 
+describe("seedEvents — reprendre le JEU EN COURS, pas seulement les jeux finis", () => {
+  const g = (home: number, away: number) => ({ home, away });
+  const vivant = (home: number, away: number, serving: "home" | "away" = "home") => ({
+    current: g(home, away),
+    serving,
+    servingBox: "right" as const,
+  });
+
+  // LE DÉFAUT QUE CE BLOC FERME. On marque le premier jeu jusqu'à 7-7, on revient au tableau.
+  // On rouvre la fiche sur un autre appareil — ou avec un autre compte : la fiche affiche bien
+  // 7-7 (elle lit l'instantané du serveur), et le marquage repart de 0-0 (il ne le lisait pas).
+  // Sept échanges perdus, sans un mot à l'écran, et rien pour les retrouver.
+
+  it("reprend un jeu en cours quand aucun jeu n'est encore terminé", () => {
+    const st = replay(seedEvents([], 5, vivant(7, 7)), 5);
+    expect(st.current).toEqual(g(7, 7));
+    expect(st.games).toEqual([]);
+    expect(st.status).toBe("live");
+  });
+
+  it("reprend le jeu en cours PAR-DESSUS les jeux terminés", () => {
+    const st = replay(seedEvents([g(11, 9)], 5, vivant(3, 8, "away")), 5);
+    expect(st.games).toEqual([g(11, 9)]);
+    expect(st.current).toEqual(g(3, 8));
+    expect(st.gamesWon).toEqual({ home: 1, away: 0 });
+  });
+
+  it("rétablit le service tel que le serveur le connaît, sans l'inventer", () => {
+    // Se tromper de serveur est plus insidieux que de perdre le score : ça ne se voit pas.
+    const st = replay(seedEvents([], 5, { current: g(5, 3), serving: "away", servingBox: "left" }), 5);
+    expect(st.serving).toBe("away");
+    expect(st.servingBox).toBe("left");
+    expect(st.awaitingServeBox).toBe(false);
+  });
+
+  it("pose « à droite » quand le carré n'est pas encore choisi", () => {
+    // Entre la reprise de service et le choix du carré, l'instantané porte `servingBox: null`.
+    // On pose le carré du même mouvement que le déroulé inventé — il se corrige d'un geste,
+    // là où perdre le serveur ne se rattrape pas.
+    const st = replay(seedEvents([], 5, { current: g(2, 1), serving: "home", servingBox: null }), 5);
+    expect(st.serving).toBe("home");
+    expect(st.servingBox).toBe("right");
+  });
+
+  it("ne reprend RIEN d'un instantané à 0-0 — le panneau « Qui engage ? » doit rester", () => {
+    expect(seedEvents([], 5, vivant(0, 0))).toEqual([]);
+    expect(replay(seedEvents([], 5, vivant(0, 0)), 5).serving).toBeNull();
+  });
+
+  it("ignore un instantané IMPOSSIBLE plutôt que d'avaler les points en le rejouant", () => {
+    // `parseLive` borne à 99 points, il ne juge pas la règle du squash : un 50-0 lui passe.
+    // Le rejouer finirait le jeu à 11-0 au milieu de la reconstruction, et les points suivants
+    // iraient dans un second jeu inventé de toutes pièces.
+    const st = replay(seedEvents([g(11, 5)], 5, vivant(50, 0)), 5);
+    expect(st.games).toEqual([g(11, 5)]);
+    expect(st.current).toEqual(g(0, 0));
+  });
+
+  it("ignore un instantané DÉJÀ gagné — un jeu fini n'est plus le jeu en cours", () => {
+    const st = replay(seedEvents([], 5, vivant(11, 4)), 5);
+    expect(st.games).toEqual([]);
+    expect(st.current).toEqual(g(0, 0));
+  });
+
+  it("laisse le marquage se poursuivre depuis le score repris", () => {
+    // C'est la propriété qui compte au bord du terrain : le point suivant s'ajoute à 7-7, il
+    // ne recommence pas un jeu.
+    const ev = applyPoint(seedEvents([], 5, vivant(7, 7)), 5, "home");
+    expect(replay(ev, 5).current).toEqual(g(8, 7));
+  });
+
+  it("sans instantané, se comporte exactement comme avant", () => {
+    // L'argument est facultatif : les appels existants ne changent pas de sens.
+    expect(seedEvents([g(11, 5)], 5)).toEqual(seedEvents([g(11, 5)], 5, null));
+  });
+});
+
 describe("validGameSequence — saisie a posteriori", () => {
   const g = (home: number, away: number) => ({ home, away });
 

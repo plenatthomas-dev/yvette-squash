@@ -124,7 +124,6 @@ describe("GET /api/interclub", () => {
         },
         opponent: "Massy",
         home: true,
-        division: "D2",
         matchCount: 4,
         matches: [
           { gamesHome: 3, gamesAway: 0, status: "done", games: [] },
@@ -153,7 +152,6 @@ describe("GET /api/interclub", () => {
     team: { id: "t1", name: "Équipe 1", captainId: null, captain: null },
     opponent: "Massy",
     home: true,
-    division: "D4",
     matchCount: 4,
     matches,
   });
@@ -224,7 +222,6 @@ describe("GET /api/interclub", () => {
         },
         opponent: "Massy",
         home: true,
-        division: "D2",
         matchCount: 4,
         matches: [],
       },
@@ -253,7 +250,6 @@ describe("GET /api/interclub", () => {
         team: { id: "t1", name: "Équipe 1", captainId: null, captain: null },
         opponent: "Massy",
         home: true,
-        division: null,
         matchCount: 4,
         matches: [],
       },

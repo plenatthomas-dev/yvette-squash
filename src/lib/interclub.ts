@@ -296,16 +296,48 @@ export function undo(events: readonly ScoreEvent[]): ScoreEvent[] {
 }
 
 /**
- * Fabrique un journal d'événements qui REPRODUIT une suite de jeux déjà connue. Sert à
- * reprendre au bord du terrain un match dont les premiers jeux ont été saisis à la main, ou
- * dont le journal local a été perdu (autre téléphone, cache vidé).
+ * Ce que le SERVEUR sait du jeu en cours — la colonne `liveJson`, telle que `parseLive` la rend.
+ *
+ * Déclaré ici et non importé de `interclub-db` : ce module est pur et ne connaît ni Prisma ni
+ * la base. Un `LiveSnapshot` de `interclub-db` satisfait cette forme structurellement.
+ */
+export interface LiveSeed {
+  current: GameScore;
+  serving: Side | null;
+  servingBox: Box | null;
+}
+
+/**
+ * Fabrique un journal d'événements qui REPRODUIT un match déjà connu — ses jeux terminés ET,
+ * si le serveur en tient un, le jeu EN COURS. Sert à reprendre au bord du terrain un match
+ * dont les premiers jeux ont été saisis à la main, ou dont le journal local a été perdu (autre
+ * téléphone, autre compte, cache vidé).
+ *
+ * ⚠️ LE JEU EN COURS NE SE REPREND QUE SI ON LE PASSE. Il ne vit pas dans `games` — cette
+ * liste ne porte que les jeux terminés — mais dans l'instantané `live`, et c'est là tout le
+ * défaut que ce paramètre corrige : on marquait jusqu'à 7-7, on rouvrait la fiche sur un autre
+ * appareil, la fiche affichait bien 7-7 (elle lit l'instantané) et le marquage repartait de
+ * 0-0 (il ne le lisait pas). Sept échanges perdus, sans un mot à l'écran.
  *
  * ⚠️ Le déroulé des échanges est INVENTÉ — seul le score de chaque jeu est fidèle. C'est
  * assumé : on ne stocke pas les points un par un, donc il n'y a rien à restituer. Les points
  * sont émis en alternance jusqu'au score du perdant, puis d'affilée pour le vainqueur, de
- * sorte que chaque jeu se termine exactement sur son dernier point et pas avant.
+ * sorte que chaque jeu se termine exactement sur son dernier point et pas avant. Le service,
+ * lui, n'est pas inventé pour le jeu en cours : l'instantané le porte, et un événement `serve`
+ * final le rétablit tel quel.
  */
-export function seedEvents(games: readonly GameScore[], bestOf: number): ScoreEvent[] {
+export function seedEvents(
+  games: readonly GameScore[],
+  bestOf: number,
+  live?: LiveSeed | null,
+): ScoreEvent[] {
+  const finis = games.some((g) => checkGame(g) === "finished");
+  // `in-progress` couvre d'un coup les trois refus : un instantané à 0-0 ne dit rien qu'on ne
+  // sache déjà, un jeu DÉJÀ gagné n'appartient plus au jeu en cours, et un score impossible
+  // (`parseLive` borne à 99, il ne juge pas la règle) se rejouerait en finissant le jeu au
+  // milieu de la reconstruction, avalant le reste des points.
+  const enCours = !!live && checkGame(live.current) === "in-progress";
+
   // RIEN À REPRODUIRE ⇒ AUCUN SERVEUR DÉSIGNÉ, et c'est tout l'objet de cette clause.
   //
   // Le premier service d'un match se tire au sort sur le terrain : ni l'appli ni le serveur ne
@@ -319,9 +351,11 @@ export function seedEvents(games: readonly GameScore[], bestOf: number): ScoreEv
   // commencé, c'est autre chose : c'est décider à la place de ceux qui sont sur le terrain, et
   // se tromper une fois sur deux sur la seule information que le marqueur avait à saisir.
   //
-  // La condition porte sur les jeux REPRODUCTIBLES, pas sur la longueur : une liste ne
-  // contenant qu'un jeu inachevé ne reproduit rien non plus (la boucle le saute).
-  if (!games.some((g) => checkGame(g) === "finished")) return [];
+  // La condition porte sur ce qui est REPRODUCTIBLE, pas sur la longueur : une liste ne
+  // contenant qu'un jeu inachevé ne reproduit rien non plus (la boucle le saute). Un
+  // instantané qui n'est pas un jeu en cours ne l'est pas davantage, et laisse donc le panneau
+  // « Qui engage ? » à sa place.
+  if (!finis && !enCours) return [];
 
   let ev: ScoreEvent[] = applyServe([], bestOf, "home", "right");
 
@@ -331,16 +365,40 @@ export function seedEvents(games: readonly GameScore[], bestOf: number): ScoreEv
     ev = applyPoint(ev, bestOf, side);
   };
 
+  /** Émet `g` en alternance jusqu'au score du plus bas, puis d'affilée pour le plus haut. */
+  const rejoue = (g: GameScore) => {
+    const lo = Math.min(g.home, g.away);
+    const meneur: Side = g.home >= g.away ? "home" : "away";
+    for (let i = 0; i < lo; i++) {
+      point(meneur);
+      point(other(meneur));
+    }
+    const reste = Math.max(g.home, g.away) - lo;
+    for (let i = 0; i < reste; i++) point(meneur);
+  };
+
   for (const g of games) {
     if (checkGame(g) !== "finished") continue;
-    const lo = Math.min(g.home, g.away);
-    const winner: Side = g.home > g.away ? "home" : "away";
-    for (let i = 0; i < lo; i++) {
-      point(winner);
-      point(other(winner));
-    }
-    const remaining = Math.max(g.home, g.away) - lo;
-    for (let i = 0; i < remaining; i++) point(winner);
+    rejoue(g);
+  }
+
+  if (enCours && live) {
+    // Le jeu en cours se rejoue comme les autres — mais il ne se termine pas, la boucle
+    // s'arrêtant exactement sur son score. `rejoue` mène avec le côté qui a le plus de points
+    // (ou `home` à égalité) : à 7-7 la partie alternée les épuise tous les deux, et il ne
+    // reste rien à émettre d'affilée.
+    rejoue(live.current);
+
+    // LE SERVICE, LUI, N'EST PAS INVENTÉ : l'instantané le porte, et un `serve` final le
+    // rétablit par-dessus ce que l'alternance a laissé. Sans lui on reprendrait le marquage
+    // avec le mauvais serveur — une erreur plus insidieuse qu'un score perdu, parce qu'elle ne
+    // se voit pas.
+    //
+    // Le CARRÉ peut manquer : entre la reprise de service et le choix du carré, l'instantané
+    // porte `servingBox: null`. On pose alors « à droite », du même mouvement que le déroulé
+    // inventé ci-dessus — le marqueur le corrige d'un geste s'il le faut, là où perdre le
+    // serveur ne se rattrape pas.
+    if (live.serving) ev = applyServe(ev, bestOf, live.serving, live.servingBox ?? "right");
   }
 
   return ev;

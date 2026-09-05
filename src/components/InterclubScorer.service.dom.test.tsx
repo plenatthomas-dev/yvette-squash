@@ -35,6 +35,8 @@ const vierge = {
   homeColor: null,
   awayColor: null,
   games: [] as { number: number; home: number; away: number }[],
+  // Aucun jeu en cours côté serveur : ces cas éprouvent le marquage à partir de rien.
+  live: null,
 };
 
 /** Le même simple, mais dont un jeu est déjà enregistré : il n'y a plus rien à demander. */

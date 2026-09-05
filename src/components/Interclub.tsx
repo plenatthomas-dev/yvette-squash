@@ -144,7 +144,6 @@ type FixtureRow = {
   team: Team;
   opponent: string;
   home: boolean;
-  division: string | null;
   matchCount: number;
   status: "scheduled" | "live" | "done";
   score: { home: number; away: number };
@@ -624,7 +623,6 @@ export default function Interclub({
     teamId: string;
     opponent: string;
     home: boolean;
-    division: string;
     matchCount: number;
     bestOf: number;
   }) {
@@ -868,7 +866,6 @@ export default function Interclub({
                   )}
                 </span>
                 {f.outcome && <TieOutcomeLine outcome={f.outcome} />}
-                {f.division && <span className="ic-division">{f.division}</span>}
               </button>
             </li>
           ))}
@@ -927,7 +924,6 @@ function CreateDialog({
     teamId: string;
     opponent: string;
     home: boolean;
-    division: string;
     matchCount: number;
     bestOf: number;
   }) => void;
@@ -936,7 +932,6 @@ function CreateDialog({
   const [teamId, setTeamId] = useState(teams[0]?.id ?? "");
   const [opponent, setOpponent] = useState("");
   const [home, setHome] = useState(true);
-  const [division, setDivision] = useState("");
   const [matchCount, setMatchCount] = useState(4);
   const [bestOf, setBestOf] = useState(5);
 
@@ -968,15 +963,11 @@ function CreateDialog({
           maxLength={60}
         />
       </label>
-      <label>
-        Division <span className="muted tiny">(facultatif)</span>
-        <input
-          value={division}
-          onChange={(e) => setDivision(e.target.value)}
-          placeholder="ex. D2 Hommes"
-          maxLength={30}
-        />
-      </label>
+      {/* PLUS DE DIVISION ICI. Le champ était libre, facultatif, saisi à la main et jamais
+          renseigné par l'import fédéral : une rencontre sur deux le portait, l'autre non, et il
+          ne servait qu'à afficher « D2 Hommes » sous le score. La division au sens de squashnet
+          — celle dont dépend le classement — est ailleurs, sur l'ÉQUIPE (`snDrawId`), et n'a
+          jamais eu de rapport avec ce champ malgré leur nom commun. */}
       <fieldset>
         <legend className="tiny muted">Lieu</legend>
         <label>
@@ -1017,7 +1008,6 @@ function CreateDialog({
               teamId,
               opponent,
               home,
-              division,
               matchCount,
               bestOf: isValidBestOf(bestOf) ? bestOf : 5,
             })
@@ -1114,8 +1104,7 @@ function FixtureDialog({
       <p className="muted tiny">
         {fixture.round && `${fixture.round} · `}
         {shortDate(fixture.date)}
-        {fixture.time && ` à ${fixture.time}`}
-        {fixture.division && ` · ${fixture.division}`} · au meilleur des {fixture.bestOf} jeux (
+        {fixture.time && ` à ${fixture.time}`} · au meilleur des {fixture.bestOf} jeux (
         {fixture.winGames} gagnants)
       </p>
       {/* La date prévisionnelle SE DIT. La fédération publie les journées non planifiées avec

@@ -70,7 +70,6 @@ type LiveFixture = {
   teamName: string;
   opponent: string;
   home: boolean;
-  division: string | null;
   status: string;
   score: { home: number; away: number };
   matches: LiveMatch[];
