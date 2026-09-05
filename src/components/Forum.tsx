@@ -92,6 +92,7 @@ export default function Forum({
   const monNomRef = useRef<string>("");
   const finRef = useRef<HTMLDivElement | null>(null);
   const zoneRef = useRef<HTMLDivElement | null>(null);
+  const saisieRef = useRef<HTMLTextAreaElement | null>(null);
 
   const charge = useCallback(
     async (n: number, mode: "page" | "rattrapage" = "page") => {
@@ -248,9 +249,22 @@ export default function Forum({
     if (enBas) finRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
 
+  /** Le champ grandit avec le texte, jusqu'au plafond posé en CSS (30dvh).
+   *
+   *  `rows={1}` seul montrerait une seule ligne d'un message de dix : on relit ce qu'on écrit
+   *  aussi souvent qu'on l'écrit. Remettre `height` à `auto` avant de lire `scrollHeight` est
+   *  indispensable — sans ça le champ ne sait que grandir, jamais rétrécir. */
+  const ajuster = () => {
+    const el = saisieRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  };
+
   const dernierSignal = useRef(0);
   const onDraft = (v: string) => {
     setDraft(v);
+    ajuster();
     const now = Date.now();
     if (v && monNomRef.current && now - dernierSignal.current > TYPING_EVERY_MS) {
       dernierSignal.current = now;
@@ -274,6 +288,8 @@ export default function Forum({
       // déduplique par id, donc on ne se voit pas parler double.
       setMessages((actuels) => fusionner(actuels ?? [], [data.message]));
       setDraft("");
+      // Le champ vidé doit REDESCENDRE : sans ça il garde la hauteur du message envoyé.
+      requestAnimationFrame(ajuster);
       setErreur(null);
     } catch (e) {
       toastRef.current("err", e instanceof Error ? e.message : "Envoi impossible");
@@ -409,6 +425,7 @@ export default function Forum({
       >
         <textarea
           className="forum-input"
+          ref={saisieRef}
           value={draft}
           onChange={(e) => onDraft(e.target.value)}
           placeholder="Écrire au club…"
