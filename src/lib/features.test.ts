@@ -18,6 +18,7 @@ const env: Features = {
   ranking: true,
   externalBookings: false,
   interclub: false,
+  forum: false,
 };
 
 describe("resolveFeatures", () => {

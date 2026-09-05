@@ -27,6 +27,7 @@ export const FEATURE_KEYS = [
   "ranking",
   "externalBookings",
   "interclub",
+  "forum",
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
@@ -48,6 +49,7 @@ export const FEATURE_LABELS: Record<FeatureKey, string> = {
   ranking: "Classement fédéral",
   externalBookings: "Détection des résas faites directement sur ResaMania",
   interclub: "Rencontres par équipes (interclub)",
+  forum: "Fil de discussion",
 };
 
 function isOn(v: string | undefined): boolean {
@@ -89,6 +91,11 @@ export const ENV_FEATURES: Features = {
   // et routes /api/interclub/**. Crée de la donnée nominative (qui joue, contre qui, quel
   // score) → à éprouver sur Recette avant activation en prod.
   interclub: isOn(process.env.NEXT_PUBLIC_FEATURE_INTERCLUB),
+  // Fil de discussion du club : vue « Fil » + routes /api/forum/**. Tout membre connecté y
+  // écrit et y lit. Crée de la donnée nominative libre (ce que les gens se disent) et, via la
+  // présence du canal temps réel, expose le FAIT D'ÊTRE EN LIGNE — deux choses qui n'existaient
+  // pas avant → à éprouver sur Recette, et à annoncer dans la note de confidentialité.
+  forum: isOn(process.env.NEXT_PUBLIC_FEATURE_FORUM),
 };
 
 /** État effectif = override s'il y en a un, sinon le défaut de l'environnement. */
