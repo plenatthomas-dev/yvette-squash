@@ -25,10 +25,21 @@ const h = vi.hoisted(() => ({
   standings: [] as Array<Record<string, unknown>>,
   standingsThrows: false,
   teamUpdates: [] as Array<Record<string, unknown>>,
+  /** La fonction interclub est-elle allumée ? (404 avant toute chose si elle ne l'est pas.) */
+  interclub: true,
+  /** L'appelant est-il admin ? Les doubles inconditionnels rendaient les deux premières
+      gardes du fichier intestables — celles qui décident QUI peut écrire un calendrier. */
+  admin: { userId: "adm", email: "a@ex.com" } as null | { userId: string; email: string },
 }));
 
-vi.mock("@/lib/interclub-access", () => ({ interclubDisabledResponse: async () => null }));
-vi.mock("@/lib/admin", () => ({ requireAdmin: async () => ({ userId: "adm", email: "a@ex.com" }) }));
+vi.mock("@/lib/interclub-access", async () => {
+  const { NextResponse } = await import("next/server");
+  return {
+    interclubDisabledResponse: async () =>
+      h.interclub ? null : NextResponse.json({ error: "Fonction indisponible" }, { status: 404 }),
+  };
+});
+vi.mock("@/lib/admin", () => ({ requireAdmin: async () => h.admin }));
 vi.mock("@/lib/interclub-gate", () => ({ interclubChanged: vi.fn() }));
 vi.mock("@/lib/interclub-notify", () => ({
   notifyFixtureMoved: vi.fn(async (...args: [unknown, string, unknown]) => {
@@ -146,9 +157,28 @@ beforeEach(() => {
   h.standings = [{ rank: 1, name: "Squash de l'Yvette", snTeamId: "161092", points: 9 }];
   h.standingsThrows = false;
   h.teamUpdates = [];
+  h.interclub = true;
+  h.admin = { userId: "adm", email: "a@ex.com" };
 });
 
 describe("préambule", () => {
+  it("404 quand la fonction interclub est coupée, AVANT de regarder les droits", async () => {
+    // La première garde du fichier, et elle passait entre les mailles : le double la rendait
+    // toujours ouverte. Le 404 précède le 403 partout dans ce dépôt — on ne dit pas « réservé
+    // aux admins » d'une fonction qui n'existe pas.
+    h.interclub = false;
+    h.admin = null;
+    expect((await POST(req({ action: "preview", teamId: "t1" }))).status).toBe(404);
+  });
+
+  it("403 pour qui n'est pas admin — un import écrit le calendrier de tout le club", async () => {
+    h.admin = null;
+    const res = await POST(req({ action: "apply", teamId: "t1" }));
+    expect(res.status).toBe(403);
+    expect(h.created).toEqual([]);
+    expect(h.updated).toEqual([]);
+  });
+
   it("refuse une action inconnue", async () => {
     expect((await POST(req({ action: "drop", teamId: "t1" }))).status).toBe(400);
   });
@@ -284,6 +314,33 @@ describe("application", () => {
     h.published = [publiee({ dateConfirmed: false })];
     await POST(req({ action: "apply", teamId: "t1" }));
     expect(h.created[0]).toMatchObject({ dateConfirmed: false });
+  });
+
+  it("REFUSE d'appliquer un aperçu périmé, au lieu d'écrire autre chose", async () => {
+    // Les deux temps ne tenaient l'un à l'autre par rien : `apply` retélécharge et recalcule.
+    // L'admin qui prévisualise, s'absente et revient cliquer validait donc un écart qu'il
+    // n'avait jamais lu — un déplacement de date efface au passage les disponibilités.
+    h.published = [publiee()];
+    const res = await POST(req({ action: "apply", teamId: "t1", seen: "un aperçu d'hier" }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("stale_preview");
+    expect(h.created).toEqual([]);
+    expect(h.updated).toEqual([]);
+  });
+
+  it("applique quand l'aperçu est celui du calendrier publié", async () => {
+    h.published = [publiee()];
+    const vu = (await (await POST(req({ action: "preview", teamId: "t1" }))).json()).seen;
+    expect(typeof vu).toBe("string");
+    const res = await POST(req({ action: "apply", teamId: "t1", seen: vu }));
+    expect(res.status).toBe(200);
+    expect(h.created).toHaveLength(1);
+  });
+
+  it("applique encore sans `seen` — un vieux client ne doit pas rester bloqué", async () => {
+    h.published = [publiee()];
+    expect((await POST(req({ action: "apply", teamId: "t1" }))).status).toBe(200);
+    expect(h.created).toHaveLength(1);
   });
 
   it("ne SUPPRIME jamais une journée retirée du calendrier, il la compte", async () => {

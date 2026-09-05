@@ -21,7 +21,11 @@ async function followersFor(teamId: string, want: FollowLevel): Promise<string[]
   // silencieusement désaccordé les deux, et seule l'autre version est testée directement.
   const covering = FOLLOW_LEVELS.filter((l) => notifiesAt(l, want));
   const rows = await prisma.interclubFollow.findMany({
-    where: { teamId, level: { in: [...covering] } },
+    // `disabledAt` exclu, comme dans `teamMemberIds` : la règle vaut pour TOUS les carnets
+    // d'adresses de ce module, pas seulement pour le roster. Un abonnement survit à la
+    // désactivation du compte (rien ne le supprime), si bien qu'un ancien membre continuait de
+    // recevoir toute la soirée de scores — le seul signe de vie que l'appli lui donnait encore.
+    where: { teamId, level: { in: [...covering] }, user: { disabledAt: null } },
     select: { userId: true },
   });
   return rows.map((r) => r.userId);
@@ -355,6 +359,12 @@ export async function notifyCalendarDrift(
   userIds: string[],
   team: { id: string; name: string },
   changes: string[],
+  /**
+   * Vrai quand cette équipe n'a JAMAIS été importée : le calendrier n'a pas changé, il est
+   * entièrement à prendre. Dire « a changé » à ce moment-là donnerait le ton pour toutes les
+   * alertes suivantes — et la première d'entre elles serait déjà fausse.
+   */
+  premierImport = false,
 ): Promise<void> {
   const teamName = team.name;
   if (userIds.length === 0) return;
@@ -362,7 +372,10 @@ export async function notifyCalendarDrift(
   const rest = changes.length > 3 ? ` (+${changes.length - 3})` : "";
   try {
     await pushToUsers(userIds, {
-      title: `${teamName} : le calendrier a changé`.slice(0, MAX_TITLE),
+      title: (premierImport
+        ? `${teamName} : calendrier à importer`
+        : `${teamName} : le calendrier a changé`
+      ).slice(0, MAX_TITLE),
       body: `${head}${rest}. À vérifier dans l'espace admin avant d'appliquer.`.slice(0, MAX_BODY),
       url: "/admin",
       // Un tag par ÉQUIPE et non par rencontre : la dérive porte sur le calendrier entier,
@@ -372,6 +385,41 @@ export async function notifyCalendarDrift(
       // « Équipe 2 » en « Équipe B » faisait cohabiter deux alertes pour la même équipe — et
       // deux équipes homonymes n'auraient jamais pu se remplacer l'une l'autre.
       tag: `interclub-calendrier-${team.id}`,
+      renotify: true,
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
+ * On a REÇU le calendrier, et on n'a pas su le lire — aux admins seuls.
+ *
+ * Distincte de la dérive, parce qu'elle appelle un tout autre geste : il n'y a rien à vérifier
+ * dans l'espace admin, il y a un parsing à reprendre. Distincte aussi du hoquet réseau, qui se
+ * répare tout seul la semaine suivante. Le cron les confondait dans un compteur que seul le
+ * tableau de bord montre : squashnet changeait son rendu — ce qu'il a déjà fait en silence — et
+ * le calendrier cessait d'être contrôlé sans que personne l'apprenne.
+ *
+ * Le capitaine n'est pas destinataire : c'est une panne d'outillage, il n'y peut rien, et une
+ * alerte qu'on ne peut pas traiter apprend surtout à ignorer les suivantes.
+ */
+export async function notifyCalendarUnreadable(
+  adminIds: string[],
+  teamNames: string[],
+): Promise<void> {
+  if (adminIds.length === 0) return;
+  try {
+    await pushToUsers(adminIds, {
+      title: "Calendrier fédéral illisible".slice(0, MAX_TITLE),
+      body: `Le rendu de squashnet a changé : ${teamNames.join(", ")}. Le contrôle hebdomadaire ne compare plus rien tant que la lecture n'est pas reprise.`.slice(
+        0,
+        MAX_BODY,
+      ),
+      url: "/admin",
+      // Un seul tag pour tout le dispositif : c'est une seule panne, quel que soit le nombre
+      // d'équipes qu'elle touche.
+      tag: "interclub-calendrier-illisible",
       renotify: true,
     });
   } catch {

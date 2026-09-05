@@ -15,6 +15,7 @@ import {
   MAX_SEASON_LEN,
   UNSET_PLAYER,
 } from "@/lib/interclub-db";
+import { estLigneClassement } from "@/lib/squashnet/standings";
 import { resolveHomePicks, type HomePick, type ResolvedPick } from "@/lib/interclub-roster";
 import { lineupOrderConflict, type OrderedSlot } from "@/lib/interclub-order";
 
@@ -81,12 +82,18 @@ export async function GET(req: NextRequest) {
   // n'importe quoi (ancien format, écriture interrompue), et un `JSON.parse` qui explose dans
   // la sérialisation de la réponse ferait tomber TOUT l'écran interclub pour un tableau
   // annexe. Illisible ⇒ pas de classement, le reste passe.
+  //
+  // LA FORME EST VÉRIFIÉE, pas seulement la syntaxe. `Array.isArray` couvrait l'écriture
+  // interrompue — le cas cité en second — et laissait passer le premier : un JSON parfaitement
+  // valide d'un format antérieur. L'écran lit ensuite `nous.matches.won` sans garde, et une
+  // levée au rendu emporte tout l'arbre, faute d'error boundary. Un classement qu'on ne sait
+  // pas lire vaut mieux tu qu'affiché de travers.
   const equipes = teams.map((t) => {
     let standings: unknown = null;
     if (t.snStandingsJson) {
       try {
         const lu = JSON.parse(t.snStandingsJson);
-        if (Array.isArray(lu) && lu.length > 0) standings = lu;
+        if (Array.isArray(lu) && lu.length > 0 && lu.every(estLigneClassement)) standings = lu;
       } catch {
         standings = null;
       }

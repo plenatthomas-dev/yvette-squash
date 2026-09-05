@@ -22,6 +22,9 @@ const h = vi.hoisted(() => ({
   /** Ce que squashnet rend, ou l'erreur qu'il jette. */
   published: [] as Array<import("@/lib/squashnet/calendar").OwnTie>,
   fetchThrows: false,
+  /** Le calendrier a été REÇU mais ne se lit plus — distinct du hoquet réseau. */
+  fetchUnreadable: false,
+  unreadable: [] as unknown[][],
   teamUpdates: [] as Array<Record<string, unknown>>,
   drifts: [] as unknown[][],
   admins: [] as Array<{ id: string; email: string }>,
@@ -41,8 +44,14 @@ vi.mock("@/lib/admin", () => ({
 // mocke le RÉSEAU seulement, et on garde le vrai `diffCalendar` / `calendarFingerprint`.
 vi.mock("@/lib/squashnet/calendar", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/squashnet/calendar")>()),
-  fetchTeamCalendar: vi.fn(async () => {
+  fetchTeamCalendar: vi.fn(async (...args: unknown[]) => {
     if (h.fetchThrows) throw new Error("502");
+    if (h.fetchUnreadable) {
+      const { CalendarUnreadableError } =
+        await importOriginal<typeof import("@/lib/squashnet/calendar")>();
+      throw new CalendarUnreadableError("le rendu a changé");
+    }
+    void args;
     return [];
   }),
   // `ownFixtures` reçoit le tableau vide ci-dessus : on lui substitue ce que le test veut voir
@@ -52,6 +61,9 @@ vi.mock("@/lib/squashnet/calendar", async (importOriginal) => ({
 vi.mock("@/lib/interclub-notify", () => ({
   notifyCalendarDrift: vi.fn(async (...a: unknown[]) => {
     h.drifts.push(a);
+  }),
+  notifyCalendarUnreadable: vi.fn(async (...a: unknown[]) => {
+    h.unreadable.push(a);
   }),
 }));
 vi.mock("@/lib/squashnet/standings", () => ({
@@ -135,6 +147,8 @@ beforeEach(() => {
   h.stored = [stored()];
   h.published = [tie()];
   h.fetchThrows = false;
+  h.fetchUnreadable = false;
+  h.unreadable = [];
   h.teamUpdates = [];
   h.drifts = [];
   h.admins = [{ id: "adm", email: "chef@ex.com" }];
@@ -195,13 +209,34 @@ describe("contrôle de dérive", () => {
     expect(h.teamUpdates.some((u) => "snCalendarHash" in u)).toBe(false);
   });
 
-  it("premier passage : enregistre l'empreinte SANS alerter", async () => {
-    // Signaler « le calendrier a changé » à la première lecture serait faux, et donnerait le
-    // ton pour toutes les alertes suivantes.
+  it("premier passage : n'enregistre PAS l'empreinte, et signale ce qu'il y a à importer", async () => {
+    // `snCalendarHash` est remis à null par chaque (ré)ancrage d'équipe. En l'écrivant ici, le
+    // cron avalait l'écart initial POUR TOUJOURS : on ancrait le dimanche en remettant l'import
+    // au lendemain, le cron passait le lundi, n'alertait pas, et les lundis suivants trouvaient
+    // l'empreinte égale. Les rencontres n'entraient jamais en base et aucun appel de
+    // disponibilité ne s'ouvrait.
+    h.teams = [team({ snCalendarHash: null })];
+    h.stored = [];
+    await GET(req());
+    expect(majCalendrier().some((u) => "snCalendarHash" in u)).toBe(false);
+    expect(h.drifts[0][2]).toEqual(["J1 nouvelle (2026-10-09)"]);
+  });
+
+  it("premier passage : dit « à importer » et non « a changé »", async () => {
+    // Rien n'a changé sur une équipe qu'on regarde pour la première fois : tout est à prendre.
+    // Le mot compte, il donne le ton de toutes les alertes suivantes.
+    h.teams = [team({ snCalendarHash: null })];
+    h.stored = [];
+    await GET(req());
+    expect(h.drifts[0][3]).toBe(true);
+  });
+
+  it("premier passage sur une base DÉJÀ à jour : rien à dire", async () => {
+    // Le cas que l'ancienne écriture d'empreinte voulait couvrir, et qui se traite tout seul :
+    // s'il n'y a aucun écart, il n'y a aucune alerte, empreinte ou pas.
     h.teams = [team({ snCalendarHash: null })];
     await GET(req());
     expect(h.drifts).toEqual([]);
-    expect(majCalendrier()[0]).toHaveProperty("snCalendarHash");
   });
 
   it("annonce une journée NOUVELLE", async () => {
@@ -227,6 +262,27 @@ describe("contrôle de dérive", () => {
     expect(body).toMatchObject({ checked: 0, failed: 1, drifted: 0 });
     expect(h.teamUpdates).toEqual([]);
     expect(h.drifts).toEqual([]);
+  });
+
+  it("DIT aux admins qu'on ne sait plus lire le calendrier, au lieu de compter un échec de plus", async () => {
+    // « On ne sait plus lire » et « squashnet n'a pas répondu » n'appellent pas le même geste :
+    // l'un demande de reprendre le parsing, l'autre se répare tout seul la semaine suivante. Les
+    // confondre dans un compteur muet, c'est laisser le calendrier cesser d'être contrôlé sans
+    // que personne l'apprenne — et squashnet a déjà changé son rendu en silence une fois.
+    h.fetchUnreadable = true;
+    const body = await (await GET(req())).json();
+    expect(body).toMatchObject({ checked: 0, failed: 1 });
+    expect(h.unreadable).toHaveLength(1);
+    expect(h.unreadable[0][0]).toEqual(["adm"]);
+    expect(h.unreadable[0][1]).toEqual(["Équipe 1"]);
+    // Le capitaine n'est PAS destinataire : il n'y peut rien.
+    expect(h.drifts).toEqual([]);
+  });
+
+  it("un hoquet réseau ordinaire n'alerte personne", async () => {
+    h.fetchThrows = true;
+    await GET(req());
+    expect(h.unreadable).toEqual([]);
   });
 
   it("ignore les équipes sans ancrage — la requête les exclut déjà", async () => {

@@ -17,6 +17,7 @@ import {
 import { teamRoster } from "@/lib/interclub-roster";
 import { interclubChanged } from "@/lib/interclub-gate";
 import { isRealDateISO } from "@/lib/time";
+import { matchKey } from "@/lib/squashnet/calendar";
 import { notifyFixtureMoved } from "@/lib/interclub-notify";
 
 export const runtime = "nodejs";
@@ -144,6 +145,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const v = parseOptionalText(brut, max);
     if (!v.ok) return NextResponse.json({ error: `Champ « ${nom} » invalide` }, { status: 400 });
     data[nom] = v.value;
+  }
+
+  // LA CLÉ D'ANCRAGE SUIT LA JOURNÉE, sans quoi corriger celle-ci ne corrige rien.
+  //
+  // `snMatchKey` vaut `événement:journée`, et c'est sur elle SEULE que l'import rapproche. La
+  // journée était modifiable, la clé non : la ligue renumérotait J1 en J01 — les deux formes
+  // existent dans les fixtures du dépôt —, l'admin corrigeait `round` à la main, et l'import
+  // suivant créait quand même un DOUBLON. L'ancienne rencontre, avec sa composition et ses
+  // réponses, n'était plus jamais rapprochée, et le cron annonçait chaque lundi
+  // « J1 retirée du calendrier ».
+  //
+  // Seul le suffixe change : l'événement reste celui sur lequel la rencontre a été importée.
+  // Une rencontre SAISIE À LA MAIN n'a pas de clé et n'en gagne pas — l'automatique et l'humain
+  // ne partagent aucune colonne.
+  if (typeof data.round === "string" && f.snMatchKey) {
+    const eventId = f.snMatchKey.slice(0, f.snMatchKey.indexOf(":"));
+    if (eventId) data.snMatchKey = matchKey(eventId, data.round);
   }
   if (typeof body.home === "boolean") data.home = body.home;
   // LE RATTRAPAGE DE LA DATE PRÉVISIONNELLE. La détection automatique a deux angles morts

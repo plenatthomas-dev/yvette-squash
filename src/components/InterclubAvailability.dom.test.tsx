@@ -309,6 +309,33 @@ describe("bloc de disponibilité — répondre", () => {
   });
 });
 
+describe("bloc de disponibilité — les DEUX 409 de la route", () => {
+  it("le conflit d'écriture se dit en message, il ne fait pas tomber l'écran", async () => {
+    // Cette route rend deux 409 : la question de remplacement, qui porte `existing`, et le
+    // conflit de sérialisation, qui ne porte qu'un message. Brancher sur le seul statut ouvrait
+    // la boîte de confirmation SANS `existing`, et le rendu levait sur `existing.status` —
+    // faute d'error boundary, tout l'écran disparaissait. Or ce 409-là se produit quand deux
+    // personnes répondent au même instant : le soir de rencontre, c'est-à-dire le cas nominal.
+    const entries = [entree({ key: "u1", name: "Thomas" })];
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (!init || init.method !== "PUT") return json(corps(entries));
+      return json({ error: "Deux réponses en même temps, réessaie", code: "write_conflict" }, 409);
+    });
+    render(<InterclubAvailability fixtureId="f1" toast={toast} onExpired={() => false} />);
+    await souffle();
+
+    await act(async () => {
+      fireEvent.click(within(boutonsDe("Thomas")).getByRole("button", { name: "Dispo" }));
+      await souffle();
+    });
+
+    // L'écran tient debout, et la personne sait quoi faire.
+    expect(screen.getByText("Thomas")).toBeTruthy();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(toast).toHaveBeenCalledWith("err", "Deux réponses en même temps, réessaie");
+  });
+});
+
 describe("bloc de disponibilité — écraser une réponse de première main", () => {
   /** Le serveur refuse d'abord (409), puis accepte la même réponse confirmée. */
   async function monteAvecConflit() {

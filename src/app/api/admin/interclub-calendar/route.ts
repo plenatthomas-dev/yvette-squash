@@ -135,16 +135,27 @@ async function anchoredTeam(teamId: unknown) {
 }
 
 // POST /api/admin/interclub-calendar
-//   { action: "preview",  teamId }  → télécharge et compare, SANS RIEN ÉCRIRE
-//   { action: "apply",    teamId }  → applique l'écart, puis enregistre l'empreinte
-//   { action: "standings", teamId } → retélécharge le CLASSEMENT de la poule, tout de suite
+//   { action: "preview",  teamId }          → télécharge et compare, SANS RIEN ÉCRIRE
+//   { action: "apply",    teamId, seen? }   → applique l'écart, puis enregistre l'empreinte
+//   { action: "standings", teamId }         → retélécharge le CLASSEMENT de la poule, tout de suite
+//
+// `seen` est l'empreinte que la PRÉVISUALISATION a montrée. Sans elle, les deux temps ne
+// tenaient l'un à l'autre par rien : `apply` retélécharge et recalcule, si bien que l'admin qui
+// prévisualise, s'absente et revient appliquer valide un écart qu'il n'a jamais vu — y compris
+// un effacement de disponibilités. Le geste en deux temps protégeait de l'inattention, pas de
+// ce que l'en-tête de ce fichier annonce.
 export async function POST(req: NextRequest) {
   const off = await interclubDisabledResponse();
   if (off) return off;
   const admin = await requireAdmin(req);
   if (!admin) return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
 
-  const body = (await req.json().catch(() => ({}))) as { action?: unknown; teamId?: unknown };
+  const body = (await req.json().catch(() => ({}))) as {
+    action?: unknown;
+    teamId?: unknown;
+    /** L'empreinte que la prévisualisation a montrée — cf. l'en-tête de la route. */
+    seen?: unknown;
+  };
   if (body.action !== "preview" && body.action !== "apply" && body.action !== "standings") {
     return NextResponse.json({ error: "Action inconnue" }, { status: 400 });
   }
@@ -225,6 +236,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       teamName: team.name,
       published: published.length,
+      // Ce que l'admin a sous les yeux, à renvoyer avec l'`apply` : c'est ce qui lie les deux
+      // temps. La même fonction que l'empreinte enregistrée, donc la même définition de
+      // « le même calendrier » — deux définitions finiraient par se contredire.
+      seen: calendarFingerprint(published),
       toCreate: diff.toCreate,
       toUpdate: diff.toUpdate,
       toDelete: diff.toDelete,
@@ -238,6 +253,22 @@ export async function POST(req: NextRequest) {
   }
 
   // --- APPLICATION -------------------------------------------------------------------------
+
+  // ON N'APPLIQUE QUE CE QUI A ÉTÉ MONTRÉ. La ligue peut publier autre chose entre les deux
+  // clics, et le second temps retélécharge : sans ce garde-fou, « Appliquer » validerait un
+  // écart que personne n'a lu. On refuse plutôt que d'écrire, et l'écran refait un aperçu —
+  // 409 parce que c'est un état qui a bougé, pas une faute de l'admin.
+  if (typeof body.seen === "string" && body.seen !== calendarFingerprint(published)) {
+    return NextResponse.json(
+      {
+        error:
+          "Le calendrier publié a changé depuis l'aperçu. Reprévisualise pour voir ce qui serait écrit.",
+        code: "stale_preview",
+      },
+      { status: 409 },
+    );
+  }
+
   const moved: { id: string; from: string; opponent: string }[] = [];
 
   for (const tie of diff.toCreate) {

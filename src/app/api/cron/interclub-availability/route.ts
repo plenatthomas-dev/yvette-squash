@@ -120,7 +120,14 @@ export async function GET(req: NextRequest) {
       availabilityOpenedAt: true,
       availabilityRemindedAt: true,
       opponent: true,
-      team: { select: { name: true, captainId: true } },
+      // LE CAPITAINE EST LU AVEC SON COMPTE, pas seulement par son identifiant.
+      // `captainId` survit à la désactivation (le schéma ne pose `SetNull` que sur la
+      // suppression) : un capitaine parti du club, désactivé, disparaissait de la liste des
+      // disponibilités — et recevait pourtant chaque J-3 le récapitulatif nominatif, c'est-à-dire
+      // les noms de ses ex-coéquipiers à appeler.
+      team: {
+        select: { name: true, captainId: true, captain: { select: { disabledAt: true } } },
+      },
     },
     orderBy: { date: "asc" },
   });
@@ -179,7 +186,8 @@ export async function GET(req: NextRequest) {
 
     // Le capitaine reçoit ce que personne d'autre n'a à recevoir. Notamment la liste de ceux
     // qu'il doit APPELER — sans elle, il relance en aveugle des gens qui ne verront rien.
-    if (f.team.captainId) {
+    // Actif seulement : un capitaine désactivé ne peut plus se connecter pour donner suite.
+    if (f.team.captainId && !f.team.captain?.disabledAt) {
       await notifyCaptainDigest(
         f.team.captainId,
         ctx,

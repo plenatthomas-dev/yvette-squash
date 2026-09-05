@@ -436,6 +436,32 @@ describe("PATCH /api/interclub/{id}", () => {
     expect(h.patched).toMatchObject({ dateConfirmed: true });
   });
 
+  it("la CLÉ D'ANCRAGE suit la journée quand la ligue renumérote", async () => {
+    // `snMatchKey` vaut `événement:journée`, et c'est sur elle SEULE que l'import rapproche.
+    // Corriger `round` sans elle ne corrigeait rien : l'import suivant créait un doublon,
+    // l'ancienne rencontre — sa composition, ses réponses — n'était plus jamais rapprochée, et
+    // le cron annonçait chaque lundi « J1 retirée du calendrier ».
+    h.fixture = fixture({ round: "J1", snMatchKey: "ev1:J1" });
+    await PATCH(patchReq({ round: "J01" }), ctx);
+    expect(h.patched).toMatchObject({ round: "J01", snMatchKey: "ev1:J01" });
+  });
+
+  it("ne DONNE PAS de clé à une rencontre saisie à la main", async () => {
+    // L'automatique et l'humain ne partagent aucune colonne : une rencontre sans clé n'en gagne
+    // pas, sinon l'import se mettrait à la corriger.
+    h.fixture = fixture({ round: "J1", snMatchKey: null });
+    await PATCH(patchReq({ round: "J01" }), ctx);
+    expect(h.patched).toMatchObject({ round: "J01" });
+    expect(h.patched).not.toHaveProperty("snMatchKey");
+  });
+
+  it("EFFACER la journée n'invente pas une clé sans journée", async () => {
+    h.fixture = fixture({ round: "J1", snMatchKey: "ev1:J1" });
+    await PATCH(patchReq({ round: null }), ctx);
+    expect(h.patched).toMatchObject({ round: null });
+    expect(h.patched).not.toHaveProperty("snMatchKey");
+  });
+
   it("REFUSE un champ texte mal typé au lieu d'EFFACER la colonne", async () => {
     // `PATCH {"venue": 42}` répondait 200 et le lieu disparaissait : « ce n'est pas une chaîne »
     // et « efface ce champ » étaient le même cas. Sur le même corps, `opponent` rendait déjà un

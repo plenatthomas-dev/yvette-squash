@@ -619,6 +619,25 @@ describe("GET /api/interclub — le classement de la poule", () => {
     expect(body.teams[0].standings).toBeNull();
   });
 
+  it("un JSON VALIDE mais d'un ancien FORMAT ne passe pas non plus", async () => {
+    // Le cas que le commentaire cite en PREMIER, et que la garde ne couvrait pas : `JSON.parse`
+    // réussit, `Array.isArray` réussit, et c'est l'écran qui lève — il lit `nous.matches.won`
+    // sans garde, et rien ne rattrape une levée au rendu. Un classement qu'on ne sait pas lire
+    // vaut mieux tu qu'affiché de travers.
+    h.teams = [
+      {
+        id: "t1",
+        name: "Équipe 1",
+        snTeamId: "161092",
+        // Un format antérieur plausible : des agrégats à plat, sans les trois `tally`.
+        snStandingsJson: JSON.stringify([{ rank: 1, name: "Yvette", matchesWon: 11 }]),
+        snStandingsAt: new Date("2026-09-04T09:00:00.000Z"),
+      },
+    ];
+    const body = await (await GET(req())).json();
+    expect(body.teams[0].standings).toBeNull();
+  });
+
   it("un tableau VIDE vaut pas de classement, pas un classement à zéro équipe", async () => {
     h.teams = [
       { id: "t1", name: "Équipe 1", snTeamId: null, snStandingsJson: "[]", snStandingsAt: null },

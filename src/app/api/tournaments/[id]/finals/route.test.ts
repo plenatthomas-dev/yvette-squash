@@ -148,7 +148,13 @@ describe("POST /api/tournaments/[id]/finals — les trois façons d'échouer", (
     h.materializeFinals.mockRejectedValue(erreurDb("P2034", "could not serialize access"));
     const res = await POST(req(), params);
     expect(res.status).toBe(409);
-    await expect(res.json()).resolves.toEqual({ error: "Génération concurrente, réessaie" });
+    // Le `code` accompagne désormais tout 409 de contention : c'est sur lui, jamais sur le
+    // texte, qu'un client branche — et cette route en rend un seul, là où les disponibilités
+    // en rendent deux qu'il fallait pouvoir distinguer.
+    await expect(res.json()).resolves.toEqual({
+      error: "Génération concurrente, réessaie",
+      code: "write_conflict",
+    });
     expect(h.appels).toBe(4);
   });
 

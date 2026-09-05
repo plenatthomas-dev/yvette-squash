@@ -132,6 +132,29 @@ describe("GET /api/interclub/{id}/availability", () => {
     expect((await GET(req(), ctx)).status).toBe(404);
   });
 
+  it("401 sans session — et 404 d'abord si la fonction est coupée", async () => {
+    // L'ordre compte autant que les codes : on ne révèle pas l'existence d'une fonction
+    // désactivée à quelqu'un qui n'est même pas connecté.
+    h.session = null;
+    expect((await GET(req(), ctx)).status).toBe(401);
+    h.interclub = false;
+    expect((await GET(req(), ctx)).status).toBe(404);
+  });
+
+  it("401 en ÉCRITURE aussi, et rien n'est enregistré", async () => {
+    h.session = null;
+    expect((await PUT(req({ status: "yes" }), ctx)).status).toBe(401);
+    expect(h.created).toBeNull();
+    expect(h.updated).toBeNull();
+  });
+
+  it("404 sur une rencontre inconnue, en lecture comme en écriture", async () => {
+    h.fixture = null;
+    expect((await GET(req(), ctx)).status).toBe(404);
+    expect((await PUT(req({ status: "yes" }), ctx)).status).toBe(404);
+    expect(h.created).toBeNull();
+  });
+
   it("403 pour un membre d'une AUTRE équipe", async () => {
     // On parle de la disponibilité de gens qui jouent ensemble : quelqu'un qui ne dispute pas
     // cette rencontre n'a rien à y lire.

@@ -80,7 +80,7 @@ const fixture = (over: Record<string, unknown> = {}) => ({
   availabilityOpenedAt: null,
   availabilityRemindedAt: null,
   opponent: "Montmartre 1",
-  team: { name: "Équipe 1", captainId: "cap" },
+  team: { name: "Équipe 1", captainId: "cap", captain: { disabledAt: null } },
   ...over,
 });
 
@@ -211,10 +211,25 @@ describe("relance (J-3) et récapitulatif du capitaine", () => {
   });
 
   it("se passe de récap quand l'équipe n'a pas de capitaine", async () => {
-    h.fixtures = [ouverte({ team: { name: "Équipe 1", captainId: null } })];
+    h.fixtures = [ouverte({ team: { name: "Équipe 1", captainId: null, captain: null } })];
     await GET(req());
     expect(h.digests).toEqual([]);
     // La relance, elle, part quand même : elle ne dépend de personne.
+    expect(h.reminders).toHaveLength(1);
+  });
+
+  it("N'ÉCRIT PLUS au capitaine dont le compte est désactivé", async () => {
+    // `captainId` survit à la désactivation — le schéma ne pose `SetNull` que sur la suppression
+    // du compte. Le capitaine parti du club disparaissait bien de la liste des disponibilités
+    // (les désactivés sont exclus du roster), et recevait pourtant chaque J-3 le récapitulatif
+    // NOMINATIF : le compte des réponses, et les noms de ses ex-coéquipiers à appeler.
+    h.fixtures = [
+      ouverte({
+        team: { name: "Équipe 1", captainId: "cap", captain: { disabledAt: new Date() } },
+      }),
+    ];
+    await GET(req());
+    expect(h.digests).toEqual([]);
     expect(h.reminders).toHaveLength(1);
   });
 

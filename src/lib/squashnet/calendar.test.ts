@@ -190,6 +190,31 @@ describe.each([
     expect(parseTeamCalendar(leurre)).toEqual(parseTeamCalendar(q(FRAGMENT)));
   });
 
+  it("ne laisse PAS le pied de page déborder dans la dernière rencontre", () => {
+    // Le découpage ne borne pas à droite : la dernière rencontre de la dernière journée courait
+    // jusqu'à la fin du document. Tant que le pied de page ne portait rien d'exploitable, cela
+    // ne se voyait pas — et aucun test ne tenait cette condition. Une rencontre dont la ligue ne
+    // publie pas le club hôte allait alors chercher le PREMIER `<p class='mb-0'>` venu, c'est-à-
+    // dire celui du pied de page : un lieu inventé, sur une convocation.
+    //
+    // Chaque rencontre est désormais bornée à son bloc `players`, dont la fermante est trouvable
+    // exactement (il ne contient aucun `<div>`).
+    const sansLieu = day(
+      "J9 - mardi 12 mai 2026",
+      "20:00",
+      `<div class='match'><div class='players'><p class='mb-0'><a data-teamid='${OURS}'>Yvette 1</a>
+</p>
+<span class='mb-0'>vs</span><p class='mb-0'><a data-teamid='161039'>Montmartre 1</a>
+</p>
+</div>
+</div>`,
+    );
+    const pied = `<div class='footer'><p class='mb-0'>SQUASH DE NULLE PART</p></div>`;
+    const lues = parseTeamCalendar(q(sansLieu) + q(pied));
+    expect(lues).toHaveLength(1);
+    expect(lues[0].venue).toBeNull();
+  });
+
   it("lit une adresse en ENTIER, même balisée", () => {
     // On coupait au premier `</` venu : « 12 RUE <b>DU</b> STADE, 91440 - ORSAY » se lisait
     // « 12 RUE DU ». Une adresse tronquée a l'air d'une adresse — personne ne la rattrape, et
@@ -338,8 +363,9 @@ describe("diffCalendar", () => {
     // cron quotidien ouvrait consciencieusement son appel de disponibilité pour une soirée qui
     // n'existe plus. On la signale ; on ne la supprime jamais d'office.
     // La rencontre stockée porte la journée J7 — sa CLÉ et sa colonne `round` s'accordent.
-    // Elles se contredisaient (`ev1:J7` sur une ligne annoncée « J1 »), et le cas ne peut pas
-    // exister en base : une confusion entre les deux serait passée inaperçue ici.
+    // Elles se contredisaient (`ev1:J7` sur une ligne annoncée « J1 »), et rien n'aurait révélé
+    // une confusion entre les deux. Cet accord est tenu par l'import, qui les pose ensemble, et
+    // par le `PATCH`, qui refait la clé quand on corrige la journée.
     const d = diffCalendar(
       [stored({ id: "x", round: "J7", snMatchKey: matchKey(EVENT, "J7") })],
       [own()],

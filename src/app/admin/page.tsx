@@ -139,6 +139,14 @@ type CalPreview = {
   /** Journées dont la date NE BOUGERA PAS : la rencontre est déjà commencée. */
   frozen: string[];
   unchanged: number;
+  /**
+   * L'empreinte du calendrier tel qu'il vient d'être MONTRÉ, renvoyée avec l'application.
+   *
+   * Les deux temps ne tenaient l'un à l'autre par rien : `apply` retélécharge et recalcule.
+   * Prévisualiser, s'absenter, revenir cliquer « Appliquer » validait donc un écart qu'on
+   * n'avait jamais lu — y compris un effacement de disponibilités.
+   */
+  seen: string | null;
 };
 
 /**
@@ -814,6 +822,7 @@ export default function AdminPage() {
         confirmDrift: data.confirmDrift ?? [],
         frozen: data.frozen ?? [],
         unchanged: data.unchanged ?? 0,
+        seen: data.seen ?? null,
       });
     } catch {
       setIcResult({ ok: false, text: "Récupération impossible." });
@@ -829,7 +838,9 @@ export default function AdminPage() {
       const res = await fetch("/api/admin/interclub-calendar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "apply", teamId: t.id }),
+        // `seen` : ce que l'aperçu a montré. Le serveur refuse plutôt que d'appliquer autre
+        // chose si la ligue a publié entre les deux clics.
+        body: JSON.stringify({ action: "apply", teamId: t.id, seen: icCal?.seen ?? undefined }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         created?: number;

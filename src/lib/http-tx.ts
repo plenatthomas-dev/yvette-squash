@@ -55,6 +55,17 @@ export class HttpError extends Error {
  */
 const MAX_ATTEMPTS = 4;
 
+/**
+ * Le code du 409 rendu quand les tentatives s'épuisent — « réessaie », et rien d'autre.
+ *
+ * Ce module explique depuis toujours pourquoi `HttpError` porte un `code` : « le marqueur ne
+ * saurait pas distinguer "quelqu'un d'autre marque" de "ton journal est périmé" — deux 409 sur
+ * la même route ». La contention n'en portait pourtant aucun, et c'est justement le 409 qu'un
+ * client rencontre sur une route qui en rend un AUTRE, plus riche : sans discriminant, il lit
+ * le second dans le premier et va chercher un champ qui n'existe pas.
+ */
+export const WRITE_CONFLICT = "write_conflict";
+
 /** P2034 = conflit d'écriture / échec de sérialisation, le cas qu'on rejoue. */
 function isSerializationConflict(e: unknown): boolean {
   return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2034";
@@ -153,7 +164,7 @@ export async function serializableTransaction<T>(
       });
     } catch (e) {
       if (!isSerializationConflict(e)) throw e;
-      if (attempt >= MAX_ATTEMPTS) throw new HttpError(409, conflictMessage);
+      if (attempt >= MAX_ATTEMPTS) throw new HttpError(409, conflictMessage, WRITE_CONFLICT);
       await new Promise((r) => setTimeout(r, backoffFor(attempt)));
     }
   }

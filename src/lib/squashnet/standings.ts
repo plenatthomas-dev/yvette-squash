@@ -88,6 +88,31 @@ export interface StandingRow {
   rallies: StandingTally;
 }
 
+/**
+ * Cette valeur a-t-elle la forme d'une ligne de classement ?
+ *
+ * Le classement est stocké en JSON dans une colonne texte, et relu des mois plus tard par un
+ * écran qui lit `nous.matches.won` sans garde. « JSON valide » ne suffit donc pas : un tableau
+ * d'un FORMAT ANTÉRIEUR passe le `JSON.parse`, passe l'`Array.isArray`, et lève au rendu — où
+ * il n'y a pas d'error boundary pour rattraper quoi que ce soit. On vérifie ce que l'écran
+ * lit, pas plus : le rang, le nom, et les trois agrégats.
+ */
+export function estLigneClassement(v: unknown): boolean {
+  if (typeof v !== "object" || v === null) return false;
+  const r = v as Record<string, unknown>;
+  const tally = (t: unknown) =>
+    typeof t === "object" &&
+    t !== null &&
+    ["won", "lost", "diff"].every((k) => typeof (t as Record<string, unknown>)[k] === "number");
+  return (
+    typeof r.rank === "number" &&
+    typeof r.name === "string" &&
+    tally(r.matches) &&
+    tally(r.games) &&
+    tally(r.rallies)
+  );
+}
+
 const TR = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
 const TD = /<td[^>]*data-label=["']([^"']*)["'][^>]*>([\s\S]*?)<\/td>/gi;
 const TEAM_ID = /data-teamid=["'](\d+)["']/i;

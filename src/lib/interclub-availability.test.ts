@@ -5,6 +5,9 @@ import {
   tally,
   isShortHanded,
   needsOverrideConfirm,
+  daysBetween,
+  dueAction,
+  type ScheduledFixture,
   MAX_AVAILABILITY_COMMENT,
   type AvailabilityEntry,
 } from "./interclub-availability";
@@ -122,5 +125,78 @@ describe("needsOverrideConfirm", () => {
     // Sa réponse est TOUJOURS relayée : exiger une confirmation à chaque fois ne protégerait
     // rien et ferait un clic de plus à chaque saisie.
     expect(needsOverrideConfirm(invité, null, "u2")).toBe(false);
+  });
+});
+
+// LE CALENDRIER DES RELANCES — la seule règle de ce module qui décide d'un ENVOI.
+//
+// Elle n'était éprouvée qu'à travers le cron, dont le faux `interclub.findMany` ignore son
+// `where` : les cas « rencontre passée » et « date non confirmée » y mesuraient bien `dueAction`,
+// mais rien ne tenait les BORNES des deux fenêtres, ni le comptage de jours autour d'un
+// changement d'heure — que le commentaire de `daysBetween` donne pourtant comme sa raison d'être.
+
+describe("daysBetween", () => {
+  it("compte des jours de CALENDRIER, pas des durées", () => {
+    expect(daysBetween("2026-10-01", "2026-10-11")).toBe(10);
+    expect(daysBetween("2026-10-11", "2026-10-01")).toBe(-10);
+    expect(daysBetween("2026-10-09", "2026-10-09")).toBe(0);
+  });
+
+  it("ne bouge pas d'un jour au changement d'heure", () => {
+    // Le passage à l'heure d'hiver 2026 en France a lieu le 25 octobre. Compté en instants, le
+    // 26 octobre est à 10 jours et 1 heure du 16 : arrondi vers le bas, la relance serait
+    // partie un jour trop tôt — deux fois par an, sur une poignée de rencontres.
+    expect(daysBetween("2026-10-16", "2026-10-26")).toBe(10);
+    expect(daysBetween("2026-03-26", "2026-04-05")).toBe(10);
+  });
+
+  it("rend NaN sur une date illisible plutôt qu'un nombre inventé", () => {
+    expect(Number.isNaN(daysBetween("pas une date", "2026-10-09"))).toBe(true);
+  });
+});
+
+describe("dueAction", () => {
+  const rencontre = (over: Partial<ScheduledFixture> = {}): ScheduledFixture => ({
+    date: "2026-10-09",
+    dateConfirmed: true,
+    availabilityOpenedAt: null,
+    availabilityRemindedAt: null,
+    ...over,
+  });
+
+  it("RIEN sur une date non confirmée, quelle que soit l'échéance", () => {
+    // La fédération publie les journées non planifiées avec une date bouchon commune :
+    // convoquer là-dessus enverrait l'équipe quatre fois le même soir, et lui apprendrait à
+    // ignorer ces notifications.
+    expect(dueAction(rencontre({ dateConfirmed: false }), "2026-10-08")).toBeNull();
+  });
+
+  it("ouvre l'appel à J-10 exactement, et pas à J-11", () => {
+    // La borne est la règle : « assez tôt pour déplacer une soirée, assez tard pour qu'on sache
+    // ce qu'on fait ce jeudi-là ». Un jour de trop et l'on ne récolte que des « incertain ».
+    expect(dueAction(rencontre(), "2026-09-29")).toBe("call");
+    expect(dueAction(rencontre(), "2026-09-28")).toBeNull();
+  });
+
+  it("relance à J-3 exactement, une fois l'appel ouvert", () => {
+    const ouverte = rencontre({ availabilityOpenedAt: new Date("2026-09-29") });
+    expect(dueAction(ouverte, "2026-10-06")).toBe("remind");
+    expect(dueAction(ouverte, "2026-10-05")).toBeNull();
+  });
+
+  it("ne relance qu'UNE fois — c'est le marqueur qui porte l'idempotence", () => {
+    // Sans lui, un cron quotidien redemanderait chaque matin à la même équipe si elle vient.
+    const relancée = rencontre({
+      availabilityOpenedAt: new Date("2026-09-29"),
+      availabilityRemindedAt: new Date("2026-10-06"),
+    });
+    expect(dueAction(relancée, "2026-10-07")).toBeNull();
+    expect(dueAction(relancée, "2026-10-08")).toBeNull();
+  });
+
+  it("RIEN sur une rencontre passée, même jamais appelée", () => {
+    // Le jour même compte encore — on peut toujours chercher un remplaçant à 18 h.
+    expect(dueAction(rencontre(), "2026-10-09")).toBe("call");
+    expect(dueAction(rencontre(), "2026-10-10")).toBeNull();
   });
 });

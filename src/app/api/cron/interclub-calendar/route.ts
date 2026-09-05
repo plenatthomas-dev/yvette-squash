@@ -9,9 +9,10 @@ import {
   ownFixtures,
   diffCalendar,
   calendarFingerprint,
+  CalendarUnreadableError,
 } from "@/lib/squashnet/calendar";
 import { fetchStandings } from "@/lib/squashnet/standings";
-import { notifyCalendarDrift } from "@/lib/interclub-notify";
+import { notifyCalendarDrift, notifyCalendarUnreadable } from "@/lib/interclub-notify";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -80,11 +81,18 @@ export async function GET(req: NextRequest) {
       snDrawId: true,
       snCalendarHash: true,
       captainId: true,
+      // Le capitaine n'est destinataire que si son compte est actif : `captainId` survit à la
+      // désactivation, et l'alerte serait partie vers quelqu'un qui ne peut plus se connecter
+      // pour y donner suite.
+      captain: { select: { disabledAt: true } },
     },
   });
 
   // Une seule fois, hors boucle : « qui est admin » ne change pas d'une équipe à l'autre.
   const adminIds = await adminUserIds();
+
+  // Les équipes dont le calendrier a été REÇU mais qu'on n'a pas su lire : à dire à part.
+  const unreadable: string[] = [];
 
   let checked = 0;
   let drifted = 0;
@@ -99,9 +107,19 @@ export async function GET(req: NextRequest) {
         await fetchTeamCalendar(team.snEventId!, team.snRoundId!),
         team.snTeamId!,
       );
-    } catch {
+    } catch (e) {
       // Un hoquet réseau n'est PAS un calendrier vide. On ne touche à rien — surtout pas à
       // `snCheckedAt`, qui doit continuer de dire « la dernière fois qu'on a vraiment regardé ».
+      //
+      // ET « ON NE SAIT PLUS LIRE » N'EST PAS UN HOQUET RÉSEAU. Les deux appellent des gestes
+      // différents — l'un se réessaie tout seul la semaine suivante, l'autre demande de
+      // recapturer la fixture et de reprendre le parsing —, et `CalendarUnreadableError` existe
+      // précisément pour les distinguer. Confondus dans un compteur muet, le changement de
+      // rendu de squashnet n'atteignait personne : le calendrier cessait simplement d'être
+      // contrôlé jusqu'à ce qu'un admin pense à lire la ligne de cron.
+      if (e instanceof CalendarUnreadableError) {
+        unreadable.push(team.name);
+      }
       failed++;
       continue;
     }
@@ -132,20 +150,25 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // CE CRON N'ÉCRIT JAMAIS L'EMPREINTE — seule l'application le fait, comme l'annoncent
+    // l'en-tête ci-dessus et `calendarFingerprint`.
+    //
+    // Il l'écrivait pourtant au premier passage, « pour ne pas alerter à tort ». Or
+    // `snCalendarHash` est remis à `null` par `set_squashnet_event` : à chaque (ré)ancrage
+    // d'équipe. On ancrait l'Équipe 1 le dimanche en remettant l'import au lendemain, le cron
+    // passait le lundi 9 h, enregistrait l'empreinte, ne signalait rien — et ne signalerait
+    // plus jamais rien, l'empreinte étant désormais égale. Les cinq rencontres n'entraient
+    // jamais en base, aucun appel de disponibilité ne s'ouvrait, et le seul rattrapage était
+    // que quelqu'un repense à cliquer « Prévisualiser ».
+    //
+    // Il reste vrai qu'on ne doit pas annoncer « le calendrier a CHANGÉ » à une équipe qu'on
+    // regarde pour la première fois : rien n'a changé, tout est à importer. C'est le message
+    // qui s'adapte, pas l'écriture.
+    const premierPassage = team.snCalendarHash === null;
     const fingerprint = calendarFingerprint(published);
-    // Premier passage d'une équipe (aucune empreinte) : on enregistre sans alerter. Signaler
-    // « le calendrier a changé » à la première lecture serait faux, et donnerait le ton pour
-    // toutes les alertes suivantes.
-    if (team.snCalendarHash === null) {
-      await prisma.interclubTeam.update({
-        where: { id: team.id },
-        data: { snCalendarHash: fingerprint, snCheckedAt: new Date() },
-      });
-      continue;
-    }
 
     await prisma.interclubTeam.update({ where: { id: team.id }, data: { snCheckedAt: new Date() } });
-    if (fingerprint === team.snCalendarHash) continue;
+    if (!premierPassage && fingerprint === team.snCalendarHash) continue;
 
     // On décrit l'écart RÉEL par rapport à ce qu'on a en base, pas seulement « ça a changé » :
     // le lecteur doit pouvoir juger de l'urgence sans ouvrir l'appli.
@@ -200,14 +223,23 @@ export async function GET(req: NextRequest) {
     // main couvre déjà la journée, par exemple) : se taire plutôt que d'alerter à vide.
     if (changes.length === 0) continue;
 
-    await notifyCalendarDrift(recipients(adminIds, team.captainId), team, changes);
+    const capitaine = team.captain?.disabledAt ? null : team.captainId;
+    await notifyCalendarDrift(recipients(adminIds, capitaine), team, changes, premierPassage);
     drifted++;
+  }
+
+  // Le changement de rendu se DIT à ceux qui peuvent y répondre, et pas seulement au journal
+  // de cron que personne n'ouvre tant que rien ne semble cassé. Aux admins seuls : c'est une
+  // panne d'outillage, pas une nouvelle de championnat, et le capitaine n'y peut rien.
+  if (unreadable.length > 0 && adminIds.length > 0) {
+    await notifyCalendarUnreadable(adminIds, unreadable);
   }
 
   await recordCronRun(
     "interclub-calendar",
     failed === 0,
-    `${checked} équipe(s) vérifiée(s), ${drifted} écart(s), ${failed} échec(s), ` +
+    `${checked} équipe(s) vérifiée(s), ${drifted} écart(s), ${failed} échec(s)` +
+      `${unreadable.length ? ` dont ${unreadable.length} illisible(s)` : ""}, ` +
       `${standings} classement(s) rafraîchi(s), ${standingsFailed} échec(s) de classement`,
   );
   return NextResponse.json({

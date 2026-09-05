@@ -82,6 +82,10 @@ export async function notifyAdminsOfRequest(purpose: TokenPurpose, email: string
           body: `Demande de ${kind} : ${email}`,
           url: "/admin",
           tag: "admin-requests",
+          // `renotify` comme partout ailleurs dans le dépôt : sans lui, la spécification impose
+          // un remplacement SILENCIEUX. Deux demandes rapprochées, et la seconde arrivait sans
+          // bruit ni vibration — c'est-à-dire qu'elle n'arrivait pas.
+          renotify: true,
         }),
       ),
     );

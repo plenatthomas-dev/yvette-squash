@@ -204,11 +204,27 @@ export function InterclubAvailability({
       });
       if (onExpired(res.status)) return;
       if (res.status === 409) {
-        // On NE REFUSE PAS : on montre ce que la personne avait répondu elle-même, et on
-        // redemande. Un refus sec ferait croire à une panne ; un remplacement silencieux
-        // ferait disparaître un « non » assumé.
-        const body = (await res.json()) as { existing: Conflict["existing"] };
-        setConflict({ key, status, existing: body.existing });
+        // DEUX 409 SUR CETTE ROUTE, et un seul est une question.
+        //
+        //   * `confirm_override` — « cette personne avait répondu elle-même, on remplace ? ».
+        //     On NE REFUSE PAS : un refus sec ferait croire à une panne, un remplacement
+        //     silencieux ferait disparaître un « non » assumé.
+        //   * `write_conflict` — deux écritures au même instant, la transaction a épuisé ses
+        //     quatre tentatives. C'est une invitation à réessayer, sans rien à montrer.
+        //
+        // Brancher sur le seul statut faisait ouvrir la boîte de confirmation SANS `existing`,
+        // et le rendu levait sur `existing.status` : faute d'error boundary, tout l'écran
+        // disparaissait — un soir de rencontre, c'est-à-dire quand deux personnes répondent en
+        // même temps. On lit donc le corps, et on n'ouvre la question que s'il en porte une.
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          existing?: Conflict["existing"];
+        };
+        if (body.existing) {
+          setConflict({ key, status, existing: body.existing });
+        } else {
+          toast("err", body.error ?? "Deux réponses en même temps, réessaie.");
+        }
         return;
       }
       if (!res.ok) {

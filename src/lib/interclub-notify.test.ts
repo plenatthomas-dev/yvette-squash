@@ -51,6 +51,14 @@ describe("ciblage des abonnés", () => {
     expect(h.lastWhere).toMatchObject({ teamId: "t1", level: { in: ["detailed"] } });
   });
 
+  it("écarte les comptes DÉSACTIVÉS, comme le roster", async () => {
+    // Rien ne supprime un abonnement quand on désactive un compte : un ancien membre continuait
+    // de recevoir toute la soirée de scores. La règle est écrite pour `teamMemberIds` ; elle vaut
+    // pour tous les carnets d'adresses du module, et le filtre se fait EN BASE.
+    await notifyGameDone(ctx, "Tom", "Gégé", [{ home: 11, away: 9 }]);
+    expect(h.lastWhere).toMatchObject({ user: { disabledAt: null } });
+  });
+
   it("un match gagné touche les temps forts ET le détaillé", async () => {
     await notifyMatchDone(ctx, "Tom", "Gégé", 3, 1, { home: 1, away: 0 });
     expect(h.lastWhere).toMatchObject({ level: { in: ["highlights", "detailed"] } });

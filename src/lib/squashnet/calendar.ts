@@ -160,11 +160,24 @@ const hasClass = (attrs: string, cls: string) => classAttr(attrs).split(/\s+/).i
  * balisage rencontré jusqu'ici dans une adresse est un `<br>`, qui n'a pas de fermante.
  */
 function classText(html: string, cls: string): string {
+  return stripTags(classHtml(html, cls));
+}
+
+/**
+ * Le contenu BRUT du premier élément portant cette classe — le même découpage, sans stripTags.
+ *
+ * Il sert à BORNER, là où `classText` sert à lire : la dernière rencontre d'une journée court
+ * sinon jusqu'à la fin du document (`splitOn` ne borne pas à droite, faute d'analyse
+ * d'imbrication), et tout ce qui suit — pied de page compris — se retrouverait candidat au lieu
+ * ou aux équipes. `<div class='players'>` ne contient aucun `<div>` : la première fermante de
+ * même nom EST la sienne, et la borne est donc exacte.
+ */
+function classHtml(html: string, cls: string): string {
   for (const m of html.matchAll(/<(\w+)\b([^>]*)>/g)) {
     if (!hasClass(m[2], cls)) continue;
     const reste = html.slice(m.index + m[0].length);
     const fin = reste.search(new RegExp(`</${m[1]}\\b`, "i"));
-    return stripTags(fin === -1 ? reste : reste.slice(0, fin));
+    return fin === -1 ? reste : reste.slice(0, fin);
   }
   return "";
 }
@@ -176,9 +189,9 @@ function classText(html: string, cls: string): string {
  *
  * ⚠️ LE DERNIER MORCEAU N'EST PAS BORNÉ À DROITE : il court jusqu'à la fin du fragment reçu, y
  * compris ce qui suit la fin réelle de l'élément. Sans analyse d'imbrication on ne peut pas
- * faire mieux ici, et cela reste sans conséquence tant que ce qui suit ne contient ni
- * `data-teamid` ni `<p class='mb-0'>` — ce qui est le cas aujourd'hui, et ce qui est à
- * revérifier le jour où l'on recapture la fixture.
+ * faire mieux ICI — c'est donc l'appelant qui borne, en réduisant chaque rencontre à son bloc
+ * `players` (cf. `parseTeamCalendar`), le seul élément dont la fermante est trouvable
+ * exactement. Ne pas se fier à ce découpage seul pour délimiter un contenu.
  */
 function splitOn(html: string, tag: string, cls: string): string[] {
   const parts: string[] = [];
@@ -211,7 +224,18 @@ export function parseTeamCalendar(html: string): CalendarTie[] {
 
     for (const row of splitOn(day, "div", "row")) {
       const time = /^\d{2}:\d{2}$/.test(classText(row, "time")) ? classText(row, "time") : null;
-      for (const match of splitOn(row, "div", "match")) {
+      for (const brut of splitOn(row, "div", "match")) {
+        // LA RENCONTRE EST BORNÉE À SON BLOC `players`, et non au reste du fragment.
+        //
+        // `splitOn` ne borne pas à droite : la dernière rencontre de la dernière journée courait
+        // jusqu'à la fin du document. Rien n'en souffrait tant que le pied de page ne portait ni
+        // `data-teamid` ni `<p class='mb-0'>` — une condition qu'aucun test ne tenait, et qu'une
+        // fixture recapturée pouvait rompre en silence. `players` enveloppe exactement ce qu'on
+        // lit ici, et ne contient aucun `<div>` : sa fermante est trouvable sans ambiguïté.
+        //
+        // Repli sur le fragment entier si le bloc disparaît du rendu : on retombe alors sur le
+        // comportement d'avant, plutôt que de ne plus rien lire du tout.
+        const match = classHtml(brut, "players") || brut;
         // Les deux équipes sont les deux seuls liens porteurs d'un `data-teamid`, dans
         // l'ordre domicile puis extérieur — c'est ce que le rendu garantit, et c'est la seule
         // chose qui distingue « on reçoit » de « on se déplace ».

@@ -127,6 +127,15 @@
      « flotter » les cartes (blanches) au-dessus de la page (gris clair) et donne toute
      sa lisibilité au relief. */
   --pico-background-color: #e9ecf1;
+  /* LE MÊME FOND, MAIS LISIBLE DEPUIS UN BOUTON.
+     Pico redéfinit `--pico-background-color` SUR l'élément `<button>` lui-même
+     (`button, [type=submit], … { --pico-background-color: var(--pico-primary-background) }`) :
+     une déclaration posée sur l'élément l'emporte sur la valeur héritée de `:root`, quelle que
+     soit la spécificité de la règle qui la lit. `color: var(--pico-background-color)` dans un
+     bouton ne rend donc pas le fond de page mais le VERT DE MARQUE — 3,4:1 au lieu de 15:1.
+     C'est le jumeau exact du piège `--pico-color` déjà documenté plus haut. Ce jeton-ci n'est
+     redéfini nulle part : il vaut le fond de page partout, y compris dans un bouton. */
+  --ink-inverse: #e9ecf1;
   --pico-card-background-color: #ffffff;
   --pico-card-sectioning-background-color: #ffffff;
 
@@ -193,6 +202,7 @@
     --grid-line: #434b58;
     /* En sombre, l'élévation = carte PLUS CLAIRE que la page (le fond reste le plus foncé). */
     --pico-background-color: #0e1116;
+    --ink-inverse: #0e1116;
     --pico-card-background-color: #191e26;
     --pico-card-sectioning-background-color: #191e26;
     /* Ombres profondes (2 couches) pour rester visibles sur fond sombre. */
@@ -237,6 +247,7 @@
   --primary-fg: #2ea86a;
   --grid-line: #434b58;
   --pico-background-color: #0e1116;
+  --ink-inverse: #0e1116;
   --pico-card-background-color: #191e26;
   --pico-card-sectioning-background-color: #191e26;
   --elev-1: 0 2px 6px rgba(0, 0, 0, 0.55), 0 8px 20px rgba(0, 0, 0, 0.6);
@@ -274,6 +285,7 @@
   /* Surfaces + texte tout en rose. Fond LÉGÈREMENT plus foncé que les cartes (les cartes
      sont désormais les plus claires) pour que le relief ressorte, comme sur les autres thèmes. */
   --pico-background-color: #ffc9e3;
+  --ink-inverse: #ffc9e3;
   --pico-card-background-color: #ffe3f2;
   --pico-card-sectioning-background-color: #ffe3f2;
   --pico-card-border-color: #ff9ecb;
@@ -5124,8 +5136,9 @@ body[data-bottombar] .install-banner {
 /* LE FOND PORTE L'ÉTAT, pas seulement le filet. Un filet de trois pixels sur fond identique
    demandait de viser la ligne pour la lire ; on compose une équipe en balayant la liste, et
    c'est le FOND qui se voit à cette vitesse.
-   Ici, contrairement à la liste des rencontres, aucun voile « en cours » ne peut entrer en
-   concurrence : ce bloc ne s'affiche que sur une rencontre à venir.
+   Le bloc s'affiche sur toute rencontre NON TERMINÉE, celle qui se joue comprise (on ajuste
+   encore une composition en cours de soirée). Aucun voile « en cours » n'entre pour autant en
+   concurrence : `.ic-row-live` ne vit que dans la LISTE des rencontres, jamais sur la fiche.
    Toujours pas de vert sur « dispo » : une disponibilité est un état, pas une action. */
 .ic-dispo-row.is-yes {
   background: var(--good-wash);
@@ -5223,7 +5236,12 @@ body[data-bottombar] .install-banner {
 .ic-dispo-buttons button[aria-pressed="true"] {
   background: var(--pico-contrast);
   border-color: var(--pico-contrast);
-  color: var(--pico-background-color);
+  /* `--ink-inverse` et NON `--pico-background-color` : cette dernière est redéfinie par Pico
+     SUR l'élément `<button>`, où elle vaut le vert de marque. Le libellé retenu s'écrivait donc
+     #158044 sur #181c25 — 3,43:1 en clair, 3,89 en sombre, 3,81 en rose, à 0,75rem gras, là où
+     AA demande 4,5:1. `.ic-standings-rank` applique la même recette et rend le bon fond : elle
+     est posée sur un `<span>`, où Pico ne redéfinit rien. C'est la preuve de l'intention. */
+  color: var(--ink-inverse);
   font-weight: 600;
 }
 
