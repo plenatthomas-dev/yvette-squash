@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { parseForumBody, forumLength, forumPreview, MAX_FORUM_LEN } from "./forum";
+import {
+  parseForumBody,
+  parseForumOption,
+  forumLength,
+  forumPreview,
+  isForumReaction,
+  MAX_FORUM_LEN,
+  MAX_POLL_OPTION_LEN,
+  FORUM_REACTIONS,
+} from "./forum";
 
 // LA TRONCATURE DES EMOJI, ET RIEN D'AUTRE.
 //
@@ -84,5 +93,44 @@ describe("forumPreview", () => {
 
   it("laisse un message court intact, sans ellipse", () => {
     expect(forumPreview("Bien joué 💪")).toBe("Bien joué 💪");
+  });
+});
+
+describe("parseForumOption — un libellé de sondage", () => {
+  it("réduit TOUS les blancs : une option tient sur une ligne", () => {
+    expect(parseForumOption("  Chez   Marco\n\net Cie ")).toBe("Chez Marco et Cie");
+  });
+
+  it("rejette le vide et ce qui n'est pas une chaîne", () => {
+    expect(parseForumOption("")).toBeNull();
+    expect(parseForumOption("   ")).toBeNull();
+    expect(parseForumOption(42)).toBeNull();
+    expect(parseForumOption(null)).toBeNull();
+  });
+
+  it("borne à la longueur d'option, pas à celle d'un message", () => {
+    expect(forumLength(parseForumOption("a".repeat(200))!)).toBe(MAX_POLL_OPTION_LEN);
+    expect(MAX_POLL_OPTION_LEN).toBeLessThan(MAX_FORUM_LEN);
+  });
+
+  // Même piège que pour le corps d'un message : un libellé « Chez Marco 🍕 » tronqué pile
+  // entre les deux moitiés de l'emoji écrirait un demi-caractère en base.
+  it("ne casse pas un emoji à la limite exacte", () => {
+    const out = parseForumOption("🍕".repeat(100))!;
+    expect(forumLength(out)).toBe(MAX_POLL_OPTION_LEN);
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(out)).toBe(false);
+  });
+});
+
+// LISTE FERMÉE, et pas un motif : sans elle la colonne `emoji` accepterait n'importe quelle
+// chaîne envoyée par un client bricolé, et une rangée de vingt pastilles ne dirait plus rien.
+describe("isForumReaction", () => {
+  it("accepte chacune des réactions offertes, et rien d'autre", () => {
+    for (const e of FORUM_REACTIONS) expect(isForumReaction(e)).toBe(true);
+    expect(isForumReaction("🤮")).toBe(false);
+    expect(isForumReaction("pas un emoji")).toBe(false);
+    expect(isForumReaction("")).toBe(false);
+    expect(isForumReaction(42)).toBe(false);
+    expect(isForumReaction(null)).toBe(false);
   });
 });

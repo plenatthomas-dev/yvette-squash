@@ -18,6 +18,10 @@ const h = vi.hoisted(() => ({
   message: { id: "m1", authorId: "u1" } as null | { id: string; authorId: string },
   deleted: null as null | string,
   diffuse: null as null | [string, Record<string, unknown>],
+  /** Ce que l'`updateMany` a blanchi, et sur quel critère : les citations de la cible. */
+  blanchi: null as null | { where: Record<string, unknown>; data: Record<string, unknown> },
+  /** L'ordre réel des écritures, pour prouver qu'elles partent ENSEMBLE. */
+  ordre: [] as string[],
 }));
 
 // `normalizeEmail` est réexporté pour `admin.ts`, qui lit l'allowlist avec : le neutraliser
@@ -37,11 +41,23 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     forumMessage: {
       findUnique: vi.fn(async () => h.message),
+      // Les deux écritures sont passées à `$transaction` sous forme de PROMESSES déjà lancées
+      // (la forme tableau de Prisma) : elles s'exécutent donc à l'appel, et c'est leur effet
+      // qu'on observe ici — pas leur mise en file.
       delete: vi.fn(async (args: { where: { id: string } }) => {
+        h.ordre.push("delete");
         h.deleted = args.where.id;
         return {};
       }),
+      updateMany: vi.fn(
+        async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+          h.ordre.push("blanchi");
+          h.blanchi = args;
+          return { count: 1 };
+        },
+      ),
     },
+    $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
   },
 }));
 
@@ -58,6 +74,8 @@ beforeEach(() => {
   h.message = { id: "m1", authorId: "u1" };
   h.deleted = null;
   h.diffuse = null;
+  h.blanchi = null;
+  h.ordre = [];
 });
 
 describe("DELETE /api/forum/{id}", () => {
@@ -113,5 +131,36 @@ describe("DELETE /api/forum/{id}", () => {
   it("referme le message chez tout le monde, sans attendre un rafraîchissement", async () => {
     await DELETE(req(), ctx);
     expect(h.diffuse).toEqual(["deleted", { id: "m1" }]);
+  });
+});
+
+// SUPPRIMER, C'EST AUSSI EFFACER LES CITATIONS.
+//
+// Les réponses gardent un instantané de ce à quoi elles répondent, pour s'afficher sans
+// jointure et survivre à la purge des 12 mois. Sans le blanchiment ci-dessous, effacer son
+// message en laisserait le texte lisible, signé de son nom, dans chaque réponse reçue — la
+// note de confidentialité promet exactement le contraire.
+describe("DELETE — ce que le message laisse derrière lui", () => {
+  it("blanchit l'instantané chez les réponses, sans supprimer les réponses", async () => {
+    await DELETE(req(), ctx);
+    expect(h.blanchi?.where).toEqual({ replyToId: "m1" });
+    expect(h.blanchi?.data).toEqual({ replyToAuthor: null, replyToExcerpt: null });
+    // Une seule suppression : celle du message visé. Les réponses restent.
+    expect(h.deleted).toBe("m1");
+  });
+
+  it("blanchit AVANT de supprimer, et dans la même transaction", async () => {
+    await DELETE(req(), ctx);
+    // L'ordre compte : la clé étrangère passerait à NULL au `delete`, et l'`updateMany` ne
+    // retrouverait alors plus aucune ligne à blanchir.
+    expect(h.ordre).toEqual(["blanchi", "delete"]);
+  });
+
+  it("ne touche à rien quand le refus tombe", async () => {
+    h.session = { userId: "quidam", displayName: "Quidam", email: "quidam@example.com" };
+    h.message = { id: "m1", authorId: "u2" };
+    await DELETE(req(), ctx);
+    expect(h.blanchi).toBeNull();
+    expect(h.deleted).toBeNull();
   });
 });

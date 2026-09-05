@@ -3,13 +3,17 @@ import type { NextRequest } from "next/server";
 
 // LE FIL DU CLUB — la route qui écrit et celle qui lit.
 //
-// Trois choses ne se relisent pas dans le code et sont donc verrouillées ici :
+// Quatre choses ne se relisent pas dans le code et sont donc verrouillées ici :
 //  1. LE PUSH NE PART PAS À L'AUTEUR, ni à ceux qui l'ont coupé. Se notifier soi-même est le
 //     défaut classique de toute messagerie, et il ne se voit qu'à l'usage.
-//  2. LA DIFFUSION NE CONTIENT PAS `canDelete`. Ce droit dépend de QUI REGARDE : diffusé tel
-//     quel, il donnerait à tout le monde le bouton « Suppr. » de l'auteur.
+//  2. AUCUNE LIGNE NE PORTE `canDelete` NI `mine`. Ces droits dépendent de QUI REGARDE. Les
+//     calculer par ligne obligeait à en figer un dans la diffusion, et un ADMIN voyait alors
+//     tout le fil comme étant le sien. Le serveur envoie `meId`/`admin` une fois, le client
+//     dérive — ces tests sont ce qui empêche la régression de revenir.
 //  3. LE MESSAGE EST ÉCRIT AVANT D'ÊTRE DIFFUSÉ. L'ordre inverse ferait exister chez les
 //     autres un message qui pourrait n'être jamais enregistré.
+//  4. L'EXTRAIT D'UNE CITATION EST RELU EN BASE, jamais repris du client — sinon n'importe
+//     qui ferait dire n'importe quoi à n'importe qui, sous son nom, durablement.
 
 const h = vi.hoisted(() => ({
   forumOn: true,
@@ -39,6 +43,10 @@ const h = vi.hoisted(() => ({
   /** Ce que le PATCH a écrit, ou null s'il n'a pas eu lieu. */
   regle: null as null | Record<string, unknown>,
   lastFindMany: null as null | Record<string, unknown>,
+  /** La cible d'une citation, telle que la base la rendrait — ou `null` si elle a disparu. */
+  cible: null as null | Record<string, unknown>,
+  /** Les données passées à `forumMessage.create` : c'est là que se lit l'instantané cité. */
+  cree: null as null | Record<string, unknown>,
 }));
 
 // `normalizeEmail` est réexporté ici pour `admin.ts`, qui s'en sert à lire l'allowlist : le
@@ -67,13 +75,17 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     forumMessage: {
       count: vi.fn(async () => h.recentCount),
-      create: vi.fn(async ({ data }: { data: { authorId: string; body: string } }) => {
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         h.ordre.push("ecrit");
+        h.cree = data;
         return {
           id: "m-neuf",
           body: data.body,
           authorId: data.authorId,
           createdAt: new Date("2026-09-05T18:42:00Z"),
+          replyToId: data.replyToId ?? null,
+          replyToAuthor: data.replyToAuthor ?? null,
+          replyToExcerpt: data.replyToExcerpt ?? null,
           author: { displayName: "Thomas" },
         };
       }),
@@ -81,18 +93,27 @@ vi.mock("@/lib/db", () => ({
         h.lastFindMany = args;
         return h.rows;
       }),
-      findUnique: vi.fn(async () => h.since),
+      // Deux appelants : l'ancre du rattrapage (`select: { createdAt }`) et la cible d'une
+      // citation (`select: { id, body, author }`). On les distingue sur le `select`, sinon
+      // le test du rattrapage se ferait servir une cible de citation.
+      findUnique: vi.fn(async (args: { select?: Record<string, unknown> }) =>
+        args?.select?.body ? h.cible : h.since,
+      ),
       deleteMany: vi.fn(async (args: { where: Record<string, unknown> }) => {
         h.purge = args.where;
         return { count: 0 };
       }),
     },
+    // Les réactions et les sondages d'une page : vides par défaut, la plupart des tests ne
+    // portent pas dessus. Ce sont DEUX requêtes, pas une par message — voir forum-db.ts.
+    forumReaction: { findMany: vi.fn(async () => []) },
+    forumPoll: { findMany: vi.fn(async () => []) },
     user: {
       findMany: vi.fn(async (args: { where: Record<string, unknown> }) => {
         h.destWhere = args.where;
         return h.destinataires;
       }),
-      findUnique: vi.fn(async () => ({ forumMuted: h.muted })),
+      findUnique: vi.fn(async () => ({ forumMuted: h.muted, displayName: "Thomas" })),
       update: vi.fn(async (args: { data: Record<string, unknown> }) => {
         h.regle = args.data;
         return {};
@@ -103,10 +124,10 @@ vi.mock("@/lib/db", () => ({
 
 import { GET, POST, PATCH } from "./route";
 
-const post = (body: unknown = "Coucou 👍") =>
+const post = (body: unknown = "Coucou 👍", extra: Record<string, unknown> = {}) =>
   ({
     cookies: { get: () => ({ value: "sid" }) },
-    json: async () => ({ body }),
+    json: async () => ({ body, ...extra }),
   }) as unknown as NextRequest;
 
 const get = (qs = "") =>
@@ -120,6 +141,9 @@ const ligne = (over: Record<string, unknown> = {}) => ({
   body: "Salut",
   authorId: "u2",
   createdAt: new Date("2026-09-05T18:00:00Z"),
+  replyToId: null,
+  replyToAuthor: null,
+  replyToExcerpt: null,
   author: { displayName: "Gégé" },
   ...over,
 });
@@ -141,6 +165,8 @@ beforeEach(() => {
   h.lastFindMany = null;
   h.muted = false;
   h.regle = null;
+  h.cible = null;
+  h.cree = null;
 });
 
 describe("gardes — l'ordre est le même que partout dans l'appli", () => {
@@ -210,11 +236,24 @@ describe("POST — diffusion et notification", () => {
     expect(h.ordre).toEqual(["ecrit", "diffuse"]);
   });
 
-  it("ne diffuse PAS `canDelete` : ce droit dépend de qui regarde", async () => {
+  it("ne diffuse NI `canDelete` NI `mine` : ces droits dépendent de qui regarde", async () => {
     await POST(post());
     expect(h.diffuse?.[0]).toBe("message");
     expect(h.diffuse?.[1]).not.toHaveProperty("canDelete");
+    expect(h.diffuse?.[1]).not.toHaveProperty("mine");
     expect(h.diffuse?.[1].id).toBe("m-neuf");
+  });
+
+  // La ligne diffusée doit être EXACTEMENT celle que le GET renvoie. Sans quoi un message reçu
+  // en direct ne se comporte pas comme le même message après rechargement — c'est très
+  // exactement le défaut qui alignait à gauche le message qu'on venait d'écrire.
+  it("diffuse la MÊME forme de ligne que celle rendue par le GET", async () => {
+    h.rows = [ligne()];
+    const body = await (await GET(get())).json();
+    await POST(post());
+    expect(Object.keys(h.diffuse?.[1] ?? {}).sort()).toEqual(
+      Object.keys(body.messages[0]).sort(),
+    );
   });
 
   it("ne notifie NI l'auteur NI les comptes désactivés NI ceux qui ont coupé", async () => {
@@ -258,23 +297,84 @@ describe("GET — la page récente", () => {
     expect(h.lastFindMany?.take).toBe(201);
   });
 
-  it("laisse l'auteur supprimer le sien, et personne d'autre", async () => {
+  it("donne l'identité du lecteur UNE fois, et aucun droit par ligne", async () => {
     h.rows = [ligne({ id: "a", authorId: "u1" }), ligne({ id: "b", authorId: "u2" })];
     const body = await (await GET(get())).json();
-    expect(body.messages.map((m: { canDelete: boolean }) => m.canDelete)).toEqual([false, true]);
+    expect(body.meId).toBe("u1");
+    expect(body.admin).toBe(false);
+    // C'est `authorId` qui permet au client de trancher, pas un booléen pré-calculé.
+    expect(body.messages.map((m: { authorId: string }) => m.authorId)).toEqual(["u2", "u1"]);
+    for (const m of body.messages) {
+      expect(m).not.toHaveProperty("canDelete");
+      expect(m).not.toHaveProperty("mine");
+    }
   });
 
-  it("laisse l'admin supprimer TOUS les messages : le fil est public, il lui faut un modérateur", async () => {
+  // LE DÉFAUT QUE CE TEST VERROUILLE : `canDelete` valait `admin || auteur`, et l'écran s'en
+  // servait pour aligner à droite. Un admin voyait donc TOUT le fil comme étant le sien.
+  // Le drapeau d'admin est désormais SÉPARÉ de l'identité, et c'est le client qui compose.
+  it("signale l'admin sans pour autant lui attribuer les messages des autres", async () => {
     h.session = { userId: "chef", displayName: "Chef", email: "chef@example.com" };
     h.rows = [ligne({ id: "a", authorId: "u1" }), ligne({ id: "b", authorId: "u2" })];
     const body = await (await GET(get())).json();
-    expect(body.messages.every((m: { canDelete: boolean }) => m.canDelete)).toBe(true);
+    expect(body.admin).toBe(true);
+    expect(body.meId).toBe("chef");
+    expect(body.messages.every((m: { authorId: string }) => m.authorId !== "chef")).toBe(true);
+  });
+
+  it("reconnaît l'admin quelle que soit la casse de son adresse", async () => {
+    h.session = { userId: "chef", displayName: "Chef", email: "CHEF@Example.com" };
+    expect((await (await GET(get())).json()).admin).toBe(true);
   });
 
   it("nomme l'auteur disparu au lieu de rendre « null »", async () => {
     h.rows = [ligne({ author: null })];
     const body = await (await GET(get())).json();
     expect(body.messages[0].authorName).toBe("Membre supprimé");
+  });
+
+  it("porte la citation jusqu'à l'écran, extrait compris", async () => {
+    h.rows = [
+      ligne({ id: "b", replyToId: "a", replyToAuthor: "Gégé", replyToExcerpt: "Covoit jeudi" }),
+    ];
+    const body = await (await GET(get())).json();
+    expect(body.messages[0].replyToAuthor).toBe("Gégé");
+    expect(body.messages[0].replyToExcerpt).toBe("Covoit jeudi");
+  });
+
+  // Une réponse dont la cible a été supprimée garde sa clé mais perd son instantané : c'est le
+  // signal qui fait afficher « Message supprimé » plutôt qu'un texte que la notice dit effacé.
+  it("distingue « ne répond à rien » de « répond à un message supprimé »", async () => {
+    // `h.rows` est servi du plus RÉCENT au plus ancien, comme la base : la réponse d'abord.
+    h.rows = [ligne({ id: "b", replyToId: "a" }), ligne({ id: "a" })];
+    const body = await (await GET(get())).json();
+    expect(body.messages[0].replyToId).toBeNull();
+    expect(body.messages[1].replyToId).toBe("a");
+    expect(body.messages[1].replyToExcerpt).toBeNull();
+  });
+});
+
+describe("POST — la citation", () => {
+  it("relit la cible EN BASE et ignore ce que le client prétend", async () => {
+    h.cible = { id: "a", body: "Covoit jeudi : 4 places", author: { displayName: "Gégé" } };
+    await POST(post("Je prends une place", { replyTo: "a", replyToExcerpt: "MENSONGE" }));
+    expect(h.cree?.replyToId).toBe("a");
+    expect(h.cree?.replyToAuthor).toBe("Gégé");
+    expect(h.cree?.replyToExcerpt).toBe("Covoit jeudi : 4 places");
+  });
+
+  // Perdre le contexte d'une réponse est moins grave que perdre la réponse : une cible purgée
+  // ou effacée entre l'ouverture du fil et l'envoi ne doit pas faire échouer l'écriture.
+  it("envoie quand même le message si la cible a disparu", async () => {
+    h.cible = null;
+    const res = await POST(post("Je prends une place", { replyTo: "disparu" }));
+    expect(res.status).toBe(201);
+    expect(h.cree?.replyToId).toBeUndefined();
+  });
+
+  it("écrit un message ordinaire quand `replyTo` est absent ou vide", async () => {
+    await POST(post("Coucou", { replyTo: "" }));
+    expect(h.cree?.replyToId).toBeUndefined();
   });
 });
 

@@ -308,6 +308,20 @@ export function PrivacyNotice() {
                   écrit disparaît avec ton compte.
                 </p>
               )}
+              {forum && (
+                <p>
+                  <strong>Réactions, citations et sondages.</strong> Une{" "}
+                  <strong>réaction</strong> est signée&nbsp;: chacun voit qui a posé quel emoji.
+                  Quand tu <strong>cites</strong> un message, un extrait en est recopié dans ta
+                  réponse&nbsp;; si son auteur le supprime, cet extrait est{" "}
+                  <strong>effacé partout</strong>, y compris dans les réponses déjà envoyées.
+                  Dans un <strong>sondage</strong>, le vote n&apos;est{" "}
+                  <strong>pas anonyme</strong>&nbsp;: on peut cocher plusieurs réponses, et
+                  chacun voit qui a coché quoi — c&apos;est ce qui permet de relancer ceux qui
+                  n&apos;ont pas répondu. Tu peux changer ton vote tant que le sondage est
+                  ouvert. Tout cela disparaît avec le message qui le porte, et avec ton compte.
+                </p>
+              )}
               {delegation && (
                 <p>
                   <strong>Délégation de droits.</strong> Si tu délègues tes droits

@@ -5,6 +5,12 @@ import { isAdminEmail } from "@/lib/admin";
 import { getFeatures } from "@/lib/features-server";
 import { readJsonBody } from "@/lib/http-tx";
 import { parseForumBody, forumPreview, MAX_FORUM_LEN } from "@/lib/forum";
+import {
+  SELECT_MESSAGE,
+  shapeMessage,
+  chargerReactions,
+  chargerSondages,
+} from "@/lib/forum-db";
 import { FORUM_RETENTION_MS } from "@/lib/retention";
 import { pushToUsers } from "@/lib/push";
 import { broadcastForum, FORUM_EVENT_MESSAGE } from "@/lib/forum-realtime";
@@ -22,42 +28,8 @@ const MAX_PER_WINDOW = 30;
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 200;
 
-/** Ce que l'écran reçoit pour un message. `authorName` est le nom d'affichage, jamais le surnom. */
-type Row = {
-  id: string;
-  body: string;
-  authorId: string;
-  authorName: string;
-  createdAt: string;
-  canDelete: boolean;
-};
-
-type Raw = {
-  id: string;
-  body: string;
-  authorId: string;
-  createdAt: Date;
-  author: { displayName: string } | null;
-};
-
-const shape = (m: Raw, viewerId: string, admin: boolean): Row => ({
-  id: m.id,
-  body: m.body,
-  authorId: m.authorId,
-  // L'auteur peut avoir disparu entre la lecture et l'affichage (compte supprimé, Cascade) —
-  // la jointure est alors nulle et le message est en train d'être effacé.
-  authorName: m.author?.displayName ?? "Membre supprimé",
-  createdAt: m.createdAt.toISOString(),
-  canDelete: admin || m.authorId === viewerId,
-});
-
-const SELECT = {
-  id: true,
-  body: true,
-  authorId: true,
-  createdAt: true,
-  author: { select: { displayName: true } },
-} as const;
+/** Longueur de l'extrait cité, en points de code. Assez pour reconnaître, trop peu pour relire. */
+const EXCERPT_LEN = 90;
 
 /**
  * GET /api/forum?limit=30[&since=<id>]
@@ -68,6 +40,9 @@ const SELECT = {
  * Avec `since` : le RATTRAPAGE après une coupure de la WebSocket — tout ce qui a été écrit
  * depuis ce message. C'est ce qui rend le courtier remplaçable : rater des événements ne coûte
  * qu'une requête au retour.
+ *
+ * La réponse porte `meId` et `admin` UNE fois, jamais un booléen par ligne : voir la note sur
+ * `MessageRow` dans lib/forum-db.ts.
  */
 export async function GET(req: NextRequest) {
   if (!(await getFeatures()).forum) {
@@ -76,7 +51,7 @@ export async function GET(req: NextRequest) {
   const session = await getSession(req.cookies.get("sid")?.value);
   if (!session) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
-  const admin = isAdminEmail(session.email);
+  const identite = { meId: session.userId, admin: isAdminEmail(session.email) };
   const raw = Number(req.nextUrl.searchParams.get("limit"));
   const limit =
     Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), MAX_LIMIT) : DEFAULT_LIMIT;
@@ -95,10 +70,18 @@ export async function GET(req: NextRequest) {
         where: { createdAt: { gt: ancre.createdAt } },
         orderBy: { createdAt: "asc" },
         take: MAX_LIMIT,
-        select: SELECT,
+        select: SELECT_MESSAGE,
       });
+      const ids = rows.map((m) => m.id);
+      const [reactions, polls] = await Promise.all([
+        chargerReactions(ids),
+        chargerSondages(ids),
+      ]);
       return NextResponse.json({
-        messages: rows.map((m) => shape(m, session.userId, admin)),
+        ...identite,
+        messages: rows.map(shapeMessage),
+        reactions,
+        polls,
         hasMore: false,
       });
     }
@@ -107,27 +90,41 @@ export async function GET(req: NextRequest) {
   const rows = await prisma.forumMessage.findMany({
     orderBy: { createdAt: "desc" },
     take: limit + 1,
-    select: SELECT,
+    select: SELECT_MESSAGE,
   });
   // L'état du réglage voyage avec la page : c'est une colonne de la ligne du membre, que la
   // session a déjà chargée côté base. Une route dédiée coûterait un aller-retour de plus pour
   // un booléen.
   const moi = await prisma.user.findUnique({
     where: { id: session.userId },
-    select: { forumMuted: true },
+    select: { forumMuted: true, displayName: true },
   });
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
+  const ids = page.map((m) => m.id);
+  // Deux requêtes ajoutées, et deux seulement quelle que soit la taille de la page — pas un
+  // `include` par message. Elles tombent sur l'OUVERTURE DU FIL, geste délibéré et rare,
+  // jamais sur l'écran d'accueil : c'est ce qui les rend compatibles avec PRODUCT.md.
+  const [reactions, polls] = await Promise.all([chargerReactions(ids), chargerSondages(ids)]);
   return NextResponse.json({
     muted: moi?.forumMuted ?? false,
+    ...identite,
+    // Son propre nom, pour que l'affichage OPTIMISTE d'une réaction porte le bon libellé
+    // avant même que le courtier ait renvoyé le delta. Aucune requête de plus : la ligne du
+    // membre était déjà lue pour `forumMuted`.
+    meName: moi?.displayName ?? "Moi",
     // Rendu du plus ANCIEN au plus récent : c'est l'ordre d'affichage d'une messagerie, et
     // l'inverser ici évite de le refaire dans le composant à chaque rendu.
-    messages: page.reverse().map((m) => shape(m, session.userId, admin)),
+    messages: page.reverse().map(shapeMessage),
+    reactions,
+    polls,
     hasMore,
   });
 }
 
-/** POST /api/forum { body } -> 201 { message }. Tout membre connecté écrit dans le fil. */
+/**
+ * POST /api/forum { body, replyTo? } -> 201 { message }. Tout membre connecté écrit dans le fil.
+ */
 export async function POST(req: NextRequest) {
   if (!(await getFeatures()).forum) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
@@ -154,9 +151,32 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // CITATION. L'extrait est RELU EN BASE, jamais repris de ce que le client envoie : sinon
+  // n'importe qui pourrait faire dire n'importe quoi à n'importe qui, sous son nom, de façon
+  // durable et crédible. Le client ne fournit qu'un identifiant.
+  //
+  // Une cible inconnue (supprimée ou purgée entre l'ouverture du fil et l'envoi) ne fait PAS
+  // échouer l'envoi : le message part sans citation. Perdre le contexte d'une réponse est
+  // moins grave que perdre la réponse.
+  let citation: { replyToId: string; replyToAuthor: string; replyToExcerpt: string } | null =
+    null;
+  if (typeof raw?.replyTo === "string" && raw.replyTo) {
+    const cible = await prisma.forumMessage.findUnique({
+      where: { id: raw.replyTo },
+      select: { id: true, body: true, author: { select: { displayName: true } } },
+    });
+    if (cible) {
+      citation = {
+        replyToId: cible.id,
+        replyToAuthor: cible.author?.displayName ?? "Membre supprimé",
+        replyToExcerpt: forumPreview(cible.body, EXCERPT_LEN),
+      };
+    }
+  }
+
   const created = await prisma.forumMessage.create({
-    data: { authorId: session.userId, body: text },
-    select: SELECT,
+    data: { authorId: session.userId, body: text, ...(citation ?? {}) },
+    select: SELECT_MESSAGE,
   });
 
   // La purge des 12 mois est greffée ICI plutôt que sur un cron : le plan Vercel les plafonne
@@ -172,16 +192,11 @@ export async function POST(req: NextRequest) {
   }
 
   // Le message part au courtier APRÈS l'écriture : diffuser d'abord ferait exister chez les
-  // autres un message qui pourrait n'être jamais enregistré. `canDelete` est calculé chez
-  // chaque destinataire, jamais diffusé — il dépend de qui regarde.
-  const shaped = shape(created, session.userId, false);
-  await broadcastForum(FORUM_EVENT_MESSAGE, {
-    id: shaped.id,
-    body: shaped.body,
-    authorId: shaped.authorId,
-    authorName: shaped.authorName,
-    createdAt: shaped.createdAt,
-  });
+  // autres un message qui pourrait n'être jamais enregistré. La ligne diffusée est EXACTEMENT
+  // celle que le GET renvoie — aucun champ qui dépendrait du destinataire, donc aucune
+  // divergence possible entre un message reçu en direct et le même après rechargement.
+  const shaped = shapeMessage(created);
+  await broadcastForum(FORUM_EVENT_MESSAGE, shaped);
 
   // NOTIFICATION — un seul `tag`, donc une seule ligne dans le centre de notifications, qui se
   // remplace au lieu de s'empiler. Sans cela, une soirée animée en produirait trente.

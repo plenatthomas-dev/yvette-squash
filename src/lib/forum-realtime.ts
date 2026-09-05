@@ -27,6 +27,22 @@ export const FORUM_CHANNEL = "presence-forum";
 export const FORUM_EVENT_MESSAGE = "message";
 /** Nom de l'événement portant une suppression, pour que le fil se referme chez tout le monde. */
 export const FORUM_EVENT_DELETED = "deleted";
+/**
+ * Bascule d'une réaction : `{ messageId, emoji, userId, on }`.
+ *
+ * On diffuse le DELTA et non le décompte : deux clics simultanés sur deux appareils
+ * enverraient sinon deux totaux concurrents, dont le dernier arrivé écraserait l'autre. Un
+ * delta se rejoue dans n'importe quel ordre pour le même résultat.
+ */
+export const FORUM_EVENT_REACTION = "reaction";
+/**
+ * État d'un sondage après un vote ou une clôture.
+ *
+ * Ici on diffuse au contraire l'ÉTAT COMPLET : un vote à choix multiple remplace l'ensemble
+ * des cases d'un membre, ce qui n'est pas un delta exprimable simplement. Le volume reste
+ * dérisoire (six options, trente membres).
+ */
+export const FORUM_EVENT_POLL = "poll";
 
 let client: Pusher | null = null;
 let configFailed = false;

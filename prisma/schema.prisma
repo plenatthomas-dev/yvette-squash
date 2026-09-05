@@ -77,6 +77,8 @@ model User {
   tricountApprovals        TricountApproval[]
   tricountComments         TricountComment[]
   forumMessages            ForumMessage[]
+  forumReactions           ForumReaction[]
+  forumPollVotes           ForumPollVote[]
   // Délégation temporaire de droits (idée 4) : ce que je donne / ce qu'on me donne.
   delegationsGiven         Delegation[]            @relation("DelegationGiven")
   delegationsReceived      Delegation[]            @relation("DelegationReceived")
@@ -1000,9 +1002,100 @@ model ForumMessage {
   body      String
   createdAt DateTime @default(now())
 
+  // CITATION — « en réponse à ». `SetNull` et surtout PAS `Cascade` : supprimer un message
+  // ne doit jamais emporter les réponses qu'il a suscitées, sinon effacer une question
+  // effacerait la discussion entière qu'elle a ouverte.
+  replyToId      String?
+  replyTo        ForumMessage?  @relation("ForumReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies        ForumMessage[] @relation("ForumReply")
+  // INSTANTANÉ de la cible, pris à l'envoi. Dénormalisé à dessein, pour deux raisons qu'une
+  // jointure ne couvre pas : la citation s'affiche sans requête supplémentaire (y compris sur
+  // un message reçu par le courtier), et elle SURVIT à la purge des 12 mois, qui efface la
+  // cible bien avant la réponse.
+  //
+  // Contrepartie traitée dans api/forum/[id] : à la suppression d'un message, ces deux champs
+  // sont remis à NULL chez toutes ses réponses. Sans cela, effacer son message en laisserait
+  // le texte visible dans les citations — la notice promet le contraire.
+  replyToAuthor  String?
+  replyToExcerpt String?
+
+  reactions ForumReaction[]
+  poll      ForumPoll?
+
   // Le fil se lit toujours du plus récent au plus ancien, et la purge balaie par date : cet
   // index sert les deux.
   @@index([createdAt])
   // Sert la limite de débit (compter les messages d'UN membre sur une fenêtre glissante).
   @@index([authorId, createdAt])
+  // Sert l'effacement des instantanés de citation à la suppression d'un message.
+  @@index([replyToId])
+}
+
+// RÉACTION à un message : acquiescer sans écrire.
+//
+// Une réaction est plus économe qu'un message, et pas seulement à l'écran : dix « ok » sous
+// une question coûtent dix écritures, dix notifications push et dix diffusions. Dix pouces
+// levés coûtent dix petites lignes et aucune notification.
+//
+// `emoji` est contraint par une LISTE FERMÉE côté route (lib/forum.ts, FORUM_REACTIONS), pas
+// par la base : Postgres accepterait n'importe quelle chaîne d'un client bricolé.
+model ForumReaction {
+  id        String       @id @default(cuid())
+  message   ForumMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  emoji     String
+  createdAt DateTime     @default(now())
+
+  // Rend la bascule IDEMPOTENTE : re-cliquer ne peut pas créer un doublon, même si deux
+  // requêtes se croisent. Même dispositif que `@@unique([userId, classEventId])` sur les
+  // réservations, et pour la même raison — c'est la base qui tient l'invariant, pas le code.
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+}
+
+// SONDAGE — « qui vient jeudi ? », « quel resto ? ».
+//
+// LE SONDAGE EST UN MESSAGE (relation 1-1 sur `messageId`), et c'est le choix qui simplifie
+// tout le reste : il prend sa place chronologique dans le fil, hérite gratuitement de la
+// suppression, de la purge à 12 mois et de la notification push, et n'a donc aucun cycle de
+// vie propre à écrire. La QUESTION est le `body` du message porteur — un client qui ignorerait
+// les sondages afficherait quand même quelque chose de lisible.
+model ForumPoll {
+  id        String            @id @default(cuid())
+  message   ForumMessage      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId String            @unique
+  // Clos par son auteur ou par un admin — mêmes droits que la suppression d'un message.
+  closedAt  DateTime?
+  createdAt DateTime          @default(now())
+  options   ForumPollOption[]
+}
+
+model ForumPollOption {
+  id       String          @id @default(cuid())
+  poll     ForumPoll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  pollId   String
+  label    String
+  // L'ordre de saisie, qui est aussi l'ordre d'affichage. Sans lui, deux options créées dans
+  // la même milliseconde ressortiraient dans un ordre arbitraire d'un chargement à l'autre.
+  position Int
+  votes    ForumPollVote[]
+
+  @@index([pollId])
+}
+
+model ForumPollVote {
+  id        String          @id @default(cuid())
+  option    ForumPollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  optionId  String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  createdAt DateTime        @default(now())
+
+  // CHOIX MULTIPLE : l'unicité porte sur (option, membre) et NON sur (sondage, membre).
+  // Cocher deux cases fait deux lignes, c'est voulu — d'où le fait que le total des voix
+  // puisse dépasser le nombre de votants, que l'écran doit alors dire explicitement.
+  @@unique([optionId, userId])
+  @@index([optionId])
 }

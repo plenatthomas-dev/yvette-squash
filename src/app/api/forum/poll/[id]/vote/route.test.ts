@@ -1,0 +1,214 @@
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import type { NextRequest } from "next/server";
+
+// LE VOTE, À CHOIX MULTIPLE.
+//
+// Deux propriétés portent la route, et aucune ne se relit dans le code :
+//  1. LE VOTE REMPLACE, il n'ajoute pas. Le corps porte l'ENSEMBLE des cases cochées, et la
+//     route efface d'abord tout ce que le membre avait coché sur CE sondage. Un différentiel
+//     obligerait le client à connaître un état qu'il peut avoir perdu entre deux diffusions.
+//     Corollaire : une liste vide est un retrait de vote légitime, pas une erreur.
+//  2. LES OPTIONS DOIVENT APPARTENIR À CE SONDAGE. Sans ce contrôle, un identifiant emprunté
+//     à un autre sondage y ajouterait une voix en douce.
+
+const h = vi.hoisted(() => ({
+  forumOn: true,
+  session: { userId: "u1", displayName: "Thomas", email: "membre@example.com" } as {
+    userId: string;
+    displayName: string;
+    email: string | null;
+  } | null,
+  poll: {
+    id: "p1",
+    closedAt: null as Date | null,
+    options: [{ id: "o1" }, { id: "o2" }, { id: "o3" }],
+    message: { authorId: "u1" },
+  } as null | Record<string, unknown>,
+  efface: null as null | Record<string, unknown>,
+  ecrit: null as null | Record<string, unknown>[],
+  maj: null as null | Record<string, unknown>,
+  diffuse: null as null | [string, Record<string, unknown>],
+}));
+
+vi.mock("@/lib/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/session")>()),
+  getSession: vi.fn(async () => h.session),
+}));
+vi.mock("@/lib/features-server", () => ({ getFeatures: async () => ({ forum: h.forumOn }) }));
+vi.mock("@/lib/forum-realtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/forum-realtime")>()),
+  broadcastForum: vi.fn(async (event: string, payload: Record<string, unknown>) => {
+    h.diffuse = [event, payload];
+  }),
+}));
+vi.mock("@/lib/forum-db", () => ({
+  relireSondage: vi.fn(async (id: string) => ({
+    id,
+    messageId: "m1",
+    closedAt: null,
+    options: [],
+  })),
+}));
+vi.mock("@/lib/db", () => ({
+  prisma: {
+    forumPoll: {
+      findUnique: vi.fn(async () => h.poll),
+      update: vi.fn(async (args: { data: Record<string, unknown> }) => {
+        h.maj = args.data;
+        return {};
+      }),
+    },
+    forumPollVote: {
+      deleteMany: vi.fn(async (args: { where: Record<string, unknown> }) => {
+        h.efface = args.where;
+        return { count: 0 };
+      }),
+      createMany: vi.fn(async (args: { data: Record<string, unknown>[] }) => {
+        h.ecrit = args.data;
+        return { count: args.data.length };
+      }),
+    },
+    $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
+  },
+}));
+
+import { POST, PATCH } from "./route";
+
+const vote = (optionIds: unknown) =>
+  ({
+    cookies: { get: () => ({ value: "sid" }) },
+    json: async () => ({ optionIds }),
+  }) as unknown as NextRequest;
+const clore = (closed: unknown) =>
+  ({
+    cookies: { get: () => ({ value: "sid" }) },
+    json: async () => ({ closed }),
+  }) as unknown as NextRequest;
+const ctx = { params: Promise.resolve({ id: "p1" }) };
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  process.env.ADMIN_EMAILS = "chef@example.com";
+  h.forumOn = true;
+  h.session = { userId: "u1", displayName: "Thomas", email: "membre@example.com" };
+  h.poll = {
+    id: "p1",
+    closedAt: null,
+    options: [{ id: "o1" }, { id: "o2" }, { id: "o3" }],
+    message: { authorId: "u1" },
+  };
+  h.efface = null;
+  h.ecrit = null;
+  h.maj = null;
+  h.diffuse = null;
+});
+
+describe("gardes", () => {
+  it("404 quand la fonction est coupée, AVANT de regarder la session", async () => {
+    h.forumOn = false;
+    h.session = null;
+    expect((await POST(vote(["o1"]), ctx)).status).toBe(404);
+    expect((await PATCH(clore(true), ctx)).status).toBe(404);
+  });
+
+  it("401 quand personne n'est connecté", async () => {
+    h.session = null;
+    expect((await POST(vote(["o1"]), ctx)).status).toBe(401);
+  });
+
+  it("404 sur un sondage inexistant", async () => {
+    h.poll = null;
+    expect((await POST(vote(["o1"]), ctx)).status).toBe(404);
+    expect(h.ecrit).toBeNull();
+  });
+});
+
+describe("le choix MULTIPLE", () => {
+  it("écrit une ligne PAR case cochée", async () => {
+    await POST(vote(["o1", "o3"]), ctx);
+    expect(h.ecrit).toEqual([
+      { optionId: "o1", userId: "u1" },
+      { optionId: "o3", userId: "u1" },
+    ]);
+  });
+
+  // C'est la propriété qui rend le vote idempotent : re-voter ne cumule jamais.
+  it("efface d'abord TOUT ce que le membre avait coché sur ce sondage", async () => {
+    await POST(vote(["o2"]), ctx);
+    expect(h.efface).toEqual({ userId: "u1", optionId: { in: ["o1", "o2", "o3"] } });
+  });
+
+  it("accepte une liste vide : c'est un retrait de vote, pas une erreur", async () => {
+    const res = await POST(vote([]), ctx);
+    expect(res.status).toBe(200);
+    expect(h.efface).not.toBeNull();
+    expect(h.ecrit).toEqual([]);
+  });
+
+  it("dédoublonne les identifiants répétés", async () => {
+    await POST(vote(["o1", "o1"]), ctx);
+    expect(h.ecrit).toHaveLength(1);
+  });
+});
+
+describe("ce que la route refuse", () => {
+  // Sans ce contrôle, un identifiant emprunté à un AUTRE sondage y ajouterait une voix.
+  it("refuse une option qui n'appartient pas à ce sondage", async () => {
+    const res = await POST(vote(["o1", "ailleurs"]), ctx);
+    expect(res.status).toBe(400);
+    expect(h.ecrit).toBeNull();
+  });
+
+  it("refuse un corps qui n'est pas une liste", async () => {
+    expect((await POST(vote("o1"), ctx)).status).toBe(400);
+    expect((await POST(vote(null), ctx)).status).toBe(400);
+    expect(h.ecrit).toBeNull();
+  });
+
+  it("refuse en 409 le vote sur un sondage clos", async () => {
+    h.poll = { ...(h.poll as object), closedAt: new Date() };
+    const res = await POST(vote(["o1"]), ctx);
+    expect(res.status).toBe(409);
+    expect(h.ecrit).toBeNull();
+  });
+});
+
+describe("la diffusion", () => {
+  // On diffuse l'ÉTAT COMPLET et non un delta : un vote à choix multiple remplace l'ensemble
+  // des cases d'un membre, ce qui ne s'exprime pas simplement comme un delta.
+  it("porte le sondage entier, pour que personne ne relise la base", async () => {
+    await POST(vote(["o1"]), ctx);
+    expect(h.diffuse?.[0]).toBe("poll");
+    expect(h.diffuse?.[1].id).toBe("p1");
+    expect(h.diffuse?.[1].messageId).toBe("m1");
+  });
+});
+
+// Clore est la version douce d'effacer : mêmes droits que la suppression d'un message.
+describe("PATCH — clore et rouvrir", () => {
+  it("laisse l'auteur clore, puis rouvrir", async () => {
+    expect((await PATCH(clore(true), ctx)).status).toBe(200);
+    expect(h.maj?.closedAt).toBeInstanceOf(Date);
+    await PATCH(clore(false), ctx);
+    expect(h.maj?.closedAt).toBeNull();
+  });
+
+  it("laisse l'ADMIN clore celui d'un autre", async () => {
+    h.session = { userId: "chef", displayName: "Chef", email: "chef@example.com" };
+    h.poll = { ...(h.poll as object), message: { authorId: "u2" } };
+    expect((await PATCH(clore(true), ctx)).status).toBe(200);
+  });
+
+  // 404 et non 403 : distinguer les deux apprendrait à un curieux quels sondages existent.
+  it("répond 404, et non 403, à un tiers", async () => {
+    h.session = { userId: "quidam", displayName: "Quidam", email: "quidam@example.com" };
+    h.poll = { ...(h.poll as object), message: { authorId: "u2" } };
+    expect((await PATCH(clore(true), ctx)).status).toBe(404);
+    expect(h.maj).toBeNull();
+  });
+
+  it("refuse autre chose qu'un booléen", async () => {
+    expect((await PATCH(clore("oui"), ctx)).status).toBe(400);
+    expect(h.maj).toBeNull();
+  });
+});

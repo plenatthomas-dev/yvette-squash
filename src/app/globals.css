@@ -6098,18 +6098,74 @@ body[data-bottombar] .install-banner {
   flex-direction: column;
   gap: 10px;
 }
+/* TROISIÈME piège de spécificité Pico rencontré sur ce composant, après
+   `button[type=submit] { width: 100% }` (0,1,1) et la famille `[role=group]`. Pico pose
+   `ul li { list-style: square }` — une spécificité (0,0,2) qui vise le LI DIRECTEMENT, et
+   qui bat donc l'héritage de la règle posée au-dessus sur le UL. Neutraliser la liste ne
+   suffit pas : il faut viser le li, sinon une puce carrée reste devant chaque bulle. */
+.forum-list li {
+  list-style: none;
+}
+/* La rangée porte l'alignement (pastille + bulle), la bulle ne porte plus que son apparence. */
+.forum-rangee {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.forum-rangee.is-mine {
+  /* Ses propres messages à DROITE : la convention de toutes les messageries, et le seul
+     dispositif qui permet de suivre un fil à trois voix sans lire les noms. */
+  flex-direction: row-reverse;
+}
+/* Pastille d'initiales. NEUTRE, sans teinte par membre : DESIGN.md réserve la couleur au
+   sens, et une couleur par joueur entrerait en concurrence avec le vert de l'action. Ce sont
+   les lettres qui portent l'identité — la couleur n'ajouterait rien qu'elles ne disent. */
+.forum-avatar {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--pico-card-sectioning-background-color);
+  border: 1px solid var(--pico-card-border-color);
+  color: var(--pico-muted-color);
+  font-size: 0.72rem;
+  font-weight: 600;
+  /* La pastille suit le BAS de la bulle, comme dans une messagerie : elle marque le locuteur
+     au niveau de sa dernière ligne, pas de son en-tête. */
+  margin-bottom: 2px;
+}
+/* Séparateur de jour. Un filet traversant avec le libellé au centre : c'est ce qui remplace
+   la date répétée sur chaque horodatage, désormais réduit à l'heure. */
+.forum-jour {
+  margin: 6px 0;
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.forum-jour::before,
+.forum-jour::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--pico-card-border-color);
+}
 /* Bulle. Pas de fond coloré pour les siens : la Règle du Fond et de l'Encre réserve la
    couleur à l'état, et « c'est moi qui parle » n'est pas un état. C'est l'alignement et un
    filet qui le disent — même dispositif que l'issue d'une rencontre. */
 .forum-msg {
   max-width: 85%;
+  min-width: 0;
   padding: 8px 12px;
   border-radius: 12px;
   background: var(--pico-card-background-color);
   border: 1px solid var(--pico-card-border-color);
 }
 .forum-msg.is-mine {
-  align-self: flex-end;
   border-left: 3px solid var(--good-edge);
 }
 .forum-msg-head {
@@ -6124,8 +6180,13 @@ body[data-bottombar] .install-banner {
   color: var(--pico-muted-color);
   font-size: 0.72rem;
 }
-.forum-suppr {
-  margin: 0 0 0 auto;
+.forum-actions {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+.forum-action {
+  margin: 0;
   padding: 4px 8px;
   width: auto;
   background: none;
@@ -6136,11 +6197,218 @@ body[data-bottombar] .install-banner {
   min-height: 44px;
   min-width: 44px;
 }
+.forum-suppr {
+  margin: 0;
+}
+/* CITATION reprise en tête de la réponse. Filet à gauche et fond légèrement en retrait : elle
+   doit se lire comme un rappel, jamais comme un message de plus dans le fil. */
+.forum-citation {
+  margin: 0 0 4px;
+  padding: 4px 8px;
+  border-left: 3px solid var(--pico-card-border-color);
+  background: var(--pico-card-sectioning-background-color);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.forum-citation span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .forum-msg-body {
   margin: 2px 0 0;
   font-size: 0.9rem;
   white-space: pre-wrap; /* les retours à la ligne que parseForumBody a préservés */
   overflow-wrap: anywhere; /* une URL collée ne doit pas élargir la bulle */
+}
+/* RÉACTIONS sous le corps du message. La sienne se distingue par un FILET, pas par un fond
+   coloré : même raison que la bulle — la couleur appartient à l'action, pas à l'appartenance. */
+.forum-reacs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.forum-reac {
+  margin: 0;
+  width: auto;
+  padding: 2px 8px;
+  min-height: 32px;
+  border-radius: 999px;
+  background: var(--pico-card-sectioning-background-color);
+  border: 1px solid var(--pico-card-border-color);
+  color: var(--pico-color);
+  font-size: 0.8rem;
+  line-height: 1;
+}
+.forum-reac.is-mienne {
+  border-color: var(--good-edge);
+  box-shadow: inset 0 0 0 1px var(--good-edge);
+}
+/* SONDAGE. Les barres se calculent sur le nombre de VOTANTS et non sur la somme des voix :
+   en choix multiple les deux diffèrent, et prendre le total rendrait 100 % inatteignable. */
+.forum-poll {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.forum-opt {
+  position: relative;
+  margin: 0;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 10px;
+  text-align: left;
+  background: var(--pico-card-sectioning-background-color);
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 8px;
+  color: var(--pico-color);
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+.forum-opt.is-coche {
+  border-color: var(--good-edge);
+}
+/* La jauge est un REMPLISSAGE derrière le libellé, pas une barre à côté : elle ne prend
+   aucune largeur au texte, qui reste lisible même à 100 %. */
+.forum-opt-jauge {
+  position: absolute;
+  inset: 0 auto 0 0;
+  /* Le voile de la famille « issue », déjà réglé dans les trois thèmes — pas une couleur
+     neuve. La Règle de la Paire Complète : le fond est `--good-wash`, l'encre reste celle du
+     thème, qui tient le contraste dessus par construction. */
+  background: var(--good-wash);
+  pointer-events: none;
+}
+.forum-opt-texte {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.forum-opt-nb {
+  position: relative;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+}
+.forum-poll-pied {
+  margin: 2px 0 0;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Barre « en réponse à » au-dessus du champ : c'est elle qui dit, avant d'écrire, à quoi on
+   répond. Sans elle la citation ne serait découverte qu'après l'envoi. */
+.forum-repond-a {
+  margin: 4px 0 0;
+  padding: 4px 8px;
+  border-left: 3px solid var(--good-edge);
+  background: var(--pico-card-sectioning-background-color);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.forum-repond-a span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Palette d'emoji de la SAISIE. Grille auto-remplie : elle s'adapte à la largeur sans qu'on
+   ait à décider d'un nombre de colonnes qui serait faux sur l'un des deux écrans. */
+.forum-palette {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+  gap: 2px;
+  margin-top: 6px;
+  padding: 6px;
+  max-height: 30dvh;
+  overflow-y: auto;
+  background: var(--pico-card-sectioning-background-color);
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 8px;
+}
+.forum-palette button {
+  margin: 0;
+  width: 100%;
+  min-height: 40px;
+  padding: 0;
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+/* Composeur de sondage : il REMPLACE le champ de saisie au lieu de s'ajouter au-dessus.
+   Deux zones de rédaction concurrentes en bas d'écran ne se départagent pas au premier
+   coup d'œil, surtout au pouce. */
+.forum-sondage-form {
+  margin-top: 6px;
+  padding: 10px;
+  background: var(--pico-card-sectioning-background-color);
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.forum-sondage-form input {
+  margin: 0;
+  font-size: 0.85rem;
+}
+@media (pointer: coarse) {
+  /* En dessous de 16 px, iOS zoome sur le champ au focus et ne redézoome jamais. */
+  .forum-sondage-form input {
+    font-size: 16px;
+  }
+}
+.forum-sondage-titre {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.forum-sondage-note {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+}
+.forum-sondage-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.forum-sondage-actions button {
+  margin: 0;
+  width: auto;
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: 0.85rem;
+}
+.forum-outils {
+  display: flex;
+  gap: 2px;
+}
+/* Deux classes (0,2,0) pour passer devant les règles de Pico sur les boutons. */
+.forum-form .forum-outil {
+  margin: 0;
+  width: auto;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 8px;
+  font-size: 1.05rem;
+  line-height: 1;
 }
 /* Hauteur RÉSERVÉE, même vide (l'espace insécable du composant) : sans elle, l'apparition de
    « X écrit… » pousserait tout le fil d'une ligne à chaque frappe. */
@@ -6159,7 +6427,10 @@ body[data-bottombar] .install-banner {
    `minmax(0, 1fr)` sur la première colonne empêche le champ de déborder sur un mot long. */
 .forum-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
+  /* Trois colonnes : outils, champ, envoi. Les deux extrêmes sont taillées sur leur contenu,
+     seule celle du milieu est élastique — c'est ce qui empêche `width: 100%` de Pico de
+     reprendre toute la barre, comme il l'avait déjà fait avec le seul bouton d'envoi. */
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
   gap: 8px;
   align-items: end;
   margin-top: 6px;

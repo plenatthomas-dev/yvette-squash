@@ -4,7 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readOk } from "@/lib/apiFetch";
 import { onForeground } from "@/lib/onForeground";
 import { EmptyState, Skeleton } from "@/components/Placeholders";
-import { MAX_FORUM_LEN, forumLength } from "@/lib/forum";
+import {
+  MAX_FORUM_LEN,
+  forumLength,
+  FORUM_EMOJIS,
+  FORUM_REACTIONS,
+  MAX_POLL_OPTIONS,
+  MIN_POLL_OPTIONS,
+  MAX_POLL_OPTION_LEN,
+} from "@/lib/forum";
+import { segmenter, libelleJour, memeJour } from "@/lib/forum-texte";
+import { initiales } from "@/lib/forum-avatar";
 
 // LE FIL DE DISCUSSION DU CLUB.
 //
@@ -23,6 +33,12 @@ import { MAX_FORUM_LEN, forumLength } from "@/lib/forum";
 // que la fonction est en essai : la frappe et la présence disparaissent alors en silence, les
 // messages continuent d'arriver par les canaux 2 et 3. Aucun écran d'erreur pour un service
 // d'agrément — c'est la règle qui gouverne tout le code de connexion ci-dessous.
+//
+// ⚠️ AUCUN booléen « c'est à moi » ni « je peux supprimer » ne vient du serveur par ligne.
+// Ils dépendent de qui regarde, pas du message, et les figer côté serveur obligeait à en
+// inventer un pour la diffusion — d'où un admin qui voyait tout le fil aligné à droite, et un
+// message reçu en direct qui n'avait pas le même comportement que le même après rechargement.
+// Le serveur envoie `meId` et `admin` UNE fois avec la page ; tout le reste se dérive ici.
 
 export type ForumMessage = {
   id: string;
@@ -30,7 +46,25 @@ export type ForumMessage = {
   authorId: string;
   authorName: string;
   createdAt: string;
-  canDelete: boolean;
+  replyToId?: string | null;
+  replyToAuthor?: string | null;
+  replyToExcerpt?: string | null;
+};
+
+type Membre = { id: string; name: string };
+type ReactionRow = { emoji: string; users: Membre[] };
+type PollOption = { id: string; label: string; voters: Membre[] };
+type Poll = { id: string; messageId: string; closedAt: string | null; options: PollOption[] };
+
+type Charge = {
+  messages: ForumMessage[];
+  reactions?: Record<string, ReactionRow[]>;
+  polls?: Record<string, Poll>;
+  hasMore?: boolean;
+  muted?: boolean;
+  meId?: string;
+  meName?: string;
+  admin?: boolean;
 };
 
 const PAGE = 30;
@@ -39,17 +73,18 @@ const TYPING_EVERY_MS = 3_000;
 /** Au-delà, on considère que la personne a cessé d'écrire (elle a pu fermer l'onglet). */
 const TYPING_FORGET_MS = 5_000;
 
-const horodatage = (iso: string): string => {
-  const d = new Date(iso);
-  const auj = new Date();
-  const memeJour =
-    d.getDate() === auj.getDate() &&
-    d.getMonth() === auj.getMonth() &&
-    d.getFullYear() === auj.getFullYear();
-  const heure = d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-  if (memeJour) return heure;
-  return `${d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })} ${heure}`;
-};
+/** L'heure d'un message, à la SECONDE.
+ *
+ *  Les secondes sont inhabituelles dans une messagerie, mais c'est le cas normal d'une
+ *  conversation vive : trois messages tombent dans la même minute et l'ordre de la liste est
+ *  alors la seule chose qui les sépare. Le JOUR, lui, est porté par le séparateur de date —
+ *  le répéter sur chaque ligne était du bruit. */
+const horodatage = (iso: string): string =>
+  new Date(iso).toLocaleTimeString("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 
 /** Fusionne une arrivée dans la liste en DÉDUPLIQUANT par id, et en gardant l'ordre du temps.
  *
@@ -62,6 +97,27 @@ function fusionner(actuels: ForumMessage[], arrivees: ForumMessage[]): ForumMess
   return [...par.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
+/** Rend le corps d'un message : du texte, et des liens qui en sont des nœuds React.
+ *
+ *  Jamais de HTML fabriqué — `segmenter` ne rend que des données, et c'est React qui crée les
+ *  éléments. Il n'y a donc aucun point d'injection, quoi qu'un membre écrive. */
+function Corps({ texte }: { texte: string }) {
+  const parts = useMemo(() => segmenter(texte), [texte]);
+  return (
+    <p className="forum-msg-body">
+      {parts.map((p, i) =>
+        p.type === "lien" ? (
+          <a key={i} href={p.valeur} target="_blank" rel="noopener noreferrer nofollow">
+            {p.valeur}
+          </a>
+        ) : (
+          <span key={i}>{p.valeur}</span>
+        ),
+      )}
+    </p>
+  );
+}
+
 export default function Forum({
   toast,
   onExpired,
@@ -70,6 +126,8 @@ export default function Forum({
   onExpired: (status: number) => boolean;
 }) {
   const [messages, setMessages] = useState<ForumMessage[] | null>(null);
+  const [reactions, setReactions] = useState<Record<string, ReactionRow[]>>({});
+  const [polls, setPolls] = useState<Record<string, Poll>>({});
   const [hasMore, setHasMore] = useState(false);
   const [limit, setLimit] = useState(PAGE);
   const [erreur, setErreur] = useState<string | null>(null);
@@ -81,6 +139,15 @@ export default function Forum({
   const [frappe, setFrappe] = useState<Record<string, number>>({});
   /** Notifications du fil coupées ? OPT-OUT : `false` par défaut, sinon le fil ne vit pas. */
   const [muted, setMuted] = useState(false);
+  /** Qui regarde. Sert à dériver l'alignement ET le droit de supprimer, pour TOUTE arrivée. */
+  const [moi, setMoi] = useState<{ id: string; name: string; admin: boolean } | null>(null);
+  /** Le message auquel on répond, s'il y en a un. */
+  const [citation, setCitation] = useState<ForumMessage | null>(null);
+  /** Palettes ouvertes : celle de la saisie, et celle des réactions d'un message donné. */
+  const [paletteSaisie, setPaletteSaisie] = useState(false);
+  const [paletteReaction, setPaletteReaction] = useState<string | null>(null);
+  /** Composeur de sondage : `null` = fermé. */
+  const [sondage, setSondage] = useState<{ question: string; options: string[] } | null>(null);
 
   const onExpiredRef = useRef(onExpired);
   onExpiredRef.current = onExpired;
@@ -104,16 +171,21 @@ export default function Forum({
             : `?limit=${n}`;
         const res = await fetch(`/api/forum${qs}`);
         if (onExpiredRef.current(res.status)) return;
-        const data = await readOk<{
-          messages: ForumMessage[];
-          hasMore?: boolean;
-          muted?: boolean;
-        }>(res);
+        const data = await readOk<Charge>(res);
         if (typeof data.muted === "boolean") setMuted(data.muted);
+        if (data.meId) {
+          setMoi({ id: data.meId, name: data.meName ?? "Moi", admin: Boolean(data.admin) });
+          if (!monNomRef.current && data.meName) monNomRef.current = data.meName;
+        }
         setErreur(null);
         setMessages((actuels) =>
           mode === "rattrapage" ? fusionner(actuels ?? [], data.messages) : data.messages,
         );
+        // Le rattrapage COMPLÈTE, la page REMPLACE : recharger une page plus longue doit
+        // repartir de l'état du serveur, sinon une réaction retirée ailleurs resterait
+        // affichée pour toujours.
+        setReactions((r) => (mode === "rattrapage" ? { ...r, ...data.reactions } : (data.reactions ?? {})));
+        setPolls((p) => (mode === "rattrapage" ? { ...p, ...data.polls } : (data.polls ?? {})));
         if (mode === "page") setHasMore(Boolean(data.hasMore));
       } catch {
         // Le silence serait indiscernable d'un fil vide — le pire des deux, parce qu'il est
@@ -134,6 +206,43 @@ export default function Forum({
     if (messages && messages.length > 0) dernierRef.current = messages[messages.length - 1].id;
   }, [messages]);
 
+  /** Applique le DELTA d'une réaction. Idempotent : rejouer le même delta ne change rien, ce
+   *  qui permet de l'appliquer en optimiste PUIS à l'arrivée du courtier sans compter double. */
+  const appliquerReaction = useCallback(
+    (d: { messageId: string; emoji: string; userId: string; userName: string; on: boolean }) => {
+      setReactions((r) => {
+        const liste = (r[d.messageId] ?? []).map((x) => ({ ...x, users: [...x.users] }));
+        const i = liste.findIndex((x) => x.emoji === d.emoji);
+        if (d.on) {
+          if (i < 0) liste.push({ emoji: d.emoji, users: [{ id: d.userId, name: d.userName }] });
+          else if (!liste[i].users.some((u) => u.id === d.userId)) {
+            liste[i].users.push({ id: d.userId, name: d.userName });
+          }
+        } else if (i >= 0) {
+          liste[i].users = liste[i].users.filter((u) => u.id !== d.userId);
+          if (liste[i].users.length === 0) liste.splice(i, 1);
+        }
+        return { ...r, [d.messageId]: liste };
+      });
+    },
+    [],
+  );
+
+  /** Retire un message partout — y compris le texte qu'il a laissé dans les citations. */
+  const retirer = useCallback((id: string) => {
+    setMessages((actuels) =>
+      (actuels ?? [])
+        .filter((m) => m.id !== id)
+        // Le serveur blanchit les instantanés en base ; on fait le même geste à l'écran, sinon
+        // le texte supprimé resterait lisible dans les réponses jusqu'au prochain chargement.
+        .map((m) =>
+          m.replyToId === id ? { ...m, replyToAuthor: null, replyToExcerpt: null } : m,
+        ),
+    );
+    setReactions(({ [id]: _oublie, ...reste }) => reste);
+    setPolls(({ [id]: _aussi, ...reste }) => reste);
+  }, []);
+
   // CANAL 3 — retour au premier plan. Throttlé comme le planning : deux reprises de focus
   // rapprochées ne doivent pas payer deux requêtes.
   useEffect(() => onForeground(() => void charge(limit, "rattrapage"), 15_000), [charge, limit]);
@@ -153,7 +262,6 @@ export default function Forum({
 
   // CANAL 1 — le courtier. Tout ce bloc est facultatif par construction : la moindre absence
   // (clé, module, autorisation) le fait renoncer sans un mot.
-  const pusherRef = useRef<{ disconnect: () => void } | null>(null);
   const triggerRef = useRef<((event: string, data: unknown) => void) | null>(null);
   useEffect(() => {
     const cle = process.env.NEXT_PUBLIC_PUSHER_KEY;
@@ -171,32 +279,31 @@ export default function Forum({
           authEndpoint: "/api/forum/realtime-auth",
         });
         socket = p;
-        pusherRef.current = p;
         const canal = p.subscribe("presence-forum");
 
-        canal.bind("message", (m: ForumMessage) => {
-          // `canDelete` n'est jamais diffusé : il dépend de qui regarde. On le recalcule ici,
-          // et seul l'auteur se voit le bouton — l'admin, lui, l'obtiendra au rechargement.
-          setMessages((actuels) => fusionner(actuels ?? [], [{ ...m, canDelete: false }]));
+        canal.bind("message", (m: ForumMessage & { poll?: Poll }) => {
+          const { poll, ...msg } = m;
+          setMessages((actuels) => fusionner(actuels ?? [], [msg]));
+          if (poll) setPolls((x) => ({ ...x, [poll.messageId]: poll }));
         });
-        canal.bind("deleted", ({ id }: { id: string }) => {
-          setMessages((actuels) => (actuels ?? []).filter((m) => m.id !== id));
-        });
+        canal.bind("deleted", ({ id }: { id: string }) => retirer(id));
+        canal.bind("reaction", appliquerReaction);
+        canal.bind("poll", (p: Poll) => setPolls((x) => ({ ...x, [p.messageId]: p })));
         canal.bind("client-typing", ({ name }: { name: string }) => {
           if (name) setFrappe((f) => ({ ...f, [name]: Date.now() }));
         });
 
-        type Membre = { id: string; info: { name: string } };
+        type MembrePresence = { id: string; info: { name: string } };
         const majPresence = () => {
           const membres = (canal as unknown as {
-            members?: { each: (cb: (m: Membre) => void) => void; me?: Membre };
+            members?: { each: (cb: (m: MembrePresence) => void) => void; me?: MembrePresence };
           }).members;
           if (!membres) return;
-          const moi = membres.me?.id;
+          const monId = membres.me?.id;
           if (membres.me?.info?.name) monNomRef.current = membres.me.info.name;
           const noms: string[] = [];
           membres.each((m) => {
-            if (m.id !== moi && m.info?.name) noms.push(m.info.name);
+            if (m.id !== monId && m.info?.name) noms.push(m.info.name);
           });
           setPresents([...new Set(noms)].sort());
         };
@@ -221,13 +328,12 @@ export default function Forum({
     return () => {
       vivant = false;
       triggerRef.current = null;
-      pusherRef.current = null;
       socket?.disconnect();
     };
     // `limit` n'est volontairement PAS une dépendance : changer de page ne doit pas
     // reconstruire la connexion. Le rattrapage relit de toute façon depuis l'ancre.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [charge]);
+  }, [charge, retirer, appliquerReaction]);
 
   // Oubli des « en train d'écrire » : sans ce balayage, quelqu'un qui ferme son onglet en
   // pleine phrase resterait affiché comme écrivant, pour toujours.
@@ -272,6 +378,23 @@ export default function Forum({
     }
   };
 
+  /** Insère un emoji À LA POSITION DU CURSEUR, et pas en fin de champ : on ajoute souvent un
+   *  emoji au milieu d'une phrase déjà écrite. */
+  const insererEmoji = (e: string) => {
+    const el = saisieRef.current;
+    const debut = el?.selectionStart ?? draft.length;
+    const fin = el?.selectionEnd ?? draft.length;
+    const suivant = draft.slice(0, debut) + e + draft.slice(fin);
+    setDraft(suivant);
+    setPaletteSaisie(false);
+    requestAnimationFrame(() => {
+      ajuster();
+      el?.focus();
+      const pos = debut + e.length;
+      el?.setSelectionRange(pos, pos);
+    });
+  };
+
   const envoyer = async () => {
     const texte = draft.trim();
     if (!texte || envoi) return;
@@ -280,7 +403,7 @@ export default function Forum({
       const res = await fetch("/api/forum", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: texte }),
+        body: JSON.stringify({ body: texte, replyTo: citation?.id ?? undefined }),
       });
       if (onExpiredRef.current(res.status)) return;
       const data = await readOk<{ message: ForumMessage }>(res);
@@ -288,6 +411,7 @@ export default function Forum({
       // déduplique par id, donc on ne se voit pas parler double.
       setMessages((actuels) => fusionner(actuels ?? [], [data.message]));
       setDraft("");
+      setCitation(null);
       // Le champ vidé doit REDESCENDRE : sans ça il garde la hauteur du message envoyé.
       requestAnimationFrame(ajuster);
       setErreur(null);
@@ -303,9 +427,104 @@ export default function Forum({
       const res = await fetch(`/api/forum/${id}`, { method: "DELETE" });
       if (onExpiredRef.current(res.status)) return;
       await readOk(res);
-      setMessages((actuels) => (actuels ?? []).filter((m) => m.id !== id));
+      retirer(id);
     } catch (e) {
       toastRef.current("err", e instanceof Error ? e.message : "Suppression impossible");
+    }
+  };
+
+  const reagir = async (messageId: string, emoji: string) => {
+    if (!moi) return;
+    setPaletteReaction(null);
+    const deja = (reactions[messageId] ?? [])
+      .find((r) => r.emoji === emoji)
+      ?.users.some((u) => u.id === moi.id);
+    const delta = { messageId, emoji, userId: moi.id, userName: moi.name, on: !deja };
+    appliquerReaction(delta); // optimiste : une pastille qui met une seconde à réagir se re-clique
+    try {
+      const res = await fetch(`/api/forum/${messageId}/reaction`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emoji }),
+      });
+      if (onExpiredRef.current(res.status)) return;
+      await readOk(res);
+    } catch {
+      appliquerReaction({ ...delta, on: Boolean(deja) }); // on remet ce que la base dit encore
+      toastRef.current("err", "Réaction non enregistrée");
+    }
+  };
+
+  const voter = async (poll: Poll, optionId: string) => {
+    if (!moi || poll.closedAt) return;
+    const coches = poll.options.filter((o) => o.voters.some((v) => v.id === moi.id)).map((o) => o.id);
+    const voulus = coches.includes(optionId)
+      ? coches.filter((x) => x !== optionId)
+      : [...coches, optionId];
+    const avant = poll;
+    // Optimiste, comme les réactions : cocher une case doit répondre au doigt.
+    setPolls((x) => ({
+      ...x,
+      [poll.messageId]: {
+        ...poll,
+        options: poll.options.map((o) => ({
+          ...o,
+          voters: voulus.includes(o.id)
+            ? o.voters.some((v) => v.id === moi.id)
+              ? o.voters
+              : [...o.voters, { id: moi.id, name: moi.name }]
+            : o.voters.filter((v) => v.id !== moi.id),
+        })),
+      },
+    }));
+    try {
+      const res = await fetch(`/api/forum/poll/${poll.id}/vote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ optionIds: voulus }),
+      });
+      if (onExpiredRef.current(res.status)) return;
+      const data = await readOk<{ poll: Poll | null }>(res);
+      if (data.poll) setPolls((x) => ({ ...x, [data.poll!.messageId]: data.poll! }));
+    } catch (e) {
+      setPolls((x) => ({ ...x, [avant.messageId]: avant }));
+      toastRef.current("err", e instanceof Error ? e.message : "Vote non enregistré");
+    }
+  };
+
+  const clore = async (poll: Poll) => {
+    try {
+      const res = await fetch(`/api/forum/poll/${poll.id}/vote`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ closed: !poll.closedAt }),
+      });
+      if (onExpiredRef.current(res.status)) return;
+      const data = await readOk<{ poll: Poll | null }>(res);
+      if (data.poll) setPolls((x) => ({ ...x, [data.poll!.messageId]: data.poll! }));
+    } catch {
+      toastRef.current("err", "Modification impossible");
+    }
+  };
+
+  const creerSondage = async () => {
+    if (!sondage || envoi) return;
+    setEnvoi(true);
+    try {
+      const res = await fetch("/api/forum/poll", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: sondage.question, options: sondage.options }),
+      });
+      if (onExpiredRef.current(res.status)) return;
+      const data = await readOk<{ message: ForumMessage; poll: Poll }>(res);
+      setMessages((actuels) => fusionner(actuels ?? [], [data.message]));
+      setPolls((x) => ({ ...x, [data.poll.messageId]: data.poll }));
+      setSondage(null);
+    } catch (e) {
+      toastRef.current("err", e instanceof Error ? e.message : "Sondage impossible");
+    } finally {
+      setEnvoi(false);
     }
   };
 
@@ -381,27 +600,184 @@ export default function Forum({
             )}
             {erreur && <p className="forum-erreur">{erreur}</p>}
             <ul className="forum-list">
-              {messages.map((m) => (
-                <li key={m.id} className={m.canDelete ? "forum-msg is-mine" : "forum-msg"}>
-                  <div className="forum-msg-head">
-                    <strong>{m.authorName}</strong>
-                    <small>{horodatage(m.createdAt)}</small>
-                    {m.canDelete && (
-                      <button
-                        type="button"
-                        className="forum-suppr"
-                        onClick={() => void supprimer(m.id)}
-                        aria-label={`Supprimer le message de ${m.authorName}`}
-                      >
-                        Suppr.
-                      </button>
+              {messages.map((m, i) => {
+                // Dérivés de `meId`/`admin`, jamais reçus par ligne : c'est ce qui fait qu'un
+                // admin ne se voit pas attribuer les messages des autres.
+                const mine = moi !== null && m.authorId === moi.id;
+                const canDelete = mine || (moi?.admin ?? false);
+                const precedent = i > 0 ? messages[i - 1] : null;
+                const nouveauJour = !precedent || !memeJour(precedent.createdAt, m.createdAt);
+                const reacs = reactions[m.id] ?? [];
+                const poll = polls[m.id];
+                return (
+                  <li key={m.id} className="forum-ligne">
+                    {nouveauJour && (
+                      <p className="forum-jour" role="presentation">
+                        <span>{libelleJour(m.createdAt)}</span>
+                      </p>
                     )}
-                  </div>
-                  {/* Nœud texte : pas de markdown, pas de HTML. `pre-wrap` rend les retours
-                      à la ligne que `parseForumBody` a pris soin de préserver. */}
-                  <p className="forum-msg-body">{m.body}</p>
-                </li>
-              ))}
+                    <div className={mine ? "forum-rangee is-mine" : "forum-rangee"}>
+                      {/* Pastille NEUTRE : DESIGN.md réserve la couleur au sens, et
+                          « c'est moi qui parle » se dit ici par l'alignement. Cachée pour ses
+                          propres messages — on sait qui on est. */}
+                      {!mine && (
+                        <span className="forum-avatar" aria-hidden="true">
+                          {initiales(m.authorName)}
+                        </span>
+                      )}
+                      <div className={mine ? "forum-msg is-mine" : "forum-msg"}>
+                        {m.replyToId && (
+                          <p className="forum-citation">
+                            {m.replyToExcerpt ? (
+                              <>
+                                <strong>{m.replyToAuthor}</strong>
+                                <span>{m.replyToExcerpt}</span>
+                              </>
+                            ) : (
+                              <em>Message supprimé</em>
+                            )}
+                          </p>
+                        )}
+                        <div className="forum-msg-head">
+                          <strong>{m.authorName}</strong>
+                          <small>{horodatage(m.createdAt)}</small>
+                          <span className="forum-actions">
+                            <button
+                              type="button"
+                              className="forum-action"
+                              onClick={() => {
+                                setCitation(m);
+                                saisieRef.current?.focus();
+                              }}
+                              aria-label={`Répondre à ${m.authorName}`}
+                            >
+                              Répondre
+                            </button>
+                            <button
+                              type="button"
+                              className="forum-action"
+                              onClick={() =>
+                                setPaletteReaction((x) => (x === m.id ? null : m.id))
+                              }
+                              aria-expanded={paletteReaction === m.id}
+                              aria-label={`Réagir au message de ${m.authorName}`}
+                            >
+                              ⊕
+                            </button>
+                            {canDelete && (
+                              <button
+                                type="button"
+                                className="forum-action forum-suppr"
+                                onClick={() => void supprimer(m.id)}
+                                aria-label={`Supprimer le message de ${m.authorName}`}
+                              >
+                                Suppr.
+                              </button>
+                            )}
+                          </span>
+                        </div>
+                        <Corps texte={m.body} />
+
+                        {poll && moi && (
+                          <div className="forum-poll">
+                            {(() => {
+                              // Le nombre de VOTANTS, pas la somme des voix : en choix
+                              // multiple les deux diffèrent, et c'est le premier qui sert de
+                              // base aux barres — sinon 100 % est inatteignable et les
+                              // proportions mentent.
+                              const votants = new Set(
+                                poll.options.flatMap((o) => o.voters.map((v) => v.id)),
+                              );
+                              const voix = poll.options.reduce((n, o) => n + o.voters.length, 0);
+                              return (
+                                <>
+                                  {poll.options.map((o) => {
+                                    const coche = o.voters.some((v) => v.id === moi.id);
+                                    const part = votants.size
+                                      ? Math.round((o.voters.length / votants.size) * 100)
+                                      : 0;
+                                    return (
+                                      <button
+                                        key={o.id}
+                                        type="button"
+                                        className={coche ? "forum-opt is-coche" : "forum-opt"}
+                                        onClick={() => void voter(poll, o.id)}
+                                        disabled={Boolean(poll.closedAt)}
+                                        aria-pressed={coche}
+                                        title={
+                                          o.voters.length
+                                            ? o.voters.map((v) => v.name).join(", ")
+                                            : "Personne pour l'instant"
+                                        }
+                                      >
+                                        <span
+                                          className="forum-opt-jauge"
+                                          style={{ width: `${part}%` }}
+                                          aria-hidden="true"
+                                        />
+                                        <span className="forum-opt-texte">
+                                          {coche ? "☑" : "☐"} {o.label}
+                                        </span>
+                                        <span className="forum-opt-nb">{o.voters.length}</span>
+                                      </button>
+                                    );
+                                  })}
+                                  <p className="forum-poll-pied">
+                                    {votants.size} votant{votants.size > 1 ? "s" : ""} · {voix}{" "}
+                                    voix
+                                    {poll.closedAt ? " · clos" : ""}
+                                    {canDelete && (
+                                      <button
+                                        type="button"
+                                        className="forum-action"
+                                        onClick={() => void clore(poll)}
+                                      >
+                                        {poll.closedAt ? "Rouvrir" : "Clore"}
+                                      </button>
+                                    )}
+                                  </p>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        )}
+
+                        {(reacs.length > 0 || paletteReaction === m.id) && (
+                          <div className="forum-reacs">
+                            {reacs.map((r) => {
+                              const mienne = moi !== null && r.users.some((u) => u.id === moi.id);
+                              return (
+                                <button
+                                  key={r.emoji}
+                                  type="button"
+                                  className={mienne ? "forum-reac is-mienne" : "forum-reac"}
+                                  onClick={() => void reagir(m.id, r.emoji)}
+                                  aria-pressed={mienne}
+                                  title={r.users.map((u) => u.name).join(", ")}
+                                >
+                                  {r.emoji} {r.users.length}
+                                </button>
+                              );
+                            })}
+                            {paletteReaction === m.id &&
+                              FORUM_REACTIONS.map((e) => (
+                                <button
+                                  key={e}
+                                  type="button"
+                                  className="forum-reac forum-reac-choix"
+                                  onClick={() => void reagir(m.id, e)}
+                                  aria-label={`Réagir avec ${e}`}
+                                >
+                                  {e}
+                                </button>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
             <div ref={finRef} />
           </>
@@ -413,37 +789,151 @@ export default function Forum({
           ? `${nomsFrappe[0]} écrit…`
           : nomsFrappe.length > 1
             ? "Plusieurs membres écrivent…"
-            : " "}
+            : " "}
       </p>
 
-      <form
-        className="forum-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void envoyer();
-        }}
-      >
-        <textarea
-          className="forum-input"
-          ref={saisieRef}
-          value={draft}
-          onChange={(e) => onDraft(e.target.value)}
-          placeholder="Écrire au club…"
-          rows={1}
-          aria-label="Votre message"
-          onKeyDown={(e) => {
-            // Entrée envoie, Maj+Entrée passe à la ligne — la convention de toutes les
-            // messageries. Sur mobile le clavier a son propre bouton, qui insère un saut.
-            if (e.key === "Enter" && !e.shiftKey) {
+      {sondage ? (
+        <div className="forum-sondage-form">
+          <p className="forum-sondage-titre">📊 Nouveau sondage</p>
+          <input
+            type="text"
+            value={sondage.question}
+            onChange={(e) => setSondage({ ...sondage, question: e.target.value })}
+            placeholder="La question…"
+            aria-label="Question du sondage"
+            maxLength={MAX_FORUM_LEN}
+          />
+          {sondage.options.map((o, i) => (
+            <input
+              key={i}
+              type="text"
+              value={o}
+              onChange={(e) =>
+                setSondage({
+                  ...sondage,
+                  options: sondage.options.map((x, j) => (j === i ? e.target.value : x)),
+                })
+              }
+              placeholder={`Réponse ${i + 1}`}
+              aria-label={`Réponse ${i + 1}`}
+              maxLength={MAX_POLL_OPTION_LEN}
+            />
+          ))}
+          <div className="forum-sondage-actions">
+            {sondage.options.length < MAX_POLL_OPTIONS && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setSondage({ ...sondage, options: [...sondage.options, ""] })}
+              >
+                + Réponse
+              </button>
+            )}
+            <button type="button" className="secondary" onClick={() => setSondage(null)}>
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={() => void creerSondage()}
+              disabled={
+                envoi ||
+                !sondage.question.trim() ||
+                sondage.options.filter((o) => o.trim()).length < MIN_POLL_OPTIONS
+              }
+            >
+              Publier
+            </button>
+          </div>
+          {/* Dit avant le vote ce que le vote fera : plusieurs cases sont cochables, et le
+              résultat n'est pas anonyme. */}
+          <p className="forum-sondage-note">
+            Chacun peut cocher plusieurs réponses, et voir qui a coché quoi.
+          </p>
+        </div>
+      ) : (
+        <>
+          {citation && (
+            <p className="forum-repond-a">
+              <span>
+                Réponse à <strong>{citation.authorName}</strong> : {citation.body.slice(0, 60)}
+              </span>
+              <button
+                type="button"
+                className="forum-action"
+                onClick={() => setCitation(null)}
+                aria-label="Annuler la réponse"
+              >
+                ✕
+              </button>
+            </p>
+          )}
+          {paletteSaisie && (
+            <div className="forum-palette" role="menu" aria-label="Emoji">
+              {FORUM_EMOJIS.map((e) => (
+                <button
+                  key={e}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => insererEmoji(e)}
+                  aria-label={`Insérer ${e}`}
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+          )}
+          <form
+            className="forum-form"
+            onSubmit={(e) => {
               e.preventDefault();
               void envoyer();
-            }
-          }}
-        />
-        <button type="submit" disabled={!draft.trim() || envoi} className="forum-envoi">
-          {envoi ? "…" : "Envoyer"}
-        </button>
-      </form>
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setPaletteSaisie(false);
+            }}
+          >
+            <div className="forum-outils">
+              <button
+                type="button"
+                className="secondary forum-outil"
+                onClick={() => setPaletteSaisie((v) => !v)}
+                aria-expanded={paletteSaisie}
+                aria-label="Emoji"
+              >
+                😀
+              </button>
+              <button
+                type="button"
+                className="secondary forum-outil"
+                onClick={() => setSondage({ question: "", options: ["", ""] })}
+                aria-label="Créer un sondage"
+              >
+                📊
+              </button>
+            </div>
+            <textarea
+              className="forum-input"
+              ref={saisieRef}
+              value={draft}
+              onChange={(e) => onDraft(e.target.value)}
+              placeholder="Écrire au club…"
+              rows={1}
+              aria-label="Votre message"
+              onKeyDown={(e) => {
+                // Entrée envoie, Maj+Entrée passe à la ligne — la convention de toutes les
+                // messageries. Sur mobile le clavier a son propre bouton, qui insère un saut.
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void envoyer();
+                }
+              }}
+            />
+            <button type="submit" disabled={!draft.trim() || envoi} className="forum-envoi">
+              {envoi ? "…" : "Envoyer"}
+            </button>
+          </form>
+        </>
+      )}
       {restant < 100 && (
         <p className="forum-restant" aria-live="polite">
           {restant >= 0 ? `${restant} caractères restants` : "Message trop long"}

@@ -35,6 +35,59 @@ export function parseForumBody(v: unknown): string | null {
   return t || null;
 }
 
+/**
+ * La palette de saisie : les emoji offerts sous le champ de message.
+ *
+ * Elle n'existe QUE pour le clavier physique. Les téléphones en produisent nativement, et
+ * c'est là que le fil se lit le plus souvent — mais depuis un ordinateur, un emoji est
+ * autrement inatteignable sans quitter l'appli.
+ *
+ * Aucune bibliothèque : un sélecteur complet pèse plusieurs centaines de kilo-octets pour
+ * couvrir des milliers de caractères dont un club de squash en emploie trente.
+ */
+export const FORUM_EMOJIS = [
+  "👍", "👎", "😂", "😅", "🙂", "😉", "😍", "🤔",
+  "😮", "😢", "😱", "🙏", "💪", "🔥", "🎉", "👏",
+  "❤️", "✅", "❌", "⚠️", "🎾", "🏆", "🥇", "⏰",
+  "📅", "🚗", "🍻", "☕", "💬", "👋",
+] as const;
+
+/**
+ * Les réactions possibles sous un message — une LISTE FERMÉE, et pas la palette ci-dessus.
+ *
+ * Six suffisent à acquiescer, et la fermeture est une contrainte de stockage autant que de
+ * lisibilité : sans elle la colonne `emoji` accepterait n'importe quelle chaîne envoyée par
+ * un client bricolé, et une rangée de vingt pastilles différentes sous un message ne dirait
+ * plus rien. La route valide contre cette liste, jamais contre un motif.
+ */
+export const FORUM_REACTIONS = ["👍", "😂", "❤️", "💪", "🎾", "✅"] as const;
+
+export type ForumReactionEmoji = (typeof FORUM_REACTIONS)[number];
+
+/** L'emoji est-il une réaction admise ? Seul contrôle accepté côté serveur. */
+export function isForumReaction(v: unknown): v is ForumReactionEmoji {
+  return typeof v === "string" && (FORUM_REACTIONS as readonly string[]).includes(v);
+}
+
+/** Longueur maximale d'un libellé d'option de sondage, en points de code. */
+export const MAX_POLL_OPTION_LEN = 60;
+/** Bornes du nombre d'options d'un sondage. Deux, sinon ce n'est pas un choix. */
+export const MIN_POLL_OPTIONS = 2;
+export const MAX_POLL_OPTIONS = 6;
+
+/**
+ * Nettoie un libellé d'option. `null` = option vide, donc à refuser.
+ *
+ * Même découpe par points de code que `parseForumBody`, et pour la même raison : « Chez
+ * Marco 🍕 » tronqué à la limite ne doit pas laisser une demi-pizza en base. Ici on réduit
+ * TOUS les blancs, retours à la ligne compris — une option de sondage tient sur une ligne.
+ */
+export function parseForumOption(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const t = [...v.replace(/\s+/g, " ").trim()].slice(0, MAX_POLL_OPTION_LEN).join("");
+  return t || null;
+}
+
 /** Longueur d'un message telle que l'utilisateur la compte : en caractères visibles. */
 export function forumLength(s: string): number {
   return [...s].length;

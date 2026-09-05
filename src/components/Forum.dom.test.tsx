@@ -16,6 +16,10 @@ import Forum from "@/components/Forum";
 //     ferait dix fois le volume des messages, et les deux courtiers comptent PAR ABONNÉ.
 //  4. LE PUSH RECHARGE LE FIL, mais seulement le sien : le service worker prévient les onglets
 //     pour TOUS les push, y compris les alertes de créneau qui n'ont rien à voir.
+//  5. « C'EST MOI QUI PARLE » SE DÉRIVE DE `meId`, JAMAIS D'UN DROIT. L'écran s'appuyait sur
+//     `canDelete`, qui vaut `admin || auteur` : un ADMIN voyait donc tout le fil aligné à
+//     droite, et un message reçu par le courtier n'avait pas le même comportement que le même
+//     message après rechargement. Les tests d'alignement ci-dessous ferment cette porte.
 
 // Le module `pusher-js` est chargé dynamiquement par le composant. On le remplace par un
 // double inerte : ces tests portent sur le comportement de l'écran, pas sur le réseau.
@@ -48,7 +52,9 @@ const msg = (over: Record<string, unknown> = {}) => ({
   authorId: "u2",
   authorName: "Gégé",
   createdAt: "2026-09-05T18:00:00.000Z",
-  canDelete: false,
+  replyToId: null,
+  replyToAuthor: null,
+  replyToExcerpt: null,
   ...over,
 });
 
@@ -65,7 +71,16 @@ Object.defineProperty(globalThis.navigator, "serviceWorker", {
 });
 
 let appels: string[] = [];
-let page: { messages: unknown[]; hasMore?: boolean; muted?: boolean };
+let page: {
+  messages: unknown[];
+  hasMore?: boolean;
+  muted?: boolean;
+  meId?: string;
+  meName?: string;
+  admin?: boolean;
+  reactions?: Record<string, unknown>;
+  polls?: Record<string, unknown>;
+};
 let postReponse: { message: unknown } | "erreur";
 
 const toast = vi.fn();
@@ -81,9 +96,9 @@ beforeEach(() => {
   canal.handlers.clear();
   canal.emis = [];
   canal.membres = null;
-  page = { messages: [msg()], hasMore: false, muted: false };
+  page = { messages: [msg()], hasMore: false, muted: false, meId: "u1", meName: "Thomas" };
   postReponse = {
-    message: msg({ id: "mien", body: "Coucou", authorId: "u1", authorName: "Thomas", canDelete: true }),
+    message: msg({ id: "mien", body: "Coucou", authorId: "u1", authorName: "Thomas" }),
   };
   toast.mockClear();
   vi.stubGlobal(
@@ -300,7 +315,7 @@ describe("notifications du fil", () => {
   });
 
   it("reflète l'état reçu du serveur au chargement", async () => {
-    page = { messages: [msg()], muted: true };
+    page = { messages: [msg()], muted: true, meId: "u1", meName: "Thomas" };
     rendre();
     await waitFor(() => expect(screen.getByRole("button", { name: /coupées/ })).toBeTruthy());
   });
@@ -308,17 +323,350 @@ describe("notifications du fil", () => {
 
 describe("suppression", () => {
   it("n'offre le bouton qu'à qui en a le droit", async () => {
-    page = { messages: [msg({ id: "a", canDelete: false }), msg({ id: "b", canDelete: true })] };
+    page = {
+      messages: [msg({ id: "a", authorId: "u2" }), msg({ id: "b", authorId: "u1" })],
+      meId: "u1",
+      meName: "Thomas",
+    };
     rendre();
     await waitFor(() => expect(screen.getAllByText("Salut")).toHaveLength(2));
     expect(screen.getAllByRole("button", { name: /Supprimer le message/ })).toHaveLength(1);
   });
 
+  it("offre le bouton à l'admin sur TOUS les messages : le fil a besoin d'un modérateur", async () => {
+    page = {
+      messages: [msg({ id: "a", authorId: "u2" }), msg({ id: "b", authorId: "u3" })],
+      meId: "chef",
+      meName: "Chef",
+      admin: true,
+    };
+    rendre();
+    await waitFor(() => expect(screen.getAllByText("Salut")).toHaveLength(2));
+    expect(screen.getAllByRole("button", { name: /Supprimer le message/ })).toHaveLength(2);
+  });
+
   it("retire le message de l'écran une fois supprimé", async () => {
-    page = { messages: [msg({ canDelete: true })] };
+    page = { messages: [msg({ authorId: "u1" })], meId: "u1", meName: "Thomas" };
     rendre();
     await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: /Supprimer le message/ }));
     await waitFor(() => expect(screen.queryByText("Salut")).toBeNull());
+  });
+});
+
+// LE DÉFAUT CORRIGÉ, ET SA GARDE.
+//
+// L'alignement lisait `canDelete`, qui vaut `admin || auteur`. Un administrateur voyait donc
+// TOUS les messages du club à droite, comme s'il les avait écrits. Et un message arrivé par le
+// courtier était figé à `canDelete: false`, donc jamais aligné à droite pour son auteur.
+describe("alignement — « c'est moi qui parle »", () => {
+  const estAMoi = (texte: string) =>
+    screen.getByText(texte).closest(".forum-rangee")?.classList.contains("is-mine");
+
+  it("aligne à droite les siens, à gauche ceux des autres", async () => {
+    page = {
+      messages: [
+        msg({ id: "a", body: "Des autres", authorId: "u2" }),
+        msg({ id: "b", body: "De moi", authorId: "u1" }),
+      ],
+      meId: "u1",
+      meName: "Thomas",
+    };
+    rendre();
+    await waitFor(() => expect(screen.getByText("De moi")).toBeTruthy());
+    expect(estAMoi("De moi")).toBe(true);
+    expect(estAMoi("Des autres")).toBe(false);
+  });
+
+  it("ne donne PAS à l'admin les messages des autres, malgré son droit de supprimer", async () => {
+    page = {
+      messages: [msg({ id: "a", body: "Des autres", authorId: "u2" })],
+      meId: "chef",
+      meName: "Chef",
+      admin: true,
+    };
+    rendre();
+    await waitFor(() => expect(screen.getByText("Des autres")).toBeTruthy());
+    expect(estAMoi("Des autres")).toBe(false);
+    // Il garde bien le bouton : c'est le DROIT qui est admin, pas la paternité.
+    expect(screen.getByRole("button", { name: /Supprimer le message/ })).toBeTruthy();
+  });
+
+  it("aligne à droite un message de soi arrivé PAR LE COURTIER", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    act(() => {
+      canal.handlers.get("message")?.(
+        msg({ id: "direct", body: "Depuis un autre onglet", authorId: "u1" }),
+      );
+    });
+    await waitFor(() => expect(screen.getByText("Depuis un autre onglet")).toBeTruthy());
+    expect(estAMoi("Depuis un autre onglet")).toBe(true);
+  });
+});
+
+// LA STRUCTURE DONT DÉPEND LA CORRECTION DE LA PUCE.
+//
+// Pico pose `ul li { list-style: square }` — spécificité (0,0,2), qui vise le LI et bat donc
+// l'héritage de `list-style: none` posé sur le UL : une puce carrée s'affichait devant chaque
+// bulle. La règle corrective est `.forum-list li`. La feuille de style n'est pas chargée en
+// test, mais sa CIBLE l'est : si le balisage cesse d'être des `li` dans une `ul.forum-list`,
+// la correction ne s'applique plus en silence, et ce test est ce qui le dit.
+describe("structure de la liste", () => {
+  it("rend chaque message comme un `li` de `ul.forum-list`", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    const li = screen.getByText("Salut").closest("li");
+    expect(li).not.toBeNull();
+    expect(li?.parentElement?.tagName).toBe("UL");
+    expect(li?.parentElement?.classList.contains("forum-list")).toBe(true);
+  });
+});
+
+describe("séparateurs de date", () => {
+  it("pose un séparateur par jour, et un seul", async () => {
+    page = {
+      messages: [
+        msg({ id: "a", body: "Hier soir", createdAt: "2026-09-04T18:00:00.000Z" }),
+        msg({ id: "b", body: "Hier plus tard", createdAt: "2026-09-04T20:00:00.000Z" }),
+        msg({ id: "c", body: "Ce matin", createdAt: "2026-09-05T09:00:00.000Z" }),
+      ],
+      meId: "u1",
+      meName: "Thomas",
+    };
+    rendre();
+    await waitFor(() => expect(screen.getByText("Ce matin")).toBeTruthy());
+    expect(document.querySelectorAll(".forum-jour")).toHaveLength(2);
+  });
+});
+
+describe("les liens dans un message", () => {
+  it("rend une adresse cliquable, sans toucher au reste du texte", async () => {
+    page = {
+      messages: [msg({ body: "Le tournoi c'est sur https://squashnet.fr/x merci" })],
+      meId: "u1",
+      meName: "Thomas",
+    };
+    rendre();
+    const lien = await screen.findByRole("link");
+    expect(lien.getAttribute("href")).toBe("https://squashnet.fr/x");
+    expect(lien.getAttribute("rel")).toContain("noopener");
+    expect(screen.getByText(/Le tournoi/)).toBeTruthy();
+    expect(screen.getByText(/merci/)).toBeTruthy();
+  });
+
+  it("ne fabrique aucun lien pour un `javascript:`", async () => {
+    page = {
+      messages: [msg({ body: "javascript:alert(1)" })],
+      meId: "u1",
+      meName: "Thomas",
+    };
+    rendre();
+    await waitFor(() => expect(screen.getByText("javascript:alert(1)")).toBeTruthy());
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+});
+
+describe("la palette d'emoji", () => {
+  it("insère À LA POSITION DU CURSEUR, pas en fin de champ", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    const champ = screen.getByLabelText("Votre message") as HTMLTextAreaElement;
+    fireEvent.change(champ, { target: { value: "Bien joue" } });
+    champ.setSelectionRange(4, 4); // juste après « Bien »
+    fireEvent.click(screen.getByRole("button", { name: "Emoji" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Insérer 🔥" }));
+    await waitFor(() => expect(champ.value).toBe("Bien🔥 joue"));
+  });
+});
+
+describe("les réactions", () => {
+  it("affiche le décompte et met en avant la sienne", async () => {
+    page = {
+      messages: [msg()],
+      meId: "u1",
+      meName: "Thomas",
+      reactions: {
+        m1: [
+          { emoji: "👍", users: [{ id: "u1", name: "Thomas" }, { id: "u2", name: "Gégé" }] },
+          { emoji: "💪", users: [{ id: "u2", name: "Gégé" }] },
+        ],
+      },
+    };
+    rendre();
+    const pouce = await screen.findByRole("button", { name: /👍 2/ });
+    expect(pouce.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /💪 1/ }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+  });
+
+  // Le delta diffusé doit pouvoir être rejoué : il arrive après l'affichage optimiste.
+  it("applique un delta reçu du courtier sans compter double", async () => {
+    page = {
+      messages: [msg()],
+      meId: "u1",
+      meName: "Thomas",
+      reactions: { m1: [{ emoji: "👍", users: [{ id: "u2", name: "Gégé" }] }] },
+    };
+    rendre();
+    await screen.findByRole("button", { name: /👍 1/ });
+    const delta = { messageId: "m1", emoji: "👍", userId: "u3", userName: "Léa", on: true };
+    act(() => canal.handlers.get("reaction")?.(delta));
+    await waitFor(() => expect(screen.getByRole("button", { name: /👍 2/ })).toBeTruthy());
+    act(() => canal.handlers.get("reaction")?.(delta)); // rejoué : rien ne doit bouger
+    await waitFor(() => expect(screen.getByRole("button", { name: /👍 2/ })).toBeTruthy());
+  });
+
+  it("retire la pastille quand la dernière réaction s'en va", async () => {
+    page = {
+      messages: [msg()],
+      meId: "u1",
+      meName: "Thomas",
+      reactions: { m1: [{ emoji: "🎾", users: [{ id: "u2", name: "Gégé" }] }] },
+    };
+    rendre();
+    await screen.findByRole("button", { name: /🎾 1/ });
+    act(() =>
+      canal.handlers
+        .get("reaction")
+        ?.({ messageId: "m1", emoji: "🎾", userId: "u2", userName: "Gégé", on: false }),
+    );
+    await waitFor(() => expect(screen.queryByRole("button", { name: /🎾 1/ })).toBeNull());
+  });
+});
+
+describe("le sondage", () => {
+  const sondage = {
+    id: "p1",
+    messageId: "m1",
+    closedAt: null,
+    options: [
+      {
+        id: "o1",
+        label: "Jeudi",
+        voters: [{ id: "u1", name: "Thomas" }, { id: "u2", name: "Gégé" }],
+      },
+      { id: "o2", label: "Vendredi", voters: [{ id: "u1", name: "Thomas" }] },
+      { id: "o3", label: "Samedi", voters: [] },
+    ],
+  };
+
+  // LE PIÈGE DU CHOIX MULTIPLE : le total des voix dépasse le nombre de votants. L'écran doit
+  // dire les deux, sans quoi « 3 voix » pour 2 personnes passe pour une erreur de comptage.
+  it("distingue les votants des voix", async () => {
+    page = { messages: [msg()], meId: "u1", meName: "Thomas", polls: { m1: sondage } };
+    rendre();
+    await waitFor(() => expect(screen.getByText(/2 votants · 3 voix/)).toBeTruthy());
+  });
+
+  it("montre ce que l'on a coché", async () => {
+    page = { messages: [msg()], meId: "u1", meName: "Thomas", polls: { m1: sondage } };
+    rendre();
+    const jeudi = await screen.findByRole("button", { name: /Jeudi/ });
+    expect(jeudi.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /Samedi/ }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+  });
+
+  it("nomme les votants d'une option, parce que le vote n'est pas secret", async () => {
+    page = { messages: [msg()], meId: "u1", meName: "Thomas", polls: { m1: sondage } };
+    rendre();
+    const jeudi = await screen.findByRole("button", { name: /Jeudi/ });
+    expect(jeudi.getAttribute("title")).toBe("Thomas, Gégé");
+  });
+
+  it("envoie l'ENSEMBLE des cases cochées, pas la seule qui vient de changer", async () => {
+    page = { messages: [msg()], meId: "u1", meName: "Thomas", polls: { m1: sondage } };
+    rendre();
+    fireEvent.click(await screen.findByRole("button", { name: /Samedi/ }));
+    await waitFor(() =>
+      expect(appels.some((a) => a === "POST /api/forum/poll/p1/vote")).toBe(true),
+    );
+  });
+
+  it("interdit le vote sur un sondage clos", async () => {
+    page = {
+      messages: [msg()],
+      meId: "u1",
+      meName: "Thomas",
+      polls: { m1: { ...sondage, closedAt: "2026-09-05T20:00:00.000Z" } },
+    };
+    rendre();
+    const jeudi = await screen.findByRole("button", { name: /Jeudi/ });
+    expect((jeudi as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/clos/)).toBeTruthy();
+  });
+});
+
+describe("la citation", () => {
+  it("montre l'auteur et l'extrait de ce à quoi on répond", async () => {
+    page = {
+      messages: [
+        msg({
+          id: "b",
+          body: "Je prends une place",
+          replyToId: "a",
+          replyToAuthor: "Gégé",
+          replyToExcerpt: "Covoit jeudi : 4 places",
+        }),
+      ],
+      meId: "u1",
+      meName: "Thomas",
+    };
+    rendre();
+    await waitFor(() => expect(screen.getByText("Covoit jeudi : 4 places")).toBeTruthy());
+    // L'auteur cité est lu DANS la citation : « Gégé » apparaît aussi comme auteur du
+    // message dans d'autres cas, et une recherche globale confondrait les deux.
+    const citation = document.querySelector(".forum-citation");
+    expect(citation?.querySelector("strong")?.textContent).toBe("Gégé");
+  });
+
+  // La notice promet qu'effacer son message l'efface partout : l'extrait blanchi en base doit
+  // se lire « Message supprimé », jamais rester affiché.
+  it("dit « Message supprimé » quand l'extrait a été blanchi", async () => {
+    page = {
+      messages: [msg({ id: "b", body: "Je prends une place", replyToId: "a" })],
+      meId: "u1",
+      meName: "Thomas",
+    };
+    rendre();
+    await waitFor(() => expect(screen.getByText("Message supprimé")).toBeTruthy());
+  });
+
+  it("efface l'extrait à l'écran quand le courtier annonce la suppression de la cible", async () => {
+    page = {
+      messages: [
+        msg({ id: "a", body: "Covoit jeudi" }),
+        msg({
+          id: "b",
+          body: "Je prends une place",
+          replyToId: "a",
+          replyToAuthor: "Gégé",
+          replyToExcerpt: "Covoit jeudi",
+        }),
+      ],
+      meId: "u1",
+      meName: "Thomas",
+    };
+    rendre();
+    await waitFor(() => expect(screen.getAllByText("Covoit jeudi")).toHaveLength(2));
+    act(() => canal.handlers.get("deleted")?.({ id: "a" }));
+    await waitFor(() => expect(screen.getByText("Message supprimé")).toBeTruthy());
+    expect(screen.queryByText("Covoit jeudi")).toBeNull();
+  });
+
+  it("joint la citation à l'envoi après un clic sur « Répondre »", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /Répondre à Gégé/ }));
+    await waitFor(() => expect(screen.getByText(/Réponse à/)).toBeTruthy());
+    const champ = screen.getByLabelText("Votre message");
+    fireEvent.change(champ, { target: { value: "Je viens" } });
+    fireEvent.submit(champ.closest("form") as HTMLFormElement);
+    await waitFor(() => expect(screen.getByText("Coucou")).toBeTruthy());
+    // La barre de citation disparaît une fois le message parti.
+    expect(screen.queryByText(/Réponse à/)).toBeNull();
   });
 });

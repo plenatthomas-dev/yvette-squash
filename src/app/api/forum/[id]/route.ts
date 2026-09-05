@@ -36,7 +36,23 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return NextResponse.json({ error: "Message introuvable" }, { status: 404 });
   }
 
-  await prisma.forumMessage.delete({ where: { id } });
+  // SUPPRIMER, C'EST AUSSI EFFACER LES CITATIONS DU MESSAGE.
+  //
+  // Les réponses gardent un instantané de ce à quoi elles répondent (`replyToExcerpt`), pour
+  // s'afficher sans jointure et survivre à la purge. Sans ce blanchiment, effacer son message
+  // en laisserait le texte lisible, signé de son nom, dans chaque réponse qu'il a reçue — la
+  // note de confidentialité promet exactement le contraire.
+  //
+  // Les DEUX écritures dans une transaction : entre le `delete` et l'`updateMany`, un lecteur
+  // ne doit jamais voir un message disparu dont la citation subsiste. `SET NULL` sur la clé
+  // étrangère fait le reste — les réponses, elles, ne bougent pas.
+  await prisma.$transaction([
+    prisma.forumMessage.updateMany({
+      where: { replyToId: id },
+      data: { replyToAuthor: null, replyToExcerpt: null },
+    }),
+    prisma.forumMessage.delete({ where: { id } }),
+  ]);
 
   // Le fil se referme chez tout le monde, sans attendre un rafraîchissement : un message
   // supprimé qui reste affiché ailleurs est précisément ce qu'on cherche à éviter en donnant
