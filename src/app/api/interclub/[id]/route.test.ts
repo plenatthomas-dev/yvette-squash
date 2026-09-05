@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { NextRequest } from "next/server";
+import { Prisma } from "@prisma/client";
 
 // Les deux routes du DÉTAIL d'une rencontre. Elles n'étaient éprouvées nulle part, alors que
 // l'une porte le SEUL 403 de toute la fonctionnalité (supprimer une rencontre, et en cascade
@@ -22,6 +23,28 @@ const h = vi.hoisted(() => ({
   availabilityCleared: null as null | Record<string, unknown>,
   /** Arguments de `notifyFixtureMoved`, ou null : l'équipe a-t-elle été prévenue ? */
   moved: null as null | unknown[],
+  /** COMBIEN de fois. Le rejeu d'une transaction ne doit pas notifier deux fois. */
+  movedCount: 0,
+
+  // ── DE QUOI ÉPROUVER LA COURSE ENTRE LA LECTURE ET L'ÉCRITURE ────────────────────────────
+  /**
+   * L'état que rend le `findUnique` DE LA TRANSACTION, quand il diffère de celui qu'a vu la
+   * garde des droits. Trois valeurs, et la distinction compte :
+   *
+   *   `undefined` → les deux lisent la même chose (le cas ordinaire) ;
+   *   un objet    → la rencontre a CHANGÉ entre les deux lectures ;
+   *   `null`      → elle a été SUPPRIMÉE entre les deux.
+   *
+   * C'est le seul moyen de rejouer ce qui arrive vraiment : un point saisi au bord du terrain,
+   * ou un second admin sur la même rencontre, pendant que la requête est en vol.
+   */
+  fixtureInTx: undefined as undefined | null | Record<string, unknown>,
+  /** Les options reçues par `$transaction` — c'est là qu'on lit le niveau d'isolation. */
+  txOptions: null as null | Record<string, unknown>,
+  /** Nombre de P2034 à lever avant d'aboutir, pour éprouver le rejeu. */
+  txEchecs: 0,
+  /** Nombre de tentatives réellement exécutées. */
+  txTentatives: 0,
 }));
 
 vi.mock("@/lib/features-server", () => ({
@@ -40,6 +63,7 @@ vi.mock("@/lib/interclub-gate", () => ({ interclubChanged: vi.fn() }));
 vi.mock("@/lib/interclub-notify", () => ({
   notifyFixtureMoved: vi.fn(async (...args: unknown[]) => {
     h.moved = args;
+    h.movedCount += 1;
   }),
 }));
 vi.mock("@/lib/db", () => ({
@@ -70,17 +94,40 @@ vi.mock("@/lib/db", () => ({
         return { count: 2 };
       }),
     },
-    // Le PATCH écrit dans une transaction : effacer les réponses et déplacer la rencontre
-    // vont ensemble. Le mock exécute le corps sur les mêmes doubles.
-    $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
-      fn({
+    // PATCH et DELETE écrivent dans une transaction SERIALIZABLE avec réessai : la garde
+    // « déjà commencée » et le calcul du déplacement s'évaluent sur l'état lu DEDANS, et non sur
+    // celui qu'a vu la garde des droits. Le double doit donc savoir trois choses de plus que
+    // « exécuter le corps » : mentir sur l'état (`fixtureInTx`), échouer en P2034 (`txEchecs`),
+    // et dire sous quel niveau d'isolation il a été appelé (`txOptions`).
+    $transaction: async (
+      fn: (tx: unknown) => Promise<unknown>,
+      options?: Record<string, unknown>,
+    ) => {
+      h.txOptions = options ?? null;
+      h.txTentatives += 1;
+      if (h.txEchecs > 0) {
+        h.txEchecs -= 1;
+        throw new Prisma.PrismaClientKnownRequestError("could not serialize access", {
+          code: "P2034",
+          clientVersion: "6.0.0",
+        });
+      }
+      return fn({
         interclub: {
           update: vi.fn(async (args: { data: Record<string, unknown> }) => {
             h.patched = args.data;
             h.fixture = { ...(h.fixture as Record<string, unknown>), ...args.data };
             return h.fixture;
           }),
-          findUnique: vi.fn(async () => h.fixture),
+          // La lecture DE LA TRANSACTION. `fixtureInTx` l'emporte dès qu'il est posé — y compris
+          // à `null`, qui dit « supprimée entre-temps » et non « laisse tomber ».
+          findUnique: vi.fn(async () =>
+            h.fixtureInTx !== undefined ? h.fixtureInTx : h.fixture,
+          ),
+          delete: vi.fn(async (args: { where: { id: string } }) => {
+            h.deleted = args.where.id;
+            return {};
+          }),
         },
         interclubAvailability: {
           deleteMany: vi.fn(async (args: { where: Record<string, unknown> }) => {
@@ -88,7 +135,8 @@ vi.mock("@/lib/db", () => ({
             return { count: 2 };
           }),
         },
-      }),
+      });
+    },
     user: {
       findMany: vi.fn(async (args: { where: Record<string, unknown> }) => {
         h.rosterWhere = args.where;
@@ -160,6 +208,11 @@ beforeEach(() => {
   h.patched = null;
   h.availabilityCleared = null;
   h.moved = null;
+  h.movedCount = 0;
+  h.fixtureInTx = undefined;
+  h.txOptions = null;
+  h.txEchecs = 0;
+  h.txTentatives = 0;
 });
 
 describe("GET /api/interclub/{id} — gardes", () => {
@@ -487,5 +540,124 @@ describe("PATCH /api/interclub/{id}", () => {
     await PATCH(patchReq({ venue: "Club" }), ctx);
     expect(h.patched).not.toHaveProperty("division");
     expect(h.patched).not.toHaveProperty("venueAddress");
+  });
+});
+
+describe("PATCH et DELETE — l'état se relit DANS la transaction", () => {
+  // CE QUE CES CAS PROTÈGENT. Les deux verbes lisaient la rencontre une fois, décidaient sur
+  // cette lecture, puis écrivaient dans une transaction ordinaire — Read Committed, sans
+  // réessai. Or entre les deux, le premier point d'une soirée se saisit au bord du terrain, et
+  // un second admin peut déplacer la même rencontre. `fixtureInTx` rejoue exactement cet
+  // instant : la garde voit un état, la transaction en voit un autre.
+
+  /** Une rencontre ENTAMÉE : un simple avec un score posé suffit à `derivedStatus`. */
+  const entamee = (over: Record<string, unknown> = {}) =>
+    fixture({ matches: [match({ status: "live", gamesHome: 1 })], ...over });
+
+  it("PATCH — 409 si la rencontre a commencé entre la garde et la transaction", async () => {
+    // Sans le correctif : 200, la date change sur une soirée en cours et les disponibilités
+    // sont effacées — exactement ce que la garde existe pour empêcher.
+    h.fixture = fixture(); // la garde voit une rencontre à venir…
+    h.fixtureInTx = entamee(); // …elle a commencé depuis
+    const res = await PATCH(patchReq({ date: "2026-10-16" }), ctx);
+    expect(res.status).toBe(409);
+    expect(h.patched).toBeNull();
+    expect(h.availabilityCleared).toBeNull();
+    expect(h.moved).toBeNull();
+  });
+
+  it("PATCH — pas de déplacement FANTÔME quand quelqu'un vient de déplacer la rencontre", async () => {
+    // A déplace au 16, l'équipe recommence à répondre ; le PATCH de B, encore parti sur
+    // l'ancienne date, effaçait ces réponses fraîches et annonçait « déplacée depuis le 3 » —
+    // un déplacement que personne n'a vécu.
+    h.fixture = fixture({ date: "2026-09-03" });
+    h.fixtureInTx = fixture({ date: "2026-10-16" });
+    const res = await PATCH(patchReq({ date: "2026-10-16", venue: "Massy" }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.availabilityCleared).toBeNull();
+    expect(h.moved).toBeNull();
+    // La correction demandée passe quand même : seul le DÉPLACEMENT est annulé, pas l'écriture.
+    expect(h.patched).toMatchObject({ venue: "Massy" });
+    expect(h.patched).not.toHaveProperty("availabilityOpenedAt");
+  });
+
+  it("PATCH — la clé d'ancrage se reconstruit sur la clé lue DEDANS", async () => {
+    // La garde porte encore l'ancien événement, l'import est passé entre-temps. C'est la clé de
+    // la transaction qui fait foi, sans quoi on rattacherait la rencontre à un événement mort.
+    h.fixture = fixture({ round: "J1", snMatchKey: "vieux:J1" });
+    h.fixtureInTx = fixture({ round: "J1", snMatchKey: "ev2:J1" });
+    await PATCH(patchReq({ round: "J01" }), ctx);
+    expect(h.patched).toMatchObject({ round: "J01", snMatchKey: "ev2:J01" });
+  });
+
+  it("la transaction est bien SERIALIZABLE, sur les deux verbes", async () => {
+    // Le niveau d'isolation EST le correctif : en Read Committed, relire dans la transaction ne
+    // garantit rien de plus, la ligne pouvant changer entre cette lecture et l'update.
+    await PATCH(patchReq({ venue: "Club" }), ctx);
+    expect(h.txOptions).toMatchObject({ isolationLevel: "Serializable" });
+    h.txOptions = null;
+    await DELETE(req(), ctx);
+    expect(h.txOptions).toMatchObject({ isolationLevel: "Serializable" });
+  });
+
+  it("PATCH — le rejeu ne cumule rien et ne notifie qu'une fois", async () => {
+    // Le corps est REJOUÉ TEL QUEL sur P2034. S'il enrichissait l'objet du corps au lieu d'une
+    // copie, la seconde tentative repartirait d'un objet déjà enrichi par la première — enrichi
+    // sur un état qu'elle n'a pas lu. Et l'annonce doit rester unique : c'est pour cela qu'elle
+    // est la valeur de RETOUR de la transaction, et non une variable remplie au passage.
+    h.txEchecs = 1;
+    const res = await PATCH(patchReq({ date: "2026-10-16" }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.txTentatives).toBe(2);
+    expect(h.movedCount).toBe(1);
+    expect(h.patched).toMatchObject({
+      date: "2026-10-16",
+      availabilityOpenedAt: null,
+      availabilityRemindedAt: null,
+    });
+  });
+
+  it("PATCH — 409 `write_conflict` quand la contention ne retombe pas", async () => {
+    // Quatre tentatives, puis on rend la main. Le `code` est ce sur quoi un client branche : la
+    // route rend deux 409 différents, et « réessaie » n'appelle pas la même réaction que
+    // « rencontre déjà commencée ».
+    h.txEchecs = 4;
+    const res = await PATCH(patchReq({ venue: "Club" }), ctx);
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "write_conflict" });
+    expect(h.patched).toBeNull();
+  });
+
+  it("PATCH — 404 si la rencontre disparaît entre la garde et la transaction", async () => {
+    h.fixtureInTx = null;
+    expect((await PATCH(patchReq({ venue: "Club" }), ctx)).status).toBe(404);
+  });
+
+  it("DELETE — 409 pour le créateur si la rencontre a commencé entre-temps", async () => {
+    // La course la plus chère du dépôt : la suppression est définitive et emporte le palmarès
+    // de quatre personnes. Sans le correctif, elle passait.
+    h.fixture = fixture();
+    h.fixtureInTx = entamee();
+    const res = await DELETE(req(), ctx);
+    expect(res.status).toBe(409);
+    expect(h.deleted).toBeNull();
+  });
+
+  it("DELETE — l'admin passe quand même, sur le même état", async () => {
+    // « Une soirée créée par erreur et marquée par erreur doit rester effaçable » : le correctif
+    // resserre la garde du créateur, il ne retire pas la main à l'admin.
+    h.session = { userId: "autre", email: "chef@example.com" };
+    h.fixture = fixture();
+    h.fixtureInTx = entamee();
+    expect((await DELETE(req(), ctx)).status).toBe(200);
+    expect(h.deleted).toBe("f1");
+  });
+
+  it("DELETE — se tait si quelqu'un l'a supprimée le premier", async () => {
+    // Le résultat voulu est atteint ; un 404 ferait croire à un échec, et l'écran proposerait de
+    // recommencer une suppression qui a bien eu lieu.
+    h.fixtureInTx = null;
+    expect((await DELETE(req(), ctx)).status).toBe(200);
+    expect(h.deleted).toBeNull();
   });
 });

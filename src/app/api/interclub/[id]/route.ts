@@ -13,7 +13,9 @@ import {
   MAX_VENUE_LEN,
   MAX_VENUE_ADDRESS_LEN,
   MAX_ROUND_LEN,
+  type FullInterclub,
 } from "@/lib/interclub-db";
+import { HttpError, httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
 import { teamRoster } from "@/lib/interclub-roster";
 import { interclubChanged } from "@/lib/interclub-gate";
 import { isRealDateISO } from "@/lib/time";
@@ -70,41 +72,54 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
  * composition ET les disponibilités déjà recueillies — c'est-à-dire tout le travail.
  *
  * Droits : créateur ou admin, exactement comme `DELETE`. Pas de règle nouvelle à retenir.
+ *
+ * ⚠️ TOUT CE QUI DÉPEND DE L'ÉTAT DE LA RENCONTRE EST ATOMIQUE (Serializable + retry P2034),
+ * comme les routes sœurs `PATCH …/matches/{mid}` et `POST …/live`. Cette route lisait la
+ * rencontre une fois, puis décidait sur cette lecture et écrivait dans une transaction
+ * ORDINAIRE — donc en Read Committed, sans réessai. Deux courses en sortaient :
+ *
+ *   - la garde « déjà commencée » sautait. Un point saisi au bord du terrain pendant la requête,
+ *     et la date changeait sur une soirée en cours : les disponibilités effacées, l'appel
+ *     relancé. C'est exactement ce que la garde existe pour empêcher ;
+ *   - le déplacement devenait FANTÔME. A déplace au 16, l'équipe recommence à répondre ; le
+ *     `PATCH` de B, encore parti sur l'ancienne date, effaçait ces réponses fraîches et
+ *     annonçait « déplacée depuis le 3 » — un déplacement que personne n'a vécu.
+ *
+ * Le `GET` juste au-dessus documente la même classe de défaut et s'en protège autrement (une
+ * écriture conditionnelle) : là-bas rien n'est en jeu qu'une colonne recalculable, ici ce sont
+ * les réponses de l'équipe.
  */
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const access = await requireInterclubMember(req);
   if (!access.ok) return access.response;
   const { session } = access;
   const { id } = await params;
+  const admin = isAdminEmail(session.email);
 
-  const f = await prisma.interclub.findUnique({
-    where: { id },
-    include: { team: true, matches: { select: { gamesHome: true, status: true } } },
-  });
-  if (!f) return NextResponse.json({ error: "Rencontre introuvable" }, { status: 404 });
-  if (f.createdById !== session.userId && !isAdminEmail(session.email)) {
+  // LA GARDE DES DROITS RESTE DEHORS, et elle seule.
+  //
+  // Un droit ne court aucun risque de concurrence : personne ne cesse d'être créateur ni admin
+  // pendant sa propre requête. La laisser ici préserve l'ordre observable — 404, puis 403, puis
+  // les 400 du corps — auquel ce fichier tient (cf. « le 403 passe AVANT le 409 » côté DELETE),
+  // et évite d'ouvrir une transaction Serializable pour quelqu'un qui n'a pas le droit d'écrire.
+  const droit = await prisma.interclub.findUnique({ where: { id }, select: { createdById: true } });
+  if (!droit) return NextResponse.json({ error: "Rencontre introuvable" }, { status: 404 });
+  if (droit.createdById !== session.userId && !admin) {
     return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
   }
 
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+
+  // LES CHAMPS ISSUS DU CORPS SEUL, validés hors transaction parce que cette validation est
+  // PURE : elle ne lit pas la rencontre, et refuser un corps mal formé ne mérite pas d'ouvrir
+  // une connexion Neon. Ce qui dépend de l'état lu — le déplacement, la clé d'ancrage — s'ajoute
+  // dedans, sur une copie.
   const data: Record<string, unknown> = {};
 
-  // --- La date, et elle seule, a des conséquences ------------------------------------------
-  let movedFrom: string | null = null;
   if (body.date !== undefined) {
     if (typeof body.date !== "string" || !isRealDateISO(body.date)) {
       return NextResponse.json({ error: "Date invalide" }, { status: 400 });
     }
-    // Une rencontre COMMENCÉE ne se déplace pas : le déplacement efface les disponibilités et
-    // relance l'appel, ce qui n'a aucun sens sur une soirée déjà en cours ou jouée. Le reste
-    // (lieu mal orthographié, adversaire à corriger) demeure modifiable après coup.
-    if (body.date !== f.date && derivedStatus(f.matchCount, f.matches) !== "scheduled") {
-      return NextResponse.json(
-        { error: "Rencontre déjà commencée : sa date ne peut plus changer." },
-        { status: 409 },
-      );
-    }
-    if (body.date !== f.date) movedFrom = f.date;
     data.date = body.date;
   }
 
@@ -147,22 +162,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data[nom] = v.value;
   }
 
-  // LA CLÉ D'ANCRAGE SUIT LA JOURNÉE, sans quoi corriger celle-ci ne corrige rien.
-  //
-  // `snMatchKey` vaut `événement:journée`, et c'est sur elle SEULE que l'import rapproche. La
-  // journée était modifiable, la clé non : la ligue renumérotait J1 en J01 — les deux formes
-  // existent dans les fixtures du dépôt —, l'admin corrigeait `round` à la main, et l'import
-  // suivant créait quand même un DOUBLON. L'ancienne rencontre, avec sa composition et ses
-  // réponses, n'était plus jamais rapprochée, et le cron annonçait chaque lundi
-  // « J1 retirée du calendrier ».
-  //
-  // Seul le suffixe change : l'événement reste celui sur lequel la rencontre a été importée.
-  // Une rencontre SAISIE À LA MAIN n'a pas de clé et n'en gagne pas — l'automatique et l'humain
-  // ne partagent aucune colonne.
-  if (typeof data.round === "string" && f.snMatchKey) {
-    const eventId = f.snMatchKey.slice(0, f.snMatchKey.indexOf(":"));
-    if (eventId) data.snMatchKey = matchKey(eventId, data.round);
-  }
   if (typeof body.home === "boolean") data.home = body.home;
   // LE RATTRAPAGE DE LA DATE PRÉVISIONNELLE. La détection automatique a deux angles morts
   // (cf. `ownFixtures`, lib/squashnet/calendar.ts) : deux vraies journées le même soir passent
@@ -177,36 +176,115 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "Rien à modifier." }, { status: 400 });
   }
 
-  // --- DÉPLACER UNE RENCONTRE INVALIDE LES RÉPONSES ------------------------------------------
-  // « Je suis dispo le 9 » ne veut pas dire « je suis dispo le 16 ». Garder les réponses ferait
-  // composer l'équipe sur des « oui » qui ne veulent plus rien dire — et ce sont précisément
-  // les soirs de report qu'on se retrouve à trois. On efface, et on relance l'appel en
-  // remettant les marqueurs à zéro pour que le cron repose la question.
-  if (movedFrom) {
-    data.availabilityOpenedAt = null;
-    data.availabilityRemindedAt = null;
-  }
+  /**
+   * Ce qu'il faudra ANNONCER une fois le commit acquis.
+   *
+   * C'est la valeur de RETOUR de la transaction, et non une variable remplie au passage — même
+   * raison que `PATCH …/matches/{mid}` : sur rejeu après conflit, le corps repart de zéro et
+   * produit sa propre valeur, là où une variable partagée devrait être remise à zéro à la main.
+   * Un oubli notifierait deux fois.
+   */
+  type Annonce = {
+    ctx: { fixtureId: string; teamId: string; teamName: string; opponent: string };
+    from: string;
+    to: { date: string; time: string | null };
+  };
 
-  const updated = await prisma.$transaction(async (tx) => {
-    if (movedFrom) await tx.interclubAvailability.deleteMany({ where: { interclubId: id } });
-    await tx.interclub.update({ where: { id }, data });
-    return tx.interclub.findUnique({ where: { id }, include: interclubInclude });
-  });
+  let resultat: { updated: FullInterclub | null; annonce: Annonce | null };
+  try {
+    resultat = await serializableTransaction(async (tx) => {
+      const f = await tx.interclub.findUnique({
+        where: { id },
+        include: { team: true, matches: { select: { gamesHome: true, status: true } } },
+      });
+      // Disparue entre la garde et ici : quelqu'un vient de la supprimer. Le 404 est le même
+      // qu'au-dessus — l'appelant n'a pas à savoir laquelle des deux lectures a échoué.
+      if (!f) throw new HttpError(404, "Rencontre introuvable");
+
+      // UNE COPIE FRAÎCHE À CHAQUE TENTATIVE. `data` vient du corps et survit au rejeu : y poser
+      // `availabilityOpenedAt` ou `snMatchKey` les laisserait derrière soi, et la tentative
+      // suivante repartirait d'un objet déjà enrichi par la précédente — enrichi sur un état
+      // qu'elle n'a pas lu.
+      const ecriture: Record<string, unknown> = { ...data };
+
+      let movedFrom: string | null = null;
+      if (typeof ecriture.date === "string" && ecriture.date !== f.date) {
+        // Une rencontre COMMENCÉE ne se déplace pas : le déplacement efface les disponibilités
+        // et relance l'appel, ce qui n'a aucun sens sur une soirée déjà en cours ou jouée. Le
+        // reste (lieu mal orthographié, adversaire à corriger) demeure modifiable après coup.
+        //
+        // La lecture est celle de la TRANSACTION : c'est là tout l'intérêt. Sur la lecture de
+        // garde, un point saisi entre les deux faisait passer la rencontre pour à venir.
+        if (derivedStatus(f.matchCount, f.matches) !== "scheduled") {
+          throw new HttpError(409, "Rencontre déjà commencée : sa date ne peut plus changer.");
+        }
+        movedFrom = f.date;
+
+        // --- DÉPLACER UNE RENCONTRE INVALIDE LES RÉPONSES --------------------------------------
+        // « Je suis dispo le 9 » ne veut pas dire « je suis dispo le 16 ». Garder les réponses
+        // ferait composer l'équipe sur des « oui » qui ne veulent plus rien dire — et ce sont
+        // précisément les soirs de report qu'on se retrouve à trois. On efface, et on relance
+        // l'appel en remettant les marqueurs à zéro pour que le cron repose la question.
+        ecriture.availabilityOpenedAt = null;
+        ecriture.availabilityRemindedAt = null;
+      }
+
+      // LA CLÉ D'ANCRAGE SUIT LA JOURNÉE, sans quoi corriger celle-ci ne corrige rien.
+      //
+      // `snMatchKey` vaut `événement:journée`, et c'est sur elle SEULE que l'import rapproche. La
+      // journée était modifiable, la clé non : la ligue renumérotait J1 en J01 — les deux formes
+      // existent dans les fixtures du dépôt —, l'admin corrigeait `round` à la main, et l'import
+      // suivant créait quand même un DOUBLON. L'ancienne rencontre, avec sa composition et ses
+      // réponses, n'était plus jamais rapprochée, et le cron annonçait chaque lundi
+      // « J1 retirée du calendrier ».
+      //
+      // Seul le suffixe change : l'événement reste celui sur lequel la rencontre a été importée,
+      // lu ici et non sur la garde. Une rencontre SAISIE À LA MAIN n'a pas de clé et n'en gagne
+      // pas — l'automatique et l'humain ne partagent aucune colonne.
+      if (typeof ecriture.round === "string" && f.snMatchKey) {
+        const eventId = f.snMatchKey.slice(0, f.snMatchKey.indexOf(":"));
+        if (eventId) ecriture.snMatchKey = matchKey(eventId, ecriture.round);
+      }
+
+      if (movedFrom) await tx.interclubAvailability.deleteMany({ where: { interclubId: id } });
+      await tx.interclub.update({ where: { id }, data: ecriture });
+      const updated = await tx.interclub.findUnique({ where: { id }, include: interclubInclude });
+
+      return {
+        updated,
+        annonce:
+          movedFrom && updated
+            ? {
+                ctx: {
+                  fixtureId: id,
+                  teamId: f.teamId,
+                  teamName: f.team.name,
+                  opponent: updated.opponent,
+                },
+                from: movedFrom,
+                to: { date: updated.date, time: updated.time },
+              }
+            : null,
+      };
+    }, "Modification concurrente, réessaie");
+  } catch (e) {
+    const res = httpErrorResponse(e);
+    if (res) return res;
+    throw e;
+  }
 
   interclubChanged();
 
-  if (movedFrom && updated) {
-    // Après l'écriture, jamais avant : annoncer un déplacement qui n'a pas eu lieu serait pire
-    // que de ne rien annoncer. Best-effort — `notifyFixtureMoved` ne jette pas.
-    await notifyFixtureMoved(
-      { fixtureId: id, teamId: f.teamId, teamName: f.team.name, opponent: updated.opponent },
-      movedFrom,
-      { date: updated.date, time: updated.time },
-    );
+  if (resultat.annonce) {
+    // Après le commit, jamais avant : annoncer un déplacement qui n'a pas eu lieu serait pire
+    // que de ne rien annoncer. Et HORS de la boucle de réessai — un envoi qui échoue ne doit ni
+    // annuler l'écriture, qui est valide, ni déclencher un rejeu, qui notifierait deux fois.
+    // Best-effort par ailleurs : `notifyFixtureMoved` ne jette pas.
+    await notifyFixtureMoved(resultat.annonce.ctx, resultat.annonce.from, resultat.annonce.to);
   }
 
   return NextResponse.json(
-    updated ? serializeInterclub(updated, session.userId, isAdminEmail(session.email)) : { ok: true },
+    resultat.updated ? serializeInterclub(resultat.updated, session.userId, admin) : { ok: true },
   );
 }
 
@@ -220,42 +298,56 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 // palmarès de quatre personnes — et rien ne le dit à l'écran, le total se contentant de
 // diminuer.
 //
-// Le `PATCH` refuse depuis toujours de déplacer une rencontre entamée (409). Le chemin de la
-// SUPPRESSION, plus destructeur, était pourtant resté le plus permissif des deux. L'admin
-// garde la main : une soirée créée par erreur et marquée par erreur doit rester effaçable.
+// Le `PATCH` refuse de déplacer une rencontre entamée (409). Le chemin de la SUPPRESSION, plus
+// destructeur, était pourtant resté le plus permissif des deux. L'admin garde la main : une
+// soirée créée par erreur et marquée par erreur doit rester effaçable.
+//
+// ⚠️ LA GARDE EST ÉVALUÉE DANS LA TRANSACTION, pour la même raison que celle du `PATCH` : elle
+// se lisait sur un état chargé avant l'écriture, et le premier point d'une soirée est saisi au
+// bord du terrain pendant que quelqu'un range son calendrier. La course était étroite mais son
+// prix est le plus élevé du dépôt — c'est la seule suppression irréversible de la fonction.
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const access = await requireInterclubMember(req);
   if (!access.ok) return access.response;
   const { session } = access;
   const { id } = await params;
-  const f = await prisma.interclub.findUnique({
-    where: { id },
-    select: {
-      createdById: true,
-      matchCount: true,
-      matches: { select: { gamesHome: true, status: true } },
-    },
-  });
-  if (!f) {
+  const admin = isAdminEmail(session.email);
+
+  // La garde des DROITS dehors, comme au `PATCH` : elle ne court pas de risque de concurrence,
+  // et la laisser ici garde l'ordre 404 → 403 → 409 que le test « le 403 passe AVANT le 409 »
+  // fixe depuis toujours.
+  const droit = await prisma.interclub.findUnique({ where: { id }, select: { createdById: true } });
+  if (!droit) {
     return NextResponse.json({ error: "Rencontre introuvable" }, { status: 404 });
   }
-
-  const admin = isAdminEmail(session.email);
-  if (f.createdById !== session.userId && !admin) {
+  if (droit.createdById !== session.userId && !admin) {
     return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
   }
-  if (!admin && derivedStatus(f.matchCount, f.matches) !== "scheduled") {
-    return NextResponse.json(
-      {
-        error:
+
+  try {
+    await serializableTransaction(async (tx) => {
+      const f = await tx.interclub.findUnique({
+        where: { id },
+        select: { matchCount: true, matches: { select: { gamesHome: true, status: true } } },
+      });
+      // Déjà supprimée par quelqu'un d'autre : le résultat voulu est atteint, et un 404 ferait
+      // croire à un échec. On se tait, comme le ferait un `deleteMany` qui ne trouve rien.
+      if (!f) return;
+      if (!admin && derivedStatus(f.matchCount, f.matches) !== "scheduled") {
+        throw new HttpError(
+          409,
           "Rencontre déjà commencée : ses résultats comptent dans les statistiques. " +
-          "Demande à un admin de la supprimer.",
-      },
-      { status: 409 },
-    );
+            "Demande à un admin de la supprimer.",
+        );
+      }
+      await tx.interclub.delete({ where: { id } });
+    }, "Suppression concurrente, réessaie");
+  } catch (e) {
+    const res = httpErrorResponse(e);
+    if (res) return res;
+    throw e;
   }
 
-  await prisma.interclub.delete({ where: { id } });
   interclubChanged();
   return NextResponse.json({ ok: true });
 }
