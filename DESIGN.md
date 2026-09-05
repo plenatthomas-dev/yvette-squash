@@ -533,6 +533,40 @@ Contour, aplat vif, aplat sourd : trois formes, pas trois nuances d'une même fo
 - **State :** désactivée quand on est déjà sur le jour courant — l'état désactivé est visible,
   la pastille ne disparaît pas.
 
+### Groupes d'options (admin)
+
+La page `/admin` empile une quinzaine de réglages qui n'ont pas la même portée : fermer l'appli
+au club et corriger l'orthographe d'un roster s'y présentaient dans le même encadré. Les cartes
+se rangent en **trois groupes**, et c'est l'en-tête du groupe — jamais la carte — qui porte un
+filet gauche de 4px.
+
+- **Critique** (`--adm-critique`) : le levier RETIRE quelque chose aux membres, tout de suite et
+  pour tous. Blocage de l'appli, coupure d'une fonction.
+- **Diffusion** (`--adm-diffusion`) : ce qui part d'ici SORT du club et ne se reprend pas. Une
+  notification envoyée est envoyée.
+- **Configuration** (`--adm-config`) : réglage interne, réversible, sans effet visible immédiat.
+  Roster interclub, relevé de classement.
+
+**Ce sont des ALIAS, pas une quatrième famille de couleurs.** Les trois empruntent les filets
+d'issue déjà réglés dans les trois thèmes (`--bad-edge`, `--live-edge`, `--good-edge`). La
+substitution d'une propriété personnalisée se résolvant au point d'usage, trois déclarations sur
+`:root` suffisent : les blocs sombre et rose n'ont rien à redéclarer, et le frontmatter `colors:`
+ci-dessus ne gagne aucune valeur.
+
+**Le titre du groupe reste en encre normale.** Le filet double un libellé explicite (« Accès et
+fonctions »), une icône et une mention de portée en toutes lettres : il ne porte donc pas seul
+l'information et n'a pas à tenir un contraste de texte. C'est ce qui évite d'inventer une encre
+bleue thémée là où `--accent` est une valeur de FOND (Règle du Fond et de l'Encre).
+
+**La Règle du Filet Qui Répond.** Un filet coloré n'est admis que s'il répond à une question que
+le libellé ne suffit pas à trancher — ici « qui verra ce réglage ». Un filet qui ne fait que
+séparer deux blocs est une bordure, pas une couleur : il relève de `--pico-card-border-color` et
+n'a aucune raison d'être teinté.
+
+**Corollaire de structure.** Le `<h2>` appartient au groupe, les cartes portent des `<h3>`. Sept
+titres de même niveau ne disaient rien de leur parenté à qui navigue au lecteur d'écran — le
+regroupement visuel et le regroupement sémantique sont le même travail.
+
 ### Cards / Containers
 
 - **Corner Style :** 12px (`md`).

@@ -4,7 +4,7 @@
 // réinitialisation. L'accès est verrouillé CÔTÉ SERVEUR par /api/admin/requests (allowlist
 // ADMIN_EMAILS) — cette page ne fait qu'afficher ce que l'API veut bien lui rendre.
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useFeatures } from "@/components/FeatureProvider";
 import FeatureFlagsPanel from "@/components/FeatureFlagsPanel";
@@ -232,18 +232,60 @@ function purposeLabel(p: PendingRequest["purpose"]): string {
   return p === "signup" ? "Nouveau compte" : "Mot de passe oublié";
 }
 
-// Carte encadrée : donne une identité visuelle à chaque bloc d'options (plus lisible qu'une
-// longue pile de sections sans séparation).
-const card: CSSProperties = {
-  border: "1px solid var(--pico-card-border-color, #e5e7eb)",
-  borderRadius: 10,
-  padding: "14px 16px",
-  background: "var(--pico-card-background-color, transparent)",
-};
-
-// Variante pour les cartes disposées en colonnes (masonry) : `breakInside: avoid` empêche
-// qu'une carte soit coupée entre deux colonnes.
-const masonryCard: CSSProperties = { ...card, breakInside: "avoid", marginBottom: 16 };
+/**
+ * UN GROUPE D'OPTIONS, et le filet qui dit ce qu'il touche.
+ *
+ * Cette page alignait sept cartes identiques dans une seule coulée : même encadré, même
+ * titre, aucun regroupement. Rien ne distinguait le bouton qui ferme l'appli à tout le club
+ * de celui qui corrige l'orthographe d'un roster, et trouver « Bannière d'annonce »
+ * demandait de lire les sept titres.
+ *
+ * Le `ton` n'est pas décoratif — DESIGN.md interdit la couleur qui ne dit rien. Il répond à
+ * la seule question qu'on se pose devant un réglage d'admin : QUI VERRA ÇA ?
+ *
+ *   `critique`  → ce levier retire quelque chose aux membres, tout de suite et pour tous ;
+ *   `diffusion` → ce qui part d'ici sort du club et ne se reprend pas ;
+ *   `config`    → réglage interne, réversible, sans effet visible immédiat.
+ *
+ * La `portee` redit en toutes lettres ce que le filet suggère : la couleur ne porte jamais
+ * seule une information, et l'icône fait le troisième rappel.
+ *
+ * ⚠️ Le `<h2>` appartient au GROUPE ; les cartes qu'il contient portent des `<h3>`. C'est la
+ * hiérarchie qui manquait au lecteur d'écran, à qui sept titres de même niveau ne disaient
+ * rien de leur parenté.
+ */
+function Groupe({
+  ton,
+  titre,
+  icone,
+  portee,
+  large,
+  children,
+}: {
+  ton: "critique" | "diffusion" | "config";
+  titre: string;
+  icone: string;
+  portee: string;
+  /** Une seule colonne : pour un contenu que 440px étrangleraient (cf. `.adm-cartes-large`). */
+  large?: boolean;
+  children: ReactNode;
+}) {
+  const id = `adm-groupe-${ton}`;
+  return (
+    <section className={`adm-groupe adm-groupe-${ton}`} aria-labelledby={id}>
+      <h2 className={`adm-groupe-titre adm-groupe-${ton}`} id={id}>
+        <span className="adm-groupe-icone" aria-hidden="true">
+          {icone}
+        </span>
+        <span>{titre}</span>
+        {/* Sans séparateur : sur écran étroit la mention passe à la ligne, et un « · » de tête
+            s'y lirait comme une puce. */}
+        <span className="adm-groupe-portee">{portee}</span>
+      </h2>
+      <div className={large ? "adm-cartes adm-cartes-large" : "adm-cartes"}>{children}</div>
+    </section>
+  );
+}
 
 export default function AdminPage() {
   const { emailLogin, ranking, interclub } = useFeatures();
@@ -974,7 +1016,7 @@ export default function AdminPage() {
         <div className="notice error">
           ⚠️ La connexion « email seul » est coupée : la file des demandes est indisponible.
         </div>
-        <div style={card}>
+        <div className="adm-carte">
           <FeatureFlagsPanel />
         </div>
       </main>
@@ -998,15 +1040,11 @@ export default function AdminPage() {
         <>
           {/* Mini-tableau de bord (étape 4) : indicateurs d'un coup d'œil. */}
           {dash && (
-            <section style={{ ...card, marginBottom: 20 }}>
-              <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Tableau de bord</h2>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
-                  gap: 8,
-                }}
-              >
+            <section className="adm-carte" style={{ marginBottom: 18 }}>
+              {/* HORS GROUPE, et en tête : on le lit, on n'y touche pas. Lui donner un filet de
+                  portée serait mentir — il ne règle rien. */}
+              <h2 className="adm-carte-titre">📊 Tableau de bord</h2>
+              <div className="adm-stats">
                 <Stat label="Membres" value={dash.members} hint={dash.disabledMembers ? `${dash.disabledMembers} désactivé(s)` : undefined} />
                 <Stat label="Actifs (30 j)" value={dash.recentLogins} />
                 <Stat label="Sessions" value={dash.activeSessions} hint={`${dash.resaSessions} ResaMania`} />
@@ -1047,15 +1085,18 @@ export default function AdminPage() {
             </section>
           )}
 
-          <p style={{ marginBottom: 20, display: "flex", gap: 16, flexWrap: "wrap" }}>
+          {/* Les autres pages de l'admin. Ce ne sont pas des options : elles n'ont donc ni
+              carte ni filet, seulement leur propre rangée. */}
+          <nav className="adm-liens" aria-label="Autres pages d'administration">
             <Link href="/admin/membres">👥 Gérer les membres →</Link>
             <Link href="/admin/demandes">📜 Historique &amp; blocklist →</Link>
             <Link href="/admin/tricounts">💶 Tricounts →</Link>
-          </p>
+          </nav>
 
-          {/* Demandes en attente : tâche quotidienne de l'admin → mise en avant, pleine largeur. */}
-          <section style={{ ...card, marginBottom: 20 }}>
-            <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Demandes en attente</h2>
+          {/* Demandes en attente : tâche quotidienne de l'admin → mise en avant, pleine largeur.
+              Hors groupe elle aussi : ce n'est pas un réglage mais du travail à faire. */}
+          <section className="adm-carte" style={{ marginBottom: 18 }}>
+            <h2 className="adm-carte-titre">📥 Demandes en attente</h2>
             <p className="muted tiny">
               Approuve une demande pour générer son lien, puis transmets-le à la personne
               (WhatsApp, SMS…). Le lien ne s'affiche qu'une seule fois.
@@ -1078,7 +1119,7 @@ export default function AdminPage() {
               <p className="muted" style={{ marginBottom: 0 }}>Aucune demande en attente.</p>
             )}
 
-            <ul className="admin-requests" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            <ul className="admin-requests">
               {requests.map((r) => (
                 <li
                   key={r.id}
@@ -1127,14 +1168,16 @@ export default function AdminPage() {
             </ul>
           </section>
 
-          {/* Outils d'administration : cartes disposées en colonnes (masonry). columnWidth borne
-              la largeur → 2 cartes de front sur PC, 1 seule sur écran étroit, sans trous de
-              hauteur (chaque carte porte `breakInside: avoid`). */}
-          <div style={{ columnWidth: 440, columnGap: 16 }}>
-            {/* Fermeture de l'appli aux membres. Placée en tête : c'est le bouton le plus
-                lourd de conséquences de cette page. */}
-            <section style={masonryCard}>
-              <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Blocage de l&apos;appli</h2>
+          {/* LES TROIS GROUPES, par conséquence décroissante. « Blocage de l'appli » ouvre le
+              premier : c'est le bouton le plus lourd de conséquences de cette page. */}
+          <Groupe
+            ton="critique"
+            icone="🔒"
+            titre="Accès et fonctions"
+            portee="retire quelque chose à tous les membres, tout de suite"
+          >
+            <section className="adm-carte">
+              <h3 className="adm-carte-titre">Blocage de l&apos;appli</h3>
               <p className="muted tiny">
                 Ferme l&apos;appli aux membres : plus de connexion (mot de passe, email et
                 biométrie) ni de réservation, et un écran affichant ton message pour ceux déjà
@@ -1191,14 +1234,22 @@ export default function AdminPage() {
               )}
             </section>
 
-            {/* Pilotage à chaud des fonctions (étape #9). */}
-            <div style={masonryCard}>
+            {/* Pilotage à chaud des fonctions (étape #9). Même groupe que le blocage : couper
+                une fonction, c'est la retirer à tout le monde sans préavis. */}
+            <div className="adm-carte">
               <FeatureFlagsPanel />
             </div>
+          </Groupe>
 
+          <Groupe
+            ton="diffusion"
+            icone="📣"
+            titre="Diffusion"
+            portee="sort du club et ne se reprend pas"
+          >
             {/* Annonce push à tous les membres abonnés (« Terrain fermé samedi »…). */}
-            <section style={masonryCard}>
-              <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Annonce à tous les membres</h2>
+            <section className="adm-carte">
+              <h3 className="adm-carte-titre">Annonce à tous les membres</h3>
               <p className="muted tiny">
                 Envoie une notification push aux membres qui ont activé les notifications.
               </p>
@@ -1238,8 +1289,8 @@ export default function AdminPage() {
             </section>
 
             {/* Bannière affichée en haut de l'appli pour tous (même sans notifications). */}
-            <section style={masonryCard}>
-              <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Bannière d'annonce</h2>
+            <section className="adm-carte">
+              <h3 className="adm-carte-titre">Bannière d&apos;annonce</h3>
               <p className="muted tiny">
                 Affichée en haut de l'appli pour tous. Laisse vide et « Retirer » pour l'enlever.
               </p>
@@ -1287,14 +1338,25 @@ export default function AdminPage() {
               )}
             </section>
 
+          </Groupe>
+
+          {/* Une seule colonne : la carte des équipes porte des formulaires imbriqués que
+              440px étrangleraient. */}
+          <Groupe
+            ton="config"
+            icone="🏆"
+            titre="Interclub"
+            portee="réglage interne, réversible"
+            large
+          >
             {/* Interclub : le roster des équipes.
                 Deux populations, deux endroits, chacun là où la liste existe déjà —
                 les MEMBRES se rattachent depuis la page « Membres » (un sélecteur par compte),
                 les joueurs SANS COMPTE se saisissent ici. Une équipe de championnat ne coïncide
                 jamais tout à fait avec la liste des inscrits sur l'appli. */}
             {interclub && (
-              <section style={masonryCard}>
-                <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Équipes interclub</h2>
+              <section className="adm-carte">
+                <h3 className="adm-carte-titre">Équipes interclub</h3>
                 <p className="muted tiny">
                   Seuls les joueurs du roster d&apos;une équipe peuvent être alignés dans ses
                   rencontres. Les membres inscrits se rattachent depuis la{" "}
@@ -1848,8 +1910,8 @@ export default function AdminPage() {
             {/* Classement squashnet : rafraîchissement manuel (rattrape les nouveaux inscrits
                 sans attendre le cron mensuel du 8). */}
             {ranking && (
-              <section style={masonryCard}>
-                <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Classement squashnet</h2>
+              <section className="adm-carte">
+                <h3 className="adm-carte-titre">Classement squashnet</h3>
                 <p className="muted tiny">
                   Récupère le classement fédéral de tous les membres listés dans l'annuaire. À
                   utiliser pour les nouveaux inscrits (le rafraîchissement automatique n'a lieu
@@ -1866,7 +1928,7 @@ export default function AdminPage() {
                 )}
               </section>
             )}
-          </div>
+          </Groupe>
         </>
       )}
     </main>
@@ -1874,17 +1936,13 @@ export default function AdminPage() {
 }
 
 // Vignette d'indicateur du tableau de bord.
+// Elle S'ENFONCE au lieu de s'encadrer : une liste posée sur une carte ne se sépare pas en
+// donnant une carte à chaque élément (Règle de la Carte sur Carte). Deux surfaces de même
+// valeur ne se distinguent pas l'une de l'autre, si bien ombrées soient-elles.
 function Stat({ label, value, hint }: { label: string; value: number; hint?: string }) {
   return (
-    <div
-      style={{
-        border: "1px solid var(--pico-card-border-color, #e5e7eb)",
-        borderRadius: 8,
-        padding: "8px 10px",
-        textAlign: "center",
-      }}
-    >
-      <div style={{ fontSize: "1.4rem", fontWeight: 700, lineHeight: 1.1 }}>{value}</div>
+    <div className="adm-stat">
+      <div className="adm-stat-valeur">{value}</div>
       <div className="tiny">{label}</div>
       {hint && <div className="muted tiny">{hint}</div>}
     </div>

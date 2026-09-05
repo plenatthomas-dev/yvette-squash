@@ -71,7 +71,10 @@ export default function FeatureFlagsPanel() {
 
   return (
     <section>
-      <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Fonctions de l'appli</h2>
+      {/* Un <h3> : ce panneau vit DANS un groupe de la page /admin, dont l'en-tête porte le
+          <h2>. Un second <h2> ici remettrait les sept outils au même niveau que leurs trois
+          groupes, ce qui est exactement la hiérarchie plate qu'on vient de défaire. */}
+      <h3 className="adm-carte-titre">Fonctions de l&apos;appli</h3>
       <p className="muted tiny">
         Activer ou couper une fonction sans redéploiement. « Auto » suit la configuration de
         l'environnement. Un changement met jusqu'à ~15 s à se propager, et il faut recharger

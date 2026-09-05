@@ -79,6 +79,19 @@
   --good-edge: #3f7ad1;
   --bad-wash: #fdeeed;
   --bad-edge: #d9534f;
+
+  /* LES TROIS TONS DES GROUPES D'OPTIONS DE L'ADMIN — des ALIAS, et non une quatrième famille.
+     Ils empruntent les filets d'issue ci-dessus, qui sont déjà réglés dans les trois thèmes :
+     la substitution d'une propriété personnalisée se résout AU POINT D'USAGE, donc ces trois
+     lignes suffisent — les blocs sombre et rose n'ont rien à redéclarer.
+
+     Ce qu'ils affirment, et c'est tout leur intérêt (cf. la Règle du Filet Qui Répond) :
+       critique  → ce levier RETIRE quelque chose aux membres, tout de suite et pour tous ;
+       diffusion → ce qui part d'ici SORT du club et ne se reprend pas ;
+       config    → réglage interne, réversible, sans effet visible immédiat. */
+  --adm-critique: var(--bad-edge);
+  --adm-diffusion: var(--live-edge);
+  --adm-config: var(--good-edge);
   --accent: #2f6fe0;
   /* Encre à poser SUR --accent (fond plein : segment actif, pastille). Le blanc ne tient le
      seuil que sur l'accent clair — 4,70:1 ici, mais 3,22:1 sur le bleu du thème sombre, d'où
@@ -2311,6 +2324,161 @@ td.cell.past {
 
 .directory-list li:last-child {
   border-bottom: none;
+}
+
+/* --- Espace admin · groupes d'options ------------------------------------ */
+/*
+   LE PROBLÈME CORRIGÉ ICI. La page /admin alignait SEPT cartes identiques dans une seule
+   coulée masonry — même encadré, même titre, aucun regroupement. Trouver « Bannière
+   d'annonce » demandait de lire les sept titres, et rien ne disait qu'un de ces boutons
+   ferme l'appli à tout le club quand un autre ne fait que corriger un roster.
+
+   Les cartes se rangent désormais en TROIS GROUPES, chacun marqué par un filet coloré. Le
+   filet répond à une question que le libellé ne tranche pas : QUI VERRA CE RÉGLAGE.
+
+   La Règle du Filet Qui Répond. Un filet coloré n'est admis que s'il répond à une question
+   que le libellé ne suffit pas à trancher. Un filet qui ne fait que séparer est une bordure,
+   pas une couleur — et DESIGN.md interdit la couleur décorative.
+
+   Le TITRE reste en encre normale. Le filet est redondant avec un libellé explicite, il n'a
+   donc pas à porter de contraste de texte : cela évite d'introduire une encre bleue thémée là
+   où `--accent` est une valeur de FOND (Règle du Fond et de l'Encre). */
+
+/* La séparation entre deux groupes doit dépasser celle qui sépare deux cartes d'un même
+   groupe (16px), sans quoi le regroupement ne se voit pas. */
+.adm-groupe {
+  margin-bottom: 28px;
+}
+
+/* L'EN-TÊTE PORTE LE FILET, PAS LA CARTE : une carte cerclée de rouge donnerait à un
+   formulaire l'allure d'une erreur.
+
+   Il se distingue d'un titre de carte par sa FORME et non par sa taille — capitales, chasse
+   ouverte, filet — les deux restant sur le même palier de la rampe (1,02rem). C'est la Règle
+   des Trois Traitements appliquée aux titres : deux niveaux qui partageraient le même
+   traitement à deux tailles voisines ne se distingueraient pas, et la rampe de fait n'a pas de
+   palier entre `title` et `display`. */
+.adm-groupe-titre {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 0 0 10px;
+  padding: 2px 0 2px 12px;
+  border-left: 4px solid var(--adm-filet, var(--pico-card-border-color));
+  font-size: 1.02rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.adm-groupe-critique { --adm-filet: var(--adm-critique); }
+.adm-groupe-diffusion { --adm-filet: var(--adm-diffusion); }
+.adm-groupe-config { --adm-filet: var(--adm-config); }
+
+/* L'ICÔNE est montée d'un cran, comme l'emoji des bandeaux : à taille de texte elle se perd,
+   et c'est elle qui double le filet pour qui ne distingue pas les teintes. */
+.adm-groupe-icone {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+/* Ce que le groupe dit en un mot, pour ne pas laisser la couleur seule porter le sens.
+   En bas de casse et sans chasse ouverte : c'est une phrase, pas une étiquette, et elle se lit
+   d'autant mieux qu'elle tranche avec les capitales du titre. */
+.adm-groupe-portee {
+  font-size: 0.78rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--pico-muted-color);
+}
+
+/* Colonnes CSS plutôt qu'une grille : `column-width` borne la largeur, donc deux cartes de
+   front sur PC et une seule sur écran étroit, sans trou de hauteur. */
+.adm-cartes {
+  column-width: 440px;
+  column-gap: 16px;
+}
+
+/* Le groupe interclub échappe au masonry : sa carte « Équipes » porte à elle seule des
+   formulaires imbriqués sur plusieurs centaines de lignes, et une colonne de 440px les
+   étrangle. */
+.adm-cartes-large {
+  column-width: auto;
+  column-count: 1;
+}
+
+.adm-carte {
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: var(--radius);
+  background: var(--card-grad), var(--pico-card-background-color);
+  box-shadow: var(--elev-1);
+  padding: 14px 16px;
+  /* Sans quoi une carte se coupe entre deux colonnes. */
+  break-inside: avoid;
+  margin-bottom: 16px;
+}
+
+.adm-carte-titre {
+  margin: 0 0 6px;
+  font-size: 1.02rem;
+  font-weight: 600;
+}
+
+/* La barre de liens vers les autres pages d'admin.
+   `justify-content` est explicite parce que Pico pose `space-between` sur TOUT `nav` : trois
+   liens s'y retrouvaient plaqués aux deux bords de la page, à lire comme trois rubriques
+   séparées alors qu'ils forment une seule rangée. */
+.adm-liens {
+  display: flex;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 0 0 18px;
+}
+
+/* LES TUILES DU TABLEAU DE BORD S'ENFONCENT, elles ne reçoivent pas une carte à elles.
+   Règle de la Carte sur Carte : deux surfaces de même valeur ne se distinguent pas l'une de
+   l'autre, si bien ombrées soient-elles. En thème sombre, « s'enfoncer » veut dire aller vers
+   la page — donc vers le plus foncé —, la carte y étant la plus claire des trois surfaces. */
+.adm-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.adm-stat {
+  background: var(--sunken);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.adm-stat-valeur {
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+/* La file des demandes : des ENREGISTREMENTS posés sur une carte, donc enfoncés eux aussi.
+   La classe existait dans le JSX depuis l'origine sans qu'aucune règle ne lui réponde. */
+.admin-requests {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+/* `list-style: none` sur le `ul` ne suffit pas : Pico repose la puce sur le `li` lui-même,
+   et elle réapparaissait à GAUCHE de l'enregistrement enfoncé, en dehors de sa surface. */
+.admin-requests > li {
+  list-style: none;
+  background: var(--sunken);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
 }
 
 /* --- Espace admin · effectif d'une équipe interclub ---------------------- */
