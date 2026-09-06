@@ -168,6 +168,62 @@ describe("chargement et affichage", () => {
   });
 });
 
+// LA TOUCHE ENTRÉE, ET LES DEUX CONVENTIONS QU'ELLE SERT. Au clavier physique elle envoie
+// (Maj+Entrée passe à la ligne) ; au clavier tactile, où Maj+Entrée n'existe pas, garder
+// l'envoi revenait à SUPPRIMER le retour à la ligne — un message en trois points ne pouvait
+// plus s'écrire qu'en trois messages. Ces tests tiennent la bascule, qui ne se relit pas dans
+// le JSX : elle est dans une media query.
+describe("la touche Entrée", () => {
+  /** Un appareil où `(pointer: coarse)` répond ce qu'on lui dit. */
+  const pointeur = (grossier: boolean) =>
+    vi.stubGlobal("matchMedia", (q: string) => ({
+      matches: q.includes("coarse") ? grossier : !grossier,
+      media: q,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+
+  const taper = async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    const zone = screen.getByLabelText("Votre message") as HTMLTextAreaElement;
+    fireEvent.change(zone, { target: { value: "Première ligne" } });
+    return zone;
+  };
+
+  it("envoie au CLAVIER PHYSIQUE — la main ne quitte pas le clavier", async () => {
+    pointeur(false);
+    const zone = await taper();
+    fireEvent.keyDown(zone, { key: "Enter" });
+    await waitFor(() => expect(corpsDe("POST", "/api/forum")?.body).toBe("Première ligne"));
+  });
+
+  // LE CAS QUI MOTIVE TOUT. `fireEvent` rend `false` si l'événement a été annulé : ce qu'on
+  // vérifie ici, c'est que la frappe suit son cours — donc que le navigateur insère le saut.
+  it("passe À LA LIGNE au clavier tactile, et n'envoie rien", async () => {
+    pointeur(true);
+    const zone = await taper();
+    expect(fireEvent.keyDown(zone, { key: "Enter" })).toBe(true);
+    expect(appels.some((a) => a.startsWith("POST /api/forum"))).toBe(false);
+  });
+
+  it("laisse Maj+Entrée passer à la ligne, clavier physique compris", async () => {
+    pointeur(false);
+    const zone = await taper();
+    expect(fireEvent.keyDown(zone, { key: "Enter", shiftKey: true })).toBe(true);
+    expect(appels.some((a) => a.startsWith("POST /api/forum"))).toBe(false);
+  });
+
+  // Un navigateur sans `matchMedia` (contexte réduit, très vieux moteur) ne doit pas perdre
+  // l'envoi au clavier : l'absence de réponse vaut « pointeur fin ».
+  it("envoie encore quand `matchMedia` n'existe pas", async () => {
+    vi.stubGlobal("matchMedia", undefined);
+    const zone = await taper();
+    fireEvent.keyDown(zone, { key: "Enter" });
+    await waitFor(() => expect(corpsDe("POST", "/api/forum")?.body).toBe("Première ligne"));
+  });
+});
+
 describe("envoi", () => {
   it("envoie le message et le montre tout de suite", async () => {
     rendre();

@@ -4954,11 +4954,27 @@ body[data-bottombar] .install-banner {
 .ics-ask p { margin: 0 0 8px; }
 .ics-ask-row {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   justify-content: center;
   flex-wrap: wrap;
 }
-.ics-ask-row button { margin: 0; width: auto; flex: 1; min-width: 130px; }
+/* « Qui engage ? » pose QUATRE boutons, une rangée par joueur. `gap` ne joue qu'À L'INTÉRIEUR
+   d'une rangée : entre deux `.ics-ask-row` voisines il ne se passait rien, et le bloc portait
+   une gouttière de 10 px horizontalement contre 0 verticalement — les deux rangées se
+   touchaient bord à bord. La marge rend au bloc la gouttière qui lui manquait. */
+.ics-ask-row + .ics-ask-row { margin-top: 10px; }
+/* Le libellé tient rarement sur une ligne sur un téléphone debout (« Gérard · gauche » dans
+   environ 150 px) : il faut donc que le bouton respire en HAUTEUR, sinon deux lignes de texte
+   remplissent la boîte jusqu'au filet. */
+.ics-ask-row button {
+  margin: 0;
+  width: auto;
+  flex: 1;
+  min-width: 130px;
+  min-height: 48px;
+  padding: 12px 10px;
+  line-height: 1.25;
+}
 
 .ics-timer {
   font-size: 2.4rem;
@@ -5019,6 +5035,9 @@ body[data-bottombar] .install-banner {
   .ics-head button { padding: 6px 10px; }
   .ics-ask { padding: 8px; }
   .ics-ask p { margin: 0 0 6px; }
+  /* La hauteur rendue aux boutons plus haut se reprend ici : couché, l'écran n'en a plus. */
+  .ics-ask-row button { min-height: 40px; padding: 8px 10px; }
+  .ics-ask-row + .ics-ask-row { margin-top: 6px; }
 }
 
 /* --- Interclub : suivi en direct (spectateurs) --- */

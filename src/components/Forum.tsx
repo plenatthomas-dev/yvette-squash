@@ -121,6 +121,25 @@ const APPUI_LONG_MS = 450;
 /** Au-delà de ce déplacement, l'appui est un DÉFILEMENT et non un appui long. */
 const APPUI_TOLERANCE_PX = 10;
 
+/**
+ * La touche Entrée ENVOIE-T-ELLE, ou passe-t-elle à la ligne ?
+ *
+ * Deux conventions opposées, et le pointeur est ce qui les sépare. Au CLAVIER PHYSIQUE,
+ * Entrée envoie et Maj+Entrée passe à la ligne : c'est l'usage de toutes les messageries de
+ * bureau, et il est bon — la main ne quitte pas le clavier. Au CLAVIER TACTILE, il n'existe
+ * pas de Maj+Entrée : garder l'envoi sur Entrée revient à SUPPRIMER le retour à la ligne, et
+ * un message en trois points ne peut plus s'écrire qu'en trois messages. C'est le bouton
+ * d'envoi, à portée de pouce, qui envoie là-bas.
+ *
+ * `(pointer: coarse)` plutôt qu'un reniflage d'agent : c'est la question qu'on pose vraiment —
+ * ce clavier a-t-il une touche Maj utilisable en combinaison ? Un hybride branché sur un
+ * clavier bascule alors du bon côté, et sans clavier il retrouve le retour à la ligne. Évalué
+ * à CHAQUE frappe, pour cette raison : brancher un clavier ne recharge pas la page.
+ */
+function entreeEnvoie(): boolean {
+  return !window.matchMedia?.("(pointer: coarse)").matches;
+}
+
 /** L'heure d'un message, à la SECONDE.
  *
  *  Les secondes sont inhabituelles dans une messagerie, mais c'est le cas normal d'une
@@ -1376,10 +1395,14 @@ export default function Forum({
               placeholder="Écrire au club…"
               rows={1}
               aria-label="Votre message"
+              /* Le clavier tactile affiche un RETOUR À LA LIGNE et non un « Envoyer » : sans
+                 cela, sa touche promettrait un envoi que `onKeyDown` ne fait plus. */
+              enterKeyHint="enter"
               onKeyDown={(e) => {
-                // Entrée envoie, Maj+Entrée passe à la ligne — la convention de toutes les
-                // messageries. Sur mobile le clavier a son propre bouton, qui insère un saut.
-                if (e.key === "Enter" && !e.shiftKey) {
+                // Au clavier physique : Entrée envoie, Maj+Entrée passe à la ligne. Au clavier
+                // tactile, Entrée passe à la ligne et c'est le bouton ⬆ qui envoie — voir
+                // `entreeEnvoie`, l'arbitrage y est écrit.
+                if (e.key === "Enter" && !e.shiftKey && entreeEnvoie()) {
                   e.preventDefault();
                   void envoyer();
                 }

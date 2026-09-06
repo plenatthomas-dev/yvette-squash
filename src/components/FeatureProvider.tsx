@@ -15,9 +15,39 @@ import { ENV_FEATURES, parseOverrides, resolveFeatures, type Features } from "@/
 
 const FeatureContext = createContext<Features>(ENV_FEATURES);
 
+/**
+ * « L'état renvoyé par `useFeatures` est-il CONNU, ou seulement supposé ? »
+ *
+ * Contexte SÉPARÉ, et non un champ ajouté à `Features` : ce type est un
+ * `Record<FeatureKey, boolean>` que `resolveFeatures` remplit clé par clé, et tous les
+ * consommateurs le déstructurent par nom de fonction. Y glisser un booléen qui n'est pas une
+ * fonction le corromprait comme type et comme idée.
+ *
+ * La distinction que ça rend possible : `tricount === false` peut vouloir dire « l'admin a
+ * coupé la fonction » OU « on n'a pas encore lu /api/features ». En prod, les variables
+ * NEXT_PUBLIC_* valent toutes "0" et ce sont les overrides en base qui rallument — donc le
+ * premier rendu se trompe SYSTÉMATIQUEMENT, et qui ne peut pas faire la différence agit sur
+ * une valeur fausse.
+ */
+const ReadyContext = createContext<boolean>(false);
+
 /** État effectif des fonctions. Hors provider : les défauts de l'environnement. */
 export function useFeatures(): Features {
   return useContext(FeatureContext);
+}
+
+/**
+ * `false` tant que /api/features n'a pas répondu au moins une fois — donc tant que
+ * `useFeatures()` ne rend que les défauts inlinés au build. À consulter avant toute décision
+ * IRRÉVERSIBLE prise sur un flag (fermer une vue, effacer un état persisté). Afficher ou
+ * masquer n'a pas besoin de l'attendre : ça se corrige tout seul au rendu suivant.
+ *
+ * Passe à `true` que la requête ait réussi, échoué ou jeté : dans les trois cas on SAIT à quoi
+ * s'en tenir — au pire les défauts d'env, qui sont la réponse définitive quand le réseau est
+ * coupé. Ne redescend jamais, y compris lors des relectures sur changement de route.
+ */
+export function useFeaturesReady(): boolean {
+  return useContext(ReadyContext);
 }
 
 /**
@@ -39,6 +69,7 @@ export function notifyFeaturesChanged(): void {
 
 export default function FeatureProvider({ children }: { children: React.ReactNode }) {
   const [features, setFeatures] = useState<Features>(ENV_FEATURES);
+  const [ready, setReady] = useState(false);
   // Relit aussi à chaque changement de route : couvre le retour depuis /admin même si le
   // signal s'est perdu, et le cas d'un flag basculé depuis un autre appareil.
   const pathname = usePathname();
@@ -53,6 +84,11 @@ export default function FeatureProvider({ children }: { children: React.ReactNod
       setFeatures(resolveFeatures(parseOverrides(data.features)));
     } catch {
       // Réseau KO → défauts d'env, l'appli reste utilisable.
+    } finally {
+      // `finally`, et non la fin du `try` : un 500 comme une coupure réseau laissent l'appli
+      // sur les défauts d'env, qui sont alors la meilleure réponse disponible. Attendre plus
+      // longtemps ne la ferait pas changer — ça bloquerait seulement ce qui dépend de `ready`.
+      setReady(true);
     }
   }, []);
 
@@ -66,5 +102,9 @@ export default function FeatureProvider({ children }: { children: React.ReactNod
     return () => window.removeEventListener(FEATURES_EVENT, onChanged);
   }, [refresh]);
 
-  return <FeatureContext.Provider value={features}>{children}</FeatureContext.Provider>;
+  return (
+    <FeatureContext.Provider value={features}>
+      <ReadyContext.Provider value={ready}>{children}</ReadyContext.Provider>
+    </FeatureContext.Provider>
+  );
 }

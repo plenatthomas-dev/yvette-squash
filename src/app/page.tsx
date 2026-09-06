@@ -49,7 +49,7 @@ import {
   pushSupported,
   pushEnabledOnServer,
 } from "@/lib/pushClient";
-import { useFeatures } from "@/components/FeatureProvider";
+import { useFeatures, useFeaturesReady } from "@/components/FeatureProvider";
 import { recheckBanner } from "@/components/AnnouncementBanner";
 import { reportMaintenance } from "@/lib/apiFetch";
 import { unlockAudio, playSuccessJingle, playError, playAlert } from "@/lib/sound";
@@ -181,6 +181,8 @@ const SPLASH_MIN_MS = 250;
 
 export default function Home() {
   const { tricount, directory, delegation, tournament, interclub, forum } = useFeatures();
+  // Voir le garde des vues coupées plus bas : sans ça, « pas encore chargé » se lit « coupé ».
+  const featuresReady = useFeaturesReady();
   const [me, setMe] = useState<string | null | undefined>(undefined); // undefined = chargement
   const [splashDone, setSplashDone] = useState(false); // plancher anti-flash de l'écran de chargement écoulé
   const [myId, setMyId] = useState<string | null>(null); // id interne (se reconnaître dans l'annuaire)
@@ -537,8 +539,18 @@ export default function Home() {
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
 
-    const isView = (x: string | null): x is "day" | "week" | "money" | "tourney" | "interclub" =>
-      x === "day" || x === "week" || x === "money" || x === "tourney" || x === "interclub";
+    // « forum » a été ajouté à l'union de `view` et au menu, mais PAS ici : la vue s'écrivait
+    // donc bien dans l'URL et dans localStorage, et cette garde la refusait à la relecture.
+    // Le Fil ne survivait à aucun rafraîchissement, sur aucun environnement.
+    const isView = (
+      x: string | null,
+    ): x is "day" | "week" | "money" | "tourney" | "interclub" | "forum" =>
+      x === "day" ||
+      x === "week" ||
+      x === "money" ||
+      x === "tourney" ||
+      x === "interclub" ||
+      x === "forum";
     const vParam = p.get("view");
     const vLS = localStorage.getItem("view");
     let v = isView(vParam) ? vParam : isView(vLS) ? vLS : null;
@@ -561,11 +573,20 @@ export default function Home() {
   // Une vue dont la fonction est coupée ne doit jamais rester à l'écran : au démarrage
   // (vue restaurée depuis l'URL/localStorage) comme après une coupure à chaud par un admin.
   useEffect(() => {
+    // ON ATTEND DE SAVOIR. Les `NEXT_PUBLIC_FEATURE_*` valent toutes "0" en prod : ce sont les
+    // overrides en base, lus par /api/features, qui rallument Frais, Tournoi et Interclub. Le
+    // premier rendu voit donc ces trois flags à `false` — non pas « coupé », mais « pas encore
+    // demandé ». Cet effet y lisait une coupure et renvoyait sur « day », l'effet suivant
+    // écrivait aussitôt `view=day` dans l'URL ET dans localStorage, et la réponse de
+    // /api/features arrivait sur un état déjà écrasé : rien ne pouvait plus le rattraper.
+    // C'est le « je rafraîchis et je repars sur les créneaux » constaté en prod, et jamais sur
+    // Recette — où l'env allume tout, si bien que le premier rendu tombait juste par accident.
+    if (!featuresReady) return;
     if (view === "money" && !tricount) setView("day");
     if (view === "tourney" && !tournament) setView("day");
     if (view === "interclub" && !interclub) setView("day");
     if (view === "forum" && !forum) setView("day");
-  }, [view, tricount, tournament, interclub, forum]);
+  }, [featuresReady, view, tricount, tournament, interclub, forum]);
 
   // Reflète l'état dans l'URL (partageable, survit au refresh) et le persiste.
   useEffect(() => {
