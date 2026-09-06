@@ -565,8 +565,13 @@ describe("appui long sur une bulle", () => {
       vi.advanceTimersByTime(500);
     });
     expect(choix()).not.toBeNull();
-    // Les six réactions de la liste fermée, et elles seules.
-    expect(document.querySelectorAll(".forum-choix-un")).toHaveLength(6);
+    // Les six réactions de la liste fermée — et RIEN de plus qui prétende en être une : le
+    // bouton « Copier » partage leur apparence mais est une ACTION, séparée par un filet.
+    expect(
+      document.querySelectorAll(".forum-choix-un:not(.forum-choix-copier)"),
+    ).toHaveLength(6);
+    expect(document.querySelector(".forum-choix-sep")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Copier le message" })).toBeTruthy();
   });
 
   it("n'ouvre RIEN sur un appui bref — c'est une lecture, pas un geste", async () => {
@@ -670,6 +675,73 @@ describe("appui long sur une bulle", () => {
     expect(
       screen.getByRole("button", { name: /Réagir au message de Gégé/ }).getAttribute("aria-expanded"),
     ).toBe("true");
+  });
+
+  // COPIER — la contrepartie de `user-select: none`. Au doigt, on ne peut plus sélectionner le
+  // texte d'un message ; cette action rend ce qu'on a retiré, au même geste. Sans elle, le
+  // correctif des poignées de sélection serait une perte nette.
+  describe("copier le message", () => {
+    let copie: string | null;
+
+    beforeEach(() => {
+      copie = null;
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: vi.fn(async (t: string) => {
+            copie = t;
+          }),
+        },
+      });
+    });
+
+    it("copie le CORPS du message, et referme", async () => {
+      rendre();
+      await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+      appuyer(bulle());
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Copier le message" }));
+      await waitFor(() => expect(copie).toBe("Salut"));
+      await waitFor(() => expect(choix()).toBeNull());
+      expect(toast).toHaveBeenCalledWith("ok", "Message copié");
+    });
+
+    // Ce n'est PAS une réaction : rien ne doit partir au serveur, rien ne doit se poser sur le
+    // message. C'est ce que le filet de séparation dit à l'œil, et ce test à la suite.
+    it("n'écrit rien au serveur — copier n'est pas réagir", async () => {
+      rendre();
+      await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+      appuyer(bulle());
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Copier le message" }));
+      await waitFor(() => expect(copie).toBe("Salut"));
+      expect(appels.some((a) => a.includes("/reaction"))).toBe(false);
+    });
+
+    // Un bouton qui ne fait rien EN SILENCE laisse croire que la copie a eu lieu, et on s'en
+    // aperçoit au moment de coller, ailleurs. Presse-papiers refusé, ou contexte non sécurisé.
+    it("le dit quand le presse-papiers refuse, au lieu de se taire", async () => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: vi.fn(async () => {
+            throw new Error("NotAllowedError");
+          }),
+        },
+      });
+      rendre();
+      await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+      appuyer(bulle());
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Copier le message" }));
+      await waitFor(() => expect(toast).toHaveBeenCalledWith("err", "Copie impossible"));
+    });
   });
 
   // Ce que la palette montre AVANT le clic. Ses boutons basculent : sans cet état, cliquer 👍

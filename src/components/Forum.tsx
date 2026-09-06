@@ -145,6 +145,32 @@ function fusionner(actuels: ForumMessage[], arrivees: ForumMessage[]): ForumMess
   return [...par.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
+/** Icône « copier » : deux feuilles superposées, le pictogramme universel du presse-papiers.
+ *
+ *  UN TRACÉ SVG ET NON UN EMOJI (📋), alors que tout le reste de cette pop-up est en emoji —
+ *  et c'est précisément pour cela. Les six emoji sont des RÉACTIONS, qui se posent sur le
+ *  message ; copier est une ACTION, qui n'y laisse rien. Un septième emoji dans la même rangée
+ *  se lirait comme une septième réaction. Le trait suit `currentColor`, donc les trois thèmes. */
+function IconeCopier() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="17"
+      height="17"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V5a2 2 0 0 1 2-2h8" />
+    </svg>
+  );
+}
+
 /** Rend le corps d'un message : du texte, et des liens qui en sont des nœuds React.
  *
  *  Jamais de HTML fabriqué — `segmenter` ne rend que des données, et c'est React qui crée les
@@ -668,6 +694,30 @@ export default function Forum({
 
   const fermerChoix = useCallback(() => setPaletteReaction(null), []);
 
+  /**
+   * Copie le texte d'un message dans le presse-papiers.
+   *
+   * C'est la contrepartie assumée de `user-select: none` : au doigt, on ne peut plus
+   * sélectionner le texte d'un message, et cette action rend ce qu'on a retiré — au même
+   * geste, dans la même pop-up. C'est l'arbitrage qu'ont fait les messageries natives.
+   *
+   * Le corps BRUT, pas ce que l'écran affiche : les liens y sont rendus en nœuds React, et
+   * recomposer le texte depuis le DOM rendrait une chaîne subtilement différente de ce que
+   * l'auteur a écrit. Ce qu'on colle est ce qui est en base.
+   */
+  const copier = async (texte: string) => {
+    setPaletteReaction(null);
+    try {
+      await navigator.clipboard.writeText(texte);
+      toastRef.current("ok", "Message copié");
+    } catch {
+      // Presse-papiers indisponible (contexte non sécurisé) ou refusé par le navigateur. Le
+      // dire : un bouton qui ne fait rien en silence laisse croire que la copie a eu lieu, et
+      // on s'en aperçoit au moment de coller, ailleurs.
+      toastRef.current("err", "Copie impossible");
+    }
+  };
+
   const reagir = async (messageId: string, emoji: string) => {
     if (!moi) return;
     setPaletteReaction(null);
@@ -1145,6 +1195,18 @@ export default function Forum({
                                   </button>
                                 );
                               })}
+                              {/* Séparé des emoji par un filet : ce qui suit n'est pas une
+                                  réaction de plus. */}
+                              <span className="forum-choix-sep" aria-hidden="true" />
+                              <button
+                                type="button"
+                                className="forum-choix-un forum-choix-copier"
+                                onClick={() => void copier(m.body)}
+                                aria-label="Copier le message"
+                                title="Copier le message"
+                              >
+                                <IconeCopier />
+                              </button>
                             </div>
                           </>
                         )}
