@@ -5288,6 +5288,39 @@ body[data-bottombar] .install-banner {
   overflow-wrap: anywhere;
 }
 
+/* --- Correction de la fiche d'une rencontre --------------------------------------- */
+
+/* Le bouton qui ouvre la correction. Il vit SOUS les lignes qu'il corrige — date, heure,
+   lieu — et non dans la barre du bas avec « Supprimer » : c'est en les lisant qu'on
+   s'aperçoit qu'elles sont fausses. Discret par la taille, jamais par la couleur. */
+.ic-edit-head {
+  width: auto;
+  margin: 8px 0 0;
+  padding: 6px 12px;
+  /* Le cran des mentions de la fiche (`muted tiny`), pas celui d'une action principale. */
+  font-size: 0.8rem;
+}
+
+/* Le formulaire remplace l'en-tête de la fiche, au même endroit et sans dialogue empilé :
+   deux boîtes l'une sur l'autre perdent le focus et le lecteur d'écran. */
+.ic-fix-edit {
+  margin-bottom: 12px;
+}
+.ic-fix-edit h3 {
+  margin-bottom: 10px;
+}
+
+/* La case du statut de la date, et sa raison sous elle. C'est le seul réglage de cet écran
+   qui décide de ce que le CRON fera — décochée, l'équipe n'est ni convoquée ni relancée —,
+   et une case sans sa phrase ne le dirait pas. */
+.ic-date-sure {
+  margin-top: 4px;
+}
+.ic-date-sure span {
+  display: block;
+  margin-left: 26px;
+}
+
 /* --- Le bloc « Qui peut venir ? » ------------------------------------------------- */
 
 .ic-dispo {

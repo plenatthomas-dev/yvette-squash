@@ -393,6 +393,13 @@ export function serializeInterclub(f: FullInterclub, userId: string | null, isAd
     // Le serveur autorise le créateur OU un admin : l'écran affiche donc le bouton dans les
     // mêmes cas, plutôt que de le cacher à un admin qui a pourtant le droit.
     canDelete: (!!userId && f.createdById === userId) || isAdmin,
+    // DEUX DROITS, MÊME RÈGLE AUJOURD'HUI — et deux champs quand même. Le `PATCH` applique
+    // exactement la garde du `DELETE` (créateur ou admin), mais modifier et supprimer n'ont
+    // aucune raison de rester liés : le jour où un capitaine pourra corriger l'heure d'une
+    // rencontre sans pouvoir l'effacer, c'est ici que ça se dira. Réutiliser `canDelete` pour
+    // afficher un bouton « Modifier » aurait donné un nom qui ment, ce qui coûte plus cher
+    // qu'un booléen de plus dans une réponse.
+    canEdit: (!!userId && f.createdById === userId) || isAdmin,
     matches,
   };
 }

@@ -191,6 +191,8 @@ type Fixture = FixtureRow & {
   isCreator: boolean;
   /** Le serveur autorise aussi les admins : l'écran doit suivre, pas deviner. */
   canDelete: boolean;
+  /** Même règle que `canDelete` aujourd'hui, champ distinct : cf. la note côté serveur. */
+  canEdit: boolean;
   matches: MatchRow[];
   roster: RosterEntry[];
 };
@@ -693,6 +695,38 @@ export default function Interclub({
     }
   }
 
+  /**
+   * Corrige la rencontre elle-même : date, heure, journée, adversaire, lieu, statut de la date.
+   *
+   * Le `PATCH` existait, complet et testé, SANS AUCUN APPELANT — l'aperçu du calendrier disait
+   * pourtant « à corriger à la main sur la rencontre » (`confirmDrift`), et le contrôle
+   * n'existait nulle part. Une rencontre saisie à la main ne pouvait ni recevoir d'heure, ni
+   * être déplacée.
+   *
+   * `body` ne porte QUE les champs modifiés : la route distingue « absent » (on ne touche pas)
+   * de « `null` explicite » (on efface), et envoyer le formulaire entier effacerait le lieu
+   * qu'un import vient de renseigner.
+   */
+  async function saveFixture(id: string, body: Record<string, unknown>) {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/interclub/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (onExpired(res.status)) return;
+      await readOk(res);
+      toast("ok", "Rencontre modifiée");
+      await loadFixture(id);
+      await loadList();
+    } catch (e) {
+      toast("err", (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveMatch(matchId: string, body: Record<string, unknown>) {
     if (!fixture) return;
     setBusy(true);
@@ -893,6 +927,7 @@ export default function Interclub({
           busy={busy}
           onClose={() => setOpenId(null)}
           onSaveMatch={saveMatch}
+          onSaveFixture={(body) => saveFixture(fixture.id, body)}
           onDelete={() => deleteFixture(fixture.id)}
           onScore={startScoring}
           toast={stableToast}
@@ -1034,6 +1069,7 @@ function FixtureDialog({
   busy,
   onClose,
   onSaveMatch,
+  onSaveFixture,
   onDelete,
   onScore,
   toast,
@@ -1043,6 +1079,8 @@ function FixtureDialog({
   busy: boolean;
   onClose: () => void;
   onSaveMatch: (matchId: string, body: Record<string, unknown>) => void;
+  /** Les champs de la RENCONTRE, et eux seuls : cf. `saveFixture` plus haut. */
+  onSaveFixture: (body: Record<string, unknown>) => void;
   onDelete: () => void;
   onScore: (matchId: string) => void;
   // Les deux rappels descendent au bloc de disponibilité, sous leur forme STABLE (cf. le long
@@ -1055,6 +1093,8 @@ function FixtureDialog({
   // Confirmation en deux temps plutot qu'un confirm() natif : la suppression emporte tous les
   // matchs et leurs jeux, et une boîte de dialogue bloquante fige l'onglet.
   const [confirmDel, setConfirmDel] = useState(false);
+  /** La FICHE de la rencontre est-elle en cours de correction ? (date, heure, lieu…) */
+  const [editHead, setEditHead] = useState(false);
 
   // Un joueur ne dispute qu'UN simple par rencontre. On retient donc qui est déjà pris, et par
   // quel simple, pour le griser dans le sélecteur — plutôt que de le proposer, de le laisser
@@ -1098,29 +1138,60 @@ function FixtureDialog({
 
   return (
     <Dialog onClose={onClose} label="Rencontre" className="ic-detail">
-      <h3>
-        {fixture.team.name} {fixture.home ? "–" : "chez"} {fixture.opponent}
-      </h3>
-      <p className="muted tiny">
-        {fixture.round && `${fixture.round} · `}
-        {shortDate(fixture.date)}
-        {fixture.time && ` à ${fixture.time}`} · au meilleur des {fixture.bestOf} jeux (
-        {fixture.winGames} gagnants)
-      </p>
-      {/* La date prévisionnelle SE DIT. La fédération publie les journées non planifiées avec
-          une date bouchon commune : l'afficher comme une date ferme est ce qui ferait déplacer
-          quelqu'un pour rien. */}
-      {!fixture.dateConfirmed && (
-        <p className="ic-provisoire">⚠️ Date prévisionnelle — la ligue ne l'a pas encore fixée.</p>
-      )}
-      {/* Le lieu, quand on le connaît. À l'extérieur, c'est l'information la plus utile de tout
-          l'écran : on ne sait pas d'avance chez qui l'on va. */}
-      {fixture.venue && (
-        <p className="muted tiny ic-venue">
-          {fixture.home ? "Chez nous : " : "Déplacement : "}
-          <strong>{fixture.venue}</strong>
-          {fixture.venueAddress && <span className="ic-venue-addr">{fixture.venueAddress}</span>}
-        </p>
+      {editHead ? (
+        <FixtureEditor
+          fixture={fixture}
+          busy={busy}
+          onCancel={() => setEditHead(false)}
+          onSave={(body) => {
+            onSaveFixture(body);
+            setEditHead(false);
+          }}
+        />
+      ) : (
+        <>
+          <h3>
+            {fixture.team.name} {fixture.home ? "–" : "chez"} {fixture.opponent}
+          </h3>
+          <p className="muted tiny">
+            {fixture.round && `${fixture.round} · `}
+            {shortDate(fixture.date)}
+            {fixture.time && ` à ${fixture.time}`} · au meilleur des {fixture.bestOf} jeux (
+            {fixture.winGames} gagnants)
+          </p>
+          {/* La date prévisionnelle SE DIT. La fédération publie les journées non planifiées avec
+              une date bouchon commune : l'afficher comme une date ferme est ce qui ferait déplacer
+              quelqu'un pour rien. */}
+          {!fixture.dateConfirmed && (
+            <p className="ic-provisoire">
+              ⚠️ Date prévisionnelle — la ligue ne l&apos;a pas encore fixée.
+            </p>
+          )}
+          {/* Le lieu, quand on le connaît. À l'extérieur, c'est l'information la plus utile de tout
+              l'écran : on ne sait pas d'avance chez qui l'on va. */}
+          {fixture.venue && (
+            <p className="muted tiny ic-venue">
+              {fixture.home ? "Chez nous : " : "Déplacement : "}
+              <strong>{fixture.venue}</strong>
+              {fixture.venueAddress && (
+                <span className="ic-venue-addr">{fixture.venueAddress}</span>
+              )}
+            </p>
+          )}
+          {/* PRÈS DE CE QU'IL CORRIGE, et non dans la barre du bas avec « Supprimer » : la date,
+              l'heure et le lieu se lisent ici, et c'est ici qu'on s'aperçoit qu'ils sont faux. */}
+          {fixture.canEdit && (
+            <p>
+              <button
+                type="button"
+                className="secondary tiny ic-edit-head"
+                onClick={() => setEditHead(true)}
+              >
+                ✎ Modifier la rencontre
+              </button>
+            </p>
+          )}
+        </>
       )}
       {fixture.team.captainName && (
         <p className="muted tiny">Capitaine&nbsp;: {fixture.team.captainName}</p>
@@ -1267,6 +1338,190 @@ function FixtureDialog({
         )}
       </div>
     </Dialog>
+  );
+}
+
+// --- Correction de la fiche d'une rencontre --------------------------------
+//
+// LA ROUTE EXISTAIT, PERSONNE NE L'APPELAIT. `PATCH /api/interclub/[id]` sait depuis toujours
+// déplacer une rencontre, lui donner une heure, un lieu, une journée, et corriger le statut de
+// sa date — mais aucun écran ne l'appelait. Deux conséquences, toutes deux invisibles :
+//
+//  * l'aperçu du calendrier fédéral dit « à corriger à la main sur la rencontre » quand la
+//    ligue et la base divergent sur `dateConfirmed` (cf. `confirmDrift`). Toute la doctrine
+//    « la déduction informe, elle ne tranche plus » reposait donc sur un geste impossible ;
+//  * une rencontre saisie à la main naissait sans heure ni lieu — le formulaire de création ne
+//    les demande pas — et rien ne pouvait les lui donner ensuite.
+//
+// ON N'ENVOIE QUE CE QUI A CHANGÉ. La route distingue « champ absent » (on ne touche pas) de
+// « `null` explicite » (on efface) : poster le formulaire entier effacerait le lieu qu'un
+// import vient de renseigner, pour le seul motif qu'on a corrigé l'heure.
+
+function FixtureEditor({
+  fixture,
+  busy,
+  onCancel,
+  onSave,
+}: {
+  fixture: Fixture;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (body: Record<string, unknown>) => void;
+}) {
+  const [date, setDate] = useState(fixture.date);
+  const [time, setTime] = useState(fixture.time ?? "");
+  const [round, setRound] = useState(fixture.round ?? "");
+  const [opponent, setOpponent] = useState(fixture.opponent);
+  const [home, setHome] = useState(fixture.home);
+  const [venue, setVenue] = useState(fixture.venue ?? "");
+  const [venueAddress, setVenueAddress] = useState(fixture.venueAddress ?? "");
+  const [dateConfirmed, setDateConfirmed] = useState(fixture.dateConfirmed);
+  /** Le report est annoncé avant d'être écrit : il efface des réponses déjà données. */
+  const [confirmDate, setConfirmDate] = useState(false);
+
+  // Une rencontre commencée ne se déplace plus — le serveur refuse en 409, et le refuser ici
+  // évite de le découvrir après avoir tout ressaisi. Le RESTE reste corrigible : un lieu mal
+  // orthographié se corrige aussi bien après le coup d'envoi.
+  const figee = fixture.status !== "scheduled";
+
+  const net = (v: string) => v.trim().replace(/\s+/g, " ");
+  /** Ce qui a bougé, et rien d'autre. Chaîne vide = « efface ce champ » (la route rend null). */
+  const modifs = (): Record<string, unknown> => {
+    const body: Record<string, unknown> = {};
+    if (!figee && date !== fixture.date) body.date = date;
+    if (net(time) !== (fixture.time ?? "")) body.time = net(time);
+    if (net(round) !== (fixture.round ?? "")) body.round = net(round);
+    if (net(opponent) !== fixture.opponent) body.opponent = net(opponent);
+    if (home !== fixture.home) body.home = home;
+    if (net(venue) !== (fixture.venue ?? "")) body.venue = net(venue);
+    if (net(venueAddress) !== (fixture.venueAddress ?? "")) body.venueAddress = net(venueAddress);
+    if (dateConfirmed !== fixture.dateConfirmed) body.dateConfirmed = dateConfirmed;
+    return body;
+  };
+
+  const body = modifs();
+  const dateBouge = "date" in body;
+  // L'adversaire est le seul champ que la route refuse vide : le dire ici plutôt que de laisser
+  // partir un 400 qu'il faudra traduire.
+  const valide = net(opponent).length > 0 && date.length > 0 && Object.keys(body).length > 0;
+
+  const enregistrer = () => {
+    if (dateBouge && !confirmDate) {
+      setConfirmDate(true);
+      return;
+    }
+    onSave(body);
+  };
+
+  return (
+    <div className="ic-fix-edit">
+      <h3>Modifier la rencontre</h3>
+      <div className="ic-form-row">
+        <label>
+          Date
+          <input
+            type="date"
+            value={date}
+            disabled={figee}
+            onChange={(e) => setDate(e.target.value)}
+          />
+        </label>
+        <label>
+          Heure
+          <input
+            type="time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+            // Vide = heure inconnue, et c'est un état légitime : la ligue publie des journées
+            // avant d'en fixer l'horaire.
+            placeholder="—"
+          />
+        </label>
+      </div>
+      {figee && (
+        <p className="muted tiny">
+          Rencontre commencée : sa date ne peut plus changer. Le reste reste corrigible.
+        </p>
+      )}
+      <div className="ic-form-row">
+        <label>
+          Journée
+          <input
+            value={round}
+            onChange={(e) => setRound(e.target.value)}
+            placeholder="ex. J3"
+            maxLength={12}
+          />
+        </label>
+        <label>
+          Club adverse
+          <input value={opponent} onChange={(e) => setOpponent(e.target.value)} maxLength={60} />
+        </label>
+      </div>
+      <fieldset>
+        <legend className="tiny muted">Lieu</legend>
+        <label>
+          <input type="radio" checked={home} onChange={() => setHome(true)} /> À domicile
+        </label>
+        <label>
+          <input type="radio" checked={!home} onChange={() => setHome(false)} /> À l&apos;extérieur
+        </label>
+      </fieldset>
+      <label>
+        Club hôte
+        <input
+          value={venue}
+          onChange={(e) => setVenue(e.target.value)}
+          placeholder="ex. Squash de Massy"
+          maxLength={80}
+        />
+      </label>
+      <label>
+        Adresse
+        <input
+          value={venueAddress}
+          onChange={(e) => setVenueAddress(e.target.value)}
+          placeholder="ex. 12 rue du Stade, 91300 Massy"
+          maxLength={200}
+        />
+      </label>
+      {/* LE RATTRAPAGE QUE LE CALENDRIER RÉCLAME. La détection automatique a deux angles morts
+          (deux vraies journées le même soir passent pour prévisionnelles, une seule journée non
+          planifiée passe pour ferme) ; c'est cette case qui les corrige, et l'import ne la
+          réécrit jamais. Sans elle, l'équipe n'était jamais convoquée pour une rencontre bien
+          réelle — ou l'était pour une date bouchon. */}
+      <label className="ic-date-sure">
+        <input
+          type="checkbox"
+          checked={dateConfirmed}
+          onChange={(e) => setDateConfirmed(e.target.checked)}
+        />{" "}
+        Date confirmée par la ligue
+        <span className="muted tiny">
+          Décochée, la rencontre s&apos;affiche « prévisionnelle » et l&apos;équipe n&apos;est ni
+          convoquée ni relancée.
+        </span>
+      </label>
+
+      {/* CE QUE LE REPORT COÛTE, dit AVANT de l'écrire — les mêmes mots que l'aperçu du
+          calendrier fédéral, qui fait exactement la même chose. Le découvrir après, c'est le
+          découvrir quand les réponses sont déjà perdues. */}
+      {dateBouge && confirmDate && (
+        <p className="ic-cal-warn">
+          ⚠️ Changer la date efface les disponibilités déjà recueillies pour cette rencontre, et
+          l&apos;équipe est prévenue du report.
+        </p>
+      )}
+
+      <div className="modal-actions">
+        <button className="secondary" disabled={busy} onClick={onCancel}>
+          Annuler
+        </button>
+        <button disabled={busy || !valide} onClick={enregistrer}>
+          {dateBouge && confirmDate ? "Déplacer et prévenir" : "Enregistrer"}
+        </button>
+      </div>
+    </div>
   );
 }
 
