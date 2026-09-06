@@ -24,6 +24,50 @@ function esc(s: string): string {
     .replace(/\r?\n/g, "\\n");
 }
 
+/**
+ * Longueur maximale d'une ligne de contenu, EN OCTETS et non en caractères (RFC 5545, § 3.1).
+ *
+ * Rien ne pliait. « SOCIETE SPORTIVE DU JEU DE PAUME ET DE RACKETS, 74 TER RUE LAURISTON,
+ * 75116 - PARIS » fait une ligne `LOCATION:` de plus de 90 octets, virgules échappées comprises,
+ * et `MAX_VENUE_LEN` + `MAX_VENUE_ADDRESS_LEN` en autorisent bien davantage. Les agendas
+ * courants tolèrent ; un parseur strict tronque ou rejette l'évènement — c'est-à-dire perd
+ * silencieusement la seule information qu'on exporte pour un déplacement.
+ */
+const MAX_OCTETS = 75;
+
+/**
+ * Plie une ligne trop longue en lignes de continuation, chacune préfixée d'UNE espace.
+ *
+ * ⚠️ ON COMPTE LES OCTETS ET ON COUPE AUX CARACTÈRES. La règle de la RFC est en octets, mais
+ * couper au milieu d'un « é » — deux octets en UTF-8 — produirait deux demi-caractères qu'aucun
+ * agenda ne recolle. `for…of` parcourt les POINTS DE CODE, donc les paires de substitution
+ * restent entières, et l'on mesure chacun avant de décider s'il tient encore.
+ *
+ * La première ligne dispose de 75 octets, les suivantes de 74 : leur espace de continuation
+ * compte dans la limite.
+ */
+function fold(line: string): string {
+  const enc = new TextEncoder();
+  if (enc.encode(line).length <= MAX_OCTETS) return line;
+  const morceaux: string[] = [];
+  let courant = "";
+  let octets = 0;
+  let limite = MAX_OCTETS;
+  for (const ch of line) {
+    const n = enc.encode(ch).length;
+    if (octets + n > limite) {
+      morceaux.push(courant);
+      courant = "";
+      octets = 0;
+      limite = MAX_OCTETS - 1;
+    }
+    courant += ch;
+    octets += n;
+  }
+  morceaux.push(courant);
+  return morceaux.join("\r\n ");
+}
+
 // Date ISO -> format UTC iCal « 20260706T150000Z » (pas d'ambiguïté de fuseau).
 function toIcsUtc(iso: string): string {
   return new Date(iso).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
@@ -55,7 +99,7 @@ export function buildIcs(ev: IcsEvent): string {
     "END:VEVENT",
     "END:VCALENDAR",
   ];
-  return lines.join("\r\n");
+  return lines.map(fold).join("\r\n");
 }
 
 // Nom de fichier lisible : « squash-2026-07-06-1500.ics ».
@@ -141,10 +185,23 @@ function nextDay(date: string): string {
   return d.toISOString().slice(0, 10).replace(/-/g, "");
 }
 
-/** L'heure de fin, bornée à la même journée : une rencontre à 22 h ne déborde pas sur demain. */
+/**
+ * L'heure de fin, bornée à la même journée : une rencontre à 22 h ne déborde pas sur demain.
+ *
+ * ⚠️ LA BORNE PORTE SUR L'INSTANT, PAS SUR LE CHAMP DES HEURES. `Math.min(23, h + 3)` laissait
+ * les minutes intactes et ne bornait que la moitié du problème : 21:05 rendait 23:05 (deux
+ * heures), 22:30 rendait 23:30 (une heure), et 23:00 rendait 23:00 — un `DTEND` ÉGAL au
+ * `DTSTART`, donc un évènement de durée nulle que certains agendas n'affichent pas du tout. Le
+ * seul essai tardif s'arrêtait à 22:30, dont le nom annonçait pourtant « une fin trois heures
+ * plus tard ».
+ *
+ * On borne donc à 23:59, dernier instant de la journée : la rencontre tardive garde une durée
+ * visible, et l'évènement ne déborde toujours pas sur le lendemain.
+ */
 function endTime(time: string): string {
   const [h, m] = time.split(":").map(Number);
-  return `${String(Math.min(23, h + FIXTURE_HOURS)).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  const fin = Math.min(h * 60 + m + FIXTURE_HOURS * 60, 23 * 60 + 59);
+  return `${String(Math.floor(fin / 60)).padStart(2, "0")}:${String(fin % 60).padStart(2, "0")}`;
 }
 
 export function buildFixtureIcs(f: IcsFixture): string {
@@ -200,7 +257,7 @@ export function buildFixtureIcs(f: IcsFixture): string {
     "END:VEVENT",
     "END:VCALENDAR",
   ];
-  return lines.join("\r\n");
+  return lines.map(fold).join("\r\n");
 }
 
 export function downloadFixtureIcs(f: IcsFixture): void {

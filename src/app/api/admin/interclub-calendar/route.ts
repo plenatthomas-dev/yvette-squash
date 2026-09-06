@@ -14,8 +14,15 @@ import {
   type StoredTie,
 } from "@/lib/squashnet/calendar";
 import { interclubChanged } from "@/lib/interclub-gate";
-import { isUniqueViolation } from "@/lib/http-tx";
-import { UNSET_PLAYER, derivedStatus, seasonOf } from "@/lib/interclub-db";
+import { isUniqueViolation, readJsonBody } from "@/lib/http-tx";
+import {
+  UNSET_PLAYER,
+  derivedStatus,
+  seasonOf,
+  parseOptionalText,
+  MAX_VENUE_LEN,
+  MAX_VENUE_ADDRESS_LEN,
+} from "@/lib/interclub-db";
 import { notifyFixtureMoved } from "@/lib/interclub-notify";
 import { fetchStandings } from "@/lib/squashnet/standings";
 
@@ -136,21 +143,26 @@ async function anchoredTeam(teamId: unknown) {
 
 // POST /api/admin/interclub-calendar
 //   { action: "preview",  teamId }          → télécharge et compare, SANS RIEN ÉCRIRE
-//   { action: "apply",    teamId, seen? }   → applique l'écart, puis enregistre l'empreinte
+//   { action: "apply",    teamId, seen }    → applique l'écart, puis enregistre l'empreinte
+//                                             SI plus rien ne reste à faire à la main
 //   { action: "standings", teamId }         → retélécharge le CLASSEMENT de la poule, tout de suite
 //
-// `seen` est l'empreinte que la PRÉVISUALISATION a montrée. Sans elle, les deux temps ne
-// tenaient l'un à l'autre par rien : `apply` retélécharge et recalcule, si bien que l'admin qui
-// prévisualise, s'absente et revient appliquer valide un écart qu'il n'a jamais vu — y compris
-// un effacement de disponibilités. Le geste en deux temps protégeait de l'inattention, pas de
-// ce que l'en-tête de ce fichier annonce.
+// `seen` est l'empreinte que la PRÉVISUALISATION a montrée, et elle est OBLIGATOIRE. Sans elle,
+// les deux temps ne tenaient l'un à l'autre par rien : `apply` retélécharge et recalcule, si
+// bien que l'admin qui prévisualise, s'absente et revient appliquer valide un écart qu'il n'a
+// jamais vu — y compris un effacement de disponibilités. Le geste en deux temps protégeait de
+// l'inattention, pas de ce que l'en-tête de ce fichier annonce.
 export async function POST(req: NextRequest) {
   const off = await interclubDisabledResponse();
   if (off) return off;
   const admin = await requireAdmin(req);
   if (!admin) return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
 
-  const body = (await req.json().catch(() => ({}))) as {
+  // `readJsonBody` et non `req.json().catch(() => ({}))` : ce dernier ne rattrape que le JSON
+  // ILLISIBLE. Le corps littéral `null` est du JSON parfaitement valide, `json()` le résout, et
+  // c'est `body.action` qui casse — « Cannot read properties of null », en 500 non géré, là où
+  // toutes les autres malformations finissent en 400 propre.
+  const body = (await readJsonBody(req)) as {
     action?: unknown;
     teamId?: unknown;
     /** L'empreinte que la prévisualisation a montrée — cf. l'en-tête de la route. */
@@ -258,7 +270,21 @@ export async function POST(req: NextRequest) {
   // clics, et le second temps retélécharge : sans ce garde-fou, « Appliquer » validerait un
   // écart que personne n'a lu. On refuse plutôt que d'écrire, et l'écran refait un aperçu —
   // 409 parce que c'est un état qui a bougé, pas une faute de l'admin.
-  if (typeof body.seen === "string" && body.seen !== calendarFingerprint(published)) {
+  //
+  // ⚠️ ET `seen` EST EXIGÉE, alors que le garde ne s'armait que si elle était présente. Une
+  // règle qu'on peut faire sauter en omettant un champ n'est pas une règle : un `POST` direct
+  // `{action:"apply", teamId}` écrivait ce que personne n'avait lu, effacements de
+  // disponibilités compris — exactement ce que l'en-tête de ce fichier promet d'empêcher.
+  // L'écran l'envoie toujours (le bouton n'existe que dans le bloc de prévisualisation), donc
+  // l'exiger ne coûte rien à personne. 400 et non 409 : il ne manque pas un état, il manque
+  // un champ.
+  if (typeof body.seen !== "string") {
+    return NextResponse.json(
+      { error: "Prévisualise avant d'appliquer." },
+      { status: 400 },
+    );
+  }
+  if (body.seen !== calendarFingerprint(published)) {
     return NextResponse.json(
       {
         error:
@@ -270,6 +296,21 @@ export async function POST(req: NextRequest) {
   }
 
   const moved: { id: string; from: string; opponent: string }[] = [];
+
+  // LES TEXTES LIBRES DE LA LIGUE PASSENT PAR LA MÊME PORTE QUE LA SAISIE HUMAINE.
+  //
+  // `venue` et `venueAddress` étaient écrits bruts, alors que le `PATCH` les borne à 80 et 200
+  // caractères : le chemin AUTOMATIQUE — celui que personne ne relit — était le moins prudent
+  // des deux, et l'adresse repartait entière dans le corps du rappel de la veille. `round` est
+  // borné ailleurs, à la source (cf. `MAX_ROUND`, lib/squashnet/calendar.ts) : il sert aussi de
+  // clé d'ancrage, et le couper ici ferait diverger la clé stockée de celle que l'import
+  // recalcule au passage suivant.
+  const borne = (v: string | null, max: number): string | null => {
+    const r = parseOptionalText(v, max);
+    // `v` est déjà `string | null`, donc la branche « mal typé » est inatteignable ici ; on la
+    // traite quand même plutôt que de l'écarter par une assertion.
+    return r.ok ? r.value : null;
+  };
 
   for (const tie of diff.toCreate) {
     // Une rencontre importée naît avec ses simples « à désigner », exactement comme une
@@ -293,8 +334,8 @@ export async function POST(req: NextRequest) {
           teamId: team.id,
           opponent: tie.opponent,
           home: tie.home,
-          venue: tie.venue,
-          venueAddress: tie.venueAddress,
+          venue: borne(tie.venue, MAX_VENUE_LEN),
+          venueAddress: borne(tie.venueAddress, MAX_VENUE_ADDRESS_LEN),
           round: tie.round,
           dateConfirmed: tie.dateConfirmed,
           // LA SAISON, DÉDUITE DE LA DATE. L'import ne la posait pas, et le filtre par saison
@@ -338,11 +379,18 @@ export async function POST(req: NextRequest) {
         where: { id: u.id },
         data: {
           ...(gele ? {} : { date: u.tie.date }),
+          // LA SAISON SUIT LA DATE, sinon elle ment dès le premier report. Elle n'était posée
+          // qu'à la CRÉATION : J01 importée le 28 juillet gardait « 2025/2026 » après un report
+          // au 10 septembre, et le filtre par saison des statistiques — nourri d'un
+          // `DISTINCT season` — rangeait la rencontre dans la saison précédente. Sans erreur et
+          // sans message, exactement le symptôme que poser `season` à l'import devait clore.
+          // Déduite de la date (bascule au 1er août, cf. `seasonOf`), donc recalculée avec elle.
+          ...(dateChanged ? { season: seasonOf(u.tie.date) || null } : {}),
           time: u.tie.time,
           home: u.tie.home,
           opponent: u.tie.opponent,
-          venue: u.tie.venue,
-          venueAddress: u.tie.venueAddress,
+          venue: borne(u.tie.venue, MAX_VENUE_LEN),
+          venueAddress: borne(u.tie.venueAddress, MAX_VENUE_ADDRESS_LEN),
           // `dateConfirmed` N'EST PAS RÉÉCRIT. Il l'était sans condition, et le gel des
           // rencontres commencées ne protégeait que `date` : la ligue programmait deux journées
           // le même soir, l'admin corrigeait les deux à la main pour rouvrir l'appel, puis le
@@ -356,11 +404,32 @@ export async function POST(req: NextRequest) {
     if (dateChanged && known) moved.push({ id: u.id, from: known.date, opponent: u.tie.opponent });
   }
 
-  // L'empreinte n'est enregistrée QU'APRÈS application : la poser dès la lecture ferait taire
-  // le contrôle hebdomadaire sur un écart que personne n'a encore appliqué.
+  // L'EMPREINTE NE SE POSE QUE SUR UN ÉCART ENTIÈREMENT RÉSOLU.
+  //
+  // Elle n'était enregistrée qu'après application, ce qui est nécessaire mais pas suffisant :
+  // elle l'était SANS CONDITION, y compris quand l'application venait de ne rien écrire. Or
+  // trois choses ne s'appliquent jamais ici, à dessein — le statut de date (`confirmDrift`,
+  // corrigé à la main), la journée retirée (`toDelete`, jamais supprimée d'office) et la
+  // rencontre déjà commencée (`frozen`, dont la date ne bouge plus). Poser l'empreinte du
+  // calendrier PUBLIÉ par-dessus revenait à déclarer résolu ce qu'on venait de refuser de
+  // résoudre, et le cron sort sur l'égalité d'empreinte AVANT de reconstruire le moindre écart.
+  //
+  // Ce que cela coûtait, mesuré sur le chemin nominal : J03 stockée « prévisionnelle », la ligue
+  // la publie ferme, l'alerte du lundi le dit, l'admin clique « Appliquer » — rien n'est écrit,
+  // l'empreinte absorbe le statut publié, et plus jamais un lundi ne le resignale. `dateConfirmed`
+  // reste `false`, le cron quotidien filtre là-dessus, et l'équipe n'est jamais convoquée pour une
+  // rencontre bien réelle. Même mécanique pour une journée retirée, qu'on continuait à convoquer.
+  //
+  // `snCheckedAt` est posée dans tous les cas : elle répond à l'autre question — « on a regardé »
+  // —, et un écart qui subsiste ne veut pas dire qu'on n'a pas regardé.
+  const resteUnEcart =
+    diff.confirmDrift.length > 0 || diff.toDelete.length > 0 || frozen.length > 0;
   await prisma.interclubTeam.update({
     where: { id: team.id },
-    data: { snCalendarHash: calendarFingerprint(published), snCheckedAt: new Date() },
+    data: {
+      ...(resteUnEcart ? {} : { snCalendarHash: calendarFingerprint(published) }),
+      snCheckedAt: new Date(),
+    },
   });
 
   interclubChanged();
@@ -386,5 +455,9 @@ export async function POST(req: NextRequest) {
     // réponses, et « plus rien n'est publié » peut n'être qu'un scraping qui a cassé.
     vanished: diff.toDelete.length,
     frozen: frozen.map((u) => u.tie.round),
+    // CE QUI RESTE À LA MAIN, DIT À L'APPELANT. Tant que ce drapeau est vrai, l'empreinte n'a pas
+    // été posée et le contrôle du lundi continuera de signaler l'écart — ce qui est le
+    // comportement voulu, mais qui se comprend mieux quand la réponse le dit.
+    pending: resteUnEcart,
   });
 }

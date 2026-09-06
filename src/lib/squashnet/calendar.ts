@@ -110,6 +110,24 @@ function stripTags(s: string): string {
 }
 
 /**
+ * Longueur maximale d'une journée, BORNÉE ICI ET NULLE PART AILLEURS.
+ *
+ * Le chemin humain (`PATCH /api/interclub/{id}`) borne `round` à huit caractères ; l'import
+ * écrivait ce que la ligue publiait, sans limite — l'automatique moins prudent que l'humain,
+ * l'asymétrie que ce module dit ailleurs avoir corrigée. « Journée01 » en fait neuf.
+ *
+ * ⚠️ LA COUPE SE FAIT À LA SOURCE, et c'est la seule place possible. `round` sert à TROIS
+ * choses — la colonne, le rapprochement (`matchKey`), l'affichage —, et les couper à des
+ * endroits différents ferait diverger la clé stockée de celle que le rapprochement recalcule :
+ * chaque import créerait un doublon, et le contrôle hebdomadaire annoncerait « retirée du
+ * calendrier » une journée qui est là. Coupée ici, la valeur est la même pour les trois.
+ *
+ * Le chiffre double `MAX_ROUND_LEN` (`lib/interclub-db.ts`) à dessein : ce module ne connaît
+ * pas Prisma et ne doit pas l'apprendre pour une constante.
+ */
+const MAX_ROUND = 8;
+
+/**
  * « J1 - mardi 28 avril 2026 » → `{ round: "J1", date: "2026-04-28" }`.
  *
  * Le jour de la semaine est LU ET JETÉ : il est redondant avec la date, et s'en servir
@@ -128,7 +146,7 @@ export function parseDayHeading(text: string): { round: string; date: string } |
   const [, round, day, monthWord, year] = m;
   const month = MONTHS[monthWord.toLowerCase()];
   if (!month) return null;
-  return { round, date: `${year}-${month}-${day.padStart(2, "0")}` };
+  return { round: round.slice(0, MAX_ROUND), date: `${year}-${month}-${day.padStart(2, "0")}` };
 }
 
 // --- Lecture des classes : UNE SEULE POLITIQUE, tolérante ------------------
@@ -364,9 +382,9 @@ export async function fetchTeamCalendar(
   // « LA POULE EST VIDE » ET « ON NE SAIT PLUS LIRE » ÉTAIENT INDISCERNABLES, et c'est le
   // second qui coûte cher : zéro rencontre fait classer TOUT le calendrier en « retirée » et
   // annoncer « J01…J05 retirée du calendrier » sur un calendrier intact. Quand le fragment
-  // montre des journées datables mais qu'on n'en tire aucune rencontre, ce n'est pas un
+  // montre la STRUCTURE d'un calendrier mais qu'on n'en tire aucune rencontre, ce n'est pas un
   // calendrier vide — c'est notre lecture qui est périmée, et cela se dit.
-  if (ties.length === 0 && dayHeadings(html) > 0) {
+  if (ties.length === 0 && looksLikeCalendar(html)) {
     throw new CalendarUnreadableError(
       "Le calendrier a été reçu mais n'a pas pu être lu : le rendu de squashnet a changé.",
     );
@@ -374,7 +392,34 @@ export async function fetchTeamCalendar(
   return ties;
 }
 
-/** Le fragment est-il un calendrier ? Compté sur les en-têtes de journée réellement datables. */
+/**
+ * Le fragment est-il un calendrier ? Sur PLUSIEURS marqueurs de structure, jamais un seul.
+ *
+ * ⚠️ IL NE COMPTAIT QUE LES `<h2>` DÉJÀ DATABLES, et c'était un angle mort de la taille du
+ * garde lui-même : quand la casse touche l'EN-TÊTE, « en-têtes datables » et « rencontres lues »
+ * tombent à zéro ENSEMBLE, donc rien n'est jeté. Mesuré en rejouant `parseDayHeading` telle
+ * quelle, chacune de ces formes rend `null` : « J01 – mardi 28 avril 2026 » (tiret
+ * demi-cadratin), « J01 - mardi 28 avr. 2026 » (mois abrégé), « Journée 1 - mardi 28 avril
+ * 2026 » (libellé à espace), un suffixe « (reportée) » ; et un `<h3>` à la place du `<h2>`
+ * échappe au comptage sans même être lu. Le fragment ressortait alors « vide », les cinq
+ * journées stockées étaient annoncées « retirées du calendrier », et l'aperçu d'admin offrait
+ * un « Supprimer définitivement » par ligne — sur un calendrier intact. C'est exactement la
+ * confusion que ce garde existe pour éliminer, laissée entière au seul endroit d'où elle vient.
+ *
+ * On interroge donc les marqueurs que le parsing traverse AVANT et APRÈS le titre — le bloc de
+ * journée, la rencontre, son bloc de joueurs — plus l'en-tête datable. Il faut qu'ils
+ * disparaissent TOUS pour qu'on se taise, et à ce compte-là le fragment est vraiment vide.
+ */
+function looksLikeCalendar(html: string): boolean {
+  return (
+    splitOn(html, "div", "b-day").length > 0 ||
+    splitOn(html, "div", "match").length > 0 ||
+    classHtml(html, "players") !== "" ||
+    dayHeadings(html) > 0
+  );
+}
+
+/** Les en-têtes de journée réellement datables — un marqueur parmi d'autres, plus le seul. */
 function dayHeadings(html: string): number {
   return [...html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/g)].filter((m) => parseDayHeading(m[1]))
     .length;
@@ -548,12 +593,16 @@ export function describeDiff(diff: CalendarDiff): string[] {
  * Empreinte du calendrier publié pour une équipe.
  *
  * Elle répond à UNE question, et une seule : « est-ce le même calendrier que la dernière fois
- * qu'on a appliqué ? ». Égale ⇒ le contrôle hebdomadaire se tait sans avoir à reconstruire
+ * qu'on a TOUT résolu ? ». Égale ⇒ le contrôle hebdomadaire se tait sans avoir à reconstruire
  * l'écart complet.
  *
- * ⚠️ Elle ne fait PAS taire une alerte déjà émise : le cron ne la réécrit pas, seule
- * l'application le fait. Un écart non appliqué est donc re-signalé chaque semaine, à dessein —
- * un report enterré dans une notification que personne n'a ouverte serait pire qu'une relance.
+ * ⚠️ Elle ne fait PAS taire une alerte déjà émise. Le cron ne la réécrit pas, et l'application
+ * ne la pose que si elle a tout appliqué : ce qu'elle refuse d'écrire par principe — le statut
+ * de date (`confirmDrift`), la journée retirée (`toDelete`), la rencontre commencée — laisse
+ * l'empreinte en place, donc l'alerte revient tant que l'écart subsiste. La poser sur un écart
+ * qu'on vient de refuser de résoudre déclarerait résolu ce qui ne l'est pas, et le silence qui
+ * suivrait serait définitif. Un report enterré dans une notification que personne n'a ouverte
+ * serait pire qu'une relance.
  *
  * Elle ne couvre que ce qui, en changeant, mérite de réveiller quelqu'un — pas l'ordre des
  * lignes, qui n'est pas garanti, ni l'adresse postale du club hôte.

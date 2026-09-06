@@ -460,6 +460,36 @@ describe("fetchTeamCalendar — quand on ne sait plus lire", () => {
     await expect(fetchTeamCalendar("ev1", "r1")).rejects.toBeInstanceOf(CalendarUnreadableError);
   });
 
+  // L'ANGLE MORT AVAIT LA TAILLE DU GARDE. Il ne comptait que les `<h2>` que `parseDayHeading`
+  // savait DÉJÀ dater : quand c'est le TITRE qui change de forme, « en-têtes datables » et
+  // « rencontres lues » tombent à zéro ENSEMBLE, donc rien n'était jeté. Le fragment passait pour
+  // vide, les cinq journées stockées ressortaient « retirées du calendrier », et l'aperçu d'admin
+  // offrait un « Supprimer définitivement » par ligne — sur un calendrier intact. Les quatre
+  // formes ci-dessous ont été mesurées en rejouant `parseDayHeading` telle quelle : toutes rendent
+  // `null`, et aucune n'a rien d'exotique pour un site qui a déjà changé sa typographie en silence.
+  const illisible = () =>
+    expect(fetchTeamCalendar("ev1", "r1")).rejects.toBeInstanceOf(CalendarUnreadableError);
+
+  it("JETTE quand le tiret du titre devient un demi-cadratin", async () => {
+    reseau.html = FRAGMENT.replace(/J(\d) - /g, "J$1 – ");
+    await illisible();
+  });
+
+  it("JETTE quand la journée s'écrit « Journée 1 » et non « J1 »", async () => {
+    reseau.html = FRAGMENT.replace(/>J(\d) - /g, ">Journée $1 - ");
+    await illisible();
+  });
+
+  it("JETTE quand le titre gagne un suffixe « (reportée) »", async () => {
+    reseau.html = FRAGMENT.replace(/(\d{4})<\/h2>/g, "$1 (reportée)</h2>");
+    await illisible();
+  });
+
+  it("JETTE quand l'en-tête passe de h2 à h3", async () => {
+    reseau.html = FRAGMENT.replace(/h2>/g, "h3>");
+    await illisible();
+  });
+
   it("rend une liste vide sans jeter quand il n'y a PAS de journée publiée", async () => {
     // Une poule non encore planifiée est un cas normal : la signaler comme une panne enverrait
     // chercher un bug là où il n'y a qu'une ligue en retard.
