@@ -27,6 +27,7 @@ interface Guest {
   name: string;
 }
 interface Participant {
+  amountCents: number;
   id: string;
   kind: "user" | "guest";
   name: string;
@@ -200,8 +201,9 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
   // séparé de `selected` (membres) car ils vivent dans deux tables distinctes.
   const [selectedGuestIds, setSelectedGuestIds] = useState<Set<string>>(new Set());
   const [guestDraft, setGuestDraft] = useState("");
-  // Répartition : « equal » = à parts égales ; « shares » = pondérée (nb de parts/pers.).
-  const [splitMode, setSplitMode] = useState<"equal" | "shares">("equal");
+  // Equal = parts égales ; shares = pondérée ; existing = centimes enregistrés.
+  const [splitMode, setSplitMode] = useState<"equal" | "shares" | "existing">("equal");
+  const [originalExpense, setOriginalExpense] = useState<ExpenseItem | null>(null);
   const [weights, setWeights] = useState<Record<string, number>>({});
 
   // Formulaire « j'ai remboursé » (rattaché à UN tricount prêt ; le rembourseur
@@ -314,7 +316,8 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
       new Set(e.participants.filter((p) => p.kind === "guest").map((p) => p.id)),
     );
     setGuestDraft("");
-    setSplitMode("equal");
+    setSplitMode("existing");
+    setOriginalExpense(e);
     setWeights(Object.fromEntries([...data.members, ...inconnus].map((m) => [m.id, 1])));
     setEditingId(e.id);
     setExpenseOpen(true);
@@ -393,6 +396,14 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
       toast("err", "Choisis au moins un participant.");
       return;
     }
+    if (splitMode === "existing" && originalExpense && (
+      cents !== originalExpense.amountCents ||
+      selected.size + selectedGuestIds.size !== originalExpense.participants.length ||
+      originalExpense.participants.some((p) => !(p.kind === "user" ? selected : selectedGuestIds).has(p.id))
+    )) {
+      toast("err", "Choisis une nouvelle répartition après avoir modifié le montant ou les participants.");
+      return;
+    }
     const participantIds = [...selected];
     const guestIds = [...selectedGuestIds];
     // En mode « parts », on transmet le poids de chaque participant coché (membre ou
@@ -412,6 +423,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+              preserveSplit: splitMode === "existing",
               label: label.trim(),
               amountCents: cents,
               payerId,
@@ -668,6 +680,10 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
   // Purement indicatif — le serveur reste la source de vérité au moment de l'enregistrement.
   const shareByMember = useMemo(() => {
     const map = new Map<string, number>();
+    if (splitMode === "existing" && originalExpense) {
+      originalExpense.participants.forEach((p) => map.set(p.id, p.amountCents));
+      return map;
+    }
     const previewCents = parseEuros(amount);
     if (previewCents === null || previewCents === 0 || !data) return map;
     const memberIds = formMembers.filter((m) => selected.has(m.id)).map((m) => m.id);
@@ -680,7 +696,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
         : splitEqually(previewCents, selectedIds.length);
     selectedIds.forEach((id, i) => map.set(id, parts[i]));
     return map;
-  }, [amount, splitMode, weights, data, formMembers, selected, selectedGuestIds, guestsForDate]);
+  }, [amount, splitMode, weights, data, formMembers, selected, selectedGuestIds, guestsForDate, originalExpense]);
 
   if (loading && !data) return <p className="muted">Chargement des frais…</p>;
   if (error) return <div className="notice error" role="alert">⚠️ {error}</div>;
@@ -1043,6 +1059,12 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
               <fieldset className="tri-participants">
                 <legend>Pour qui ? ({selected.size + selectedGuestIds.size})</legend>
                 <div className="tri-splitmode" role="group" aria-label="Mode de répartition">
+                  {editingId && (
+                    <button type="button" className={splitMode === "existing" ? "on" : ""}
+                      aria-pressed={splitMode === "existing"} onClick={() => setSplitMode("existing")}>
+                      Conserver la répartition
+                    </button>
+                  )}
                   <button
                     type="button"
                     className={splitMode === "equal" ? "on" : ""}
@@ -1060,6 +1082,9 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                     Par parts
                   </button>
                 </div>
+                {splitMode === "existing" && (
+                  <p className="muted">Les montants de chacun sont conservés. Si tu changes le montant ou les participants, choisis « Équitable » ou « Par parts ».</p>
+                )}
                 {formMembers.map((m) => {
                   const checked = selected.has(m.id);
                   const share = shareByMember.get(m.id);

@@ -12,7 +12,7 @@ import {
   MAX_PARTS,
 } from "@/lib/tricount";
 import { getFeatures } from "@/lib/features-server";
-import { httpErrorResponse, readJsonBody, serializableTransaction } from "@/lib/http-tx";
+import { HttpError, httpErrorResponse, readJsonBody, serializableTransaction } from "@/lib/http-tx";
 import { blockEmailOnlyExpenseWrite, refuseSiSolde } from "@/lib/tricount-guard";
 
 export const runtime = "nodejs";
@@ -56,7 +56,7 @@ export async function DELETE(
   await prisma.$transaction(async (tx) => {
     await tx.expense.delete({ where: { id } });
     if (!expense.isRefund) {
-      await tx.tricountApproval.deleteMany({ where: { tricountId: expense.tricountId } });
+      await tx.tricountApproval.deleteMany({ where: { tricountId: expense.tricountId, user: { disabledAt: null } } });
     }
     // ⚠️ ON NE COMPTE QUE LES VRAIES DÉPENSES, jamais les remboursements.
     //
@@ -81,7 +81,7 @@ export async function DELETE(
 }
 
 // PATCH /api/tricount/expenses/{id} -> modifie une VRAIE dépense (jamais un
-// remboursement). { label, amountCents, payerId, participantIds, guestIds?, weights? }.
+// remboursement). { label, amountCents, payerId, participantIds, guestIds?, weights?, preserveSplit? }.
 // Même droit que la suppression (celui qui a saisi la ligne ou le payeur). La date
 // (donc le tricount) ne change pas ici. Les parts sont recalculées et les
 // validations « OK pour rembourser » remises à zéro (les montants ont bougé).
@@ -232,6 +232,22 @@ export async function PATCH(
   // un payeur qui n'avait pas vu les nouveaux montants.
   try {
     await serializableTransaction(async (tx) => {
+      // Retouche qui ne touche ni au montant ni aux participants : on REJOUE les centimes
+      // enregistrés, arrondis compris, au lieu de rendre une répartition à parts égales que
+      // personne n'a demandée.
+      if (body.preserveSplit === true) {
+        const current = await tx.expense.findUnique({
+          where: { id }, select: { amountCents: true, shares: true },
+        });
+        const saved = new Map(current?.shares.map((share) => [
+          share.userId ? userKey(share.userId) : guestKey(share.guestId!), share.amountCents,
+        ]));
+        if (!current || current.amountCents !== amountCents || saved.size !== allKeys.length ||
+            allKeys.some((key) => !saved.has(key))) {
+          throw new HttpError(409, "La répartition a changé : choisis une nouvelle répartition.");
+        }
+        allKeys.forEach((key, i) => { parts[i] = saved.get(key)!; });
+      }
       // Remplace intégralement les parts (participants et montants peuvent changer).
       await tx.expenseShare.deleteMany({ where: { expenseId: id } });
       await tx.expense.update({
@@ -249,8 +265,8 @@ export async function PATCH(
           },
         },
       });
-      // Montants modifiés : chaque payeur devra re-valider avant remboursements.
-      await tx.tricountApproval.deleteMany({ where: { tricountId: existingExpense.tricountId } });
+      // Les payeurs actifs revalident ; la validation automatique des comptes désactivés reste acquise.
+      await tx.tricountApproval.deleteMany({ where: { tricountId: existingExpense.tricountId, user: { disabledAt: null } } });
     }, "Écriture concurrente sur ce tricount, réessaie");
   } catch (e) {
     const res = httpErrorResponse(e);

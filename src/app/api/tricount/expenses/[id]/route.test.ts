@@ -80,6 +80,7 @@ vi.mock("@/lib/db", () => ({
         ? Promise.all(arg)
         : (arg as (tx: unknown) => Promise<unknown>)({
             expense: {
+              findUnique: vi.fn(async () => h.expense),
               delete: h.del,
               count: h.count,
               update: vi.fn(async (a: Record<string, unknown>) => {
@@ -324,7 +325,7 @@ describe("PATCH /api/tricount/expenses/[id] — ce qui est réécrit", () => {
 
   it("remet à zéro les validations du tricount", async () => {
     await PATCH(reqBody(corps), ctx);
-    expect(h.approvalsDeleteMany).toHaveBeenCalledWith({ where: { tricountId: "t1" } });
+    expect(h.approvalsDeleteMany).toHaveBeenCalledWith({ where: { tricountId: "t1", user: { disabledAt: null } } });
   });
 
   it("garde les invités dans `guestId` et les membres dans `userId`", async () => {
@@ -426,5 +427,29 @@ describe("Un tricount soldé", () => {
     h.tricountEtat = { ...SOLDE, approvals: [] };
     h.expense = { tricountId: "t1", isRefund: false, creatorId: "u1", payerId: "u1" };
     expect((await PATCH(reqBody(corps), ctx)).status).toBe(200);
+  });
+});
+
+
+describe("preserving a saved expense split", () => {
+  beforeEach(() => {
+    h.session = resaUser;
+    h.expense = { tricountId: "t1", isRefund: false, creatorId: "u1", payerId: "u1",
+      amountCents: 3000, shares: [part("u1", 2000), part("u2", 1000)] };
+  });
+  it("garde 20/10 après une simple retouche de libellé, participants inversés compris", async () => {
+    const res = await PATCH(reqBody({ ...corps, label: "New label", participantIds: ["u2", "u1"], preserveSplit: true }), ctx);
+    expect(res.status).toBe(200);
+    expect(partsPatchees()).toEqual([["u:u2", 1000], ["u:u1", 2000]]);
+  });
+  it.each([{ amountCents: 4000 }, { participantIds: ["u1", "u3"] }])("exige une nouvelle répartition explicite pour %j", async (change) => {
+    const res = await PATCH(reqBody({ ...corps, participantIds: ["u1", "u2"], ...change, preserveSplit: true }), ctx);
+    expect(res.status).toBe(409);
+    expect(h.sharesDeleted).not.toHaveBeenCalled();
+    expect(h.updated).toBeNull();
+  });
+  it("conserve à la suppression la validation des payeurs désactivés", async () => {
+    expect((await DELETE(req(), ctx)).status).toBe(200);
+    expect(h.approvalsDeleteMany).toHaveBeenCalledWith({ where: { tricountId: "t1", user: { disabledAt: null } } });
   });
 });

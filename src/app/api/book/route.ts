@@ -2,12 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { book, invalidatePlanningCache } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import { isRealDateISO } from "@/lib/time";
 import { isClassEventId } from "@/lib/validation";
 import { resolveActingContext } from "@/lib/delegation";
 import { refreshSnapshotFromResa } from "@/lib/planning-snapshot";
 import { appBlockForUserId, appBlockedResponse } from "@/lib/app-block";
+import { readJsonBody } from "@/lib/http-tx";
 
 export const runtime = "nodejs";
+
+function isSlotTimestamp(value: unknown): value is string {
+  return typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
+    isRealDateISO(value.slice(0, 10)) && Number.isFinite(Date.parse(value));
+}
 
 // POST /api/book { classEventId, courtName, startsAt, endsAt, onBehalfOf? }
 // onBehalfOf (idée 4) : userId du délégant, si on réserve en son nom (délégation active).
@@ -20,9 +28,18 @@ export async function POST(req: NextRequest) {
   const block = await appBlockForUserId(session.userId);
   if (block) return appBlockedResponse(block);
 
-  const { classEventId, courtName, startsAt, endsAt, onBehalfOf } = await req
-    .json()
-    .catch(() => ({}));
+  const { classEventId, courtName, startsAt, endsAt, onBehalfOf } = await readJsonBody(req);
+
+  if (!isClassEventId(classEventId)) {
+    return NextResponse.json({ error: "classEventId invalide" }, { status: 400 });
+  }
+  if (
+    typeof courtName !== "string" || !courtName.trim() || courtName.length > 80 ||
+    !isSlotTimestamp(startsAt) || !isSlotTimestamp(endsAt) ||
+    Date.parse(endsAt) <= Date.parse(startsAt)
+  ) {
+    return NextResponse.json({ error: "Créneau invalide" }, { status: 400 });
+  }
 
   const acting = await resolveActingContext(
     session,
@@ -33,10 +50,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: acting.error }, { status: acting.status });
   }
   const { resa, bookingOwnerId, actingUserId } = acting.ctx;
-
-  if (!isClassEventId(classEventId)) {
-    return NextResponse.json({ error: "classEventId invalide" }, { status: 400 });
-  }
 
   // Blocage « même créneau » : ResaMania interdit de réserver 2 terrains au même horaire.
   // 1) Court-circuit local si on connaît déjà une résa à cet horaire → évite un appel

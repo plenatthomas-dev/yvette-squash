@@ -86,7 +86,7 @@ export async function reconcilePlanningWithBookings(
       where: { userId_classEventId: { userId: bookerUserId, classEventId: s.id } },
       // Rebooking direct sur ResaMania après une annulation faite depuis l'appli : on repasse
       // la ligne existante en "booked", source "resamania" (c'est ResaMania qui fait foi ici).
-      update: { status: "booked", source: "resamania", startsAt: s.startsAt, endsAt: s.endsAt, courtName: s.courtName },
+      update: { status: "booked", source: "resamania", attendeeId: null, actingUserId: null, startsAt: s.startsAt, endsAt: s.endsAt, courtName: s.courtName },
       create: {
         userId: bookerUserId,
         classEventId: s.id,

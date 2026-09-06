@@ -42,7 +42,7 @@ Les seules restrictions protègent quelqu'un d'un **écrasement**, jamais d'un a
 | Un match **tenu** par un marqueur non périmé ne s'écrit pas par-dessus lui | `POST …/claim`, `PUT …/live`, `PATCH …/matches/{mid}` | Deux scores divergents qu'on ne saurait départager |
 | Un match **terminé** ne se réécrit pas par un TIERS via le direct — le marqueur en titre, lui, le peut (il doit pouvoir annuler le point décisif) | `PUT …/live` | Qu'un passant inverse un score final |
 | **Supprimer** une rencontre : créateur et admins | `DELETE …/{id}` | L'irréversible |
-| `knownGameCount` : l'écriture doit se fonder sur le même ÉTAT que la base — même nombre de jeux **et mêmes scores** | `PATCH …/matches/{mid}`, `PUT …/live` (règle unique, `staleGamesReason`) | Un écran ouvert dix minutes plus tôt qui efface ce qui a été joué, ou qui rejoue un score corrigé depuis |
+| `knownGameCount` + `knownGames` : l'écriture doit se fonder sur le même ÉTAT que la base — même nombre de jeux **et mêmes scores**. Ce sont les jeux OUVERTS dans l'écran qu'on compare, jamais ceux qu'on envoie : sans quoi corriger un 11-5 en 11-7 se refuserait lui-même. | `PATCH …/matches/{mid}`, `PUT …/live` (règle unique, `staleGamesReason`) | Un écran ouvert dix minutes plus tôt qui efface ce qui a été joué, ou qui rejoue un score corrigé depuis |
 | Un simple **« à désigner »** ne peut ni commencer le marquage en direct ni recevoir un score saisi a posteriori | `POST …/claim`, `PUT …/live`, `PATCH …/matches/{mid}` (règle unique, `lineupComplete`) | Une notification qui annoncerait le placeholder comme un vrai nom de joueur |
 | Une composition qui romprait l'**ordre des simples** (le mieux classé des joueurs présents doit jouer le simple n° 1 ; à classement égal, le meilleur rang mixte passe devant) est refusée | `POST /api/interclub`, `PATCH …/matches/{mid}` (règle unique, `lineupOrderConflict`) | Une rencontre disputée dans le mauvais ordre, sanctionnable par la fédération |
 
@@ -738,6 +738,14 @@ que `knownGameCount` couvre, et lui seul — sur les **deux** routes d'écriture
 marqueur, et non celui qu'il envoie : un undo reste donc légal, seul un journal bâti sur un état
 que la base a dépassé est refusé (code `stale-games`, sur lequel l'écran de marquage repart du
 score enregistré).
+
+Le formulaire de saisie a posteriori, lui, n'écrit pas la suite d'un journal : il CORRIGE des
+jeux déjà enregistrés. Ce qu'il envoie ne peut donc pas servir de référence — le comparer à la
+base refuserait exactement ce qu'on lui demande, corriger un score. Il joint `knownGames`, le
+score TEL QU'IL L'A OUVERT ; c'est ce cliché que la garde confronte à la base, et l'ancien client
+qui ne l'envoie pas retombe sur la protection par préfixe. Les jeux sont relus `ORDER BY number`
+des deux côtés : la comparaison se fait position par position, et un ordre laissé au hasard
+inventerait des écarts.
 
 ---
 

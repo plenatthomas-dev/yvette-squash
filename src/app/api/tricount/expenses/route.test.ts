@@ -208,7 +208,7 @@ describe("POST /api/tricount/expenses — ce qui est écrit vaut ce qui a été 
     // Les montants changent : chaque payeur doit revalider avant que les remboursements
     // rouvrent. Hors transaction, une dépense pourrait s'ajouter en laissant les validations.
     await POST(req(base));
-    expect(h.approvalsDeleted).toHaveBeenCalledWith({ where: { tricountId: "t1" } });
+    expect(h.approvalsDeleted).toHaveBeenCalledWith({ where: { tricountId: "t1", user: { disabledAt: null } } });
   });
 
   it("dédoublonne les participants", async () => {

@@ -1140,6 +1140,47 @@ describe("la recherche dans le fil", () => {
     await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
   };
 
+  it("garde les messages reçus du courtier pendant le rafraîchissement du corpus", async () => {
+    corpus = { messages: [msg({ id: "old", body: "Raquette ancienne" })] };
+    await ouvrir();
+    taper("raquette");
+    await waitFor(() => expect(affiche(/Raquette ancienne/)).toBe(true));
+    const originalFetch = fetch;
+    let release!: (value: Response) => void;
+    const pending = new Promise<Response>((resolve) => { release = resolve; });
+    let refreshing = false;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/recherche")) { refreshing = true; return pending; }
+      return originalFetch(input, init);
+    }));
+    act(() => swListeners.forEach((cb) => cb({ data: { type: "push-received", tag: "forum" } } as MessageEvent)));
+    await waitFor(() => expect(refreshing).toBe(true));
+    act(() => {
+      canal.handlers.get("message")?.(msg({ id: "new", body: "Raquette neuve" }));
+      canal.handlers.get("deleted")?.({ id: "old" });
+    });
+    await act(async () => release({ ok: true, status: 200, json: async () => corpus } as Response));
+    expect(affiche(/Raquette neuve/)).toBe(true);
+    expect(affiche(/Raquette ancienne/)).toBe(false);
+  });
+
+  it("rafraîchit le corpus au rattrapage, quand le courtier a manqué messages et suppressions", async () => {
+    vi.stubEnv("NEXT_PUBLIC_PUSHER_KEY", "");
+    corpus = { messages: [msg({ id: "old", body: "Raquette ancienne" })] };
+    await ouvrir();
+    taper("raquette");
+    await waitFor(() => expect(affiche(/Raquette ancienne/)).toBe(true));
+    const fresh = msg({ id: "new", body: "Raquette neuve", createdAt: "2026-09-04T18:00:00.000Z" });
+    page = { ...page, messages: [msg(), fresh] };
+    corpus = { messages: [msg(), fresh] };
+    act(() => {
+      swListeners.forEach((cb) => cb({ data: { type: "push-received", tag: "forum" } } as MessageEvent));
+    });
+    await waitFor(() => expect(affiche(/Raquette neuve/)).toBe(true));
+    expect(affiche(/Raquette ancienne/)).toBe(false);
+    expect(appels.filter((a) => a.includes("/recherche"))).toHaveLength(2);
+  });
+
   // Le fil s'ouvre bien plus souvent qu'on n'y cherche : le corpus entier ne doit pas partir
   // avec lui. Chaque requête évitée est un réveil de Neon évité (PRODUCT.md).
   it("ne demande RIEN tant que personne ne cherche", async () => {

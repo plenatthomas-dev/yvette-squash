@@ -3,7 +3,7 @@ import { prisma } from "./db";
 import { encrypt, decrypt } from "./crypto";
 import { ensureFresh } from "./resamania/client";
 import type { ResaIdentity, ResaSession } from "./resamania/types";
-import type { User } from "@prisma/client";
+import type { User, Prisma } from "@prisma/client";
 
 const SESSION_DAYS = 30;
 
@@ -130,13 +130,13 @@ export async function createSession(resa: ResaSession): Promise<string> {
 }
 
 /** Crée une session « email seul » (aucun jeton ResaMania). Renvoie l'id de cookie. */
-export async function createEmailSession(userId: string): Promise<string> {
-  await prisma.session.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+export async function createEmailSession(userId: string, tx: Prisma.TransactionClient = prisma): Promise<string> {
+  await tx.session.deleteMany({ where: { expiresAt: { lt: new Date() } } });
   // Trace la dernière connexion (le refus des comptes désactivés est fait en amont, dans la
   // route de login email qui a déjà chargé le User).
-  await prisma.user.update({ where: { id: userId }, data: { lastLoginAt: new Date() } });
+  await tx.user.update({ where: { id: userId }, data: { lastLoginAt: new Date() } });
   const id = randomBytes(24).toString("base64url");
-  await prisma.session.create({
+  await tx.session.create({
     data: {
       id,
       userId,
@@ -203,16 +203,16 @@ export interface AppSession {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-// Fenêtre de « réclamation » d'un refresh : pendant ce laps, les requêtes concurrentes
-// considèrent le token encore bon — et il l'est réellement, grâce à la marge de 60 s
-// prise sur expires_in à l'émission (cf. exchangeToken).
-const REFRESH_CLAIM_MS = 20_000;
+// Le verrou ne modifie jamais la véritable expiration du jeton.
+const REFRESH_CLAIM_MS = 60_000;
+const REFRESH_WAIT_MS = 20_000;
 
 type SessionTokenFields = {
   id: string;
   accessToken: string | null;
   refreshTokenEnc: string | null;
   tokenExpiresAt: Date | null;
+  refreshClaimedAt?: Date | null;
   identityJson: string | null;
 };
 
@@ -250,49 +250,55 @@ async function resolveResaToken(s: SessionTokenFields): Promise<ResaSession | nu
 
   if (resa.expiresAt > Date.now()) return resa;
 
-  // Token (presque) expiré → refresh SÉRIALISÉ entre requêtes concurrentes (la vue
-  // Semaine tire 7 /api/planning en parallèle). updateMany atomique : une seule requête
-  // « gagne » et rafraîchit, les autres relisent son résultat.
-  const claimed = await prisma.session.updateMany({
-    where: { id: s.id, tokenExpiresAt: { lte: new Date() } },
-    data: { tokenExpiresAt: new Date(Date.now() + REFRESH_CLAIM_MS) },
-  });
-
-  if (claimed.count === 1) {
+  const deadline = Date.now() + REFRESH_WAIT_MS;
+  while (true) {
+    const claimedAt = new Date();
+    const claimed = await prisma.session.updateMany({
+      where: {
+        id: s.id,
+        tokenExpiresAt: { lte: claimedAt },
+        OR: [
+          { refreshClaimedAt: null },
+          { refreshClaimedAt: { lt: new Date(Date.now() - REFRESH_CLAIM_MS) } },
+        ],
+      },
+      data: { refreshClaimedAt: claimedAt },
+    });
+    if (claimed.count === 1) {
+      try {
+        const fresh = await ensureFresh(resa);
+        resa = { ...fresh, identity: resa.identity };
+        const saved = await prisma.session.updateMany({
+          where: { id: s.id, refreshClaimedAt: claimedAt },
+          data: {
+            accessToken: encrypt(resa.accessToken),
+            refreshTokenEnc: encrypt(resa.refreshToken),
+            tokenExpiresAt: new Date(resa.expiresAt),
+            refreshClaimedAt: null,
+          },
+        });
+        return saved.count === 1 ? resa : null;
+      } catch {
+        await prisma.session.deleteMany({ where: { id: s.id, refreshClaimedAt: claimedAt } });
+        return null;
+      }
+    }
+    // Une attente épuisée est transitoire : on garde la session et son verrou.
+    if (Date.now() >= deadline) throw new Error("Rafraîchissement ResaMania en cours — réessaie.");
+    await sleep(250);
+    const latest = await prisma.session.findUnique({ where: { id: s.id } });
+    if (!latest?.accessToken || !latest.refreshTokenEnc || !latest.tokenExpiresAt) return null;
     try {
-      const fresh = await ensureFresh(resa);
-      resa = { ...fresh, identity: resa.identity };
-      await prisma.session.update({
-        where: { id: s.id },
-        data: {
-          accessToken: encrypt(resa.accessToken),
-          refreshTokenEnc: encrypt(resa.refreshToken),
-          tokenExpiresAt: new Date(resa.expiresAt),
-        },
-      });
-      return resa;
+      resa = {
+        accessToken: decrypt(latest.accessToken),
+        refreshToken: decrypt(latest.refreshTokenEnc),
+        expiresAt: latest.tokenExpiresAt.getTime(),
+        identity: resa.identity,
+      };
     } catch {
-      // refresh impossible (token révoqué…) -> session invalide, reconnexion forcée
-      await prisma.session.delete({ where: { id: s.id } }).catch(() => {});
       return null;
     }
-  }
-
-  // Une autre requête détient le refresh : on lui laisse le temps d'écrire, puis on relit.
-  await sleep(600);
-  const s2 = await prisma.session.findUnique({ where: { id: s.id } });
-  if (!s2 || !s2.accessToken || !s2.refreshTokenEnc || !s2.tokenExpiresAt) return null;
-  try {
-    // Si le gagnant n'a pas encore fini d'écrire, on repart avec l'ancien access token :
-    // il reste réellement valide ~60 s (marge), assez pour cette requête.
-    return {
-      accessToken: decrypt(s2.accessToken),
-      refreshToken: decrypt(s2.refreshTokenEnc),
-      expiresAt: s2.tokenExpiresAt.getTime(),
-      identity: resa.identity,
-    };
-  } catch {
-    return null;
+    if (resa.expiresAt > Date.now()) return resa;
   }
 }
 
@@ -317,11 +323,11 @@ export async function getLiveSessionUserId(sid: string | undefined): Promise<str
   const [s] = await Promise.all([
     prisma.session.findUnique({
       where: { id: sid },
-      select: { userId: true, expiresAt: true },
+      select: { userId: true, expiresAt: true, user: { select: { disabledAt: true } } },
     }),
     touchLastSeen(sid, now).catch(() => {}),
   ]);
-  return s && s.expiresAt > now ? s.userId : null;
+  return s && s.expiresAt > now && !s.user?.disabledAt ? s.userId : null;
 }
 
 const LAST_SEEN_THROTTLE_MS = 3_600_000; // 1 h
@@ -353,7 +359,7 @@ export async function getSession(sid: string | undefined): Promise<AppSession | 
   if (!sid) return null;
   const s = await prisma.session.findUnique({ where: { id: sid }, include: { user: true } });
   if (!s) return null;
-  if (s.expiresAt < new Date()) {
+  if (s.expiresAt <= new Date() || s.user.disabledAt) {
     await prisma.session.delete({ where: { id: sid } }).catch(() => {});
     return null;
   }

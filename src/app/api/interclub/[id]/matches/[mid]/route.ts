@@ -59,7 +59,7 @@ export async function PATCH(
   const { id, mid } = await params;
 
   const body = await readJsonBody(req);
-  const { homeUserId, homeGuestId, awayName, homeColor, awayColor, games, knownGameCount } =
+  const { homeUserId, homeGuestId, awayName, homeColor, awayColor, games, knownGameCount, knownGames } =
     body as {
       homeUserId?: unknown;
       homeGuestId?: unknown;
@@ -68,7 +68,13 @@ export async function PATCH(
       awayColor?: unknown;
       games?: unknown;
       knownGameCount?: unknown;
+      knownGames?: GameScore[];
     };
+
+  if (knownGames !== undefined && (!Array.isArray(knownGames) || knownGames.length !== knownGameCount ||
+    knownGames.some((g) => !g || !Number.isInteger(g.home) || !Number.isInteger(g.away) || g.home < 0 || g.away < 0))) {
+    return NextResponse.json({ error: "knownGames invalide" }, { status: 400 });
+  }
 
   if (!isColorValue(homeColor) || !isColorValue(awayColor)) {
     return NextResponse.json({ error: "Couleur inconnue" }, { status: 400 });
@@ -139,7 +145,7 @@ export async function PATCH(
           // Les POINTS, et pas seulement le nombre : la garde de fraîcheur compare désormais
           // le score des jeux déjà confirmés, un même nombre ne prouvant pas qu'on parle des
           // mêmes jeux (cf. `staleGamesReason`).
-          games: { select: { number: true, pointsHome: true, pointsAway: true } },
+          games: { orderBy: { number: "asc" }, select: { number: true, pointsHome: true, pointsAway: true } },
           interclub: {
             select: {
               id: true,
@@ -204,13 +210,11 @@ export async function PATCH(
         if (knownGameCount !== undefined && (!Number.isInteger(knownGameCount) || (knownGameCount as number) < 0)) {
           throw new HttpError(400, "knownGameCount invalide");
         }
-        // MÊME RÈGLE QUE LA ROUTE SŒUR, et c'est maintenant littéralement le même code.
-        //
-        // Elle ne l'était pas : ici tout était conditionné à la PRÉSENCE du champ, si bien
-        // qu'un `{ games: [] }` sans rien annoncer effaçait les jeux d'un simple et le
-        // ramenait à `pending`. `docs/interclub.md` affirmait pourtant que la garde couvrait
-        // les DEUX routes d'écriture.
-        const perime = staleGamesReason(knownGameCount as number | undefined, m.games, parsedGames);
+        // Une CORRECTION se compare au cliché OUVERT par l'écran (`knownGames`), jamais à ce
+        // qu'elle envoie : sinon corriger un 11-5 en 11-7 se refuserait tout seul. Les clients
+        // anciens, qui ne joignent pas ce cliché, et le marquage en direct — qui prolonge un
+        // journal au lieu de le corriger — gardent la protection par préfixe.
+        const perime = staleGamesReason(knownGameCount as number | undefined, m.games, knownGames ?? parsedGames);
         if (perime) throw new HttpError(409, perime, "stale-games");
       }
 

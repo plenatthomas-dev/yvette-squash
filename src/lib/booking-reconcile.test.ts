@@ -163,3 +163,11 @@ describe("reconcilePlanningWithBookings — coût sur une base Neon qui dort", (
     expect(h.upsert).not.toHaveBeenCalled(); // flag OFF → on s'arrête là
   });
 });
+
+it("oublie l'ancien attendee en restaurant une résa refaite sur ResaMania", async () => {
+  h.externalBookings = true;
+  await reconcilePlanningWithBookings(planning([slot()]), "2026-07-11");
+  expect(h.upsert).toHaveBeenCalledWith(expect.objectContaining({
+    update: expect.objectContaining({ attendeeId: null, actingUserId: null, status: "booked" }),
+  }));
+});
