@@ -5714,6 +5714,17 @@ body[data-bottombar] .install-banner {
 .ic-cal-list li + li {
   margin-top: 3px;
 }
+/* Le geste de suppression d'une journée retirée, POSÉ SUR SA LIGNE. Il vivait ailleurs — il
+   fallait aller retrouver la rencontre dans l'écran des membres —, et une consigne qu'on lit
+   ici pour l'exécuter là-bas ne s'exécute pas. En ligne avec le texte, à la taille du texte :
+   c'est une conséquence de ce qui est écrit, pas une action de la page. */
+.ic-cal-del {
+  width: auto;
+  margin: 0;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  vertical-align: baseline;
+}
 .ic-cal-list .ic-provisoire-tag {
   margin-left: 6px;
 }

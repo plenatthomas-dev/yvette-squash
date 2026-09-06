@@ -39,6 +39,29 @@ export const MAX_VENUE_ADDRESS_LEN = 200;
 export const MAX_ROUND_LEN = 8;
 
 /**
+ * La SAISON d'une date : « 2026/2027 ».
+ *
+ * L'import fédéral ne posait pas ce champ, et personne ne s'en apercevait : le filtre par
+ * saison des statistiques se nourrit de `SELECT DISTINCT season`, si bien qu'à mesure que
+ * l'import remplaçait la saisie à la main, il se vidait — sans erreur, sans message, en
+ * proposant simplement de moins en moins de choix.
+ *
+ * BASCULE AU 1er AOÛT, et non au 1er janvier ni au 1er septembre. Une saison fédérale
+ * s'ouvre en septembre ; une rencontre de préparation jouée en août appartient à celle qui
+ * commence, pas à celle qui vient de finir. Juillet, lui, ne se joue pas — le club est fermé —
+ * et la borne y est donc sans conséquence, ce qui en fait le bon endroit où la poser.
+ *
+ * Une DÉDUCTION, jamais un écrasement : elle sert à la CRÉATION d'une rencontre importée. Une
+ * saison saisie à la main reste telle quelle, comme partout ailleurs dans ce module.
+ */
+export function seasonOf(dateISO: string): string {
+  const [y, m] = dateISO.split("-").map(Number);
+  if (!y || !m || m > 12) return "";
+  const debut = m >= 8 ? y : y - 1;
+  return `${debut}/${debut + 1}`;
+}
+
+/**
  * Heure de début, « HH:MM ». Chaîne vide ⇒ null (« on ne sait pas encore »), ce qui est un cas
  * NORMAL : une rencontre s'inscrit souvent avant que la ligue ait publié les horaires.
  *
