@@ -6200,16 +6200,22 @@ body[data-bottombar] .install-banner {
 }
 /* PAS DE SÉLECTION DE TEXTE LÀ OÙ L'APPUI LONG EST UN GESTE.
  *
- * Le composant effaçait la sélection en JavaScript au moment d'ouvrir la pop-up
- * (`removeAllRanges`), en pariant sur ses 450 ms d'avance sur le seuil du système. Le pari est
- * perdu sur iOS : WebKit pose ses poignées bleues et sa barre « Partager / Modifier » AVANT
- * que la pop-up ne s'ouvre, et les repose derrière — on voyait donc les deux en même temps, la
- * sélection par-dessus les emoji.
+ * CONSTATÉ SUR ANDROID (Chrome / Blink), en recette : l'appui long ouvrait bien la pop-up
+ * d'emoji, mais le navigateur sélectionnait le mot en même temps — poignées bleues autour de
+ * la bulle et de ses pastilles, plus la barre flottante d'Android (partager / modifier /
+ * « Appuyer pour afficher les résultats de recherche ») posée par-dessus les emoji. Deux
+ * gestes répondaient à un seul appui.
  *
- * La seule chose qui les empêche est de refuser la sélection EN AMONT. Le préfixe `-webkit-`
- * est indispensable et n'est pas décoratif : c'est WebKit qui pose ces poignées, et c'est la
- * propriété préfixée qu'il lit. `-webkit-touch-callout` supprime en plus la bulle d'options
- * (« Copier / Rechercher ») qui recouvrait la pop-up.
+ * Le composant effaçait pourtant la sélection en JavaScript à l'ouverture (`removeAllRanges`),
+ * en pariant sur ses 450 ms d'avance. Le pari ne pouvait pas être gagné : Blink commence sa
+ * sélection AVANT ce délai, et la rétablit derrière notre effacement. Aucun réglage de durée
+ * n'y change rien — c'est en amont qu'il faut refuser.
+ *
+ * `user-select: none` est ce qui agit ici. Le préfixe `-webkit-` l'accompagne pour les moteurs
+ * qui ne lisent que lui, et `-webkit-touch-callout` est là POUR IOS uniquement, où il supprime
+ * la bulle « Copier / Rechercher » qui recouvrirait la pop-up de la même façon ; il est inerte
+ * sur Blink, qui ne l'implémente pas. Les trois lignes traitent donc le même symptôme sur deux
+ * moteurs.
  *
  * ⚠️ Sous `(pointer: coarse)` UNIQUEMENT. Au doigt, l'appui long veut dire « réagir » — il ne
  * peut pas vouloir dire deux choses à la fois. À la souris il ne veut rien dire (le composant
