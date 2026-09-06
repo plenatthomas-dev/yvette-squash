@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { getFeatures } from "@/lib/features-server";
-import { readJsonBody } from "@/lib/http-tx";
+import { readJsonBody, isUniqueViolation, isMissingRecord } from "@/lib/http-tx";
 import { isForumReaction } from "@/lib/forum";
 import { broadcastForum, FORUM_EVENT_REACTION } from "@/lib/forum-realtime";
 
@@ -53,18 +53,34 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Trop de réactions d'un coup." }, { status: 429 });
   }
 
-  // La bascule s'appuie sur l'index unique (message, membre, emoji) : deux clics qui se
-  // croisent ne peuvent pas créer deux lignes, c'est la base qui tient l'invariant.
+  // La bascule s'appuie sur l'index unique (message, membre, emoji) : deux clics qui se croisent
+  // ne peuvent pas créer deux lignes. Mais la base ne tient pas cet invariant EN SILENCE — elle
+  // JETTE, et c'était là le défaut : la première version lisait puis écrivait sans rien
+  // rattraper. Deux clics à 200 ms d'intervalle, ou deux appareils, et les deux `findUnique`
+  // rendaient `null` avant que le premier `create` n'ait été validé ; le second violait
+  // l'unicité, la route rendait 500, et l'écran rembobinait son affichage optimiste vers « pas
+  // de réaction » ALORS QUE LA BASE EN AVAIT UNE. Le mensonge durait jusqu'au rechargement.
+  //
+  // P2002 (déjà là) et P2025 (déjà partie) sont donc traités comme des SUCCÈS : dans les deux
+  // cas la base est exactement dans l'état que le clic demandait. C'est le cas pour lequel
+  // `isUniqueViolation` a été écrit — « deux clics sur Appliquer ne sont pas une faute ».
   const existante = await prisma.forumReaction.findUnique({
     where: { messageId_userId_emoji: { messageId, userId: session.userId, emoji } },
     select: { id: true },
   });
-  if (existante) {
-    await prisma.forumReaction.delete({ where: { id: existante.id } });
-  } else {
-    await prisma.forumReaction.create({ data: { messageId, userId: session.userId, emoji } });
-  }
   const on = !existante;
+  try {
+    if (existante) {
+      await prisma.forumReaction.delete({ where: { id: existante.id } });
+    } else {
+      await prisma.forumReaction.create({ data: { messageId, userId: session.userId, emoji } });
+    }
+  } catch (e) {
+    if (!isUniqueViolation(e) && !isMissingRecord(e)) throw e;
+    // Une course perdue ne change pas ce qu'on rend : l'état visé est atteint, et le delta
+    // diffusé ci-dessous le décrit toujours correctement — poser une réaction déjà posée, ou
+    // retirer une réaction déjà retirée, est idempotent chez tous les clients.
+  }
 
   const moi = await prisma.user.findUnique({
     where: { id: session.userId },

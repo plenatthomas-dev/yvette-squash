@@ -22,7 +22,13 @@ const h = vi.hoisted(() => ({
   /** Le `data` passé à `forumPoll.create` : c'est là qu'on lit les options. */
   poll: null as null | Record<string, unknown>,
   pushed: null as null | [string[], Record<string, unknown>],
+  /** Le troisième argument de `pushToUsers` : ce que la cloche GARDE, distinct de ce qu'on pousse. */
+  pushOpts: null as null | Record<string, unknown>,
   diffuse: null as null | [string, Record<string, unknown>],
+  /** TOUS les événements diffusés, dans l'ordre : la route en émet deux. */
+  diffuses: [] as Array<[string, Record<string, unknown>]>,
+  /** Le `where` du dernier `count` : c'est lui qui borne la limite à UN membre. */
+  countWhere: null as null | Record<string, unknown>,
 }));
 
 vi.mock("@/lib/session", async (importOriginal) => ({
@@ -31,15 +37,19 @@ vi.mock("@/lib/session", async (importOriginal) => ({
 }));
 vi.mock("@/lib/features-server", () => ({ getFeatures: async () => ({ forum: h.forumOn }) }));
 vi.mock("@/lib/push", () => ({
-  pushToUsers: vi.fn(async (ids: string[], payload: Record<string, unknown>) => {
-    h.pushed = [ids, payload];
-    return { recipients: ids.length, sent: ids.length };
-  }),
+  pushToUsers: vi.fn(
+    async (ids: string[], payload: Record<string, unknown>, opts?: Record<string, unknown>) => {
+      h.pushed = [ids, payload];
+      h.pushOpts = opts ?? null;
+      return { recipients: ids.length, sent: ids.length };
+    },
+  ),
 }));
 vi.mock("@/lib/forum-realtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/forum-realtime")>()),
   broadcastForum: vi.fn(async (event: string, payload: Record<string, unknown>) => {
     h.diffuse = [event, payload];
+    h.diffuses.push([event, payload]);
   }),
 }));
 
@@ -53,9 +63,8 @@ const tx = {
         authorId: args.data.authorId,
         createdAt: new Date("2026-09-05T18:42:00Z"),
         replyToId: null,
-        replyToAuthor: null,
-        replyToExcerpt: null,
         author: { displayName: "Thomas" },
+        replyTo: null,
       };
     }),
   },
@@ -75,7 +84,14 @@ const tx = {
 
 vi.mock("@/lib/db", () => ({
   prisma: {
-    forumMessage: { count: vi.fn(async () => h.recentCount) },
+    // Le `where` est CAPTURÉ, et non ignoré : le remplacer par `{}` dans la route ferait de la
+    // limite un plafond global au club, sans qu'aucun test de ce fichier ne rougisse.
+    forumMessage: {
+      count: vi.fn(async (args?: { where?: Record<string, unknown> }) => {
+        h.countWhere = args?.where ?? null;
+        return h.recentCount;
+      }),
+    },
     user: { findMany: vi.fn(async () => [{ id: "u2" }, { id: "u3" }]) },
     $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   },
@@ -97,10 +113,13 @@ beforeEach(() => {
   h.forumOn = true;
   h.session = { userId: "u1", displayName: "Thomas", email: "membre@example.com" };
   h.recentCount = 0;
+  h.countWhere = null;
+  h.pushOpts = null;
   h.message = null;
   h.poll = null;
   h.pushed = null;
   h.diffuse = null;
+  h.diffuses = [];
 });
 
 describe("gardes", () => {
@@ -119,6 +138,15 @@ describe("gardes", () => {
     h.recentCount = 30;
     expect((await POST(req())).status).toBe(429);
     expect(h.message).toBeNull();
+  });
+
+  // Ce que ce test empêche : compter les messages DE TOUT LE MONDE. Avec `where: {}`, la
+  // limite deviendrait un plafond de trente par dix minutes POUR LE CLUB ENTIER.
+  it("compte les messages d'UN SEUL membre, sur une fenêtre glissante", async () => {
+    await POST(req());
+    expect(h.countWhere?.authorId).toBe("u1");
+    const gte = (h.countWhere?.createdAt as { gte: Date }).gte;
+    expect(Math.round((Date.now() - gte.getTime()) / 60_000)).toBe(10);
   });
 });
 
@@ -191,10 +219,37 @@ describe("le sondage EST un message", () => {
     expect(h.pushed?.[1].body).toBe("Resto après ?");
   });
 
-  it("diffuse le message ET le sondage ensemble, pour éviter un aller-retour", async () => {
+  // Le push est transitoire ; la ligne `AppNotification` est une copie DURABLE (30 jours) chez
+  // chaque destinataire, que ni la suppression du sondage ni celle du compte de son auteur
+  // n'atteignent. La question n'y est donc pas recopiée.
+  it("ne recopie PAS la question dans le journal de la cloche", async () => {
+    await POST(req("Qui vient chez moi jeudi ?"));
+    const journal = h.pushOpts?.journal as Record<string, unknown> | undefined;
+    expect(journal).toBeTruthy();
+    expect(JSON.stringify(journal)).not.toContain("chez moi");
+    expect(journal?.tag).toBe("forum");
+  });
+
+  // DEUX ÉVÉNEMENTS, ET NON UN MESSAGE ENRICHI. La doctrine du fil est que « la ligne diffusée
+  // est EXACTEMENT celle que le GET renvoie ». Greffer un champ `poll` sur l'événement
+  // `message` obligeait le client à connaître une seconde forme de message, et faisait mentir
+  // le contrat au moment même où il compte — un message reçu en direct doit se comporter comme
+  // le même message après rechargement.
+  it("diffuse le sondage sur SON canal, et le message sans champ en plus", async () => {
     await POST(req("Resto après ?"));
-    expect(h.diffuse?.[0]).toBe("message");
-    expect(h.diffuse?.[1].id).toBe("m-sondage");
-    expect((h.diffuse?.[1].poll as { messageId: string }).messageId).toBe("m-sondage");
+    expect(h.diffuses.map((d) => d[0])).toEqual(["poll", "message"]);
+    const [, sondage] = h.diffuses[0];
+    const [, message] = h.diffuses[1];
+    expect((sondage as { messageId: string }).messageId).toBe("m-sondage");
+    expect(message.id).toBe("m-sondage");
+    expect(message).not.toHaveProperty("poll");
+  });
+
+  // Le sondage AVANT le message : un `poll` reçu pour un message qu'on n'a pas encore est rangé
+  // sans dommage (il est indexé par `messageId`), tandis qu'un message affiché une fraction de
+  // seconde sans son sondage se verrait.
+  it("émet le sondage AVANT le message", async () => {
+    await POST(req("Resto après ?"));
+    expect(h.diffuses[0][0]).toBe("poll");
   });
 });

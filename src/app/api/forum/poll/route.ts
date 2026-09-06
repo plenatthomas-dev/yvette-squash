@@ -10,10 +10,12 @@ import {
   MAX_FORUM_LEN,
   MIN_POLL_OPTIONS,
   MAX_POLL_OPTIONS,
+  JOURNAL_FORUM,
 } from "@/lib/forum";
-import { SELECT_MESSAGE, shapeMessage, shapePoll } from "@/lib/forum-db";
+import { SELECT_MESSAGE, shapeMessage, shapePoll, INCLUDE_POLL } from "@/lib/forum-db";
+import { FORUM_RETENTION_MS } from "@/lib/retention";
 import { pushToUsers } from "@/lib/push";
-import { broadcastForum, FORUM_EVENT_MESSAGE } from "@/lib/forum-realtime";
+import { broadcastForum, FORUM_EVENT_MESSAGE, FORUM_EVENT_POLL } from "@/lib/forum-realtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,11 +54,23 @@ export async function POST(req: NextRequest) {
   // On nettoie AVANT de compter : trois champs dont un laissé vide font deux options, pas
   // trois, et l'écran doit refuser à ce moment-là — pas créer un sondage bancal.
   const labels: string[] = [];
+  const vues = new Set<string>();
   for (const o of brutes) {
     const l = parseForumOption(o);
+    if (!l) continue;
     // Deux options identiques rendraient le résultat indécidable : « Jeudi » et « Jeudi »
-    // séparent les voix de ceux qui voulaient dire la même chose.
-    if (l && !labels.includes(l)) labels.push(l);
+    // séparent les voix de ceux qui voulaient dire la même chose. La comparaison IGNORE LA
+    // CASSE et les accents — « Jeudi » et « jeudi » produisaient sinon exactement
+    // l'indécidabilité que ce contrôle existe pour empêcher, et personne ne relit deux
+    // options qu'on vient de taper soi-même. C'est le PREMIER écrit qui est gardé, avec sa
+    // casse : c'est celui que l'auteur a voulu.
+    const cle = l
+      .toLocaleLowerCase("fr-FR")
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "");
+    if (vues.has(cle)) continue;
+    vues.add(cle);
+    labels.push(l);
   }
   if (labels.length < MIN_POLL_OPTIONS || labels.length > MAX_POLL_OPTIONS) {
     return NextResponse.json(
@@ -87,24 +101,48 @@ export async function POST(req: NextRequest) {
         messageId: message.id,
         options: { create: labels.map((label, position) => ({ label, position })) },
       },
-      include: {
-        options: {
-          orderBy: { position: "asc" },
-          include: { votes: { include: { user: { select: { displayName: true } } } } },
-        },
-      },
+      // `INCLUDE_POLL` et non une copie : c'est le même objet que celui de la lecture, donc
+      // le sondage diffusé à la création a exactement la forme de celui que le GET renvoie.
+      // Une seconde définition, ici, finirait par en diverger sur un détail — l'ordre des
+      // options, ou la présence du nom d'un votant.
+      include: INCLUDE_POLL,
     });
     return { message, poll };
   });
 
+  // La purge des 12 mois est greffée ICI AUSSI. Elle ne l'était que sur `POST /api/forum`, et
+  // c'était sans conséquence — le premier message ordinaire rattrapait —, mais une asymétrie
+  // non écrite entre deux routes qui créent toutes deux un message finit par se lire comme un
+  // oubli. Best-effort, comme là-bas : une purge en échec ne fait pas échouer le sondage.
+  try {
+    await prisma.forumMessage.deleteMany({
+      where: { createdAt: { lt: new Date(Date.now() - FORUM_RETENTION_MS) } },
+    });
+  } catch {
+    /* la purge repassera au prochain message */
+  }
+
   const shaped = shapeMessage(message);
-  const shapedPoll = shapePoll(poll as never);
-  await broadcastForum(FORUM_EVENT_MESSAGE, { ...shaped, poll: shapedPoll });
+  const shapedPoll = shapePoll(poll);
+  // DEUX ÉVÉNEMENTS, ET NON UN MESSAGE ENRICHI. La doctrine du fil est que « la ligne diffusée
+  // est EXACTEMENT celle que le GET renvoie » : y greffer un champ `poll` obligeait le client à
+  // connaître une seconde forme de message, et faisait mentir le contrat au moment même où il
+  // compte le plus. Le sondage part sur son propre canal, celui qu'écoutent déjà le vote et la
+  // clôture — c'est-à-dire le même chemin qu'après un rechargement.
+  //
+  // Le sondage AVANT le message : un `poll` reçu pour un message qu'on n'a pas encore est rangé
+  // sans dommage (il est indexé par `messageId`), tandis qu'un message affiché une fraction de
+  // seconde sans son sondage se verrait.
+  await broadcastForum(FORUM_EVENT_POLL, shapedPoll);
+  await broadcastForum(FORUM_EVENT_MESSAGE, shaped);
 
   const destinataires = await prisma.user.findMany({
     where: { disabledAt: null, forumMuted: false, id: { not: session.userId } },
     select: { id: true },
   });
+  // Le JOURNAL ne porte pas la question, pour la même raison qu'il ne porte pas un message :
+  // c'est une copie durable chez chaque destinataire, que rien n'efface ensuite. Voir la note
+  // sur `JOURNAL_FORUM`.
   await pushToUsers(
     destinataires.map((u) => u.id),
     {
@@ -114,6 +152,7 @@ export async function POST(req: NextRequest) {
       tag: "forum",
       renotify: true,
     },
+    { journal: JOURNAL_FORUM },
   );
 
   return NextResponse.json({ message: shaped, poll: shapedPoll }, { status: 201 });

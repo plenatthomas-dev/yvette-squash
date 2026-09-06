@@ -29,6 +29,26 @@ describe("initiales", () => {
     expect([...initiales("🎾")].length).toBe(1);
   });
 
+  // UN CRAN DE PLUS QUE LE POINT DE CODE : la GRAPPE DE GRAPHÈMES. Ces trois cas se cassaient
+  // tous à un caractère du début d'un nom, et se lisaient comme un bug d'affichage sans qu'on
+  // puisse deviner d'où il venait.
+  it("ne casse pas un drapeau, qui est fait de DEUX indicateurs régionaux", () => {
+    // `[..."🇫🇷"][0]` rend « 🇫 » seul : un demi-drapeau, qui s'affiche en lettre encadrée.
+    expect(initiales("🇫🇷 Marc")).toBe("🇫🇷M");
+  });
+
+  it("ne casse pas une séquence à jointeur de largeur nulle", () => {
+    expect(initiales("👨‍👩‍👧 Famille")).toBe("👨‍👩‍👧F");
+  });
+
+  // « élodie » en NFD, c'est « e » suivi d'un accent combinant. Le premier POINT DE CODE est
+  // un « e » nu : la pastille affichait « E » là où le nom commence par « É ».
+  it("garde l'accent d'une lettre écrite en forme décomposée", () => {
+    expect(initiales("élodie")).toBe("É");
+    // Et le résultat est en forme composée, comme tout le reste de l'affichage.
+    expect([...initiales("élodie")].length).toBe(1);
+  });
+
   it("rend un point d'interrogation plutôt que rien sur un nom vide", () => {
     expect(initiales("")).toBe("?");
     expect(initiales("   ")).toBe("?");

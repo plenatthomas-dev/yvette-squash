@@ -72,7 +72,15 @@ function broker(): Pusher | null {
   }
 }
 
-/** Le courtier est-il utilisable ? Sert à l'écran pour ne pas promettre ce qu'il n'aura pas. */
+/**
+ * Le courtier est-il utilisable ?
+ *
+ * ⚠️ Le commentaire disait « sert à l'écran pour ne pas promettre ce qu'il n'aura pas » — et
+ * l'écran ne l'appelait pas, ne pouvait pas l'appeler (ce module est serveur) et n'en a pas
+ * besoin : le composant lit `NEXT_PUBLIC_PUSHER_KEY` lui-même et renonce en silence. La
+ * fonction reste, mais pour ce qu'elle fait RÉELLEMENT : donner à `forum-realtime.test.ts` un
+ * moyen d'observer la mémoïsation de `broker()`, qu'aucune autre porte ne rend visible.
+ */
 export function realtimeConfigured(): boolean {
   return broker() !== null;
 }
@@ -120,7 +128,8 @@ export async function broadcastForum(event: string, payload: unknown): Promise<v
   }
 }
 
-/** Réinitialise la mémoïsation. Réservé aux tests, qui changent l'environnement en cours de route. */
+/** Réinitialise la mémoïsation. Réservé à `forum-realtime.test.ts`, qui change l'environnement
+ *  d'un cas à l'autre — sans cette porte, le premier cas figerait le module pour tous. */
 export function resetForumRealtimeForTests(): void {
   client = null;
   configFailed = false;

@@ -19,21 +19,31 @@ import {
 // l'existante ; s'ils tombent, le module n'a plus de raison d'être.
 
 describe("parseForumBody — la limite", () => {
-  it("NE CASSE PAS un emoji posé exactement sur la limite", () => {
+  it("ACCEPTE un message posé exactement sur la limite, emoji compris", () => {
     // 999 caractères puis un 👍 : le pouce est le millième, il doit passer ENTIER.
     const s = "a".repeat(MAX_FORUM_LEN - 1) + "👍";
     const out = parseForumBody(s)!;
     expect(forumLength(out)).toBe(MAX_FORUM_LEN);
     expect(out.endsWith("👍")).toBe(true);
-    // La preuve par la négative : c'est exactement ce que `slice` aurait produit.
+    // La preuve par la négative : c'est ce qu'une découpe en unités UTF-16 aurait produit.
     expect(s.slice(0, MAX_FORUM_LEN).endsWith("👍")).toBe(false);
   });
 
-  it("coupe ENTRE deux emoji, jamais au milieu d'un", () => {
-    const out = parseForumBody("👍".repeat(MAX_FORUM_LEN + 10))!;
-    expect(forumLength(out)).toBe(MAX_FORUM_LEN);
-    // Un demi-emoji se lit \uD83D ou \uDC4D orphelin : aucun substitut isolé ne doit rester.
-    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(out)).toBe(false);
+  // LE DÉFAUT QUE CE TEST VERROUILLE : la fonction TRONQUAIT, et la route répondait 201. Un
+  // compte rendu de 1300 caractères revenait dans le fil coupé net, sans ellipse, et son
+  // auteur croyait avoir tout envoyé. Refuser rend la main à celui qui écrit.
+  it("REFUSE au-delà de la limite au lieu de tronquer en silence", () => {
+    expect(parseForumBody("a".repeat(MAX_FORUM_LEN + 1))).toBeNull();
+    expect(parseForumBody("a".repeat(MAX_FORUM_LEN))).not.toBeNull();
+  });
+
+  it("mesure la limite en POINTS DE CODE : 1000 emoji passent, 1001 non", () => {
+    // 1000 pouces = 2000 unités UTF-16. Compter celles-ci refuserait un message que l'écran
+    // annonce comme long de 1000 caractères, et le compteur mentirait.
+    const mille = "👍".repeat(MAX_FORUM_LEN);
+    expect(mille.length).toBe(MAX_FORUM_LEN * 2);
+    expect(parseForumBody(mille)).toBe(mille);
+    expect(parseForumBody("👍".repeat(MAX_FORUM_LEN + 1))).toBeNull();
   });
 
   it("compte en caractères visibles, pas en unités UTF-16", () => {

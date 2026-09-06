@@ -38,8 +38,12 @@ export async function POST(req: NextRequest) {
   }
   // Un seul canal existe. Refuser explicitement tout autre nom évite qu'une signature obtenue
   // ici serve ailleurs le jour où un second canal apparaîtra.
+  //
+  // 404 et non 403, comme les cinq autres routes du fil et comme le fil des frais partagés :
+  // distinguer « ce canal existe mais pas pour toi » de « ce canal n'existe pas » apprendrait
+  // à un curieux ce qui existe. C'était la seule route du fil à s'écarter de la convention.
   if (channel !== FORUM_CHANNEL) {
-    return NextResponse.json({ error: "Canal refusé" }, { status: 403 });
+    return NextResponse.json({ error: "Canal introuvable" }, { status: 404 });
   }
 
   const auth = authorizeForumChannel(socketId, channel, {

@@ -7,7 +7,12 @@
 // — le tri des options, ou la présence d'un votant — et l'écran afficherait alors deux vérités
 // selon la requête qui l'a alimenté.
 
+import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
+import { forumPreview } from "./forum";
+
+/** Longueur de l'extrait cité, en points de code. Assez pour reconnaître, trop peu pour relire. */
+export const EXCERPT_LEN = 90;
 
 /** Un membre nommé, tel qu'il apparaît dans une réaction ou un vote. */
 export type Membre = { id: string; name: string };
@@ -41,9 +46,16 @@ export type MessageRow = {
   authorId: string;
   authorName: string;
   createdAt: string;
-  /** Citation : `null` partout si le message ne répond à rien. */
+  /**
+   * CITATION. Les trois champs vont ENSEMBLE : ou bien tous les trois sont renseignés, ou bien
+   * tous les trois sont `null`. Il n'y a pas d'état intermédiaire, parce qu'ils sont dérivés
+   * d'une seule et même jointure — la clé étrangère est en `SET NULL`, donc une cible effacée
+   * ou purgée fait disparaître la citation entière, en base comme à l'écran.
+   *
+   * Rien n'est stocké : `replyToAuthor` et `replyToExcerpt` sont RELUS sur la cible à chaque
+   * lecture. C'est ce qui fait que le texte d'un membre ne survit nulle part à son effacement.
+   */
   replyToId: string | null;
-  /** `null` alors que `replyToId` ne l'est pas = la cible a été supprimée depuis. */
   replyToAuthor: string | null;
   replyToExcerpt: string | null;
 };
@@ -54,9 +66,10 @@ export const SELECT_MESSAGE = {
   authorId: true,
   createdAt: true,
   replyToId: true,
-  replyToAuthor: true,
-  replyToExcerpt: true,
   author: { select: { displayName: true } },
+  // La cible citée, relue par JOINTURE et non recopiée dans la ligne. Le surcoût est une
+  // lecture indexée par la clé primaire ; le bénéfice est qu'aucune parole ne se duplique.
+  replyTo: { select: { body: true, author: { select: { displayName: true } } } },
 } as const;
 
 type RawMessage = {
@@ -65,9 +78,8 @@ type RawMessage = {
   authorId: string;
   createdAt: Date;
   replyToId: string | null;
-  replyToAuthor: string | null;
-  replyToExcerpt: string | null;
   author: { displayName: string } | null;
+  replyTo: { body: string; author: { displayName: string } | null } | null;
 };
 
 export function shapeMessage(m: RawMessage): MessageRow {
@@ -79,9 +91,11 @@ export function shapeMessage(m: RawMessage): MessageRow {
     // la jointure est alors nulle et le message est en train d'être effacé.
     authorName: m.author?.displayName ?? "Membre supprimé",
     createdAt: m.createdAt.toISOString(),
-    replyToId: m.replyToId,
-    replyToAuthor: m.replyToAuthor,
-    replyToExcerpt: m.replyToExcerpt,
+    // `replyToId` est neutralisé si la jointure ne rend rien : la clé et son contenu doivent
+    // vivre et mourir ensemble, sinon l'écran affiche une citation vide.
+    replyToId: m.replyTo ? m.replyToId : null,
+    replyToAuthor: m.replyTo ? (m.replyTo.author?.displayName ?? "Membre supprimé") : null,
+    replyToExcerpt: m.replyTo ? forumPreview(m.replyTo.body, EXCERPT_LEN) : null,
   };
 }
 
@@ -118,12 +132,20 @@ export async function chargerReactions(
   return out;
 }
 
+/**
+ * L'`include` d'un sondage complet — options triées, voix, et le nom de chaque votant.
+ *
+ * `satisfies Prisma.ForumPollInclude` et non un `as const` nu : c'est ce qui fait qu'en
+ * retirer un morceau devient une ERREUR DE COMPILATION plutôt qu'un `undefined` à
+ * l'exécution. La forme reste inférée exactement (le `satisfies` ne l'élargit pas), donc le
+ * type de retour de Prisma reste précis et les `as unknown as` disparaissent avec.
+ */
 export const INCLUDE_POLL = {
   options: {
     orderBy: { position: "asc" },
     include: { votes: { include: { user: { select: { displayName: true } } } } },
   },
-} as const;
+} satisfies Prisma.ForumPollInclude;
 
 type RawPoll = {
   id: string;
@@ -162,12 +184,12 @@ export async function chargerSondages(messageIds: string[]): Promise<Record<stri
     include: INCLUDE_POLL,
   });
   const out: Record<string, PollRow> = {};
-  for (const p of polls as unknown as RawPoll[]) out[p.messageId] = shapePoll(p);
+  for (const p of polls) out[p.messageId] = shapePoll(p);
   return out;
 }
 
 /** Relit un sondage entier après un vote, pour le diffuser. */
 export async function relireSondage(pollId: string): Promise<PollRow | null> {
   const p = await prisma.forumPoll.findUnique({ where: { id: pollId }, include: INCLUDE_POLL });
-  return p ? shapePoll(p as unknown as RawPoll) : null;
+  return p ? shapePoll(p) : null;
 }

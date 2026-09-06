@@ -71,6 +71,20 @@ Object.defineProperty(globalThis.navigator, "serviceWorker", {
 });
 
 let appels: string[] = [];
+/**
+ * Les requêtes SORTANTES, corps compris.
+ *
+ * Le double ne gardait que la méthode et l'URL. Quatre tests promettaient donc ce qui est
+ * ENVOYÉ sans jamais le regarder : envoyer `{ optionIds: [celle qui vient de changer] }` au
+ * lieu de l'ensemble des cases — l'invariant n°1 du choix multiple — les laissait tous verts.
+ * Un corps non lu est un test qui ne teste rien.
+ */
+let envois: Array<{ methode: string; url: string; corps: Record<string, unknown> | null }> = [];
+
+/** Le corps du dernier envoi correspondant à `methode` et à un fragment d'URL. */
+const corpsDe = (methode: string, urlContient: string) =>
+  [...envois].reverse().find((e) => e.methode === methode && e.url.includes(urlContient))?.corps ??
+  null;
 let page: {
   messages: unknown[];
   hasMore?: boolean;
@@ -92,6 +106,7 @@ beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_PUSHER_KEY", "cle-de-test");
   vi.stubEnv("NEXT_PUBLIC_PUSHER_CLUSTER", "eu");
   appels = [];
+  envois = [];
   swListeners = [];
   canal.handlers.clear();
   canal.emis = [];
@@ -103,8 +118,14 @@ beforeEach(() => {
   toast.mockClear();
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: string, init?: { method?: string }) => {
-      appels.push(`${init?.method ?? "GET"} ${url}`);
+    vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+      const methode = init?.method ?? "GET";
+      appels.push(`${methode} ${url}`);
+      envois.push({
+        methode,
+        url,
+        corps: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+      });
       if (init?.method === "POST") {
         if (postReponse === "erreur") {
           return { ok: false, status: 429, json: async () => ({ error: "Trop de messages" }) };
@@ -154,6 +175,10 @@ describe("envoi", () => {
     fireEvent.change(screen.getByLabelText("Votre message"), { target: { value: "Coucou 👍" } });
     fireEvent.click(screen.getByRole("button", { name: "Envoyer" }));
     await waitFor(() => expect(appels.some((a) => a.startsWith("POST"))).toBe(true));
+    // Ce qui est ENVOYÉ, et pas seulement le fait qu'une requête soit partie.
+    expect(corpsDe("POST", "/api/forum")?.body).toBe("Coucou 👍");
+    // Et « le montre tout de suite » : la réponse est insérée sans attendre le courtier.
+    await waitFor(() => expect(screen.getByText("Coucou")).toBeTruthy());
   });
 
   it("vide le champ après un envoi réussi, et le garde après un refus", async () => {
@@ -242,7 +267,16 @@ describe("le courtier", () => {
     fireEvent.change(zone, { target: { value: "abc" } });
     const typing = canal.emis.filter(([e]) => e === "client-typing");
     expect(typing).toHaveLength(1);
-    expect(typing[0][1]).toEqual({ name: "Thomas" });
+    // L'identifiant voyage AVEC le nom : la frappe est indexée par id, sinon deux homonymes
+    // — un club en a — se confondent en une seule personne et l'un fait taire l'autre.
+    expect(typing[0][1]).toEqual({ id: "u1", name: "Thomas" });
+
+    // LA MOITIÉ QUI MANQUAIT. Sans elle, un drapeau « une seule fois par montage » passerait le
+    // test : ce qu'on veut n'est pas « un signal », c'est « un signal PAR FENÊTRE ». On avance
+    // au-delà des 3 s et on vérifie qu'un second signal repart.
+    vi.setSystemTime(Date.now() + 4_000);
+    fireEvent.change(zone, { target: { value: "abcd" } });
+    expect(canal.emis.filter(([e]) => e === "client-typing")).toHaveLength(2);
   });
 
   it("affiche qui est en ligne, sans se compter soi-même", async () => {
@@ -309,15 +343,34 @@ describe("notifications du fil", () => {
   it("coupe et rétablit, et le dit au serveur", async () => {
     rendre();
     await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: /Notifications/ }));
+    // NOM ACCESSIBLE STABLE : c'est `aria-pressed` qui porte l'état, pas le libellé. « Couper
+    // les notifications, enfoncé » se lit sans ambiguïté ; « Notifications coupées, enfoncé »
+    // ne disait pas si « coupées » décrivait l'état ou l'effet du clic.
+    const bouton = () => screen.getByRole("button", { name: /Couper les notifications/ });
+    expect(bouton().getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(bouton());
     await waitFor(() => expect(appels.some((a) => a.startsWith("PATCH"))).toBe(true));
-    await waitFor(() => expect(screen.getByRole("button", { name: /coupées/ })).toBeTruthy());
+    // L'affichage est OPTIMISTE : sans lire le corps, envoyer `{ muted: false }` en dur
+    // laisserait l'écran dire « coupées » et le serveur ne rien couper du tout.
+    expect(corpsDe("PATCH", "/api/forum")).toEqual({ muted: true });
+    await waitFor(() => expect(bouton().getAttribute("aria-pressed")).toBe("true"));
+    // Le libellé VISIBLE, lui, change bien : c'est ce qu'on lit d'un coup d'œil.
+    expect(bouton().textContent).toContain("coupées");
+
+    fireEvent.click(bouton());
+    await waitFor(() => expect(corpsDe("PATCH", "/api/forum")).toEqual({ muted: false }));
   });
 
   it("reflète l'état reçu du serveur au chargement", async () => {
     page = { messages: [msg()], muted: true, meId: "u1", meName: "Thomas" };
     rendre();
-    await waitFor(() => expect(screen.getByRole("button", { name: /coupées/ })).toBeTruthy());
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: /Couper les notifications/ })
+          .getAttribute("aria-pressed"),
+      ).toBe("true"),
+    );
   });
 });
 
@@ -424,12 +477,16 @@ describe("structure de la liste", () => {
 });
 
 describe("séparateurs de date", () => {
+  // DATES LOCALES, SANS `Z`, comme le fait déjà `forum-texte.test.ts`. `memeJour` compare des
+  // jours CIVILS LOCAUX : avec des instants UTC, ces trois horodatages tombent le même jour à
+  // Honolulu (UTC−10) et le test rendait un séparateur au lieu de deux. Un test qui dépend du
+  // fuseau de la machine passe en local et échoue en intégration continue, ou l'inverse.
   it("pose un séparateur par jour, et un seul", async () => {
     page = {
       messages: [
-        msg({ id: "a", body: "Hier soir", createdAt: "2026-09-04T18:00:00.000Z" }),
-        msg({ id: "b", body: "Hier plus tard", createdAt: "2026-09-04T20:00:00.000Z" }),
-        msg({ id: "c", body: "Ce matin", createdAt: "2026-09-05T09:00:00.000Z" }),
+        msg({ id: "a", body: "Hier soir", createdAt: "2026-09-04T18:00:00" }),
+        msg({ id: "b", body: "Hier plus tard", createdAt: "2026-09-04T20:00:00" }),
+        msg({ id: "c", body: "Ce matin", createdAt: "2026-09-05T09:00:00" }),
       ],
       meId: "u1",
       meName: "Thomas",
@@ -475,7 +532,9 @@ describe("la palette d'emoji", () => {
     fireEvent.change(champ, { target: { value: "Bien joue" } });
     champ.setSelectionRange(4, 4); // juste après « Bien »
     fireEvent.click(screen.getByRole("button", { name: "Emoji" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Insérer 🔥" }));
+    // Des BOUTONS ordinaires, plus un `role="menu"` : ce rôle promettait des flèches
+    // directionnelles et un piège de focus que rien n'implémentait.
+    fireEvent.click(screen.getByRole("button", { name: "Insérer 🔥" }));
     await waitFor(() => expect(champ.value).toBe("Bien🔥 joue"));
   });
 });
@@ -577,6 +636,9 @@ describe("le sondage", () => {
     expect(jeudi.getAttribute("title")).toBe("Thomas, Gégé");
   });
 
+  // L'INVARIANT N°1 DU CHOIX MULTIPLE, et le seul endroit où il se vérifie côté client. La
+  // fixture a déjà « Jeudi » coché par u1 : cocher « Samedi » doit envoyer LES DEUX. N'envoyer
+  // que l'option qui vient de changer effacerait le vote précédent, puisque la route REMPLACE.
   it("envoie l'ENSEMBLE des cases cochées, pas la seule qui vient de changer", async () => {
     page = { messages: [msg()], meId: "u1", meName: "Thomas", polls: { m1: sondage } };
     rendre();
@@ -584,6 +646,23 @@ describe("le sondage", () => {
     await waitFor(() =>
       expect(appels.some((a) => a === "POST /api/forum/poll/p1/vote")).toBe(true),
     );
+    // u1 avait déjà « Jeudi » (o1) et « Vendredi » (o2) : cocher « Samedi » doit envoyer LES
+    // TROIS, et non le seul o3.
+    const envoye = corpsDe("POST", "/vote")?.optionIds as string[];
+    expect([...envoye].sort()).toEqual(["o1", "o2", "o3"]);
+  });
+
+  // Décocher est le geste symétrique : la case retirée ne doit PAS repartir dans la liste.
+  it("retire la case décochée de l'ensemble envoyé", async () => {
+    page = { messages: [msg()], meId: "u1", meName: "Thomas", polls: { m1: sondage } };
+    rendre();
+    fireEvent.click(await screen.findByRole("button", { name: /Jeudi/ }));
+    await waitFor(() =>
+      expect(appels.some((a) => a === "POST /api/forum/poll/p1/vote")).toBe(true),
+    );
+    // « Jeudi » retiré, « Vendredi » conservé : c'est bien l'ensemble qui part, amputé d'une
+    // case, et non un différentiel.
+    expect(corpsDe("POST", "/vote")?.optionIds).toEqual(["o2"]);
   });
 
   it("interdit le vote sur un sondage clos", async () => {
@@ -623,19 +702,25 @@ describe("la citation", () => {
     expect(citation?.querySelector("strong")?.textContent).toBe("Gégé");
   });
 
-  // La notice promet qu'effacer son message l'efface partout : l'extrait blanchi en base doit
-  // se lire « Message supprimé », jamais rester affiché.
-  it("dit « Message supprimé » quand l'extrait a été blanchi", async () => {
+  // Ce que la notice promet : effacer son message l'efface PARTOUT. La citation ne survit donc
+  // pas à sa cible — ni son texte, ni un « Message supprimé » à sa place. La base ne garde
+  // aucune trace (`ON DELETE SET NULL`), l'écran non plus, et les deux chemins s'accordent.
+  it("n'affiche aucune citation quand la cible a disparu", async () => {
     page = {
-      messages: [msg({ id: "b", body: "Je prends une place", replyToId: "a" })],
+      messages: [msg({ id: "b", body: "Je prends une place", replyToId: null })],
       meId: "u1",
       meName: "Thomas",
     };
     rendre();
-    await waitFor(() => expect(screen.getByText("Message supprimé")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Je prends une place")).toBeTruthy());
+    expect(document.querySelector(".forum-citation")).toBeNull();
   });
 
-  it("efface l'extrait à l'écran quand le courtier annonce la suppression de la cible", async () => {
+  // LE DÉFAUT QUE CE TEST VERROUILLE : l'affichage divergeait selon le chemin. En direct le
+  // client gardait `replyToId` et affichait « Message supprimé » ; après rechargement la clé
+  // arrivait nulle de la base et la citation disparaissait entièrement. Le même geste donnait
+  // deux écrans différents selon qu'on avait rafraîchi ou non.
+  it("retire la citation entière quand le courtier annonce la suppression de la cible", async () => {
     page = {
       messages: [
         msg({ id: "a", body: "Covoit jeudi" }),
@@ -653,8 +738,11 @@ describe("la citation", () => {
     rendre();
     await waitFor(() => expect(screen.getAllByText("Covoit jeudi")).toHaveLength(2));
     act(() => canal.handlers.get("deleted")?.({ id: "a" }));
-    await waitFor(() => expect(screen.getByText("Message supprimé")).toBeTruthy());
+    await waitFor(() => expect(document.querySelector(".forum-citation")).toBeNull());
     expect(screen.queryByText("Covoit jeudi")).toBeNull();
+    expect(screen.queryByText("Message supprimé")).toBeNull();
+    // La réponse, elle, reste : effacer une question n'efface pas la discussion.
+    expect(screen.getByText("Je prends une place")).toBeTruthy();
   });
 
   it("joint la citation à l'envoi après un clic sur « Répondre »", async () => {
@@ -666,6 +754,9 @@ describe("la citation", () => {
     fireEvent.change(champ, { target: { value: "Je viens" } });
     fireEvent.submit(champ.closest("form") as HTMLFormElement);
     await waitFor(() => expect(screen.getByText("Coucou")).toBeTruthy());
+    // C'est `replyTo` qui fait la citation : sans cette assertion, le supprimer de l'envoi
+    // laissait le test vert et la réponse partait sans rattacher à quoi elle répond.
+    expect(corpsDe("POST", "/api/forum")).toEqual({ body: "Je viens", replyTo: "m1" });
     // La barre de citation disparaît une fois le message parti.
     expect(screen.queryByText(/Réponse à/)).toBeNull();
   });

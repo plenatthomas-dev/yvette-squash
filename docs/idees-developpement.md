@@ -106,18 +106,38 @@ d'une soirée à sa place).
   délégant, bulle « i » de validité dans les Réglages), paragraphe **RGPD** dédié dans la
   note de confidentialité, tests de la route (GET/POST). Détail : `docs/delegation-droits.md`.
 
-## 5. Messagerie entre utilisateurs
+## 5. Messagerie entre utilisateurs ✅ fait (fil public)
 
 **Communiquer entre utilisateurs** — par exemple à propos d'un tricount.
 
-- **Statut** : 🚧 (a) fait · (b) à étudier · **Valeur** ⭐⭐ · **Effort** variable
+- **Statut** : ✅ (a) fait · ✅ (b) fait, autrement que prévu · **Valeur** ⭐⭐
 - **Notes / éval** : deux périmètres très différents :
   - **(a) fil de commentaires attaché à un tricount** → **S–M**, ciblé, directement utile
     au partage de frais ; **✅ fait** (voir ci-dessous) ;
   - **(b) messagerie générale** entre membres → **L–XL** (fils, non-lus, modération,
     notifs) et **dépend de l'annuaire (6)**.
-  Web Push (`PushSubscription`) déjà en place pour notifier. **Verdict** : commencer par
-  **(a)**, remettre (b) à plus tard.
+  Web Push (`PushSubscription`) déjà en place pour notifier. **Verdict initial** : commencer
+  par **(a)**, remettre (b) à plus tard.
+- **Livré 5b — LE FIL DU CLUB**, et c'est le périmètre qui a changé, pas seulement la date.
+  L'estimation **L–XL** portait sur une messagerie à **fils multiples et destinataires
+  choisis** (d'où la dépendance à l'annuaire, et d'où « non-lus, modération »). Ce qui a été
+  livré est **un seul fil, public à tous les membres** : la conversation du club, pas une
+  boîte de réception. Le choix retire d'un coup l'essentiel de l'effort — aucun destinataire à
+  choisir, donc aucune dépendance à l'annuaire ; aucune arborescence de fils ; la modération
+  se réduit à « un admin peut supprimer n'importe quel message » ; les non-lus n'existent pas
+  (la colonne prévue pour eux a d'ailleurs été retirée, faute d'emploi). Ce qui reste tient
+  dans `Forum.tsx` et six routes `/api/forum*`.
+
+  Détail : migrations `45_forum` (le fil) et `46_forum_v2` (citation, réactions, sondages) ;
+  courtier temps réel **facultatif** (Pusher, canal de présence unique) doublé par le push et
+  par le rattrapage au retour au premier plan — le fil marche sans lui ; conservation
+  **12 mois** par purge opportuniste ; opt-out des notifications depuis le fil lui-même ;
+  paragraphe RGPD dédié dans la note de confidentialité. Flag `NEXT_PUBLIC_FEATURE_FORUM`.
+
+  **Ce que 5b ne couvre toujours pas** : le message PRIVÉ entre deux membres. Il reste **L**,
+  il dépend toujours de l'annuaire (6), et il pose une question que le fil public ne posait
+  pas — conserver la correspondance privée de membres est une finalité distincte, à écrire
+  dans la notice avant d'écrire la moindre ligne.
 - **Livré 5a** (sur `main`, build vert, **gated `FEATURE_TRICOUNT` → invisible en prod**
   tant que le flag reste off) : nouveau modèle `TricountComment` (lié au `Tricount`,
   `onDelete: Cascade` → le fil disparaît si toutes les dépenses du jour sont retirées ;

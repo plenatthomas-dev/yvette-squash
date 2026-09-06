@@ -1,0 +1,14 @@
+-- RETRAIT D'UNE COLONNE MORTE : `User.forumReadAt`.
+--
+-- Livrée par `45_forum` « pour la pastille non-lus ». La pastille n'a jamais été écrite, et la
+-- colonne n'est ni lue ni écrite nulle part dans l'application — vérifié sur tout `src/`.
+--
+-- Ce n'est pas seulement du ménage. C'était un HORODATAGE PAR MEMBRE sans finalité : une
+-- donnée de fréquentation individuelle (« quand ce membre a-t-il ouvert le fil »), conservée
+-- sans durée, que la note de confidentialité n'annonce pas et qu'aucun écran ne justifie. La
+-- minimisation veut qu'elle n'existe pas tant que personne ne s'en sert.
+--
+-- Aucune donnée utile n'est perdue : la colonne n'a jamais reçu d'écriture. Si la pastille
+-- « non lus » est écrite un jour, elle reviendra avec la fonctionnalité qui la justifie — et
+-- avec la ligne de notice qui l'annonce.
+ALTER TABLE "User" DROP COLUMN IF EXISTS "forumReadAt";

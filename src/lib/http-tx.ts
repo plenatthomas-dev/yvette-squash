@@ -84,6 +84,33 @@ function isSerializationConflict(e: unknown): boolean {
 export function isUniqueViolation(e: unknown): boolean {
   return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
 }
+/**
+ * P2025 = « l'enregistrement visé n'existe pas / plus ». Un `delete` ou un `update` qui ne
+ * trouve plus sa cible.
+ *
+ * Le pendant de `isUniqueViolation` pour l'autre moitié d'une BASCULE : re-cliquer sur
+ * « supprimer » ne doit pas rendre un 500 parce que le premier clic avait déjà abouti. Le geste
+ * a le résultat demandé — la ligne n'est plus là — donc c'est un succès, pas une faute.
+ *
+ * ⚠️ Même réserve que pour P2002 : à n'avaler que là où l'ABSENCE est le résultat voulu. Sur une
+ * route qui doit affirmer que la cible existait (un droit, un paiement), le confondre avec un
+ * succès masquerait un 404 légitime.
+ */
+export function isMissingRecord(e: unknown): boolean {
+  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025";
+}
+
+/**
+ * P2003 = violation de clé étrangère. La ligne référencée a disparu entre la vérification et
+ * l'écriture.
+ *
+ * Exportée pour les écritures qui ont un REPLI : citer un message que quelqu'un supprime au même
+ * instant ne doit pas faire perdre la réponse — on la réécrit sans citation. Là où il n'y a pas
+ * de repli, laisser remonter : un 500 sur une référence cassée est le bon signal.
+ */
+export function isForeignKeyViolation(e: unknown): boolean {
+  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003";
+}
 
 /**
  * Recul entre deux tentatives : croissant, et TIRÉ AU SORT sur toute sa largeur.

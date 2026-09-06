@@ -96,9 +96,13 @@ describe("POST /api/forum/realtime-auth", () => {
 
   // Une signature n'a de sens que pour le canal demandé. Refuser tout autre nom dès
   // maintenant évite qu'elle serve ailleurs le jour où un second canal apparaîtra.
-  it("403 sur tout autre canal que celui du fil", async () => {
+  //
+  // 404 et non 403 : c'est la convention de tout le dépôt pour un refus — distinguer « existe
+  // mais pas pour toi » de « n'existe pas » apprend à un curieux ce qui existe. Cette route
+  // était la seule du fil à s'en écarter.
+  it("404 sur tout autre canal que celui du fil, indiscernable d'un canal inexistant", async () => {
     const res = await POST(req({ channel_name: "presence-autre-chose" }));
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
     expect(h.vu).toBeNull();
   });
 

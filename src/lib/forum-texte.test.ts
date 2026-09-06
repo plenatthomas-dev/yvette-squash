@@ -18,8 +18,12 @@ describe("segmenter — le texte ordinaire est intouché", () => {
     expect(segmenter(t)).toEqual([{ type: "texte", valeur: t }]);
   });
 
-  it("rend une chaîne vide sans segment", () => {
-    expect(segmenter("")).toEqual([]);
+  // L'invariant du module est « un texte SANS adresse ressort en un seul segment, strictement
+  // identique à l'entrée ». La chaîne vide en est un, et elle rendait `[]` — le seul cas où le
+  // module se contredisait. Sans conséquence à l'écran, mais un invariant vrai à 99 % ne sert
+  // pas d'invariant : c'est exactement ce qu'on cesse de vérifier avant de s'en servir.
+  it("tient son invariant JUSQUE SUR la chaîne vide", () => {
+    expect(segmenter("")).toEqual([{ type: "texte", valeur: "" }]);
   });
 });
 
@@ -37,7 +41,14 @@ describe("segmenter — seuls http et https deviennent des liens", () => {
     }
   });
 
-  it("ne reconnaît pas un schéma sans domaine", () => {
+  // ⚠️ `"https://"` seul ne rencontre JAMAIS le motif — il exige au moins un caractère après
+  // les deux barres — donc il n'atteignait pas la garde qu'il prétendait couvrir : la
+  // supprimer laissait ce test vert. Le vrai cas est `"https://."`, que le motif reconnaît et
+  // que le rognage de ponctuation réduit ensuite à son schéma nu.
+  it("ne reconnaît pas un schéma sans domaine, même après rognage de la ponctuation", () => {
+    expect(segmenter("https://.").every((s) => s.type === "texte")).toBe(true);
+    expect(segmenter("va voir https://, merci").every((s) => s.type === "texte")).toBe(true);
+    // Et le cas dégénéré, qui n'atteint pas le motif du tout.
     expect(segmenter("https://").every((s) => s.type === "texte")).toBe(true);
   });
 });

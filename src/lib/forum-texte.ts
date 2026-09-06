@@ -34,6 +34,11 @@ function rogner(url: string): string {
  * un message ordinaire en cherchant des liens dedans.
  */
 export function segmenter(texte: string): Segment[] {
+  // La chaîne vide est un TEXTE SANS ADRESSE comme un autre. L'invariant juste au-dessus dit
+  // « un seul segment, strictement identique à l'entrée » ; la boucle rendait `[]`, et c'était
+  // le seul cas où le module se contredisait. Sans conséquence à l'écran, mais un invariant
+  // vrai à 99 % ne sert pas d'invariant.
+  if (texte === "") return [{ type: "texte", valeur: "" }];
   const out: Segment[] = [];
   let curseur = 0;
   for (const m of texte.matchAll(LIEN)) {

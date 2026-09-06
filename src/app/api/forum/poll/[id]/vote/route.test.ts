@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { NextRequest } from "next/server";
+import { Prisma } from "@prisma/client";
 
 // LE VOTE, À CHOIX MULTIPLE.
 //
@@ -10,6 +11,11 @@ import type { NextRequest } from "next/server";
 //     Corollaire : une liste vide est un retrait de vote légitime, pas une erreur.
 //  2. LES OPTIONS DOIVENT APPARTENIR À CE SONDAGE. Sans ce contrôle, un identifiant emprunté
 //     à un autre sondage y ajouterait une voix en douce.
+//  3. LE REMPLACEMENT EST ATOMIQUE. « J'efface toutes mes cases, je repose celles que je
+//     veux » n'a de sens que si les deux ordres voient le même instantané. En isolation par
+//     défaut ils ne le voyaient pas : deux clics à 150 ms d'intervalle, et le `deleteMany` du
+//     second ne voyait pas la ligne que le premier venait d'insérer — violation d'unicité, 500,
+//     transaction annulée en entier, et le second vote PERDU. D'où la sérialisation.
 
 const h = vi.hoisted(() => ({
   forumOn: true,
@@ -28,6 +34,15 @@ const h = vi.hoisted(() => ({
   ecrit: null as null | Record<string, unknown>[],
   maj: null as null | Record<string, unknown>,
   diffuse: null as null | [string, Record<string, unknown>],
+  /** Le niveau d'isolation réclamé à `$transaction`. Le défaut ne suffit pas ici. */
+  isolation: null as null | string,
+  /** Combien de fois la transaction a été jouée : le rejeu sur conflit se mesure. */
+  essais: 0,
+  /** Ce que `createMany` doit jeter au premier essai, pour éprouver le rejeu. */
+  jette: null as null | Error,
+  /** Le nombre de voix récentes du membre, et le `where` avec lequel on l'a demandé. */
+  recentCount: 0,
+  countWhere: null as null | Record<string, unknown>,
 }));
 
 vi.mock("@/lib/session", async (importOriginal) => ({
@@ -49,8 +64,12 @@ vi.mock("@/lib/forum-db", () => ({
     options: [],
   })),
 }));
-vi.mock("@/lib/db", () => ({
-  prisma: {
+vi.mock("@/lib/db", () => {
+  // Le double doit servir LES DEUX formes de `$transaction` : le tableau de promesses, et la
+  // FONCTION de rappel — c'est celle qu'emploie `serializableTransaction`, qui est aussi la
+  // seule à pouvoir demander un niveau d'isolation. Ne servir que la première laissait la
+  // route ne pas s'exécuter du tout.
+  const client: Record<string, unknown> = {
     forumPoll: {
       findUnique: vi.fn(async () => h.poll),
       update: vi.fn(async (args: { data: Record<string, unknown> }) => {
@@ -59,20 +78,47 @@ vi.mock("@/lib/db", () => ({
       }),
     },
     forumPollVote: {
+      // Le `where` est CAPTURÉ, et non ignoré : le remplacer par `{}` dans la route ferait de
+      // la limite un plafond global au club, sans qu'aucun test de ce fichier ne rougisse.
+      count: vi.fn(async (args?: { where?: Record<string, unknown> }) => {
+        h.countWhere = args?.where ?? null;
+        return h.recentCount;
+      }),
       deleteMany: vi.fn(async (args: { where: Record<string, unknown> }) => {
         h.efface = args.where;
         return { count: 0 };
       }),
       createMany: vi.fn(async (args: { data: Record<string, unknown>[] }) => {
+        if (h.jette) {
+          const e = h.jette;
+          h.jette = null;
+          throw e;
+        }
         h.ecrit = args.data;
         return { count: args.data.length };
       }),
     },
-    $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
-  },
-}));
+  };
+  client.$transaction = vi.fn(
+    async (arg: unknown, opts?: { isolationLevel?: string }) => {
+      if (typeof arg === "function") {
+        h.essais += 1;
+        h.isolation = opts?.isolationLevel ?? null;
+        return (arg as (tx: unknown) => Promise<unknown>)(client);
+      }
+      return Promise.all(arg as Promise<unknown>[]);
+    },
+  );
+  return { prisma: client };
+});
 
 import { POST, PATCH } from "./route";
+import { prisma } from "@/lib/db";
+
+/** Le double de Prisma, retypé pour lire ce qui a été passé à `createMany`. */
+const client = prisma as unknown as {
+  forumPollVote: { createMany: ReturnType<typeof vi.fn> };
+};
 
 const vote = (optionIds: unknown) =>
   ({
@@ -101,6 +147,11 @@ beforeEach(() => {
   h.ecrit = null;
   h.maj = null;
   h.diffuse = null;
+  h.isolation = null;
+  h.essais = 0;
+  h.jette = null;
+  h.recentCount = 0;
+  h.countWhere = null;
 });
 
 describe("gardes", () => {
@@ -142,12 +193,68 @@ describe("le choix MULTIPLE", () => {
     const res = await POST(vote([]), ctx);
     expect(res.status).toBe(200);
     expect(h.efface).not.toBeNull();
-    expect(h.ecrit).toEqual([]);
+    // Rien à réinsérer : on n'émet pas un `createMany` vide, qui ne serait qu'un aller-retour.
+    expect(h.ecrit).toBeNull();
   });
 
   it("dédoublonne les identifiants répétés", async () => {
     await POST(vote(["o1", "o1"]), ctx);
     expect(h.ecrit).toHaveLength(1);
+  });
+});
+
+// LES DEUX PROPRIÉTÉS QUI FERMENT LA COURSE. Elles ne se relisent pas dans le code appelant :
+// sans elles, la route redevient un `deleteMany` + `createMany` en isolation par défaut, et le
+// second de deux votes rapprochés est perdu avec un 500.
+describe("le remplacement est ATOMIQUE", () => {
+  it("écrit sous isolation SÉRIALISABLE, et non au niveau par défaut", async () => {
+    await POST(vote(["o1"]), ctx);
+    expect(h.isolation).toBe("Serializable");
+    expect(h.essais).toBe(1);
+  });
+
+  it("REJOUE la transaction sur conflit d'écriture, au lieu de perdre le vote", async () => {
+    h.jette = new Prisma.PrismaClientKnownRequestError("write conflict", {
+      code: "P2034",
+      clientVersion: "6",
+    });
+    const res = await POST(vote(["o1"]), ctx);
+    expect(res.status).toBe(200);
+    expect(h.essais).toBe(2);
+    expect(h.ecrit).toEqual([{ optionId: "o1", userId: "u1" }]);
+  });
+
+  // Ceinture : une ligne identique qui subsisterait malgré tout ne doit pas faire échouer le
+  // vote. La clé est (option, membre) — un doublon EST le même vote, jamais un conflit réel.
+  it("tolère un doublon à la réinsertion", async () => {
+    await POST(vote(["o1"]), ctx);
+    const args = (client.forumPollVote.createMany as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(args.skipDuplicates).toBe(true);
+  });
+});
+
+// Chaque vote coûte une lecture, une transaction à deux écritures, la relecture du sondage ET
+// UN ÉVÉNEMENT PUSHER — dont le quota est JOURNALIER. Un client qui boucle ne fait pas
+// qu'alourdir Neon : il fait taire le temps réel du fil pour tout le club jusqu'au lendemain.
+describe("garde-fou de débit", () => {
+  it("laisse passer un usage normal", async () => {
+    h.recentCount = 59;
+    expect((await POST(vote(["o1"]), ctx)).status).toBe(200);
+  });
+
+  it("refuse en 429 au-delà, sans écrire ni diffuser", async () => {
+    h.recentCount = 60;
+    expect((await POST(vote(["o1"]), ctx)).status).toBe(429);
+    expect(h.ecrit).toBeNull();
+    expect(h.efface).toBeNull();
+    expect(h.diffuse).toBeNull();
+  });
+
+  it("compte les voix d'UN SEUL membre, sur une fenêtre glissante", async () => {
+    await POST(vote(["o1"]), ctx);
+    expect(h.countWhere?.userId).toBe("u1");
+    const gte = (h.countWhere?.createdAt as { gte: Date }).gte;
+    expect(Math.round((Date.now() - gte.getTime()) / 60_000)).toBe(10);
   });
 });
 

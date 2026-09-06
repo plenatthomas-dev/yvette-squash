@@ -6050,8 +6050,21 @@ body[data-bottombar] .install-banner {
   display: flex;
   flex-direction: column;
   /* Le chrome du planning est masqué sur cette vue (isSpecial) : on prend la hauteur utile,
-     `dvh` et non `vh` pour que la barre d'URL mobile ne rogne pas la saisie. */
-  height: calc(100dvh - 150px);
+     `dvh` et non `vh` pour que la barre d'URL mobile ne rogne pas la saisie.
+
+     ⚠️ 150px EST UN NOMBRE MESURÉ, PAS UNE CONSTANTE : c'est la hauteur de l'en-tête de
+     l'application au-dessus de cette vue, dans son état normal. Aucune règle CSS ne peut le
+     déduire — un élément ne connaît pas son propre décalage au haut du viewport. Le
+     comportement à connaître est donc celui-ci : si l'en-tête grandit (bandeau d'annonce,
+     bannière d'installation, titre sur deux lignes), la section dépasse d'autant et la zone
+     de saisie sort du cadre visible.
+
+     `max-height: 100dvh` borne le dégât — la section ne peut jamais dépasser l'écran entier,
+     et c'est la liste qui absorbe la différence puisqu'elle est le seul élément élastique.
+     Le vrai remède, si un bandeau permanent apparaît un jour, est de poser la valeur depuis
+     le composant (`style={{ "--forum-chrome": … }}`) plutôt que d'ajuster ce nombre à vue. */
+  height: calc(100dvh - var(--forum-chrome, 150px));
+  max-height: 100dvh;
   min-height: 320px;
 }
 .forum-head {
@@ -6083,6 +6096,8 @@ body[data-bottombar] .install-banner {
   display: block;
   font-size: 0.8rem;
   padding: 8px 14px;
+  /* Un bouton qu'on vise en remontant le fil d'une main : même règle que partout ailleurs. */
+  min-height: 44px;
 }
 .forum-erreur {
   margin: 0 0 8px;
@@ -6105,6 +6120,11 @@ body[data-bottombar] .install-banner {
    suffit pas : il faut viser le li, sinon une puce carrée reste devant chaque bulle. */
 .forum-list li {
   list-style: none;
+  /* QUATRIÈME piège du même Pico, et il en fallait DEUX déclarations : `:where(ol, ul) li`
+     pose aussi un `margin-bottom` (spécificité 0,0,1). Neutraliser la seule puce laissait donc
+     l'espacement réel entre bulles à 14 px au lieu des 10 px que le `gap` du UL demande — un
+     écart de 40 %, invisible à la relecture du seul `gap`. */
+  margin-bottom: 0;
 }
 /* La rangée porte l'alignement (pastille + bulle), la bulle ne porte plus que son apparence. */
 .forum-rangee {
@@ -6168,12 +6188,23 @@ body[data-bottombar] .install-banner {
 .forum-msg.is-mine {
   border-left: 3px solid var(--good-edge);
 }
+/* `flex-wrap` et `min-width: 0` VONT ENSEMBLE. Les trois boutons d'action font au moins
+   132 px : sur un iPhone SE en compte admin, il ne restait rien pour le nom, qui débordait de
+   la bulle au lieu de passer à la ligne. `min-width: 0` sur le conteneur ET sur le nom est ce
+   qui autorise un élément flex à rétrécir sous sa largeur de contenu — sans lui, `wrap` seul
+   ne suffit pas. */
 .forum-msg-head {
+  flex-wrap: wrap;
+  min-width: 0;
   display: flex;
   align-items: baseline;
   gap: 8px;
 }
 .forum-msg-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.85rem;
 }
 .forum-msg-head small {
@@ -6233,7 +6264,15 @@ body[data-bottombar] .install-banner {
   gap: 4px;
   margin-top: 6px;
 }
+/* CIBLE TACTILE ÉTENDUE SANS GROSSIR LA PASTILLE. Une rangée de pastilles de 44 px sous
+   chaque message écraserait le message lui-même ; mais 32 px se ratent un doigt sur deux,
+   debout dans une salle, et c'est la règle que ce composant pose lui-même dix lignes plus
+   haut. Le `::after` étend la zone cliquable de 6 px tout autour — 44 px au total — sans
+   prendre un pixel de mise en page. `overflow: visible` est indispensable : sans lui la zone
+   étendue serait rognée par le rayon de la pastille. */
 .forum-reac {
+  position: relative;
+  overflow: visible;
   margin: 0;
   width: auto;
   padding: 2px 8px;
@@ -6241,9 +6280,28 @@ body[data-bottombar] .install-banner {
   border-radius: 999px;
   background: var(--pico-card-sectioning-background-color);
   border: 1px solid var(--pico-card-border-color);
+  /* QUATRIÈME piège Pico du composant, et le même que le menu d'en-tête (:628) et Tricount
+     (:3591) : Pico redéfinit `--pico-color` SUR le <button> lui-même (→ --pico-primary-inverse,
+     donc blanc). Lire la variable sans rétablir l'héritage donnait un compteur BLANC SUR BLANC
+     en thème clair et rose ; seul l'emoji restait visible, car son glyphe porte sa couleur. */
+  --pico-color: inherit;
   color: var(--pico-color);
   font-size: 0.8rem;
   line-height: 1;
+}
+/* Pico réapplique `--pico-color` = blanc au survol/focus/actif : sans ces états le chiffre
+   redevient invisible dès qu'on pose le doigt ou le curseur sur la pastille. */
+.forum-reac:hover,
+.forum-reac:focus,
+.forum-reac:active {
+  --pico-color: inherit;
+  color: var(--pico-color);
+}
+.forum-reac::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: inherit;
 }
 .forum-reac.is-mienne {
   border-color: var(--good-edge);
@@ -6267,12 +6325,21 @@ body[data-bottombar] .install-banner {
   background: var(--pico-card-sectioning-background-color);
   border: 1px solid var(--pico-card-border-color);
   border-radius: 8px;
+  /* Même piège que `.forum-reac` ci-dessus : sans `inherit`, le libellé de l'option et les
+     cases ☐/☑ disparaissaient entièrement en thème clair et rose. */
+  --pico-color: inherit;
   color: var(--pico-color);
   font-size: 0.85rem;
   display: flex;
   align-items: center;
   gap: 8px;
   overflow: hidden;
+}
+.forum-opt:hover,
+.forum-opt:focus,
+.forum-opt:active {
+  --pico-color: inherit;
+  color: var(--pico-color);
 }
 .forum-opt.is-coche {
   border-color: var(--good-edge);
@@ -6297,6 +6364,20 @@ body[data-bottombar] .install-banner {
   position: relative;
   font-size: 0.72rem;
   color: var(--pico-muted-color);
+}
+/* Les votants EN CLAIR sous un sondage clos. Pico applique `pointer-events: none` aux boutons
+   `[disabled]` : sur un sondage clos, l'infobulle « qui a coché quoi » disparaît même à la
+   souris — au moment précis où l'on vient lire le résultat. Ils ne s'affichent QUE là, parce
+   que sur un sondage ouvert la même information tient dans l'infobulle et allongerait la
+   bulle pour rien. */
+.forum-poll-votants {
+  margin: 2px 0 0;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+  overflow-wrap: anywhere;
+}
+.forum-poll-votants strong {
+  font-weight: 600;
 }
 .forum-poll-pied {
   margin: 2px 0 0;
@@ -6344,10 +6425,16 @@ body[data-bottombar] .install-banner {
 .forum-palette button {
   margin: 0;
   width: 100%;
-  min-height: 40px;
+  /* 44 px, comme toutes les cibles tactiles du composant. La grille est déjà en
+     `minmax(40px, 1fr)` : passer à 44 ne change qu'une colonne sur un écran très étroit. */
+  min-height: 44px;
   padding: 0;
   background: none;
   border: none;
+  /* Taille d'ICÔNE et non de texte : la rampe de DESIGN.md gouverne le texte, et un emoji
+     employé comme pictogramme se dimensionne à sa cible optique. Même valeur que
+     `.forum-outil` ci-dessous, à dessein — deux boutons du même dispositif prennent le même
+     cran, jamais deux crans voisins (Règle du Cran Voisin). */
   font-size: 1.1rem;
   line-height: 1;
 }
@@ -6407,7 +6494,10 @@ body[data-bottombar] .install-banner {
   min-height: 44px;
   min-width: 44px;
   padding: 0 8px;
-  font-size: 1.05rem;
+  /* Voir `.forum-palette button` : taille d'icône, et la MÊME que celle de la palette. Les
+     deux boutons ouvrent des outils de saisie côte à côte ; les servir à 1,05 et 1,1rem ne se
+     lisait pas comme un système, mais comme une inattention. */
+  font-size: 1.1rem;
   line-height: 1;
 }
 /* Hauteur RÉSERVÉE, même vide (l'espace insécable du composant) : sans elle, l'apparition de

@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { isAdminEmail } from "@/lib/admin";
 import { getFeatures } from "@/lib/features-server";
+import { isMissingRecord } from "@/lib/http-tx";
 import { broadcastForum, FORUM_EVENT_DELETED } from "@/lib/forum-realtime";
 
 export const runtime = "nodejs";
@@ -36,23 +37,21 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return NextResponse.json({ error: "Message introuvable" }, { status: 404 });
   }
 
-  // SUPPRIMER, C'EST AUSSI EFFACER LES CITATIONS DU MESSAGE.
+  // SUPPRIMER, C'EST AUSSI EFFACER LES CITATIONS DU MESSAGE — et c'est la BASE qui s'en charge,
+  // seule, par le `ON DELETE SET NULL` de `replyToId`. Rien à blanchir : aucune copie du texte
+  // ne vit ailleurs que dans cette ligne (cf. la note sur `replyToId` dans schema.prisma). Une
+  // version antérieure dénormalisait un instantané chez chaque réponse, qu'il fallait alors
+  // remettre à NULL ici — un chemin sur trois, puisque ni la purge des 12 mois ni la cascade de
+  // suppression d'un compte ne passent par cette route.
   //
-  // Les réponses gardent un instantané de ce à quoi elles répondent (`replyToExcerpt`), pour
-  // s'afficher sans jointure et survivre à la purge. Sans ce blanchiment, effacer son message
-  // en laisserait le texte lisible, signé de son nom, dans chaque réponse qu'il a reçue — la
-  // note de confidentialité promet exactement le contraire.
-  //
-  // Les DEUX écritures dans une transaction : entre le `delete` et l'`updateMany`, un lecteur
-  // ne doit jamais voir un message disparu dont la citation subsiste. `SET NULL` sur la clé
-  // étrangère fait le reste — les réponses, elles, ne bougent pas.
-  await prisma.$transaction([
-    prisma.forumMessage.updateMany({
-      where: { replyToId: id },
-      data: { replyToAuthor: null, replyToExcerpt: null },
-    }),
-    prisma.forumMessage.delete({ where: { id } }),
-  ]);
+  // P2025 rattrapé comme un SUCCÈS : l'auteur depuis son téléphone pendant que l'admin
+  // supprime depuis son ordinateur, ou un simple double-clic. Le geste a le résultat demandé —
+  // le message n'est plus là — et l'autorisation, elle, a bien été vérifiée juste au-dessus.
+  try {
+    await prisma.forumMessage.delete({ where: { id } });
+  } catch (e) {
+    if (!isMissingRecord(e)) throw e;
+  }
 
   // Le fil se referme chez tout le monde, sans attendre un rafraîchissement : un message
   // supprimé qui reste affiché ailleurs est précisément ce qu'on cherche à éviter en donnant

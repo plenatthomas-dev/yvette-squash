@@ -3,13 +3,16 @@
 -- Trois choix de conception sont inscrits dans ce fichier et méritent d'être relus avant
 -- toute modification ultérieure :
 --
---  1. La CITATION est dénormalisée (`replyToAuthor`, `replyToExcerpt`) en plus de la clé
---     `replyToId`. L'instantané permet d'afficher une citation sans jointure — y compris sur
---     un message reçu par le courtier — et de survivre à la purge des 12 mois, qui efface la
---     cible bien avant la réponse. La clé étrangère est en `ON DELETE SET NULL` et surtout
---     PAS en cascade : effacer une question ne doit pas effacer la discussion qu'elle a
---     ouverte. La contrepartie (blanchir l'instantané quand la cible est supprimée) est faite
---     par la route, pas par la base.
+--  1. La CITATION est une CLÉ ÉTRANGÈRE, et rien d'autre (`replyToId`, en `ON DELETE SET
+--     NULL` et surtout PAS en cascade : effacer une question ne doit pas effacer la discussion
+--     qu'elle a ouverte). Le texte cité est relu par jointure à l'affichage.
+--
+--     Une première version dénormalisait un instantané de la cible (`replyToAuthor`,
+--     `replyToExcerpt`) pour éviter cette jointure. C'était une COPIE de la parole d'un membre
+--     dans une ligne qui ne lui appartient pas : la cascade de suppression d'un compte et la
+--     purge des 12 mois ne l'atteignaient pas, et le GET la servait telle quelle. On paie une
+--     lecture de plus, et la promesse d'effacement de la notice devient vraie PAR
+--     CONSTRUCTION plutôt que par un blanchiment à faire dans trois fichiers différents.
 --
 --  2. La RÉACTION porte un index unique (message, membre, emoji). C'est lui qui rend la
 --     bascule idempotente : deux clics qui se croisent ne peuvent pas créer deux lignes.
@@ -21,11 +24,9 @@
 --     est à choix MULTIPLE, cocher deux cases fait bien deux lignes.
 
 -- AlterTable : la citation, sur le message lui-même.
-ALTER TABLE "ForumMessage" ADD COLUMN     "replyToId" TEXT,
-ADD COLUMN     "replyToAuthor" TEXT,
-ADD COLUMN     "replyToExcerpt" TEXT;
+ALTER TABLE "ForumMessage" ADD COLUMN     "replyToId" TEXT;
 
--- CreateIndex : sert l'effacement des instantanés à la suppression d'un message.
+-- CreateIndex : sert le SET NULL de la clé étrangère quand une cible citée est supprimée.
 CREATE INDEX "ForumMessage_replyToId_idx" ON "ForumMessage"("replyToId");
 
 -- AddForeignKey : SET NULL, jamais CASCADE (cf. point 1 ci-dessus).
@@ -47,6 +48,11 @@ CREATE INDEX "ForumReaction_messageId_idx" ON "ForumReaction"("messageId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ForumReaction_messageId_userId_emoji_key" ON "ForumReaction"("messageId", "userId", "emoji");
+
+-- CreateIndex : sert la limite de débit (réactions d'UN membre sur une fenêtre glissante) et
+-- la cascade de suppression d'un compte. L'unique ci-dessus ne peut pas y servir — sa colonne
+-- de tête est `messageId`.
+CREATE INDEX "ForumReaction_userId_createdAt_idx" ON "ForumReaction"("userId", "createdAt");
 
 -- AddForeignKey
 ALTER TABLE "ForumReaction" ADD CONSTRAINT "ForumReaction_messageId_fkey" FOREIGN KEY ("messageId") REFERENCES "ForumMessage"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -101,6 +107,11 @@ CREATE INDEX "ForumPollVote_optionId_idx" ON "ForumPollVote"("optionId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ForumPollVote_optionId_userId_key" ON "ForumPollVote"("optionId", "userId");
+
+-- CreateIndex : `userId` d'abord, que cherchent la cascade de suppression d'un compte et le
+-- `deleteMany` du vote ; `createdAt` ensuite, pour la limite de débit. Colonne de tête de
+-- l'unique = `optionId`, donc inutilisable pour l'un comme pour l'autre.
+CREATE INDEX "ForumPollVote_userId_createdAt_idx" ON "ForumPollVote"("userId", "createdAt");
 
 -- AddForeignKey
 ALTER TABLE "ForumPollVote" ADD CONSTRAINT "ForumPollVote_optionId_fkey" FOREIGN KEY ("optionId") REFERENCES "ForumPollOption"("id") ON DELETE CASCADE ON UPDATE CASCADE;

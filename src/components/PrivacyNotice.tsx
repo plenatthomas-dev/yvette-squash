@@ -205,6 +205,14 @@ export function PrivacyNotice() {
                 <strong> nombre d'inscrits</strong> et <strong>ta position</strong> —
                 <strong> jamais les noms</strong>.
               </p>
+              <p>
+                <strong>La cloche.</strong> Chaque notification qui t&apos;est destinée laisse
+                aussi une ligne dans la cloche de l&apos;appli, gardée{" "}
+                <strong>30 jours</strong> puis effacée&nbsp;: c&apos;est le filet pour les fois
+                où le téléphone n&apos;a rien reçu (notifications refusées, appareil éteint).
+                Elle ne garde <strong>jamais le texte d&apos;un message du fil</strong> — juste
+                de quoi t&apos;y renvoyer, et c&apos;est le fil qui fait foi.
+              </p>
               {tricount && (
                 <p>
                   <strong>Partage de frais (« Frais »).</strong> Dépenses, remboursements et
@@ -312,9 +320,11 @@ export function PrivacyNotice() {
                 <p>
                   <strong>Réactions, citations et sondages.</strong> Une{" "}
                   <strong>réaction</strong> est signée&nbsp;: chacun voit qui a posé quel emoji.
-                  Quand tu <strong>cites</strong> un message, un extrait en est recopié dans ta
-                  réponse&nbsp;; si son auteur le supprime, cet extrait est{" "}
-                  <strong>effacé partout</strong>, y compris dans les réponses déjà envoyées.
+                  Quand tu <strong>cites</strong> un message, ta réponse n&apos;en garde{" "}
+                  <strong>aucune copie</strong>&nbsp;: l&apos;extrait affiché est relu sur le
+                  message d&apos;origine à chaque lecture. Si son auteur le supprime — ou si son
+                  compte part, ou si les {FORUM_RETENTION_LABEL} sont passés — la citation{" "}
+                  <strong>disparaît d&apos;elle-même</strong>, partout et sans exception.
                   Dans un <strong>sondage</strong>, le vote n&apos;est{" "}
                   <strong>pas anonyme</strong>&nbsp;: on peut cocher plusieurs réponses, et
                   chacun voit qui a coché quoi — c&apos;est ce qui permet de relancer ceux qui

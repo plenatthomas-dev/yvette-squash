@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { NextRequest } from "next/server";
+import { Prisma } from "@prisma/client";
 
 // LES RÉACTIONS.
 //
@@ -23,9 +24,13 @@ const h = vi.hoisted(() => ({
   /** La réaction déjà posée par ce membre sur cet emoji, ou `null`. */
   existante: null as null | { id: string },
   recentCount: 0,
+  /** Le `where` du dernier `count` : c'est lui qui borne la limite à UN membre. */
+  countWhere: null as null | Record<string, unknown>,
   cree: null as null | Record<string, unknown>,
   supprime: null as null | string,
   diffuse: null as null | [string, Record<string, unknown>],
+  /** Ce que l'écriture doit jeter : la course entre deux clics se joue là. */
+  jette: null as null | Error,
 }));
 
 vi.mock("@/lib/session", async (importOriginal) => ({
@@ -44,12 +49,20 @@ vi.mock("@/lib/db", () => ({
     forumMessage: { findUnique: vi.fn(async () => h.message) },
     forumReaction: {
       findUnique: vi.fn(async () => h.existante),
-      count: vi.fn(async () => h.recentCount),
+      // Le `where` est CAPTURÉ, et non ignoré : le remplacer par `{}` dans la route ferait de
+      // la limite un plafond global au club — 120 réactions par dix minutes pour tout le
+      // monde — sans qu'aucun test de ce fichier ne rougisse.
+      count: vi.fn(async (args?: { where?: Record<string, unknown> }) => {
+        h.countWhere = args?.where ?? null;
+        return h.recentCount;
+      }),
       create: vi.fn(async (args: { data: Record<string, unknown> }) => {
+        if (h.jette) throw h.jette;
         h.cree = args.data;
         return { id: "r1" };
       }),
       delete: vi.fn(async (args: { where: { id: string } }) => {
+        if (h.jette) throw h.jette;
         h.supprime = args.where.id;
         return {};
       }),
@@ -77,6 +90,8 @@ beforeEach(() => {
   h.cree = null;
   h.supprime = null;
   h.diffuse = null;
+  h.countWhere = null;
+  h.jette = null;
 });
 
 describe("gardes — le même ordre que partout dans l'appli", () => {
@@ -166,7 +181,55 @@ describe("la diffusion", () => {
   });
 });
 
+// LA COURSE QUE CES TESTS FERMENT. La bascule lit puis écrit, sans transaction. Deux clics à
+// 200 ms d'intervalle, ou deux appareils : les deux lectures rendent `null`, les deux écritures
+// partent, la seconde viole l'index unique. La route rendait alors 500, et l'écran rembobinait
+// son affichage optimiste vers « pas de réaction » ALORS QUE LA BASE EN AVAIT UNE — un mensonge
+// qui durait jusqu'au rechargement. La base tient bien l'invariant, mais elle le tient en
+// JETANT : c'est à la route de traduire ce jet en succès.
+describe("deux clics qui se croisent", () => {
+  it("traite une réaction déjà posée comme un succès, pas comme un 500", async () => {
+    h.existante = null;
+    h.jette = new Prisma.PrismaClientKnownRequestError("unique", {
+      code: "P2002",
+      clientVersion: "6",
+    });
+    const res = await POST(req("👍"), ctx);
+    expect(res.status).toBe(200);
+    expect((await res.json()).on).toBe(true);
+    // Le delta part quand même : il décrit l'état atteint, et il est idempotent chez tous.
+    expect(h.diffuse?.[1].on).toBe(true);
+  });
+
+  it("traite une réaction déjà retirée comme un succès, pas comme un 500", async () => {
+    h.existante = { id: "r1" };
+    h.jette = new Prisma.PrismaClientKnownRequestError("not found", {
+      code: "P2025",
+      clientVersion: "6",
+    });
+    const res = await POST(req("👍"), ctx);
+    expect(res.status).toBe(200);
+    expect((await res.json()).on).toBe(false);
+    expect(h.diffuse?.[1].on).toBe(false);
+  });
+
+  // Ceinture : une erreur qui n'est PAS une course doit continuer de remonter. Avaler tout ce
+  // qui passe transformerait une panne en succès silencieux.
+  it("laisse remonter une erreur qui n'est pas une course", async () => {
+    h.existante = null;
+    h.jette = new Error("la base est tombée");
+    await expect(POST(req("👍"), ctx)).rejects.toThrow("la base est tombée");
+  });
+});
+
 describe("garde-fou d'emballement", () => {
+  it("compte les réactions d'UN SEUL membre, sur une fenêtre glissante", async () => {
+    await POST(req("👍"), ctx);
+    expect(h.countWhere?.userId).toBe("u1");
+    const gte = (h.countWhere?.createdAt as { gte: Date }).gte;
+    expect(Math.round((Date.now() - gte.getTime()) / 60_000)).toBe(10);
+  });
+
   it("laisse passer un usage normal", async () => {
     h.recentCount = 119;
     expect((await POST(req(), ctx)).status).toBe(200);
