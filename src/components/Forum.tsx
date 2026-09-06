@@ -14,7 +14,7 @@ import {
   MAX_POLL_OPTION_LEN,
   forumPreview,
 } from "@/lib/forum";
-import { segmenter, libelleJour, memeJour } from "@/lib/forum-texte";
+import { segmenter, souligner, concorde, libelleJour, memeJour } from "@/lib/forum-texte";
 import { initiales } from "@/lib/forum-avatar";
 
 // LE FIL DE DISCUSSION DU CLUB.
@@ -190,12 +190,15 @@ function IconeCopier() {
   );
 }
 
-/** Rend le corps d'un message : du texte, et des liens qui en sont des nœuds React.
+/** Rend le corps d'un message : du texte, des liens qui en sont des nœuds React, et — pendant
+ *  une recherche — le passage trouvé.
  *
- *  Jamais de HTML fabriqué — `segmenter` ne rend que des données, et c'est React qui crée les
- *  éléments. Il n'y a donc aucun point d'injection, quoi qu'un membre écrive. */
-function Corps({ texte }: { texte: string }) {
-  const parts = useMemo(() => segmenter(texte), [texte]);
+ *  Jamais de HTML fabriqué — `segmenter` et `souligner` ne rendent que des données, et c'est
+ *  React qui crée les éléments. Il n'y a donc aucun point d'injection, quoi qu'un membre
+ *  écrive, et le soulignage n'y change rien : `<mark>` est produit ICI, à partir d'un type de
+ *  segment, jamais à partir d'une chaîne balisée. */
+function Corps({ texte, requete = "" }: { texte: string; requete?: string }) {
+  const parts = useMemo(() => souligner(segmenter(texte), requete), [texte, requete]);
   return (
     <p className="forum-msg-body">
       {parts.map((p, i) =>
@@ -203,6 +206,8 @@ function Corps({ texte }: { texte: string }) {
           <a key={i} href={p.valeur} target="_blank" rel="noopener noreferrer nofollow">
             {p.valeur}
           </a>
+        ) : p.type === "trouve" ? (
+          <mark key={i}>{p.valeur}</mark>
         ) : (
           <span key={i}>{p.valeur}</span>
         ),
@@ -249,6 +254,21 @@ export default function Forum({
   /** La pop-up de choix bascule SOUS la bulle quand il n'y a pas la place au-dessus. */
   const [choixDessous, setChoixDessous] = useState(false);
 
+  // RECHERCHE — un état ENTIÈREMENT À PART du fil.
+  //
+  // Rien de ce qui suit ne touche `messages`, `reactions`, `polls` ni `limit`. C'est délibéré :
+  // le fil porte un protocole de synchronisation où chaque réponse dit s'il faut SUBSTITUER,
+  // COMPLÉTER ou ÉLAGUER (cf. `charge`), et y mêler une seconde source de messages était le
+  // moyen le plus court de faire disparaître des messages légitimes à l'élagage suivant.
+  /** Ce qui est tapé dans le champ. Vide = pas de recherche, le fil s'affiche normalement. */
+  const [requete, setRequete] = useState("");
+  /** Le fil ENTIER, pour chercher au-delà des messages chargés. `null` = pas encore demandé. */
+  const [corpus, setCorpus] = useState<ForumMessage[] | null>(null);
+  /** Le corpus a-t-il buté sur le plafond de la route ? Alors la recherche ne couvre pas tout. */
+  const [tronque, setTronque] = useState(false);
+  /** Le corpus n'a pas pu être chargé : on le DIT, plutôt que de rendre « aucun résultat ». */
+  const [corpusErreur, setCorpusErreur] = useState(false);
+
   const onExpiredRef = useRef(onExpired);
   onExpiredRef.current = onExpired;
   const toastRef = useRef(toast);
@@ -290,6 +310,13 @@ export default function Forum({
   moiRef.current = moi;
   const zoneRef = useRef<HTMLDivElement | null>(null);
   const saisieRef = useRef<HTMLTextAreaElement | null>(null);
+  /** Le corpus est-il déjà parti ? Une seule demande par montage, quoi qu'on tape ensuite. */
+  const corpusDemandeRef = useRef(false);
+  /** Cherche-t-on ? Une requête faite de blancs seuls n'est pas une recherche. */
+  const enRecherche = requete.trim() !== "";
+  /** Le même, lisible depuis un effet qui n'écoute, lui, que `messages`. */
+  const enRechercheRef = useRef(false);
+  enRechercheRef.current = enRecherche;
 
   const charge = useCallback(
     async (n: number, mode: "page" | "rattrapage" = "page") => {
@@ -357,6 +384,32 @@ export default function Forum({
     void charge(limit);
   }, [charge, limit]);
 
+  /**
+   * Le fil ENTIER, chargé une seule fois, à la PREMIÈRE FRAPPE dans le champ de recherche.
+   *
+   * Ni au montage ni à la mise au point du champ : qui ouvre le fil sans chercher ne paie rien
+   * — ni octets, ni réveil de Neon (PRODUCT.md). Et une seule fois par montage, parce qu'un
+   * chargement par caractère tapé serait exactement le polling que ce fil s'interdit ; les
+   * messages qui arrivent ensuite sont greffés sur le corpus par le courtier, plus bas.
+   */
+  const chargerCorpus = useCallback(async () => {
+    if (corpusDemandeRef.current) return;
+    corpusDemandeRef.current = true;
+    try {
+      const res = await fetch("/api/forum/recherche");
+      if (onExpiredRef.current(res.status)) return;
+      const data = await readOk<{ messages: ForumMessage[]; tronque?: boolean }>(res);
+      setCorpus(data.messages);
+      setTronque(Boolean(data.tronque));
+      setCorpusErreur(false);
+    } catch {
+      // On REJOUERA à la frappe suivante : un corpus manquant rendrait « aucun résultat » pour
+      // tout, ce qui se lit comme « personne n'en a jamais parlé ». L'écran le dit à la place.
+      corpusDemandeRef.current = false;
+      setCorpusErreur(true);
+    }
+  }, []);
+
   // Le dernier id connu suit la liste, pour que le rattrapage reparte du bon endroit.
   useEffect(() => {
     if (messages && messages.length > 0) dernierRef.current = messages[messages.length - 1].id;
@@ -384,8 +437,30 @@ export default function Forum({
     [],
   );
 
+  /**
+   * Insère un message dans le fil, ET dans le corpus de recherche s'il est chargé.
+   *
+   * Les trois chemins d'arrivée passent par ici (le courtier, la réponse du POST, celle du
+   * sondage) pour la même raison qui a fait naître `forum-db.ts` côté serveur : trois
+   * insertions parallèles finiraient par diverger, et un message posté pendant qu'on cherche
+   * serait introuvable — le cas le plus déroutant qui soit, puisqu'on vient de le voir passer.
+   *
+   * `fusionner` déduplique par id : le message qu'on a inséré soi-même après le POST revient
+   * par le courtier sans se compter double, ici comme dans le fil.
+   */
+  const inserer = useCallback((m: ForumMessage) => {
+    setMessages((actuels) => fusionner(actuels ?? [], [m]));
+    // `c && …` : on ne CRÉE pas le corpus au passage d'un message. Tant que personne n'a
+    // cherché, il n'existe pas, et un corpus né d'un seul message rendrait une recherche qui
+    // ne trouve que lui.
+    setCorpus((c) => (c ? fusionner(c, [m]) : c));
+  }, []);
+
   /** Retire un message partout — y compris les citations qui le reprenaient. */
   const retirer = useCallback((id: string) => {
+    // Le corpus subit le MÊME sort, et pas seulement le fil : un message supprimé qui reste
+    // trouvable est précisément ce que le pouvoir de modération de l'admin cherche à éviter.
+    setCorpus((c) => (c ? c.filter((m) => m.id !== id) : c));
     setMessages((actuels) =>
       (actuels ?? [])
         .filter((m) => m.id !== id)
@@ -448,9 +523,7 @@ export default function Forum({
         // le GET renvoie. La route sondage greffait un champ `poll` sur cet événement, ce qui
         // obligeait le client à connaître une seconde forme de message ; elle émet maintenant
         // un événement `poll` distinct, celui-là même qu'écoutent déjà le vote et la clôture.
-        canal.bind("message", (m: ForumMessage) => {
-          setMessages((actuels) => fusionner(actuels ?? [], [m]));
-        });
+        canal.bind("message", (m: ForumMessage) => inserer(m));
         canal.bind("deleted", ({ id }: { id: string }) => retirer(id));
         canal.bind("reaction", appliquerReaction);
         canal.bind("poll", (p: Poll) => setPolls((x) => ({ ...x, [p.messageId]: p })));
@@ -510,7 +583,7 @@ export default function Forum({
     // `limit` n'est volontairement PAS une dépendance : changer de page ne doit pas
     // reconstruire la connexion. Le rattrapage relit de toute façon depuis l'ancre.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [charge, retirer, appliquerReaction]);
+  }, [charge, retirer, appliquerReaction, inserer]);
 
   // Oubli des « en train d'écrire » : sans ce balayage, quelqu'un qui ferme son onglet en
   // pleine phrase resterait affiché comme écrivant, pour toujours.
@@ -541,9 +614,14 @@ export default function Forum({
   // Sauf après un « charger les messages plus anciens » : là, on rend sa place au lecteur en
   // décalant le défilement de la hauteur exactement gagnée. C'est le seul geste du fil qui
   // insère AU-DESSUS de ce qu'on regarde.
+  //
+  // ⚠️ RIEN DE TOUT CELA PENDANT UNE RECHERCHE. La liste affichée est alors celle des
+  // résultats, qui ne suit pas `messages` : un message arrivé par le courtier déclencherait
+  // quand même cet effet, et ferait sauter en bas une liste de résultats qu'on est en train de
+  // lire — sans qu'aucun de ces résultats n'ait bougé.
   useEffect(() => {
     const zone = zoneRef.current;
-    if (!zone) return;
+    if (!zone || enRechercheRef.current) return;
     const avant = ancrageRef.current;
     if (avant !== null) {
       ancrageRef.current = null;
@@ -553,6 +631,23 @@ export default function Forum({
     const enBas = zone.scrollHeight - zone.scrollTop - zone.clientHeight < 120;
     if (enBas) finRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
+
+  // BASCULER ENTRE LE FIL ET LES RÉSULTATS REPOSE LE DÉFILEMENT, dans les deux sens.
+  //
+  // Sans cela, la position héritée de la liste précédente s'applique telle quelle à une liste
+  // qui n'a ni la même hauteur ni le même contenu : on entre dans une recherche au milieu de
+  // ses résultats, et l'on revient au fil quelque part dans le mois dernier.
+  //
+  // Deux destinations opposées, parce que ce ne sont pas deux listes de même nature : le fil
+  // est une conversation qu'on rejoint par la FIN, une liste de résultats se lit depuis le
+  // DÉBUT. `requete` est en dépendance, pas seulement le booléen : affiner sa recherche change
+  // les résultats, et doit ramener en haut des nouveaux.
+  useEffect(() => {
+    const zone = zoneRef.current;
+    if (!zone) return;
+    if (enRecherche) zone.scrollTop = 0;
+    else finRef.current?.scrollIntoView({ block: "end" });
+  }, [enRecherche, requete]);
 
   /** Le champ grandit avec le texte, jusqu'au plafond posé en CSS (30dvh).
    *
@@ -613,7 +708,7 @@ export default function Forum({
       const data = await readOk<{ message: ForumMessage }>(res);
       // Insertion immédiate. Le même message reviendra par le courtier : `fusionner`
       // déduplique par id, donc on ne se voit pas parler double.
-      setMessages((actuels) => fusionner(actuels ?? [], [data.message]));
+      inserer(data.message);
       // On n'efface QUE ce qu'on a envoyé : si le texte a changé pendant la requête, il
       // appartient au message suivant et doit rester.
       setDraft((courant) => (courant === partiDe ? "" : courant));
@@ -850,7 +945,7 @@ export default function Forum({
       });
       if (onExpiredRef.current(res.status)) return;
       const data = await readOk<{ message: ForumMessage; poll: Poll }>(res);
-      setMessages((actuels) => fusionner(actuels ?? [], [data.message]));
+      inserer(data.message);
       setPolls((x) => ({ ...x, [data.poll.messageId]: data.poll }));
       setSondage(null);
     } catch (e) {
@@ -877,6 +972,25 @@ export default function Forum({
       toastRef.current("err", "Réglage non enregistré");
     }
   };
+
+  /**
+   * Les messages du corpus qui concordent.
+   *
+   * Le nom de l'AUTEUR est cherché en même temps que le corps, et c'est deux mots de code pour
+   * la moitié du « qui a dit quoi » : taper « marie » ramène tout ce que Marie a dit, sans
+   * qu'on ait eu à construire un filtre par auteur. Personne ne cherche « marie » en espérant
+   * les messages qui contiennent le mot sans être d'elle — et s'ils existent, les voir est un
+   * bonus, pas une gêne.
+   */
+  const resultats = useMemo(
+    () =>
+      enRecherche
+        ? (corpus ?? []).filter(
+            (m) => concorde(m.body, requete) || concorde(m.authorName, requete),
+          )
+        : [],
+    [enRecherche, corpus, requete],
+  );
 
   const restant = MAX_FORUM_LEN - forumLength(draft);
   /** Le seul palier franchi, pour l'annonce vocale — cf. la région `aria-live` en bas. */
@@ -926,10 +1040,125 @@ export default function Forum({
             <span aria-hidden="true">{muted ? "🔕 Notifications coupées" : "🔔 Notifications"}</span>
           </button>
         </div>
+
+        {/* LA RECHERCHE. Deuxième rangée de l'en-tête (`flex-basis: 100%`), et non une modale :
+            c'est le fil lui-même qu'on filtre, et le champ doit rester visible pendant qu'on
+            lit ce qu'il a ramené. La liste, seul élément élastique de la section, absorbe la
+            hauteur qu'il prend — `--forum-chrome` mesure l'en-tête de l'APPLICATION, au-dessus
+            de cette vue, et n'a donc rien à voir avec cette rangée-ci.
+
+            PAS D'`autoFocus` : sur téléphone, il lèverait le clavier à chaque ouverture du fil,
+            au moment précis où l'on veut lire. Même arbitrage que la modale de l'annuaire. */}
+        <div className="forum-recherche">
+          <input
+            type="search"
+            value={requete}
+            onChange={(e) => {
+              setRequete(e.target.value);
+              // À la PREMIÈRE frappe seulement : `chargerCorpus` se garde lui-même.
+              if (e.target.value.trim()) void chargerCorpus();
+            }}
+            placeholder="Rechercher dans le fil…"
+            aria-label="Rechercher dans le fil"
+          />
+          {/* Le ✕ natif du `type="search"` n'existe pas partout, et nulle part avec une cible
+              de 44 px. Celui-ci rend aussi le fil du même geste. */}
+          {enRecherche && (
+            <button
+              type="button"
+              className="secondary forum-recherche-vider"
+              onClick={() => setRequete("")}
+              aria-label="Effacer la recherche"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="forum-scroll" ref={zoneRef}>
-        {messages === null ? (
+        {/* LES RÉSULTATS SONT EN LECTURE SEULE — ni barre d'actions, ni pastilles de réaction,
+            ni appui long. Ce n'est pas une simplification : le corpus ne porte NI réactions NI
+            sondages (la route ne les charge pas, c'est ce qui la rend bon marché), et une bulle
+            qui afficherait « aucune réaction » sur un message qui en a trois mentirait. On
+            cherche pour retrouver ; on efface le champ pour agir. */}
+        {enRecherche ? (
+          <>
+            <p className="forum-resultats-nb" aria-live="polite">
+              {corpus === null
+                ? "Recherche en cours…"
+                : `${resultats.length} message${resultats.length > 1 ? "s" : ""} trouvé${
+                    resultats.length > 1 ? "s" : ""
+                  }`}
+            </p>
+            {/* Une recherche qui ne couvre qu'une partie du fil sans le dire est pire que pas
+                de recherche : on conclut « personne n'en a jamais parlé » d'un silence qui
+                n'est que le plafond de la route. */}
+            {tronque && (
+              <p className="forum-erreur">
+                Le fil dépasse ce que la recherche peut fouiller : seuls les messages les plus
+                récents sont couverts.
+              </p>
+            )}
+            {corpus === null ? (
+              corpusErreur ? (
+                // Et surtout PAS « aucun résultat », qui se lirait comme « personne n'en a
+                // jamais parlé » alors que la question n'a jamais été posée.
+                <EmptyState icon="⚠️" text="Recherche indisponible pour le moment." />
+              ) : (
+                <Skeleton />
+              )
+            ) : resultats.length === 0 ? (
+              <EmptyState icon="🔎" text={`Aucun message ne contient « ${requete.trim()} ».`} />
+            ) : (
+              <ul className="forum-list">
+                {resultats.map((m, i) => {
+                  const mine = moi !== null && m.authorId === moi.id;
+                  const precedent = i > 0 ? resultats[i - 1] : null;
+                  // Les séparateurs de jour SURVIVENT au filtrage, et c'est eux qui répondent
+                  // au « quand » : les résultats sautent d'un mois à l'autre, et une heure
+                  // seule ne dirait pas laquelle.
+                  const nouveauJour = !precedent || !memeJour(precedent.createdAt, m.createdAt);
+                  return (
+                    <li key={m.id} className="forum-ligne">
+                      {nouveauJour && (
+                        <p className="forum-jour" role="presentation">
+                          <span>{libelleJour(m.createdAt)}</span>
+                        </p>
+                      )}
+                      <div className={mine ? "forum-rangee is-mine" : "forum-rangee"}>
+                        {!mine && (
+                          <span className="forum-avatar" aria-hidden="true">
+                            {initiales(m.authorName)}
+                          </span>
+                        )}
+                        {/* `est-lecture` REND LA SÉLECTION DU TEXTE, que la bulle du fil
+                            refuse au doigt pour laisser l'appui long ouvrir la pop-up de
+                            réactions (cf. la note de globals.css). Ici l'appui long ne veut
+                            rien dire : rien ne justifie plus d'empêcher de copier. */}
+                        <div className="forum-bulle est-lecture">
+                          <div className={mine ? "forum-msg is-mine" : "forum-msg"}>
+                            {m.replyToExcerpt && (
+                              <p className="forum-citation">
+                                <strong>{m.replyToAuthor}</strong>
+                                <span>{m.replyToExcerpt}</span>
+                              </p>
+                            )}
+                            <div className="forum-msg-head">
+                              <strong>{m.authorName}</strong>
+                              <small>{horodatage(m.createdAt)}</small>
+                            </div>
+                            <Corps texte={m.body} requete={requete} />
+                          </div>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </>
+        ) : messages === null ? (
           <Skeleton />
         ) : messages.length === 0 ? (
           <EmptyState

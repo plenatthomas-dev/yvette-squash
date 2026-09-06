@@ -6302,6 +6302,15 @@ body[data-bottombar] .install-banner {
     -webkit-user-select: none;
     user-select: none;
   }
+  /* SAUF DANS LES RÉSULTATS DE RECHERCHE, où l'appui long ne veut rien dire : la bulle n'y
+     porte aucune action, donc plus rien ne justifie de confisquer la sélection. C'est le coût
+     décrit juste au-dessus, rendu là où il ne s'impose plus — on vient d'y retrouver la phrase
+     qu'on cherchait, c'est précisément le moment où l'on veut la copier. */
+  .forum-bulle.est-lecture {
+    -webkit-touch-callout: default;
+    -webkit-user-select: text;
+    user-select: text;
+  }
 }
 /* La place que les pastilles prennent EN DEHORS de la bulle. Sans elle, elles mordraient sur
    le message suivant au lieu de mordre sur le leur. Posée seulement quand il y en a. */
@@ -6808,6 +6817,47 @@ body[data-bottombar] .install-banner {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+/* --- La recherche dans le fil ------------------------------------------ */
+/* Deuxième rangée de l'en-tête : `flex-basis: 100%` la fait passer à la ligne dans le
+   `flex-wrap` de `.forum-head`, sans qu'aucune hauteur soit à recalculer nulle part — la
+   liste est le seul élément élastique de la section, c'est elle qui rend la place. */
+.forum-recherche {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.forum-recherche input[type="search"] {
+  flex: 1;
+  margin: 0;
+}
+.forum-recherche-vider {
+  width: auto;
+  margin: 0;
+  padding: 0 12px;
+  /* Cible tactile, comme partout dans ce fil : 24 px se ratent un doigt sur deux. */
+  min-height: 44px;
+  min-width: 44px;
+}
+/* Le décompte est une information de service : il annonce ce que la liste montre déjà, et ne
+   doit pas peser autant qu'un message. */
+.forum-resultats-nb {
+  margin: 0 0 8px;
+  padding: 0 4px;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+}
+/* LE PASSAGE TROUVÉ. Un fond, pas une couleur de texte : DESIGN.md réserve la couleur au sens,
+   et « c'est ce que tu cherchais » n'est pas un sens que porte le message — c'est un repère
+   posé par-dessus. Le fond suit `--pico-mark-background-color`, donc les trois thèmes, et
+   garde le contraste du texte courant plutôt que d'en imposer un. */
+.forum-msg-body mark {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: var(--pico-mark-background-color);
+  color: var(--pico-mark-color);
 }
 .forum-mute {
   width: auto;
