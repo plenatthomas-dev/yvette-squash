@@ -17,6 +17,7 @@ import InterclubFollow from "@/components/InterclubFollow";
 import InterclubLive from "@/components/InterclubLive";
 import { InterclubAvailability } from "@/components/InterclubAvailability";
 import { CLUB_TZ } from "@/lib/time";
+import { downloadFixtureIcs } from "@/lib/ics";
 import type { TieOutcome } from "@/lib/interclub-db";
 import { InterclubStats } from "@/components/InterclubStats";
 import {
@@ -1174,23 +1175,45 @@ function FixtureDialog({
               {fixture.home ? "Chez nous : " : "Déplacement : "}
               <strong>{fixture.venue}</strong>
               {fixture.venueAddress && (
-                <span className="ic-venue-addr">{fixture.venueAddress}</span>
+                // L'ADRESSE EST UN ITINÉRAIRE, pas un texte à recopier dans une autre appli. Une
+                // URL Maps plutôt qu'un schéma propriétaire : `maps:` ne s'ouvre pas sur Android
+                // et `geo:` pas sur iOS, alors qu'une URL https est reprise par l'application de
+                // cartes des deux côtés.
+                <a
+                  className="ic-venue-addr"
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                    `${fixture.venue} ${fixture.venueAddress}`,
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {fixture.venueAddress}
+                </a>
               )}
             </p>
           )}
-          {/* PRÈS DE CE QU'IL CORRIGE, et non dans la barre du bas avec « Supprimer » : la date,
-              l'heure et le lieu se lisent ici, et c'est ici qu'on s'aperçoit qu'ils sont faux. */}
-          {fixture.canEdit && (
-            <p>
+          {/* PRÈS DE CE QU'ELLES CONCERNENT, et non dans la barre du bas avec « Supprimer » :
+              la date, l'heure et le lieu se lisent ici, et c'est ici qu'on veut les emporter
+              dans son agenda — ou s'apercevoir qu'ils sont faux. */}
+          <p className="ic-fix-tools">
+            <button
+              type="button"
+              className="secondary tiny"
+              title="Ajouter la rencontre à mon agenda (.ics)"
+              onClick={() => downloadFixtureIcs({ ...fixture, teamName: fixture.team.name })}
+            >
+              📅 Agenda
+            </button>
+            {fixture.canEdit && (
               <button
                 type="button"
-                className="secondary tiny ic-edit-head"
+                className="secondary tiny"
                 onClick={() => setEditHead(true)}
               >
                 ✎ Modifier la rencontre
               </button>
-            </p>
-          )}
+            )}
+          </p>
         </>
       )}
       {fixture.team.captainName && (

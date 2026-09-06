@@ -152,6 +152,30 @@ describe("le droit de corriger", () => {
   });
 });
 
+// L'ADRESSE EST UN ITINÉRAIRE. En déplacement, c'est l'information la plus utile de l'écran,
+// et la recopier à la main dans une autre application au volant est le pire moment pour la
+// recopier. Une URL https plutôt qu'un schéma propriétaire : `maps:` ne s'ouvre pas sur
+// Android, `geo:` pas sur iOS.
+describe("le lieu du déplacement", () => {
+  it("ouvre l'adresse dans une carte, sans quitter l'appli au retour", async () => {
+    const r = await ouvre(false);
+    const lien = r.getByRole("link", { name: /12 rue du Stade/ }) as HTMLAnchorElement;
+    expect(lien.href).toContain("google.com/maps");
+    // Le club hôte ET l'adresse : une rue seule tombe parfois sur la mauvaise commune.
+    expect(decodeURIComponent(lien.href)).toContain("Squash de Massy 12 rue du Stade");
+    expect(lien.target).toBe("_blank");
+    expect(lien.rel).toContain("noopener");
+  });
+
+  it("offre l'ajout à l'agenda à TOUT LE MONDE, pas seulement à qui peut corriger", async () => {
+    // Emporter la date d'une rencontre n'est pas un droit d'administration : c'est le geste
+    // du joueur qui veut la retrouver dans son téléphone.
+    surcharge = { canEdit: false };
+    const r = await ouvre(false);
+    expect(r.getByRole("button", { name: /Agenda/ })).toBeTruthy();
+  });
+});
+
 describe("on n'envoie que ce qui a changé", () => {
   it("corrige l'heure SEULE, sans emporter le lieu que l'import a renseigné", async () => {
     const r = await ouvre();

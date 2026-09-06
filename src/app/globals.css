@@ -5290,12 +5290,19 @@ body[data-bottombar] .install-banner {
 
 /* --- Correction de la fiche d'une rencontre --------------------------------------- */
 
-/* Le bouton qui ouvre la correction. Il vit SOUS les lignes qu'il corrige — date, heure,
-   lieu — et non dans la barre du bas avec « Supprimer » : c'est en les lisant qu'on
-   s'aperçoit qu'elles sont fausses. Discret par la taille, jamais par la couleur. */
-.ic-edit-head {
+/* Les deux gestes qui portent sur la RENCONTRE elle-même — l'emporter dans son agenda, la
+   corriger. Ils vivent sous les lignes qu'ils concernent (date, heure, lieu) et non dans la
+   barre du bas avec « Supprimer » : c'est en les lisant qu'on veut les emporter, ou qu'on
+   s'aperçoit qu'elles sont fausses. Discrets par la taille, jamais par la couleur. */
+.ic-fix-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+.ic-fix-tools button {
   width: auto;
-  margin: 8px 0 0;
+  margin: 0;
   padding: 6px 12px;
   /* Le cran des mentions de la fiche (`muted tiny`), pas celui d'une action principale. */
   font-size: 0.8rem;
