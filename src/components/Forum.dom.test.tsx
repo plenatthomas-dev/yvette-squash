@@ -539,7 +539,192 @@ describe("la palette d'emoji", () => {
   });
 });
 
+// L'APPUI LONG — le geste des messageries. Il n'a aucun équivalent au clavier et ne s'annonce
+// à aucun lecteur d'écran : le bouton ⊕ de l'en-tête reste donc, et c'est lui le chemin
+// accessible. Ces tests verrouillent les deux, plus les trois gestes qui ne doivent PAS ouvrir
+// la palette — un défilement, un appui bref, et un appui posé sur un bouton.
+describe("appui long sur une bulle", () => {
+  /** La bulle du message `m1`, celle qui porte les gestes. */
+  const bulle = () => document.querySelector(".forum-bulle") as HTMLElement;
+  const choix = () => document.querySelector(".forum-choix");
+
+  const appuyer = (el: HTMLElement, over: Record<string, unknown> = {}) =>
+    fireEvent.pointerDown(el, { pointerType: "touch", clientX: 50, clientY: 50, ...over });
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  it("ouvre la palette de choix après un appui maintenu", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    expect(choix()).toBeNull();
+
+    appuyer(bulle());
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(choix()).not.toBeNull();
+    // Les six réactions de la liste fermée, et elles seules.
+    expect(document.querySelectorAll(".forum-choix-un")).toHaveLength(6);
+  });
+
+  it("n'ouvre RIEN sur un appui bref — c'est une lecture, pas un geste", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    appuyer(bulle());
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+    fireEvent.pointerUp(bulle());
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(choix()).toBeNull();
+  });
+
+  // LE CAS QUI COMPTE LE PLUS : on remonte le fil, le doigt traîne sur une bulle. Ouvrir une
+  // palette à chaque défilement rendrait le fil inutilisable au pouce.
+  it("n'ouvre RIEN quand le doigt part en défilement", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    appuyer(bulle());
+    fireEvent.pointerMove(bulle(), { clientX: 50, clientY: 130 });
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(choix()).toBeNull();
+  });
+
+  // Un appui qui commence SUR un bouton appartient à ce bouton : maintenir « Répondre » ne doit
+  // pas ouvrir une palette par-dessus l'action qu'on est en train de déclencher.
+  it("n'ouvre RIEN quand l'appui commence sur un bouton", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    fireEvent.pointerDown(screen.getByRole("button", { name: /Répondre à Gégé/ }), {
+      pointerType: "touch",
+      clientX: 50,
+      clientY: 50,
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(choix()).toBeNull();
+  });
+
+  // À la souris, maintenir un clic ne veut rien dire — et l'on empêcherait la sélection d'un
+  // texte qu'on est simplement en train de lire.
+  it("ne se déclenche pas à la souris", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    appuyer(bulle(), { pointerType: "mouse" });
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(choix()).toBeNull();
+  });
+
+  it("pose la réaction choisie, et referme", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    appuyer(bulle());
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Réagir avec 👍" }));
+    await waitFor(() =>
+      expect(appels.some((a) => a === "POST /api/forum/m1/reaction")).toBe(true),
+    );
+    expect(corpsDe("POST", "/reaction")).toEqual({ emoji: "👍" });
+    await waitFor(() => expect(choix()).toBeNull());
+  });
+
+  it("se referme sur Échap et sur un appui à côté", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+
+    appuyer(bulle());
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+    fireEvent.keyDown(choix() as Element, { key: "Escape" });
+    await waitFor(() => expect(choix()).toBeNull());
+
+    appuyer(bulle());
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+    fireEvent.pointerDown(document.querySelector(".forum-voile") as Element);
+    await waitFor(() => expect(choix()).toBeNull());
+  });
+
+  // Le chemin ACCESSIBLE, celui du clavier et du lecteur d'écran. L'appui long ne le remplace
+  // pas : il s'y ajoute.
+  it("s'ouvre aussi par le bouton ⊕, qui reste le chemin au clavier", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    const declencheur = screen.getByRole("button", { name: /Réagir au message de Gégé/ });
+    expect(declencheur.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(declencheur);
+    await waitFor(() => expect(choix()).not.toBeNull());
+    expect(
+      screen.getByRole("button", { name: /Réagir au message de Gégé/ }).getAttribute("aria-expanded"),
+    ).toBe("true");
+  });
+
+  // Ce que la palette montre AVANT le clic. Ses boutons basculent : sans cet état, cliquer 👍
+  // alors qu'on l'avait déjà mis le retire sans que rien ne l'annonce.
+  it("montre ce qu'on a déjà posé, et dit que le clic va le retirer", async () => {
+    page = {
+      messages: [msg()],
+      meId: "u1",
+      meName: "Thomas",
+      reactions: { m1: [{ emoji: "👍", users: [{ id: "u1", name: "Thomas" }] }] },
+    };
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    appuyer(bulle());
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+    const deja = screen.getByRole("button", { name: "Retirer 👍" });
+    expect(deja.getAttribute("aria-pressed")).toBe("true");
+    expect(deja.className).toContain("is-mienne");
+    expect(screen.getByRole("button", { name: "Réagir avec 💪" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+  });
+});
+
 describe("les réactions", () => {
+  // LA STRUCTURE, et non l'apparence : les pastilles sont HORS de la bulle, sœurs du message et
+  // non ses enfants. C'est ce qui permet au CSS de les poser à cheval sur son bord bas, et ce
+  // qui les distingue du message — une réaction le commente, elle n'en fait pas partie. Dedans,
+  // elles se lisaient comme une dernière ligne écrite par l'auteur.
+  it("pose les pastilles À CÔTÉ de la bulle, jamais dedans", async () => {
+    page = {
+      messages: [msg()],
+      meId: "u1",
+      meName: "Thomas",
+      reactions: { m1: [{ emoji: "👍", users: [{ id: "u2", name: "Gégé" }] }] },
+    };
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    const reacs = document.querySelector(".forum-reacs") as HTMLElement;
+    expect(reacs).not.toBeNull();
+    expect(reacs.closest(".forum-msg")).toBeNull();
+    expect(reacs.parentElement?.classList.contains("forum-bulle")).toBe(true);
+    // La classe qui réserve, en CSS, la place prise en dehors de la bulle.
+    expect(document.querySelector(".forum-ligne")?.classList.contains("a-reac")).toBe(true);
+  });
+
+  it("ne réserve aucune place quand il n'y a aucune réaction", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    expect(document.querySelector(".forum-reacs")).toBeNull();
+    expect(document.querySelector(".forum-ligne")?.classList.contains("a-reac")).toBe(false);
+  });
+
   it("affiche le décompte et met en avant la sienne", async () => {
     page = {
       messages: [msg()],

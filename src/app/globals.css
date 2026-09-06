@@ -6174,16 +6174,43 @@ body[data-bottombar] .install-banner {
   height: 1px;
   background: var(--pico-card-border-color);
 }
+/* LA BULLE ET CE QUI S'Y ACCROCHE. Ce conteneur porte la LARGEUR et l'ancrage ; la bulle
+   elle-même ne porte plus que son apparence. Il existe pour deux choses qu'une bulle ne peut
+   pas porter : les pastilles de réaction, posées à cheval sur son bord bas, et la pop-up de
+   choix, qui s'ancre dessus. Toutes deux sont en position absolue — elles ne prennent donc
+   AUCUNE hauteur, et la pastille d'initiales continue de s'aligner sur le bas de la bulle. */
+.forum-bulle {
+  position: relative;
+  max-width: 85%;
+  min-width: 0;
+}
 /* Bulle. Pas de fond coloré pour les siens : la Règle du Fond et de l'Encre réserve la
    couleur à l'état, et « c'est moi qui parle » n'est pas un état. C'est l'alignement et un
    filet qui le disent — même dispositif que l'issue d'une rencontre. */
 .forum-msg {
-  max-width: 85%;
   min-width: 0;
   padding: 8px 12px;
   border-radius: 12px;
   background: var(--pico-card-background-color);
   border: 1px solid var(--pico-card-border-color);
+  /* L'appui long qui ouvre la palette doit pouvoir se distinguer d'un défilement : `pan-y`
+     laisse le fil défiler à la verticale et dit au navigateur de ne pas attendre pour le
+     décider. Le zoom à deux doigts reste possible sur la page. */
+  touch-action: pan-y;
+  /* iOS affiche une bulle d'options (« Copier / Rechercher ») au bout d'un appui long, qui
+     recouvrirait la pop-up. On la supprime SANS toucher à `user-select` : copier le texte
+     d'un message — une adresse, un numéro — reste possible partout. */
+  -webkit-touch-callout: none;
+}
+/* La place que les pastilles prennent EN DEHORS de la bulle. Sans elle, elles mordraient sur
+   le message suivant au lieu de mordre sur le leur. Posée seulement quand il y en a. */
+.forum-ligne.a-reac {
+  margin-bottom: 18px;
+}
+/* Et la place qu'elles prennent DEDANS : sans ce fond de bulle plus épais, la moitié haute
+   d'une pastille recouvrirait la dernière ligne du message. */
+.forum-ligne.a-reac .forum-msg {
+  padding-bottom: 20px;
 }
 .forum-msg.is-mine {
   border-left: 3px solid var(--good-edge);
@@ -6256,13 +6283,32 @@ body[data-bottombar] .install-banner {
   white-space: pre-wrap; /* les retours à la ligne que parseForumBody a préservés */
   overflow-wrap: anywhere; /* une URL collée ne doit pas élargir la bulle */
 }
-/* RÉACTIONS sous le corps du message. La sienne se distingue par un FILET, pas par un fond
-   coloré : même raison que la bulle — la couleur appartient à l'action, pas à l'appartenance. */
+/* RÉACTIONS À CHEVAL SUR LE BORD BAS DE LA BULLE — la convention de toutes les messageries,
+   et ce qui les distingue du message : une réaction COMMENTE le message, elle n'en fait pas
+   partie. Placées dedans, elles se lisaient comme une dernière ligne écrite par l'auteur.
+   La sienne se distingue par un FILET, pas par un fond coloré : même raison que la bulle — la
+   couleur appartient à l'action, pas à l'appartenance.
+
+   `top: 100%` pose leur haut sur le bord bas de la bulle, la translation les remonte de la
+   moitié de leur hauteur : elles chevauchent alors le bord, moitié dedans moitié dehors. En
+   position absolue elles ne prennent aucune hauteur — c'est `.forum-ligne.a-reac` qui réserve
+   la place, et l'avatar continue de s'aligner sur le bas de la bulle. */
 .forum-reacs {
+  position: absolute;
+  top: 100%;
+  left: 10px;
+  transform: translateY(-16px);
+  z-index: 1;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 6px;
+}
+/* Ses propres messages sont à droite : leurs pastilles suivent, sinon elles pendraient du
+   mauvais côté et sembleraient appartenir au message d'à côté. */
+.forum-rangee.is-mine .forum-reacs {
+  left: auto;
+  right: 10px;
+  justify-content: flex-end;
 }
 /* CIBLE TACTILE ÉTENDUE SANS GROSSIR LA PASTILLE. Une rangée de pastilles de 44 px sous
    chaque message écraserait le message lui-même ; mais 32 px se ratent un doigt sur deux,
@@ -6302,6 +6348,82 @@ body[data-bottombar] .install-banner {
   position: absolute;
   inset: -6px;
   border-radius: inherit;
+}
+/* POP-UP DE CHOIX — ouverte par un APPUI LONG sur la bulle, ou par le bouton ⊕ de l'en-tête.
+   Un bandeau flottant AU-DESSUS du message, comme dans une messagerie native : on voit encore
+   le message auquel on réagit, ce qui est tout l'intérêt de l'ancrer dessus plutôt que de
+   poser une modale au centre de l'écran.
+
+   Six emoji à 44 px + les écarts + le rembourrage font 286 px : cela tient sur un iPhone SE
+   (320 px). `overflow-x: auto` est la porte de sortie si un jour la liste s'allonge — elle ne
+   doit jamais élargir la page. */
+.forum-choix {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  gap: 2px;
+  padding: 5px;
+  max-width: 92vw;
+  overflow-x: auto;
+  border-radius: 999px;
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-card-border-color);
+  /* La seule ombre portée du composant, et elle est là pour dire « ceci flotte au-dessus » —
+     sans elle, le bandeau se confondrait avec une rangée de pastilles de plus. */
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+}
+.forum-rangee.is-mine .forum-choix {
+  left: auto;
+  right: 0;
+}
+/* Bascule SOUS la bulle quand il n'y a pas la place au-dessus — c'est-à-dire sur le premier
+   message visible, que le haut de la zone de défilement rognerait. La mesure est faite à
+   l'ouverture par le composant ; ici on ne fait que retourner l'ancrage. */
+.forum-choix.est-dessous {
+  bottom: auto;
+  top: calc(100% + 6px);
+}
+.forum-choix-un {
+  margin: 0;
+  width: auto;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border-radius: 999px;
+  background: none;
+  border: 1px solid transparent;
+  /* Même piège Pico que partout ailleurs sur ce composant : sans `inherit`, le bouton hérite
+     de l'encre blanche des boutons Pico. Sans effet sur un glyphe emoji, qui porte sa propre
+     couleur — mais le filet `is-mienne` ci-dessous, lui, en dépend. */
+  --pico-color: inherit;
+  color: var(--pico-color);
+  /* Taille d'ICÔNE, la même que la palette de saisie : deux dispositifs qui offrent des emoji
+     prennent le même cran (Règle du Cran Voisin). */
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.forum-choix-un:hover,
+.forum-choix-un:focus,
+.forum-choix-un:active {
+  --pico-color: inherit;
+  color: var(--pico-color);
+}
+/* Ce qu'on a DÉJÀ posé. Ces boutons BASCULENT : sans ce filet, cliquer 👍 alors qu'on l'avait
+   déjà mis le retirait sans que rien ne l'annonce. */
+.forum-choix-un.is-mienne {
+  border-color: var(--good-edge);
+  background: var(--good-wash);
+}
+/* Voile de fermeture. Transparent à dessein, ou presque : assombrir toute l'appli pour six
+   emoji serait hors de proportion, mais un voile strictement invisible ne dirait pas qu'un
+   appui va refermer plutôt qu'agir. */
+.forum-voile {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgb(0 0 0 / 0.06);
 }
 .forum-reac.is-mienne {
   border-color: var(--good-edge);
