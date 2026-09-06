@@ -161,6 +161,7 @@ describe("dueAction", () => {
     dateConfirmed: true,
     availabilityOpenedAt: null,
     availabilityRemindedAt: null,
+    eveRemindedAt: null,
     ...over,
   });
 
@@ -191,12 +192,58 @@ describe("dueAction", () => {
       availabilityRemindedAt: new Date("2026-10-06"),
     });
     expect(dueAction(relancée, "2026-10-07")).toBeNull();
-    expect(dueAction(relancée, "2026-10-08")).toBeNull();
+    // À J-1, ce n'est plus une relance qui part mais le rappel de la veille — un autre message,
+    // à d'autres destinataires. Ce qui est vérifié ici reste que la RELANCE ne repart pas.
+    expect(dueAction(relancée, "2026-10-08")).not.toBe("remind");
   });
 
   it("RIEN sur une rencontre passée, même jamais appelée", () => {
     // Le jour même compte encore — on peut toujours chercher un remplaçant à 18 h.
     expect(dueAction(rencontre(), "2026-10-09")).toBe("call");
     expect(dueAction(rencontre(), "2026-10-10")).toBeNull();
+  });
+
+  // LE RAPPEL DE LA VEILLE, troisième et dernier envoi. Il ne demande rien : il dit l'heure et
+  // le lieu à ceux qui jouent, au moment où l'on prépare son sac. Entre J-3 et le coup
+  // d'envoi, plus rien ne partait.
+  describe("le rappel de la veille", () => {
+    /** Appel ouvert et relance faite : l'état normal d'une rencontre à l'approche. */
+    const prête = (over: Partial<ScheduledFixture> = {}) =>
+      rencontre({
+        availabilityOpenedAt: new Date("2026-09-29"),
+        availabilityRemindedAt: new Date("2026-10-06"),
+        ...over,
+      });
+
+    it("part à J-1, et pas à J-2", () => {
+      expect(dueAction(prête(), "2026-10-07")).toBeNull();
+      expect(dueAction(prête(), "2026-10-08")).toBe("eve");
+    });
+
+    it("part encore LE JOUR MÊME — « ce soir » vaut mieux que rien", () => {
+      // Une rencontre inscrite tardivement n'a pas de veille utile : le rappel du matin même
+      // est le seul qu'elle puisse recevoir.
+      expect(dueAction(prête(), "2026-10-09")).toBe("eve");
+    });
+
+    it("ne part qu'UNE fois — même marqueur, même rôle que les deux autres", () => {
+      expect(dueAction(prête({ eveRemindedAt: new Date("2026-10-08") }), "2026-10-09")).toBeNull();
+    });
+
+    it("ne part JAMAIS sur une date prévisionnelle", () => {
+      // Même règle que l'appel et la relance : la date bouchon de la fédération ne convoque
+      // personne, et surtout pas la veille pour rien.
+      expect(dueAction(prête({ dateConfirmed: false }), "2026-10-08")).toBeNull();
+    });
+
+    it("attend son tour : l'appel et la relance passent d'abord", () => {
+      // Une rencontre inscrite l'avant-veille reçoit son appel le jour même, sa relance le
+      // lendemain — un seul envoi par jour et par rencontre, dans l'ordre du calendrier. Trois
+      // notifications le même matin pour la même soirée s'annuleraient les unes les autres.
+      expect(dueAction(rencontre(), "2026-10-08")).toBe("call");
+      expect(
+        dueAction(rencontre({ availabilityOpenedAt: new Date("2026-10-08") }), "2026-10-08"),
+      ).toBe("remind");
+    });
   });
 });

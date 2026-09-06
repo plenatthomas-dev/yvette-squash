@@ -389,6 +389,14 @@ export default function AdminPage() {
    * restent désactivés — on n'importe qu'une équipe à la fois —, mais ils le disent autrement.
    */
   const [icCalBusy, setIcCalBusy] = useState<string | null>(null);
+  /**
+   * La journée retirée dont la suppression est ARMÉE, en attente du second clic.
+   *
+   * Confirmation en deux temps plutôt qu'un `confirm()` natif, comme sur la fiche d'une
+   * rencontre : la suppression emporte la composition et les réponses déjà recueillies, et une
+   * boîte bloquante fige l'onglet. Une seule à la fois — c'est un geste qui se pèse.
+   */
+  const [icDelArm, setIcDelArm] = useState<string | null>(null);
   const [icName, setIcName] = useState("");
 
   useEffect(() => {
@@ -910,6 +918,41 @@ export default function AdminPage() {
     }
   };
 
+  /**
+   * Supprime une journée que la ligue ne publie plus.
+   *
+   * L'aperçu les SIGNALE depuis toujours — « à vérifier, puis à supprimer à la main » — et il
+   * fallait ensuite aller retrouver la rencontre dans l'écran des membres. Le geste est ici,
+   * là où on l'apprend.
+   *
+   * LA RÈGLE NE CHANGE PAS : rien n'est supprimé d'office. Une journée retirée peut porter une
+   * composition et des réponses, et « plus rien n'est publié » peut n'être qu'un scraping qui
+   * a cassé. C'est un geste humain de plus, pas une automatisation — d'où les deux clics.
+   */
+  const deleteVanished = async (id: string) => {
+    setIcCalBusy(id);
+    setIcResult(null);
+    try {
+      const res = await fetch(`/api/interclub/${id}`, { method: "DELETE" });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setIcResult({ ok: false, text: data.error ?? "Suppression impossible." });
+        return;
+      }
+      // Retirée de l'aperçu SANS le retélécharger : reprévisualiser rejouerait un appel à
+      // squashnet pour une information qu'on vient d'obtenir, et ferait clignoter la liste.
+      setIcCal((prev) =>
+        prev ? { ...prev, toDelete: prev.toDelete.filter((d) => d.id !== id) } : prev,
+      );
+      setIcResult({ ok: true, text: "Journée supprimée." });
+    } catch {
+      setIcResult({ ok: false, text: "Suppression impossible." });
+    } finally {
+      setIcDelArm(null);
+      setIcCalBusy(null);
+    }
+  };
+
   const applyCalendar = async (t: IcTeam) => {
     setIcCalBusy(t.id);
     setIcResult(null);
@@ -948,7 +991,7 @@ export default function AdminPage() {
             ? ` — ${data.frozen.join(", ")} gardée(s) à sa date : la rencontre est commencée`
             : "") +
           (data.vanished
-            ? ` — ${data.vanished} journée(s) ne sont plus publiées : à vérifier et à supprimer à la main`
+            ? ` — ${data.vanished} journée(s) ne sont plus publiées : reprévisualise pour les vérifier et les supprimer`
             : "") +
           ".",
       });
@@ -1858,8 +1901,43 @@ export default function AdminPage() {
                                       {icCal.toDelete.map((d) => (
                                         <li key={d.id}>
                                           <strong>{d.round ?? "?"}</strong> n&apos;est plus publiée
-                                          ({d.date} c. {d.opponent}) — à vérifier, puis à supprimer
-                                          à la main si c&apos;est confirmé.
+                                          ({d.date} c. {d.opponent}) — à vérifier avant de
+                                          supprimer.{" "}
+                                          {/* Le geste est ICI, là où on l'apprend : il fallait
+                                              sinon aller retrouver la rencontre dans l'écran des
+                                              membres. Deux clics, parce qu'une journée retirée
+                                              porte peut-être déjà une composition et des
+                                              réponses — et parce que « plus rien n'est publié »
+                                              peut n'être qu'un scraping qui a cassé. */}
+                                          {icDelArm === d.id ? (
+                                            <>
+                                              <button
+                                                type="button"
+                                                className="secondary ic-cal-del"
+                                                disabled={icCalBusy !== null}
+                                                onClick={() => setIcDelArm(null)}
+                                              >
+                                                Non, garder
+                                              </button>{" "}
+                                              <button
+                                                type="button"
+                                                className="danger ic-cal-del"
+                                                disabled={icCalBusy !== null}
+                                                onClick={() => void deleteVanished(d.id)}
+                                              >
+                                                Supprimer définitivement
+                                              </button>
+                                            </>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              className="secondary ic-cal-del"
+                                              disabled={icCalBusy !== null}
+                                              onClick={() => setIcDelArm(d.id)}
+                                            >
+                                              Supprimer
+                                            </button>
+                                          )}
                                         </li>
                                       ))}
                                     </ul>

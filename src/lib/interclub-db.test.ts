@@ -4,6 +4,7 @@ import {
   fixtureScore,
   parseLive,
   scorerIsStale,
+  seasonOf,
   SCORER_STALE_MS,
   staleGamesReason,
   tieOutcome,
@@ -313,5 +314,35 @@ describe("tieOutcome — le barème de la ligue, maintenant qu'un 2-2 est possib
       result: "drawUnbroken",
       leaguePoints: null,
     });
+  });
+});
+
+// LA SAISON D'UNE DATE. L'import fédéral ne posait pas ce champ, et le filtre par saison des
+// statistiques — nourri d'un `DISTINCT season` — se vidait à mesure que l'import remplaçait la
+// saisie à la main : sans erreur, en proposant simplement de moins en moins de choix.
+describe("seasonOf", () => {
+  it("range septembre et octobre dans la saison qui s'ouvre", () => {
+    expect(seasonOf("2026-09-03")).toBe("2026/2027");
+    expect(seasonOf("2026-12-18")).toBe("2026/2027");
+  });
+
+  it("range janvier à juin dans la saison qui se termine", () => {
+    expect(seasonOf("2027-01-15")).toBe("2026/2027");
+    expect(seasonOf("2027-05-28")).toBe("2026/2027");
+  });
+
+  // LA BORNE, et la seule décision de cette fonction. Une rencontre de préparation jouée en
+  // août appartient à la saison qui COMMENCE, pas à celle qui vient de finir. Juillet ne se
+  // joue pas — le club est fermé —, ce qui fait du 1er août le bon endroit où couper.
+  it("bascule au 1er août, pas au 1er janvier ni au 1er septembre", () => {
+    expect(seasonOf("2026-07-31")).toBe("2025/2026");
+    expect(seasonOf("2026-08-01")).toBe("2026/2027");
+  });
+
+  it("rend une chaîne vide sur une date illisible, plutôt qu'une saison inventée", () => {
+    // L'appelant écrit alors `null` : une saison fausse serait pire que pas de saison, elle
+    // rangerait la rencontre dans un filtre où personne ne la cherchera.
+    expect(seasonOf("pas une date")).toBe("");
+    expect(seasonOf("2026-13-01")).toBe("");
   });
 });

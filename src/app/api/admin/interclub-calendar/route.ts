@@ -15,7 +15,7 @@ import {
 } from "@/lib/squashnet/calendar";
 import { interclubChanged } from "@/lib/interclub-gate";
 import { isUniqueViolation } from "@/lib/http-tx";
-import { UNSET_PLAYER, derivedStatus } from "@/lib/interclub-db";
+import { UNSET_PLAYER, derivedStatus, seasonOf } from "@/lib/interclub-db";
 import { notifyFixtureMoved } from "@/lib/interclub-notify";
 import { fetchStandings } from "@/lib/squashnet/standings";
 
@@ -297,6 +297,12 @@ export async function POST(req: NextRequest) {
           venueAddress: tie.venueAddress,
           round: tie.round,
           dateConfirmed: tie.dateConfirmed,
+          // LA SAISON, DÉDUITE DE LA DATE. L'import ne la posait pas, et le filtre par saison
+          // des statistiques — qui se nourrit d'un `DISTINCT season` — se vidait à mesure que
+          // l'import remplaçait la saisie à la main. Sans erreur : il proposait simplement de
+          // moins en moins de choix. La ligue ne publie pas ce libellé ; il se lit de la date
+          // (bascule au 1er août, cf. `seasonOf`).
+          season: seasonOf(tie.date) || null,
           snMatchKey: matchKey(team.snEventId, tie.round),
           createdById: admin.userId,
           matches: {

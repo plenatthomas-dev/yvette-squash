@@ -149,6 +149,15 @@ export function needsOverrideConfirm(
  */
 export const CALL_DAYS_BEFORE = 10;
 export const REMIND_DAYS_BEFORE = 3;
+/**
+ * LE RAPPEL DE LA VEILLE. Les deux seuils au-dessus demandent « qui peut venir » ; celui-ci ne
+ * demande rien — il dit l'heure, le lieu et l'adresse à ceux qui sont alignés, au moment où
+ * l'on prépare son sac. Entre J-3 et le coup d'envoi, plus rien ne partait.
+ *
+ * `<= 1` et non `=== 1` comme les deux autres : une rencontre inscrite l'avant-veille reçoit
+ * son rappel le jour même, et « ce soir » vaut mieux que rien.
+ */
+export const EVE_DAYS_BEFORE = 1;
 
 /**
  * Nombre de jours entiers entre deux dates « YYYY-MM-DD », sans passer par un fuseau.
@@ -171,6 +180,7 @@ export interface ScheduledFixture {
   dateConfirmed: boolean;
   availabilityOpenedAt: Date | null;
   availabilityRemindedAt: Date | null;
+  eveRemindedAt: Date | null;
 }
 
 /**
@@ -188,11 +198,16 @@ export interface ScheduledFixture {
 export function dueAction(
   f: ScheduledFixture,
   today: string,
-): "call" | "remind" | null {
+): "call" | "remind" | "eve" | null {
   if (!f.dateConfirmed) return null;
   const jours = daysBetween(today, f.date);
   if (Number.isNaN(jours) || jours < 0) return null;
   if (!f.availabilityOpenedAt) return jours <= CALL_DAYS_BEFORE ? "call" : null;
   if (!f.availabilityRemindedAt) return jours <= REMIND_DAYS_BEFORE ? "remind" : null;
+  // UN SEUL ENVOI PAR JOUR ET PAR RENCONTRE, et l'ordre est celui du calendrier : une
+  // rencontre inscrite à J-2 reçoit son appel le jour même, sa relance le lendemain, et son
+  // rappel de la veille est perdu — c'est le prix d'une file ordonnée, et le bon prix : trois
+  // notifications le même matin pour la même soirée s'annulent les unes les autres.
+  if (!f.eveRemindedAt) return jours <= EVE_DAYS_BEFORE ? "eve" : null;
   return null;
 }

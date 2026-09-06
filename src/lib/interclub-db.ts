@@ -39,6 +39,29 @@ export const MAX_VENUE_ADDRESS_LEN = 200;
 export const MAX_ROUND_LEN = 8;
 
 /**
+ * La SAISON d'une date : « 2026/2027 ».
+ *
+ * L'import fédéral ne posait pas ce champ, et personne ne s'en apercevait : le filtre par
+ * saison des statistiques se nourrit de `SELECT DISTINCT season`, si bien qu'à mesure que
+ * l'import remplaçait la saisie à la main, il se vidait — sans erreur, sans message, en
+ * proposant simplement de moins en moins de choix.
+ *
+ * BASCULE AU 1er AOÛT, et non au 1er janvier ni au 1er septembre. Une saison fédérale
+ * s'ouvre en septembre ; une rencontre de préparation jouée en août appartient à celle qui
+ * commence, pas à celle qui vient de finir. Juillet, lui, ne se joue pas — le club est fermé —
+ * et la borne y est donc sans conséquence, ce qui en fait le bon endroit où la poser.
+ *
+ * Une DÉDUCTION, jamais un écrasement : elle sert à la CRÉATION d'une rencontre importée. Une
+ * saison saisie à la main reste telle quelle, comme partout ailleurs dans ce module.
+ */
+export function seasonOf(dateISO: string): string {
+  const [y, m] = dateISO.split("-").map(Number);
+  if (!y || !m || m > 12) return "";
+  const debut = m >= 8 ? y : y - 1;
+  return `${debut}/${debut + 1}`;
+}
+
+/**
  * Heure de début, « HH:MM ». Chaîne vide ⇒ null (« on ne sait pas encore »), ce qui est un cas
  * NORMAL : une rencontre s'inscrit souvent avant que la ligue ait publié les horaires.
  *
@@ -393,6 +416,13 @@ export function serializeInterclub(f: FullInterclub, userId: string | null, isAd
     // Le serveur autorise le créateur OU un admin : l'écran affiche donc le bouton dans les
     // mêmes cas, plutôt que de le cacher à un admin qui a pourtant le droit.
     canDelete: (!!userId && f.createdById === userId) || isAdmin,
+    // DEUX DROITS, MÊME RÈGLE AUJOURD'HUI — et deux champs quand même. Le `PATCH` applique
+    // exactement la garde du `DELETE` (créateur ou admin), mais modifier et supprimer n'ont
+    // aucune raison de rester liés : le jour où un capitaine pourra corriger l'heure d'une
+    // rencontre sans pouvoir l'effacer, c'est ici que ça se dira. Réutiliser `canDelete` pour
+    // afficher un bouton « Modifier » aurait donné un nom qui ment, ce qui coûte plus cher
+    // qu'un booléen de plus dans une réponse.
+    canEdit: (!!userId && f.createdById === userId) || isAdmin,
     matches,
   };
 }

@@ -17,6 +17,7 @@ import {
   notifyAvailabilityCall,
   notifyAvailabilityReminder,
   notifyCaptainDigest,
+  notifyEveReminder,
 } from "@/lib/interclub-notify";
 
 export const runtime = "nodejs";
@@ -119,7 +120,14 @@ export async function GET(req: NextRequest) {
       dateConfirmed: true,
       availabilityOpenedAt: true,
       availabilityRemindedAt: true,
+      eveRemindedAt: true,
       opponent: true,
+      // Le lieu part dans le rappel de la veille : c'est justement ce qu'on y cherche.
+      venue: true,
+      venueAddress: true,
+      // Qui est ALIGNÉ. Le rappel ne va qu'à eux — les joueurs sans compte (`homeGuestId`)
+      // n'ont personne à notifier, et le récapitulatif de J-3 les a déjà signalés au capitaine.
+      matches: { select: { homeUserId: true } },
       // LE CAPITAINE EST LU AVEC SON COMPTE, pas seulement par son identifiant.
       // `captainId` survit à la désactivation (le schéma ne pose `SetNull` que sur la
       // suppression) : un capitaine parti du club, désactivé, disparaissait de la liste des
@@ -135,6 +143,7 @@ export async function GET(req: NextRequest) {
   let called = 0;
   let reminded = 0;
   let digests = 0;
+  let eves = 0;
   // Les équipes en sous-effectif s'ACCUMULENT au lieu de s'écrire au fil de l'eau.
   //
   // `recordCronRun` est un upsert d'UNE ligne par cron : l'appeler dans la boucle puis une
@@ -156,6 +165,29 @@ export async function GET(req: NextRequest) {
         data: { availabilityOpenedAt: new Date() },
       });
       called++;
+      continue;
+    }
+
+    // --- RAPPEL DE LA VEILLE ---------------------------------------------------------
+    //
+    // Il ne demande rien : il DIT l'heure, le lieu et l'adresse, à ceux qui jouent. Le seul
+    // envoi de ce cron qui ne soit pas une question, et le seul qui parte à une liste tirée de
+    // la COMPOSITION plutôt que du roster.
+    if (action === "eve") {
+      const alignes = [...new Set(f.matches.map((m) => m.homeUserId).filter((id) => id !== null))];
+      if (alignes.length) {
+        await notifyEveReminder(
+          alignes,
+          ctx,
+          { date: f.date, time: f.time, home: f.home, venue: f.venue, venueAddress: f.venueAddress },
+          f.date === today,
+        );
+        eves += alignes.length;
+      }
+      // Le marqueur est posé MÊME SANS DESTINATAIRE : une composition vide la veille ne sera
+      // pas remplie à temps par ce cron, et repasser demain sur la même rencontre ne
+      // trouverait rien de plus. Sans lui, elle serait réexaminée à chaque passage.
+      await prisma.interclub.update({ where: { id: f.id }, data: { eveRemindedAt: new Date() } });
       continue;
     }
 
@@ -216,7 +248,7 @@ export async function GET(req: NextRequest) {
   await recordCronRun(
     "interclub-availability",
     true,
-    `${called} appel(s), ${reminded} relance(s), ${digests} récap(s)${alerte}`,
+    `${called} appel(s), ${reminded} relance(s), ${digests} récap(s), ${eves} rappel(s) de veille${alerte}`,
   );
-  return NextResponse.json({ examined: fixtures.length, called, reminded, digests });
+  return NextResponse.json({ examined: fixtures.length, called, reminded, digests, eves });
 }

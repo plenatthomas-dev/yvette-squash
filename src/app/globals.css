@@ -5288,6 +5288,46 @@ body[data-bottombar] .install-banner {
   overflow-wrap: anywhere;
 }
 
+/* --- Correction de la fiche d'une rencontre --------------------------------------- */
+
+/* Les deux gestes qui portent sur la RENCONTRE elle-même — l'emporter dans son agenda, la
+   corriger. Ils vivent sous les lignes qu'ils concernent (date, heure, lieu) et non dans la
+   barre du bas avec « Supprimer » : c'est en les lisant qu'on veut les emporter, ou qu'on
+   s'aperçoit qu'elles sont fausses. Discrets par la taille, jamais par la couleur. */
+.ic-fix-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+.ic-fix-tools button {
+  width: auto;
+  margin: 0;
+  padding: 6px 12px;
+  /* Le cran des mentions de la fiche (`muted tiny`), pas celui d'une action principale. */
+  font-size: 0.8rem;
+}
+
+/* Le formulaire remplace l'en-tête de la fiche, au même endroit et sans dialogue empilé :
+   deux boîtes l'une sur l'autre perdent le focus et le lecteur d'écran. */
+.ic-fix-edit {
+  margin-bottom: 12px;
+}
+.ic-fix-edit h3 {
+  margin-bottom: 10px;
+}
+
+/* La case du statut de la date, et sa raison sous elle. C'est le seul réglage de cet écran
+   qui décide de ce que le CRON fera — décochée, l'équipe n'est ni convoquée ni relancée —,
+   et une case sans sa phrase ne le dirait pas. */
+.ic-date-sure {
+  margin-top: 4px;
+}
+.ic-date-sure span {
+  display: block;
+  margin-left: 26px;
+}
+
 /* --- Le bloc « Qui peut venir ? » ------------------------------------------------- */
 
 .ic-dispo {
@@ -5673,6 +5713,17 @@ body[data-bottombar] .install-banner {
 }
 .ic-cal-list li + li {
   margin-top: 3px;
+}
+/* Le geste de suppression d'une journée retirée, POSÉ SUR SA LIGNE. Il vivait ailleurs — il
+   fallait aller retrouver la rencontre dans l'écran des membres —, et une consigne qu'on lit
+   ici pour l'exécuter là-bas ne s'exécute pas. En ligne avec le texte, à la taille du texte :
+   c'est une conséquence de ce qui est écrit, pas une action de la page. */
+.ic-cal-del {
+  width: auto;
+  margin: 0;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  vertical-align: baseline;
 }
 .ic-cal-list .ic-provisoire-tag {
   margin-left: 6px;

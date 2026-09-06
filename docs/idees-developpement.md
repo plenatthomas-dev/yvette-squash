@@ -267,6 +267,15 @@ réservé** via un code couleur (asso vs autre asso) — **comme en vue jour**.
   **alarme `VALARM` -1 h**, `UID` stable dérivé de l'IRI ResaMania, horaires en UTC.
   Nom de fichier lisible (`squash-AAAA-MM-JJ-HHMM.ics`). Branché depuis la vue jour
   (`page.tsx`) et la vue semaine (`WeekGrid.tsx`).
+  **Étendu aux rencontres d'interclub** (2026-09-06, `buildFixtureIcs`/`downloadFixtureIcs`) :
+  c'est le meilleur candidat ICS de l'appli — une rencontre porte un lieu qui n'est pas le
+  club et une adresse postale. Trois différences avec la réservation, toutes voulues :
+  **heure FLOTTANTE** (sans `Z` : le module interclub raisonne en heure murale, et un fuseau
+  posé à l'export se tromperait deux fois par an), **journée entière quand la ligue n'a pas
+  publié d'horaire** (plutôt qu'un 20 h inventé), et **mention « date prévisionnelle »** dans
+  le titre quand la date est une date bouchon. Alarme à **-2 h** — on part de chez soi bien
+  avant. L'adresse devient au passage un lien d'itinéraire (URL Maps, pas de schéma
+  `maps:`/`geo:` qui ne marche que d'un côté).
 - **D. Liste d'attente sur créneau complet** · ✅ fait · ⭐⭐⭐ · **M** (réel : **XS–S**)
   Version **plus simple et moins risquée que l'idée 2** : s'inscrire en attente sur un
   créneau plein → **notification** (push, infra existante) quand il se libère ; la

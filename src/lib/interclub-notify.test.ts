@@ -28,6 +28,7 @@ vi.mock("./push", () => ({
 import {
   frenchDate,
   notifyCalendarDrift,
+  notifyEveReminder,
   notifyAvailabilityReminder,
   notifyCaptainDigest,
   notifyFixtureDone,
@@ -244,6 +245,56 @@ describe("notifyCalendarDrift", () => {
     // Sans capitaine ni admin joignable, il n'y a pas de destinataire : pousser dans le vide
     // consommerait le quota et masquerait un vrai problème de configuration.
     await notifyCalendarDrift([], equipe, ["J1 modifiée"]);
+    expect(h.sent).toEqual([]);
+  });
+});
+
+// LE RAPPEL DE LA VEILLE. Le seul message de ce module qui ne pose aucune question : il DIT
+// où l'on va et à quelle heure, la veille, à ceux qui jouent.
+describe("le rappel de la veille", () => {
+  const deplacement = {
+    date: "2026-10-09",
+    time: "20:00",
+    home: false,
+    venue: "Squash de Massy",
+    venueAddress: "12 rue du Stade, 91300 Massy",
+  };
+
+  it("porte l'ADRESSE ENTIÈRE, et pas seulement le nom du club", async () => {
+    // Une notification qu'il faut quitter pour trouver un renseignement n'a servi à rien.
+    await notifyEveReminder(["a"], ctx, deplacement);
+    expect(h.sent[0].payload.body).toContain("Squash de Massy, 12 rue du Stade, 91300 Massy");
+    expect(h.sent[0].payload.body).toContain("Demain à 20:00");
+  });
+
+  it("ne recopie pas l'adresse du club quand on reçoit", async () => {
+    // Tout le monde sait où l'on joue à domicile ; la place se garde pour ce qui s'ignore.
+    await notifyEveReminder(["a"], ctx, { ...deplacement, home: true });
+    expect(h.sent[0].payload.body).toContain("à domicile");
+    expect(h.sent[0].payload.body).not.toContain("rue du Stade");
+  });
+
+  it("dit « ce soir » quand la rencontre se joue le jour même", async () => {
+    // Une rencontre inscrite tardivement n'a pas de veille utile : le rappel du matin même est
+    // le seul qu'elle recevra, et « demain » y serait faux.
+    await notifyEveReminder(["a"], ctx, deplacement, true);
+    expect(h.sent[0].payload.body).toContain("Ce soir");
+  });
+
+  it("porte la date en clair quand l'heure n'est pas publiée", async () => {
+    await notifyEveReminder(["a"], ctx, { ...deplacement, time: null });
+    expect(h.sent[0].payload.body).toContain(frenchDate("2026-10-09"));
+  });
+
+  it("ne remplace pas la relance sur l'écran verrouillé", async () => {
+    // Deux messages pour deux gestes différents : un tag commun ferait disparaître celui que
+    // le joueur n'a pas encore lu.
+    await notifyEveReminder(["a"], ctx, deplacement);
+    expect(h.sent[0].payload.tag).toBe("interclub-f1-veille");
+  });
+
+  it("n'envoie RIEN quand personne n'est aligné", async () => {
+    await notifyEveReminder([], ctx, deplacement);
     expect(h.sent).toEqual([]);
   });
 });

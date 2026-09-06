@@ -266,6 +266,15 @@ describe("application", () => {
     expect(h.created[0]).toMatchObject({ round: "J1", date: "2026-10-09", snMatchKey: `${EVENT}:J1` });
   });
 
+  it("pose la SAISON, que la ligue ne publie pas", async () => {
+    // Sans elle, le filtre par saison des statistiques — nourri d'un `DISTINCT season` — se
+    // vidait à mesure que l'import remplaçait la saisie à la main : sans erreur, en proposant
+    // simplement de moins en moins de choix.
+    h.published = [publiee()];
+    await POST(req({ action: "apply", teamId: "t1" }));
+    expect(h.created[0]).toMatchObject({ season: "2026/2027" });
+  });
+
   it("DÉPLACE une rencontre non commencée, efface ses réponses et prévient l'équipe", async () => {
     h.fixtures = [enBase()];
     h.published = [publiee({ date: "2026-10-16" })];
