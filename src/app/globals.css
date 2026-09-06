@@ -6183,6 +6183,10 @@ body[data-bottombar] .install-banner {
   position: relative;
   max-width: 85%;
   min-width: 0;
+  /* Les gestes sont posés ICI, donc leur réglage aussi. L'appui long doit pouvoir se
+     distinguer d'un défilement : `pan-y` laisse le fil défiler à la verticale et dit au
+     navigateur de ne pas attendre pour le décider. Le zoom à deux doigts reste possible. */
+  touch-action: pan-y;
 }
 /* Bulle. Pas de fond coloré pour les siens : la Règle du Fond et de l'Encre réserve la
    couleur à l'état, et « c'est moi qui parle » n'est pas un état. C'est l'alignement et un
@@ -6193,14 +6197,35 @@ body[data-bottombar] .install-banner {
   border-radius: 12px;
   background: var(--pico-card-background-color);
   border: 1px solid var(--pico-card-border-color);
-  /* L'appui long qui ouvre la palette doit pouvoir se distinguer d'un défilement : `pan-y`
-     laisse le fil défiler à la verticale et dit au navigateur de ne pas attendre pour le
-     décider. Le zoom à deux doigts reste possible sur la page. */
-  touch-action: pan-y;
-  /* iOS affiche une bulle d'options (« Copier / Rechercher ») au bout d'un appui long, qui
-     recouvrirait la pop-up. On la supprime SANS toucher à `user-select` : copier le texte
-     d'un message — une adresse, un numéro — reste possible partout. */
-  -webkit-touch-callout: none;
+}
+/* PAS DE SÉLECTION DE TEXTE LÀ OÙ L'APPUI LONG EST UN GESTE.
+ *
+ * Le composant effaçait la sélection en JavaScript au moment d'ouvrir la pop-up
+ * (`removeAllRanges`), en pariant sur ses 450 ms d'avance sur le seuil du système. Le pari est
+ * perdu sur iOS : WebKit pose ses poignées bleues et sa barre « Partager / Modifier » AVANT
+ * que la pop-up ne s'ouvre, et les repose derrière — on voyait donc les deux en même temps, la
+ * sélection par-dessus les emoji.
+ *
+ * La seule chose qui les empêche est de refuser la sélection EN AMONT. Le préfixe `-webkit-`
+ * est indispensable et n'est pas décoratif : c'est WebKit qui pose ces poignées, et c'est la
+ * propriété préfixée qu'il lit. `-webkit-touch-callout` supprime en plus la bulle d'options
+ * (« Copier / Rechercher ») qui recouvrait la pop-up.
+ *
+ * ⚠️ Sous `(pointer: coarse)` UNIQUEMENT. Au doigt, l'appui long veut dire « réagir » — il ne
+ * peut pas vouloir dire deux choses à la fois. À la souris il ne veut rien dire (le composant
+ * ignore explicitement `pointerType === "mouse"`), donc sélectionner un message pour le copier
+ * reste entièrement possible sur ordinateur.
+ *
+ * CE QUE CELA COÛTE, et il faut le savoir : au doigt, on ne peut plus sélectionner le texte
+ * d'un message pour le copier. Si ce besoin se manifeste, la réponse n'est pas de rendre la
+ * sélection — c'est d'ajouter une action « Copier » à la pop-up, comme le font les messageries
+ * natives, qui ont fait exactement cet arbitrage. */
+@media (pointer: coarse) {
+  .forum-bulle {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }
 /* La place que les pastilles prennent EN DEHORS de la bulle. Sans elle, elles mordraient sur
    le message suivant au lieu de mordre sur le leur. Posée seulement quand il y en a. */
