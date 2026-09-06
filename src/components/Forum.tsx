@@ -109,12 +109,12 @@ const TYPING_FORGET_MS = 5_000;
  * 450 ms : juste en deçà du seuil auquel iOS et Android déclenchent leur propre sélection de
  * texte (~500 ms), pour que la pop-up arrive la première.
  *
- * ⚠️ CETTE AVANCE NE SUFFIT PAS, et c'est le CSS qui règle la question. WebKit pose ses
- * poignées de sélection et sa barre d'options AVANT nos 450 ms, puis les repose derrière : on
- * voyait les deux en même temps, la sélection par-dessus les emoji. `globals.css` refuse donc
- * la sélection sur `.forum-bulle` sous `(pointer: coarse)` — voir la note qui s'y trouve, elle
- * porte l'arbitrage. Le `removeAllRanges` ci-dessous reste comme ceinture pour les moteurs qui
- * l'auraient quand même commencée.
+ * ⚠️ CETTE AVANCE NE SUFFIT PAS, et c'est le CSS qui règle la question. Constaté sur Android :
+ * Blink commence sa sélection avant nos 450 ms et la rétablit derrière notre effacement, si
+ * bien qu'on voyait les poignées bleues et la barre flottante du système par-dessus les emoji.
+ * `globals.css` refuse donc la sélection sur `.forum-bulle` sous `(pointer: coarse)` — voir la
+ * note qui s'y trouve, elle porte l'arbitrage et son coût. Le `removeAllRanges` ci-dessous
+ * reste en ceinture pour un moteur qui l'aurait quand même commencée.
  */
 const APPUI_LONG_MS = 450;
 
@@ -618,8 +618,8 @@ export default function Forum({
       appuiRef.current.timer = null;
       appuiRef.current.abouti = true;
       // Ceinture : le CSS refuse déjà la sélection au doigt (cf. `.forum-bulle` sous
-      // `pointer: coarse`), mais un moteur qui en aurait commencé une la laisserait sous la
-      // pop-up. Deux lignes pour ne pas dépendre d'une seule des deux défenses.
+      // `pointer: coarse`), et c'est lui qui fait le travail. Ceci ne rattrape qu'un moteur qui
+      // en aurait commencé une malgré tout — ne pas dépendre d'une seule des deux défenses.
       window.getSelection?.()?.removeAllRanges();
       // Le retour haptique dit que l'appui a « pris ». Absent partout sauf sur Android, d'où
       // l'appel facultatif — c'est un agrément, jamais le signal principal.
