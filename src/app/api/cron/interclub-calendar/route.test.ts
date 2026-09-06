@@ -9,9 +9,10 @@ import type { NextRequest } from "next/server";
 // déplacer une convocation sans que personne ne l'ait voulu.
 //
 // Trois choses à tenir, et aucune ne se voit à la relecture :
-//   * il n'écrit AUCUNE rencontre ;
-//   * il alerte UNE FOIS pour un même écart (sinon le même report reviendrait tous les lundis
-//     jusqu'à ce qu'un admin l'applique, et l'alerte deviendrait un bruit qu'on n'ouvre plus) ;
+//   * il n'écrit AUCUNE rencontre — ni l'empreinte, qui n'appartient qu'à l'application ;
+//   * il se tait quand RIEN n'a bougé (empreinte égale), et RELANCE tant qu'un écart n'est pas
+//     résolu. La relance est voulue : ce commentaire promettait l'inverse — « il alerte une fois
+//     pour un même écart » —, et c'était faux depuis que l'empreinte a cessé d'être écrite ici ;
 //   * un hoquet réseau n'est pas un calendrier vide.
 
 const h = vi.hoisted(() => ({

@@ -45,6 +45,14 @@ const h = vi.hoisted(() => ({
   txEchecs: 0,
   /** Nombre de tentatives réellement exécutées. */
   txTentatives: 0,
+  /**
+   * L'écriture doit-elle violer l'index unique `(teamId, snMatchKey)` ?
+   *
+   * Renuméroter une journée vers une journée déjà prise refait la clé d'ancrage à l'identique.
+   * Prisma rend alors un P2002, que `httpErrorResponse` ne connaît pas : la route sortait en 500
+   * nu, là où l'import traite la même contrainte depuis toujours.
+   */
+  uniqueViolation: false,
 }));
 
 vi.mock("@/lib/features-server", () => ({
@@ -115,6 +123,12 @@ vi.mock("@/lib/db", () => ({
       return fn({
         interclub: {
           update: vi.fn(async (args: { data: Record<string, unknown> }) => {
+            if (h.uniqueViolation) {
+              throw new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+                code: "P2002",
+                clientVersion: "6.0.0",
+              });
+            }
             h.patched = args.data;
             h.fixture = { ...(h.fixture as Record<string, unknown>), ...args.data };
             return h.fixture;
@@ -209,6 +223,7 @@ beforeEach(() => {
   h.moved = null;
   h.movedCount = 0;
   h.fixtureInTx = undefined;
+  h.uniqueViolation = false;
   h.txOptions = null;
   h.txEchecs = 0;
   h.txTentatives = 0;
@@ -452,6 +467,34 @@ describe("PATCH /api/interclub/{id}", () => {
     expect(h.moved?.[1]).toBe("2026-09-03");
   });
 
+  it("RECALCULE la saison d'une rencontre IMPORTÉE qui change de saison", async () => {
+    // `season` n'était posée qu'à la création, ici comme à l'import : une J01 du 28 juillet
+    // reportée au 10 septembre gardait « 2025/2026 ». Le filtre par saison des statistiques, qui
+    // se nourrit d'un `DISTINCT season`, la rangeait alors dans la saison précédente — sans
+    // erreur et sans message, ce qui est la seule façon dont ce défaut pouvait durer.
+    h.fixture = fixture({ date: "2026-07-28", season: "2025/2026", snMatchKey: "ev1:J1" });
+    await PATCH(patchReq({ date: "2026-09-10" }), ctx);
+    expect(h.patched).toMatchObject({ date: "2026-09-10", season: "2026/2027" });
+  });
+
+  it("NE TOUCHE PAS la saison d'une rencontre SAISIE À LA MAIN", async () => {
+    // Elle y vient du formulaire (cf. `POST /api/interclub`). La recalculer écraserait un libellé
+    // humain par une déduction : l'automatique et l'humain ne partagent aucune colonne.
+    h.fixture = fixture({ date: "2026-07-28", season: "un libellé à moi", snMatchKey: null });
+    await PATCH(patchReq({ date: "2026-09-10" }), ctx);
+    expect(h.patched).toMatchObject({ date: "2026-09-10" });
+    expect(h.patched).not.toHaveProperty("season");
+  });
+
+  it("un corps JSON `null` finit en 400, et non en 500 non géré", async () => {
+    // `req.json().catch(() => ({}))` ne rattrape que le JSON ILLISIBLE. `null` est du JSON
+    // parfaitement valide : `json()` résolvait, et la validation suivante levait sur une lecture
+    // de propriété. Toutes les autres malformations finissaient déjà en 400 propre.
+    const res = await PATCH(patchReq(null), ctx);
+    expect(res.status).toBe(400);
+    expect(h.patched).toBeNull();
+  });
+
   it("ne touche NI aux réponses NI aux marqueurs quand la date ne bouge pas", async () => {
     await PATCH(patchReq({ date: "2026-09-03", venue: "Ailleurs" }), ctx);
     expect(h.availabilityCleared).toBeNull();
@@ -507,11 +550,38 @@ describe("PATCH /api/interclub/{id}", () => {
     expect(h.patched).not.toHaveProperty("snMatchKey");
   });
 
-  it("EFFACER la journée n'invente pas une clé sans journée", async () => {
+  it("REFUSE d'effacer la journée d'une rencontre ANCRÉE, plutôt que de la laisser à moitié", async () => {
+    // `parseOptionalText` rend `null` sur `""`, la clé restait donc derrière : une rencontre sans
+    // journée mais toujours rapprochée par `ev1:J1`, que `diffCalendar` ne recale jamais (il ne
+    // compare pas `round`) et qu'un `toDelete` annoncerait « ? n'est plus publiée ». La journée et
+    // la clé vont ensemble — c'est ce que l'import promet en les posant ensemble. Effacer la clé
+    // avec elle serait pire : la rencontre passerait pour saisie à la main, et l'import suivant
+    // recréerait sa jumelle.
     h.fixture = fixture({ round: "J1", snMatchKey: "ev1:J1" });
+    const res = await PATCH(patchReq({ round: null }), ctx);
+    expect(res.status).toBe(400);
+    expect(h.patched).toBeNull();
+  });
+
+  it("EFFACER la journée reste permis sur une rencontre saisie à la main", async () => {
+    // Il n'y a là aucune clé à tenir en accord : le refus ci-dessus protège l'ancrage, pas la
+    // colonne. L'interdire partout ferait payer à la saisie humaine une contrainte de l'import.
+    h.fixture = fixture({ round: "J1", snMatchKey: null });
     await PATCH(patchReq({ round: null }), ctx);
     expect(h.patched).toMatchObject({ round: null });
     expect(h.patched).not.toHaveProperty("snMatchKey");
+  });
+
+  it("RENUMÉROTER vers une journée déjà prise rend un 409 en français, et non un 500 nu", async () => {
+    // La clé refaite entre en collision avec `@@unique([teamId, snMatchKey])`. `httpErrorResponse`
+    // ne connaît que `HttpError` et laissait passer le P2002 : l'admin recevait une page d'erreur
+    // sans message pour une faute de saisie parfaitement ordinaire. L'import traite la même
+    // contrainte depuis toujours.
+    h.fixture = fixture({ round: "J2", snMatchKey: "ev1:J2" });
+    h.uniqueViolation = true;
+    const res = await PATCH(patchReq({ round: "J01" }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/déjà cette journée/i);
   });
 
   it("REFUSE un champ texte mal typé au lieu d'EFFACER la colonne", async () => {

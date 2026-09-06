@@ -8,13 +8,20 @@ import {
   parseTimeInput,
   parseOptionalText,
   derivedStatus,
+  seasonOf,
   MAX_OPPONENT_LEN,
   MAX_VENUE_LEN,
   MAX_VENUE_ADDRESS_LEN,
   MAX_ROUND_LEN,
   type FullInterclub,
 } from "@/lib/interclub-db";
-import { HttpError, httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
+import {
+  HttpError,
+  httpErrorResponse,
+  isUniqueViolation,
+  readJsonBody,
+  serializableTransaction,
+} from "@/lib/http-tx";
 import { teamRoster } from "@/lib/interclub-roster";
 import { interclubChanged } from "@/lib/interclub-gate";
 import { isRealDateISO } from "@/lib/time";
@@ -107,7 +114,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
   }
 
-  const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  // `readJsonBody` et non `req.json().catch(() => ({}))` : ce dernier ne rattrape que le JSON
+  // ILLISIBLE. `null` est du JSON valide, `json()` le résout, et la validation qui suit lève sur
+  // une lecture de propriété — un 500 non géré pour un corps que toute autre malformation fait
+  // finir en 400 propre.
+  const body = await readJsonBody(req);
 
   // LES CHAMPS ISSUS DU CORPS SEUL, validés hors transaction parce que cette validation est
   // PURE : elle ne lit pas la rencontre, et refuser un corps mal formé ne mérite pas d'ouvrir
@@ -208,7 +219,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const ecriture: Record<string, unknown> = { ...data };
 
       let movedFrom: string | null = null;
-      if (typeof ecriture.date === "string" && ecriture.date !== f.date) {
+      const nouvelleDate = typeof ecriture.date === "string" ? ecriture.date : null;
+      if (nouvelleDate !== null && nouvelleDate !== f.date) {
         // Une rencontre COMMENCÉE ne se déplace pas : le déplacement efface les disponibilités
         // et relance l'appel, ce qui n'a aucun sens sur une soirée déjà en cours ou jouée. Le
         // reste (lieu mal orthographié, adversaire à corriger) demeure modifiable après coup.
@@ -227,6 +239,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         // l'appel en remettant les marqueurs à zéro pour que le cron repose la question.
         ecriture.availabilityOpenedAt = null;
         ecriture.availabilityRemindedAt = null;
+
+        // LA SAISON SUIT LA DATE, SUR UNE RENCONTRE IMPORTÉE. Elle n'était posée qu'à la
+        // création : une J01 du 28 juillet reportée au 10 septembre gardait « 2025/2026 », et le
+        // filtre par saison des statistiques — nourri d'un `DISTINCT season` — la rangeait dans
+        // la saison précédente, sans erreur ni message.
+        //
+        // Sur une rencontre SAISIE À LA MAIN, on n'y touche pas : `season` y vient du formulaire
+        // (cf. `POST /api/interclub`), et la recalculer écraserait un libellé humain par une
+        // déduction — l'automatique et l'humain ne partagent aucune colonne, ici comme ailleurs.
+        if (f.snMatchKey) ecriture.season = seasonOf(nouvelleDate) || null;
       }
 
       // LA CLÉ D'ANCRAGE SUIT LA JOURNÉE, sans quoi corriger celle-ci ne corrige rien.
@@ -244,6 +266,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (typeof ecriture.round === "string" && f.snMatchKey) {
         const eventId = f.snMatchKey.slice(0, f.snMatchKey.indexOf(":"));
         if (eventId) ecriture.snMatchKey = matchKey(eventId, ecriture.round);
+      }
+      // EFFACER LA JOURNÉE D'UNE RENCONTRE ANCRÉE EST REFUSÉ, et non appliqué à moitié.
+      //
+      // `parseOptionalText` rend `null` sur `""`, la condition ci-dessus ne voit plus une chaîne,
+      // et la clé restait derrière : une rencontre sans journée mais toujours rapprochée par
+      // `ev1:J01`, que `diffCalendar` ne recale jamais (il ne compare pas `round`) et qu'un
+      // `toDelete` annoncerait « ? n'est plus publiée ». La journée et la clé vont ensemble —
+      // c'est ce que l'import promet en les posant ensemble ; les séparer ici romprait l'accord
+      // depuis l'autre bout. Effacer la clé avec elle serait pire : la rencontre passerait pour
+      // saisie à la main, et l'import suivant recréerait sa jumelle.
+      if (ecriture.round === null && f.snMatchKey) {
+        throw new HttpError(
+          400,
+          "Cette rencontre vient du calendrier fédéral : sa journée se corrige, elle ne s'efface pas.",
+        );
       }
 
       if (movedFrom) await tx.interclubAvailability.deleteMany({ where: { interclubId: id } });
@@ -268,6 +305,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       };
     }, "Modification concurrente, réessaie");
   } catch (e) {
+    // RENUMÉROTER UNE JOURNÉE VERS UNE JOURNÉE DÉJÀ PRISE SE DIT EN FRANÇAIS. Corriger J02 en
+    // « J01 » alors que J01 existe refait la clé d'ancrage à l'identique, viole
+    // `@@unique([teamId, snMatchKey])` et sortait en 500 nu : `httpErrorResponse` ne connaît que
+    // `HttpError` et laissait passer le P2002. L'import traite la même contrainte depuis
+    // toujours (`isUniqueViolation`) ; le chemin humain le fait maintenant aussi, et 409 parce
+    // que c'est un conflit avec une ligne existante, pas un corps mal formé.
+    if (isUniqueViolation(e)) {
+      return NextResponse.json(
+        { error: "Une autre rencontre de cette équipe porte déjà cette journée." },
+        { status: 409 },
+      );
+    }
     const res = httpErrorResponse(e);
     if (res) return res;
     throw e;

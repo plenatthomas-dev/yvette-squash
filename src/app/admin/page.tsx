@@ -970,6 +970,8 @@ export default function AdminPage() {
         moved?: number;
         vanished?: number;
         frozen?: string[];
+        /** Vrai s'il reste un écart que l'import ne s'applique pas — cf. la route. */
+        pending?: boolean;
         error?: string;
       };
       if (!res.ok) {
@@ -993,7 +995,14 @@ export default function AdminPage() {
           (data.vanished
             ? ` — ${data.vanished} journée(s) ne sont plus publiées : reprévisualise pour les vérifier et les supprimer`
             : "") +
-          ".",
+          "." +
+          // CE QUI RESTE À FAIRE À LA MAIN SE DIT ICI. Tant qu'il reste un écart que l'import
+          // refuse d'appliquer — statut de date, journée retirée, rencontre commencée —,
+          // l'empreinte n'est pas posée et le lundi le resignalera. Sans cette phrase, l'admin
+          // croirait la relance hebdomadaire cassée alors qu'elle fait exactement son travail.
+          (data.pending
+            ? " Il reste un écart à corriger à la main : le contrôle du lundi continuera de le signaler tant que ce n'est pas fait."
+            : ""),
       });
     } catch {
       setIcResult({ ok: false, text: "Import impossible." });
@@ -1957,20 +1966,24 @@ export default function AdminPage() {
                                   <div className="ic-cal-actions">
                                     <button
                                       type="button"
+                                      /* LE BOUTON NE S'ARME QUE S'IL Y A QUELQUE CHOSE À ÉCRIRE. Il s'armait
+                                         aussi sur un simple `confirmDrift`, que l'import ne s'applique JAMAIS,
+                                         et l'infobulle invitait alors à cliquer « pour que le contrôle
+                                         hebdomadaire cesse de le signaler ». C'était vrai, et c'était le défaut :
+                                         l'empreinte se posait sur un écart que personne n'avait corrigé, l'alerte
+                                         du lundi se taisait pour de bon, et la rencontre restait « prévisionnelle »
+                                         donc hors de toute convocation. L'empreinte ne se pose plus dans ce cas
+                                         (cf. la route d'import) ; le bouton n'a donc plus rien à y faire. */
                                       disabled={
                                         icCalBusy !== null ||
-                                        (icCal.toCreate.length === 0 &&
-                                          icCal.toUpdate.length === 0 &&
-                                          icCal.confirmDrift.length === 0)
+                                        (icCal.toCreate.length === 0 && icCal.toUpdate.length === 0)
                                       }
                                       title={
-                                        icCal.toCreate.length === 0 &&
-                                        icCal.toUpdate.length === 0 &&
-                                        icCal.confirmDrift.length === 0
-                                          ? "Rien à appliquer : la base est déjà à jour."
-                                          : icCal.toCreate.length === 0 && icCal.toUpdate.length === 0
-                                            ? "Rien à écrire — enregistre seulement que ce calendrier a été vu, pour que le contrôle hebdomadaire cesse de le signaler."
-                                            : "Écrit les créations et corrections listées ci-dessus."
+                                        icCal.toCreate.length > 0 || icCal.toUpdate.length > 0
+                                          ? "Écrit les créations et corrections listées ci-dessus."
+                                          : icCal.confirmDrift.length > 0 || icCal.toDelete.length > 0
+                                            ? "Rien à écrire ici : le statut de date et les journées retirées se corrigent sur la rencontre. Le contrôle du lundi continuera de les signaler tant que ce n'est pas fait."
+                                            : "Rien à appliquer : la base est déjà à jour."
                                       }
                                       onClick={() => applyCalendar(t)}
                                     >

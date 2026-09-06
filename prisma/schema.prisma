@@ -669,10 +669,17 @@ model InterclubTeam {
   snStandingsAt   DateTime?
   // Empreinte du dernier calendrier téléchargé, et date du dernier contrôle.
   //
-  // L'empreinte est ce qui rend le contrôle hebdomadaire SUPPORTABLE : sans elle, un report
-  // détecté une fois serait re-signalé tous les lundis jusqu'à ce qu'un admin l'applique, et
-  // l'alerte deviendrait un bruit qu'on n'ouvre plus. `snCheckedAt` répond à l'autre question,
-  // celle que le silence ne tranche pas : « rien n'a bougé », ou « on n'a pas regardé » ?
+  // L'empreinte est ce qui rend le contrôle hebdomadaire SUPPORTABLE : sans elle, il faudrait
+  // reconstruire l'écart complet à chaque passage pour découvrir qu'il est vide.
+  //
+  // ⚠️ ELLE NE FAIT PAS TAIRE UN ÉCART NON RÉSOLU, contrairement à ce que ce commentaire a
+  // longtemps affirmé (« un report détecté une fois serait re-signalé tous les lundis ») : c'est
+  // au contraire ce que le cron fait exprès. Il ne l'écrit jamais, et l'import ne la pose qu'une
+  // fois TOUT appliqué. Un report qui attend est donc bien re-signalé chaque semaine — une
+  // relance vaut mieux qu'un report enterré dans une notification que personne n'a ouverte.
+  //
+  // `snCheckedAt` répond à l'autre question, celle que le silence ne tranche pas : « rien n'a
+  // bougé », ou « on n'a pas regardé » ?
   snCalendarHash  String?
   snCheckedAt     DateTime?
   members         User[]

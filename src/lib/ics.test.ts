@@ -90,7 +90,35 @@ describe("une rencontre d'interclub", () => {
 
   it("ne déborde pas sur le lendemain quand la rencontre commence tard", () => {
     const ics = buildFixtureIcs({ ...RENCONTRE, time: "22:30" });
-    expect(ligne(ics, "DTEND")).toBe("DTEND:20260903T233000");
+    expect(ligne(ics, "DTEND")).toBe("DTEND:20260903T235900");
+  });
+
+  it("garde une durée non nulle à 23 h — un DTEND égal au DTSTART ne s'affiche pas partout", () => {
+    // La borne ne portait que sur le CHAMP DES HEURES : `Math.min(23, h + 3)` laissait les
+    // minutes intactes, si bien que 23:00 rendait 23:00. L'évènement durait zéro seconde, et
+    // certains agendas ne l'affichent pas du tout — l'export réussissait sans rien exporter.
+    const ics = buildFixtureIcs({ ...RENCONTRE, time: "23:00" });
+    expect(ligne(ics, "DTSTART")).toBe("DTSTART:20260903T230000");
+    expect(ligne(ics, "DTEND")).toBe("DTEND:20260903T235900");
+  });
+
+  it("plie les lignes trop longues, en octets et jamais au milieu d'un caractère", () => {
+    // RFC 5545 § 3.1 : au-delà de 75 octets, on plie et l'on reprend par UNE espace. Rien ne
+    // pliait, et une adresse réelle de la poule dépasse largement — un parseur strict tronque ou
+    // rejette alors l'évènement, c'est-à-dire perd la seule information utile d'un déplacement.
+    const ics = buildFixtureIcs({
+      ...RENCONTRE,
+      home: false,
+      venue: "SOCIETE SPORTIVE DU JEU DE PAUME ET DE RACKETS",
+      venueAddress: "74 TER RUE LAURISTON, 75116 - PARIS",
+    });
+    const octets = (l: string) => new TextEncoder().encode(l).length;
+    for (const l of ics.split("\r\n")) expect(octets(l)).toBeLessThanOrEqual(75);
+    // Déplié, le lieu est intact : le pliage ne doit rien perdre ni rien ajouter.
+    const deplie = ics.replace(/\r\n /g, "");
+    expect(deplie).toContain(
+      "LOCATION:SOCIETE SPORTIVE DU JEU DE PAUME ET DE RACKETS\\, 74 TER RUE LAURISTON\\, 75116 - PARIS",
+    );
   });
 
   it("DIT qu'une date est prévisionnelle plutôt que de la faire passer pour ferme", () => {

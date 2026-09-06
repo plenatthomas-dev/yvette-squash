@@ -12,6 +12,11 @@ import type { NextRequest } from "next/server";
 //  2. UNE JOURNÉE RETIRÉE DU CALENDRIER SE SIGNALE, ELLE NE SE SUPPRIME PAS. Elle porte
 //     peut-être une composition et des réponses, et « plus rien n'est publié » peut n'être
 //     qu'un scraping qui a cassé.
+//  3. L'EMPREINTE NE SE POSE QUE SUR UN ÉCART ENTIÈREMENT RÉSOLU. C'est elle qui fait taire le
+//     contrôle du lundi, et elle était posée sans condition — y compris quand l'application
+//     venait de ne RIEN écrire. Les trois choses qu'on refuse d'appliquer par principe (statut
+//     de date, journée retirée, rencontre commencée) se trouvaient donc déclarées résolues, et
+//     le silence qui suivait était définitif.
 
 const h = vi.hoisted(() => ({
   team: null as null | Record<string, unknown>,
@@ -101,6 +106,20 @@ import { POST } from "./route";
 const EVENT = "ev1";
 const req = (body: unknown) => ({ json: async () => body }) as unknown as NextRequest;
 
+/**
+ * Applique, en passant l'empreinte que la prévisualisation vient de montrer.
+ *
+ * `seen` est OBLIGATOIRE : le garde d'aperçu périmé ne s'armait que si le champ était présent,
+ * si bien qu'un `POST` direct `{action:"apply", teamId}` écrivait ce que personne n'avait lu —
+ * effacements de disponibilités compris. Une règle qu'on fait sauter en omettant un champ n'est
+ * pas une règle. Les essais passent donc par ce raccourci, qui reproduit le geste de l'écran :
+ * on prévisualise, puis on applique CE QU'ON A VU.
+ */
+async function applique(teamId = "t1") {
+  const vu = (await (await POST(req({ action: "preview", teamId }))).json()).seen;
+  return POST(req({ action: "apply", teamId, seen: vu }));
+}
+
 /** Une rencontre telle que la ligue la publie. */
 const publiee = (over: Record<string, unknown> = {}) => ({
   round: "J1",
@@ -177,6 +196,13 @@ describe("préambule", () => {
     expect(res.status).toBe(403);
     expect(h.created).toEqual([]);
     expect(h.updated).toEqual([]);
+  });
+
+  it("refuse un corps JSON `null` en 400, et non en 500 non géré", async () => {
+    // `req.json().catch(() => ({}))` ne rattrape que le JSON ILLISIBLE. Le corps littéral `null`
+    // est du JSON valide : `json()` résolvait, et `body.action` levait « Cannot read properties
+    // of null ». Toutes les autres malformations finissaient déjà en 400 propre.
+    expect((await POST(req(null))).status).toBe(400);
   });
 
   it("refuse une action inconnue", async () => {
@@ -261,7 +287,7 @@ describe("prévisualisation", () => {
 describe("application", () => {
   it("crée une journée publiée qu'on n'avait pas, avec ses simples « à désigner »", async () => {
     h.published = [publiee()];
-    await POST(req({ action: "apply", teamId: "t1" }));
+    await applique();
     expect(h.created).toHaveLength(1);
     expect(h.created[0]).toMatchObject({ round: "J1", date: "2026-10-09", snMatchKey: `${EVENT}:J1` });
   });
@@ -271,14 +297,14 @@ describe("application", () => {
     // vidait à mesure que l'import remplaçait la saisie à la main : sans erreur, en proposant
     // simplement de moins en moins de choix.
     h.published = [publiee()];
-    await POST(req({ action: "apply", teamId: "t1" }));
+    await applique();
     expect(h.created[0]).toMatchObject({ season: "2026/2027" });
   });
 
   it("DÉPLACE une rencontre non commencée, efface ses réponses et prévient l'équipe", async () => {
     h.fixtures = [enBase()];
     h.published = [publiee({ date: "2026-10-16" })];
-    await POST(req({ action: "apply", teamId: "t1" }));
+    await applique();
 
     expect(h.updated[0].data).toMatchObject({ date: "2026-10-16", availabilityOpenedAt: null });
     expect(h.wipedFor).toEqual(["f1"]);
@@ -290,7 +316,7 @@ describe("application", () => {
     // effaçait au passage les réponses qu'elle portait.
     h.fixtures = [commencee()];
     h.published = [publiee({ date: "2026-10-16" })];
-    await POST(req({ action: "apply", teamId: "t1" }));
+    await applique();
 
     expect(h.updated[0].data).not.toHaveProperty("date");
     expect(h.wipedFor).toEqual([]);
@@ -300,7 +326,7 @@ describe("application", () => {
   it("applique quand même le LIEU d'une rencontre commencée — seule la date a des conséquences", async () => {
     h.fixtures = [commencee()];
     h.published = [publiee({ venue: "SQUASH DE MASSY" })];
-    await POST(req({ action: "apply", teamId: "t1" }));
+    await applique();
     expect(h.updated[0].data).toMatchObject({ venue: "SQUASH DE MASSY" });
   });
 
@@ -312,7 +338,7 @@ describe("application", () => {
     // repassaient à « prévisionnelle » : l'équipe cessait d'être convoquée, sans un mot.
     h.fixtures = [enBase({ dateConfirmed: false })];
     h.published = [publiee({ venue: "SQUASH DE MASSY" })];
-    await POST(req({ action: "apply", teamId: "t1" }));
+    await applique();
     expect(h.updated[0].data).toMatchObject({ venue: "SQUASH DE MASSY" });
     expect(h.updated[0].data).not.toHaveProperty("dateConfirmed");
   });
@@ -321,7 +347,7 @@ describe("application", () => {
     // Le pendant : il n'y a là aucune correction humaine à préserver, et une date bouchon doit
     // naître prévisionnelle sous peine de convoquer l'équipe un 30 juin.
     h.published = [publiee({ dateConfirmed: false })];
-    await POST(req({ action: "apply", teamId: "t1" }));
+    await applique();
     expect(h.created[0]).toMatchObject({ dateConfirmed: false });
   });
 
@@ -346,24 +372,89 @@ describe("application", () => {
     expect(h.created).toHaveLength(1);
   });
 
-  it("applique encore sans `seen` — un vieux client ne doit pas rester bloqué", async () => {
+  it("REFUSE d'appliquer SANS `seen`, plutôt que d'écrire ce que personne n'a lu", async () => {
+    // Le garde ne s'armait QUE si le champ était présent, ce qui en faisait une politesse et non
+    // une règle : un `POST` direct `{action:"apply", teamId}` — ou un onglet resté ouvert sur une
+    // version antérieure de l'écran — appliquait un écart que personne n'avait vu, effacements de
+    // disponibilités compris. C'est exactement ce que l'en-tête de la route promet d'empêcher.
+    // 400 et non 409 : il ne manque pas un état, il manque un champ.
     h.published = [publiee()];
-    expect((await POST(req({ action: "apply", teamId: "t1" }))).status).toBe(200);
-    expect(h.created).toHaveLength(1);
+    const res = await POST(req({ action: "apply", teamId: "t1" }));
+    expect(res.status).toBe(400);
+    expect(h.created).toEqual([]);
+    expect(h.updated).toEqual([]);
   });
 
   it("ne SUPPRIME jamais une journée retirée du calendrier, il la compte", async () => {
     h.fixtures = [enBase({ id: "x", round: "J7", snMatchKey: `${EVENT}:J7` })];
     h.published = [publiee()];
-    const body = await (await POST(req({ action: "apply", teamId: "t1" }))).json();
+    const body = await (await applique()).json();
     expect(body.vanished).toBe(1);
     expect(h.updated).toEqual([]); // rien touché sur elle
+  });
+
+  it("POSE l'empreinte quand tout a été appliqué — sinon le lundi relancerait pour rien", async () => {
+    h.published = [publiee()];
+    await applique();
+    expect(h.teamUpdates.at(-1)).toHaveProperty("snCalendarHash");
+  });
+
+  it("NE POSE PAS l'empreinte tant qu'un statut de date diverge — sinon l'alerte meurt", async () => {
+    // LE DÉFAUT LE PLUS COÛTEUX DE CETTE ROUTE, et il passait par le chemin nominal. J03 est
+    // stockée « prévisionnelle », la ligue la publie ferme : l'import ne réécrit jamais ce champ
+    // (c'est la règle 2 du fichier), il le SIGNALE. L'admin voyait l'alerte du lundi, cliquait
+    // « Appliquer » — rien n'était écrit, mais l'empreinte absorbait le statut publié, et le cron
+    // sort sur l'égalité d'empreinte AVANT de reconstruire le moindre écart. Plus jamais un
+    // lundi ne le resignalait ; `dateConfirmed` restait `false` ; le cron quotidien filtre
+    // là-dessus, donc l'équipe n'était jamais convoquée pour une rencontre bien réelle.
+    h.fixtures = [enBase({ dateConfirmed: false })];
+    h.published = [publiee({ dateConfirmed: true })];
+    const body = await (await applique()).json();
+    expect(h.teamUpdates.at(-1)).not.toHaveProperty("snCalendarHash");
+    // `snCheckedAt` est posée quand même : « on a regardé » et « rien ne reste » sont deux
+    // questions différentes, et un écart qui subsiste ne dit pas qu'on n'a pas regardé.
+    expect(h.teamUpdates.at(-1)).toHaveProperty("snCheckedAt");
+    expect(body.pending).toBe(true);
+  });
+
+  it("NE POSE PAS l'empreinte tant qu'une journée retirée est encore en base", async () => {
+    // Même mécanique, autre liste. L'`apply` ne supprime jamais une journée disparue, mais il
+    // posait l'empreinte du calendrier publié — qui, par construction, ne la contient plus. Elle
+    // n'était donc plus jamais signalée, et le cron quotidien continuait d'ouvrir son appel de
+    // disponibilité pour une soirée que la ligue ne publie plus : exactement ce que la liste
+    // `toDelete` existe pour empêcher.
+    h.fixtures = [enBase({ id: "x", round: "J7", snMatchKey: `${EVENT}:J7` })];
+    h.published = [publiee()];
+    const body = await (await applique()).json();
+    expect(body.vanished).toBe(1);
+    expect(h.teamUpdates.at(-1)).not.toHaveProperty("snCalendarHash");
+    expect(body.pending).toBe(true);
+  });
+
+  it("NE POSE PAS l'empreinte quand une rencontre commencée a gardé sa date", async () => {
+    // Le report n'a pas été appliqué : le déclarer résolu ferait disparaître le seul rappel
+    // qu'il reste une date à traiter à la main.
+    h.fixtures = [commencee()];
+    h.published = [publiee({ date: "2026-10-16" })];
+    const body = await (await applique()).json();
+    expect(body.frozen).toEqual(["J1"]);
+    expect(h.teamUpdates.at(-1)).not.toHaveProperty("snCalendarHash");
+  });
+
+  it("RECALCULE la saison quand la date change de saison", async () => {
+    // Elle n'était posée qu'à la création : une J01 du 28 juillet reportée au 10 septembre
+    // gardait « 2025/2026 », et le filtre par saison des statistiques — nourri d'un
+    // `DISTINCT season` — la rangeait dans la saison précédente, sans erreur ni message.
+    h.fixtures = [enBase({ date: "2026-07-28" })];
+    h.published = [publiee({ date: "2026-09-10" })];
+    await applique();
+    expect(h.updated[0].data).toMatchObject({ date: "2026-09-10", season: "2026/2027" });
   });
 
   it("NE TOUCHE PAS une rencontre saisie à la main, même sur la même journée", async () => {
     h.fixtures = [enBase({ snMatchKey: null })];
     h.published = [publiee({ date: "2026-10-16" })];
-    await POST(req({ action: "apply", teamId: "t1" }));
+    await applique();
     expect(h.updated).toEqual([]);
     expect(h.created).toHaveLength(1); // son homologue fédérale est créée à côté
   });
