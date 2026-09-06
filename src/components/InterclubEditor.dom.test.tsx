@@ -310,3 +310,14 @@ describe("Sélecteur de composition — classement ET rang mixte", () => {
     expect(o.disabled).toBe(false);
   });
 });
+
+
+it("envoie le score OUVERT à part de la correction", async () => {
+  fixtureOverride = { ...FIXTURE, matches: [{ ...FIXTURE.matches[0], games: [{ home: 11, away: 5 }], gamesHome: 1, gamesAway: 0 }] };
+  const r = await ouvreEditeur();
+  fireEvent.change(r.getByLabelText("Jeu 1, points de l'adversaire"), { target: { value: "7" } });
+  fireEvent.click(r.getByRole("button", { name: "Enregistrer" }));
+  await souffle();
+  const body = envois.find((e) => e.methode === "PATCH" && e.url.includes("/matches/"))?.corps;
+  expect(body).toMatchObject({ games: [{ home: 11, away: 7 }], knownGameCount: 1, knownGames: [{ home: 11, away: 5 }] });
+});

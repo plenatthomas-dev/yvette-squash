@@ -1800,6 +1800,7 @@ function MatchEditor({
   // effacé sans un mot. Le mécanisme serveur était bon ; c'est ce qu'on lui donnait qui ne
   // décrivait plus l'écran.
   const [knownGameCount] = useState(match.games.length);
+  const [knownGames] = useState(() => match.games.map((g) => ({ home: g.home, away: g.away })));
 
   const setGame = (i: number, side: "home" | "away", v: string) => {
     // La case vide est un état légitime, pas une valeur refusée.
@@ -2005,6 +2006,7 @@ function MatchEditor({
               // formulaire et l'enregistrement, quelqu'un a pu clore un jeu au bord du terrain,
               // et `games` — qui REMPLACE tout — l'effacerait sans que rien ne le signale.
               knownGameCount,
+              knownGames,
             })
           }
         >

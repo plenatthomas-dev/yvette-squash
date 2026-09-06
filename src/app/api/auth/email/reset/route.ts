@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
 import { hashPassword } from "@/lib/crypto";
 import { createEmailSession } from "@/lib/session";
 import { getFeatures } from "@/lib/features-server";
 import {
   passwordProblem,
   findApprovedToken,
-  consumeEmailTokens,
   nameFromEmail,
 } from "@/lib/email-auth";
-import type { TokenPurpose } from "@/lib/email-auth";
+import { HttpError, httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
 import { appBlockForEmail, appBlockedResponse } from "@/lib/app-block";
 
 export const runtime = "nodejs";
@@ -46,41 +44,38 @@ export async function POST(req: NextRequest) {
   const block = await appBlockForEmail(row.email);
   if (block) return appBlockedResponse(block);
 
-  const purpose = row.purpose as TokenPurpose;
   const passwordHash = await hashPassword(body.password as string);
-
-  let userId: string;
+  let sid: string;
   let displayName: string;
-  const existing = await prisma.user.findUnique({ where: { email: row.email } });
-  if (existing) {
-    // Compte connu (email ou ResaMania sans mot de passe) → on pose le mot de passe et on
-    // marque l'email vérifié, sans toucher au displayName existant.
-    await prisma.user.update({
-      where: { id: existing.id },
-      data: { passwordHash, emailVerifiedAt: new Date() },
-    });
-    userId = existing.id;
-    displayName = existing.displayName;
-  } else if (purpose === "signup") {
-    // Activation d'un email inconnu → création de la ligne User.
-    const created = await prisma.user.create({
-      data: {
-        email: row.email,
-        displayName: row.displayName ?? nameFromEmail(row.email),
-        passwordHash,
-        emailVerifiedAt: new Date(),
-      },
-    });
-    userId = created.id;
-    displayName = created.displayName;
-  } else {
-    // reset dont le compte a disparu entre la demande et la validation : jeton inutile.
-    await consumeEmailTokens(row.email, purpose);
-    return NextResponse.json({ error: "Lien invalide ou expiré." }, { status: 400 });
+  try {
+    ({ sid, displayName } = await serializableTransaction(async (tx) => {
+      const existing = await tx.user.findUnique({ where: { email: row.email } });
+      if (existing?.disabledAt) {
+        throw new HttpError(403, "Ce compte est désactivé.");
+      }
+      // Le lien approuvé est CONSOMMÉ dans la même transaction que le mot de passe et les
+      // sessions : deux envois simultanés ne peuvent donc pas le rejouer tous les deux.
+      const claimed = await tx.emailToken.deleteMany({
+        where: { id: row.id, tokenHash: row.tokenHash, approvedAt: { not: null }, expiresAt: { gt: new Date() } },
+      });
+      if (claimed.count !== 1 || (!existing && row.purpose !== "signup")) {
+        throw new HttpError(400, "Lien invalide ou expiré.");
+      }
+      const user = existing
+        ? await tx.user.update({ where: { id: existing.id }, data: { passwordHash, emailVerifiedAt: new Date() } })
+        : await tx.user.create({ data: {
+            email: row.email, displayName: row.displayName ?? nameFromEmail(row.email),
+            passwordHash, emailVerifiedAt: new Date(),
+          } });
+      await tx.emailToken.deleteMany({ where: { email: row.email } });
+      await tx.session.deleteMany({ where: { userId: user.id } });
+      return { sid: await createEmailSession(user.id, tx), displayName: user.displayName };
+    }));
+  } catch (e) {
+    const response = httpErrorResponse(e);
+    if (response) return response;
+    throw e;
   }
-  await consumeEmailTokens(row.email, purpose);
-
-  const sid = await createEmailSession(userId);
   const res = NextResponse.json({ displayName });
   res.cookies.set("sid", sid, {
     httpOnly: true,

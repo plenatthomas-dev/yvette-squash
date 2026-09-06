@@ -165,7 +165,7 @@ export async function GET(req: NextRequest) {
             participants: e.shares.map((s) => {
               const key = s.userId ? userKey(s.userId) : guestKey(s.guestId as string);
               const p = parseKey(key);
-              return { id: p.id, kind: p.kind, name: name(key) };
+              return { id: p.id, kind: p.kind, name: name(key), amountCents: s.amountCents };
             }),
             canDelete: mine,
             // Édition réservée aux vraies dépenses (un remboursement se supprime/refait).

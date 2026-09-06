@@ -15,6 +15,7 @@ import { prisma } from "./db";
 import { hashToken } from "./crypto";
 import { sendEmail } from "./email";
 import { logRequestDecision } from "./moderation";
+import { serializableTransaction } from "./http-tx";
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const MIN_PASSWORD_LEN = 8;
@@ -57,14 +58,19 @@ export function passwordProblem(pw: unknown): string | null {
  * noyade multi-IP), le nombre récent par IP, puis par email.
  */
 export async function emailSendRateLimited(email: string, ip: string): Promise<boolean> {
-  await prisma.emailToken.deleteMany({ where: { expiresAt: { lt: new Date() } } });
-  const pending = await prisma.emailToken.count({ where: { approvedAt: null } });
-  if (pending >= MAX_PENDING_TOTAL) return true;
   const since = new Date(Date.now() - SEND_WINDOW_MS);
-  const fromIp = await prisma.emailToken.count({ where: { ip, createdAt: { gte: since } } });
-  if (fromIp >= MAX_PER_IP) return true;
-  const fromEmail = await prisma.emailToken.count({ where: { email, createdAt: { gte: since } } });
-  return fromEmail >= MAX_PER_EMAIL;
+  return serializableTransaction(async (tx) => {
+    await tx.emailToken.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+    await tx.emailRequestAttempt.deleteMany({ where: { createdAt: { lt: since } } });
+    const pending = await tx.emailToken.count({ where: { approvedAt: null } });
+    if (pending >= MAX_PENDING_TOTAL) return true;
+    const fromIp = await tx.emailRequestAttempt.count({ where: { ip, createdAt: { gte: since } } });
+    const fromEmail = await tx.emailRequestAttempt.count({ where: { email, createdAt: { gte: since } } });
+    if (fromIp >= MAX_PER_IP || fromEmail >= MAX_PER_EMAIL) return true;
+    // L'historique survit au remplacement, à la validation et à la consommation du lien.
+    await tx.emailRequestAttempt.create({ data: { email, ip } });
+    return false;
+  });
 }
 
 /**

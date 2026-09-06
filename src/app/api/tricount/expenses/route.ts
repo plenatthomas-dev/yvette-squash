@@ -211,7 +211,7 @@ export async function POST(req: NextRequest) {
         },
       });
       // Les montants ont changé : chaque payeur devra re-valider avant remboursements.
-      await tx.tricountApproval.deleteMany({ where: { tricountId: tricount.id } });
+      await tx.tricountApproval.deleteMany({ where: { tricountId: tricount.id, user: { disabledAt: null } } });
       return cree;
     }, "Écriture concurrente sur ce tricount, réessaie");
   } catch (e) {

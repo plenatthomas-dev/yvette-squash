@@ -104,3 +104,9 @@ describe("normalizeEmail — la clé d'identité commune ResaMania / email", () 
     expect(normalizeEmail("  Thomas@Exemple.FR ")).toBe("thomas@exemple.fr");
   });
 });
+
+it("refuse un compte désactivé, même quand sa session n'a pas expiré", async () => {
+  h.sessionFindUnique.mockResolvedValue(session({ displayName: "Disabled", email: "disabled@example.fr", disabledAt: new Date() } as { displayName: string; email: string }));
+  expect(await getSession("sid-1")).toBeNull();
+  expect(h.sessionDelete).toHaveBeenCalledWith({ where: { id: "sid-1" } });
+});

@@ -118,3 +118,15 @@ describe("POST /api/book (délégation)", () => {
     expect((await res.json()).code).toBe("overlap");
   });
 });
+
+it.each([
+  { courtName: undefined }, { courtName: " " }, { courtName: {} },
+  { startsAt: undefined }, { startsAt: "invalid" }, { startsAt: 5 },
+  { startsAt: "2026-02-31T18:00:00Z" }, { startsAt: "5" }, { startsAt: "2026-09-10" },
+  { endsAt: undefined }, { endsAt: "invalid" }, { endsAt: BODY.startsAt },
+  { endsAt: "2026-07-10T18:00:00.000Z" },
+])("refuse un créneau mal formé AVANT d'appeler ResaMania : %j", async (change) => {
+  expect((await POST(postReq({ ...BODY, ...change }))).status).toBe(400);
+  expect(h.book).not.toHaveBeenCalled();
+  expect(h.upsert).not.toHaveBeenCalled();
+});

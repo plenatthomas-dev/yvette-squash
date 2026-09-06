@@ -310,13 +310,44 @@ export default function Forum({
   moiRef.current = moi;
   const zoneRef = useRef<HTMLDivElement | null>(null);
   const saisieRef = useRef<HTMLTextAreaElement | null>(null);
-  /** Le corpus est-il déjà parti ? Une seule demande par montage, quoi qu'on tape ensuite. */
+  /** Corpus demandé au premier usage, puis rafraîchi avec le rattrapage du fil. */
   const corpusDemandeRef = useRef(false);
   /** Cherche-t-on ? Une requête faite de blancs seuls n'est pas une recherche. */
   const enRecherche = requete.trim() !== "";
   /** Le même, lisible depuis un effet qui n'écoute, lui, que `messages`. */
   const enRechercheRef = useRef(false);
   enRechercheRef.current = enRecherche;
+
+  const corpusRequestRef = useRef(0);
+  const corpusChangesRef = useRef<Map<string, ForumMessage | null> | null>(null);
+
+  const chargerCorpus = useCallback(async (force = false) => {
+    if (corpusDemandeRef.current && !force) return;
+    const request = ++corpusRequestRef.current;
+    const changes = new Map<string, ForumMessage | null>();
+    corpusChangesRef.current = changes;
+    corpusDemandeRef.current = true;
+    try {
+      const res = await fetch("/api/forum/recherche");
+      if (onExpiredRef.current(res.status)) return;
+      const data = await readOk<{ messages: ForumMessage[]; tronque?: boolean }>(res);
+      if (request !== corpusRequestRef.current) return;
+      setCorpus(fusionner(
+        data.messages.filter((m) => !changes.has(m.id)),
+        [...changes.values()].filter((m): m is ForumMessage => m !== null),
+      ));
+      setTronque(Boolean(data.tronque));
+      setCorpusErreur(false);
+    } catch {
+      if (request !== corpusRequestRef.current) return;
+      // On REJOUERA à la frappe suivante : un corpus manquant rendrait « aucun résultat » pour
+      // tout, ce qui se lit comme « personne n'en a jamais parlé ». L'écran le dit à la place.
+      corpusDemandeRef.current = false;
+      setCorpusErreur(true);
+    } finally {
+      if (request === corpusRequestRef.current) corpusChangesRef.current = null;
+    }
+  }, []);
 
   const charge = useCallback(
     async (n: number, mode: "page" | "rattrapage" = "page") => {
@@ -370,6 +401,9 @@ export default function Forum({
         );
         setPolls((p) => (complet ? (data.polls ?? {}) : remplacerCouverts(p, data.polls, couverts)));
         if (complet) setHasMore(Boolean(data.hasMore));
+        // Le courtier a pu manquer un message ou une suppression hors de la page visible : le
+        // corpus se rattrape avec le fil, sinon la recherche vieillit sans que rien ne le dise.
+        if (mode === "rattrapage" && corpusDemandeRef.current) void chargerCorpus(true);
       } catch {
         // Le silence serait indiscernable d'un fil vide — le pire des deux, parce qu'il est
         // crédible. On ne l'affiche que si on n'a rien à montrer par ailleurs.
@@ -377,38 +411,12 @@ export default function Forum({
         setMessages((actuels) => actuels ?? []);
       }
     },
-    [],
+    [chargerCorpus],
   );
 
   useEffect(() => {
     void charge(limit);
   }, [charge, limit]);
-
-  /**
-   * Le fil ENTIER, chargé une seule fois, à la PREMIÈRE FRAPPE dans le champ de recherche.
-   *
-   * Ni au montage ni à la mise au point du champ : qui ouvre le fil sans chercher ne paie rien
-   * — ni octets, ni réveil de Neon (PRODUCT.md). Et une seule fois par montage, parce qu'un
-   * chargement par caractère tapé serait exactement le polling que ce fil s'interdit ; les
-   * messages qui arrivent ensuite sont greffés sur le corpus par le courtier, plus bas.
-   */
-  const chargerCorpus = useCallback(async () => {
-    if (corpusDemandeRef.current) return;
-    corpusDemandeRef.current = true;
-    try {
-      const res = await fetch("/api/forum/recherche");
-      if (onExpiredRef.current(res.status)) return;
-      const data = await readOk<{ messages: ForumMessage[]; tronque?: boolean }>(res);
-      setCorpus(data.messages);
-      setTronque(Boolean(data.tronque));
-      setCorpusErreur(false);
-    } catch {
-      // On REJOUERA à la frappe suivante : un corpus manquant rendrait « aucun résultat » pour
-      // tout, ce qui se lit comme « personne n'en a jamais parlé ». L'écran le dit à la place.
-      corpusDemandeRef.current = false;
-      setCorpusErreur(true);
-    }
-  }, []);
 
   // Le dernier id connu suit la liste, pour que le rattrapage reparte du bon endroit.
   useEffect(() => {
@@ -449,6 +457,7 @@ export default function Forum({
    * par le courtier sans se compter double, ici comme dans le fil.
    */
   const inserer = useCallback((m: ForumMessage) => {
+    corpusChangesRef.current?.set(m.id, m);
     setMessages((actuels) => fusionner(actuels ?? [], [m]));
     // `c && …` : on ne CRÉE pas le corpus au passage d'un message. Tant que personne n'a
     // cherché, il n'existe pas, et un corpus né d'un seul message rendrait une recherche qui
@@ -458,6 +467,7 @@ export default function Forum({
 
   /** Retire un message partout — y compris les citations qui le reprenaient. */
   const retirer = useCallback((id: string) => {
+    corpusChangesRef.current?.set(id, null);
     // Le corpus subit le MÊME sort, et pas seulement le fil : un message supprimé qui reste
     // trouvable est précisément ce que le pouvoir de modération de l'admin cherche à éviter.
     setCorpus((c) => (c ? c.filter((m) => m.id !== id) : c));

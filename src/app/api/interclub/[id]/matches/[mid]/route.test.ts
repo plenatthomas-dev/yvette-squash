@@ -759,3 +759,20 @@ describe("PATCH .../matches/{mid} — une requête qui ne demande rien n'écrit 
     expect(interclubChanged).toHaveBeenCalled();
   });
 });
+
+
+describe("manual corrections compare the original score snapshot", () => {
+  it("accepte de corriger 11-5 en 11-7 sur une base inchangée", async () => {
+    h.match = { ...freshMatch(), games: [{ number: 1, pointsHome: 11, pointsAway: 5 }], gamesHome: 1, gamesAway: 0 };
+    const res = await PATCH(patch({ games: [{ home: 11, away: 7 }], knownGameCount: 1, knownGames: [{ home: 11, away: 5 }] }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.deletedGames).toBeGreaterThan(0);
+  });
+  it("refuse toujours un score de même longueur modifié ailleurs", async () => {
+    h.match = { ...freshMatch(), games: [{ number: 1, pointsHome: 11, pointsAway: 9 }], gamesHome: 1, gamesAway: 0 };
+    const res = await PATCH(patch({ games: [{ home: 11, away: 7 }], knownGameCount: 1, knownGames: [{ home: 11, away: 5 }] }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("stale-games");
+    expect(h.deletedGames).toBe(0);
+  });
+});

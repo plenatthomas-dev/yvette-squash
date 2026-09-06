@@ -40,7 +40,7 @@ const Interclub = dynamic(() => import("@/components/Interclub"), { ssr: false }
 // Idem pour le fil de discussion : son JS embarque le client temps réel, qui n'a aucune
 // raison de peser sur le premier chargement de quelqu'un qui vient réserver un terrain.
 const Forum = dynamic(() => import("@/components/Forum"), { ssr: false });
-import { fmtTime, slotMinutes, stampFR } from "@/lib/time";
+import { fmtTime, slotMinutes, stampFR, isRealDateISO } from "@/lib/time";
 import { NOTIFICATION_RETENTION_DAYS } from "@/lib/notifications-shared";
 import { downloadIcs } from "@/lib/ics";
 import {
@@ -431,10 +431,14 @@ export default function Home() {
   }, [me, canNotify, loadAlerts]);
 
   // Compteurs « N en attente » pour la plage [from, to] (jour : from==to).
-  const loadWaitCounts = useCallback(async (from: string, to: string) => {
+  const planningRequest = useRef(0);
+  const invalidatePlanningRequest = useCallback(() => { planningRequest.current++; }, []);
+  const planningContext = useRef({ date, view });
+  planningContext.current = { date, view };
+  const loadWaitCounts = useCallback(async (from: string, to: string, request = planningRequest.current) => {
     const r = await fetch(`/api/alerts/counts?from=${from}&to=${to}`);
-    if (r.ok) setWaitCounts(await r.json());
-    else setWaitCounts({});
+    const counts = r.ok ? await r.json() : {};
+    if (request === planningRequest.current) setWaitCounts(counts);
   }, []);
 
   // Compteur du badge € : tricounts où je dois de l'argent, remboursements ouverts.
@@ -484,60 +488,74 @@ export default function Home() {
     // planning vit en mémoire de process : l'invalidation faite par la route d'écriture ne
     // vaut que pour SON instance serverless, et ce GET peut tomber ailleurs (cf. getPlanning).
     async (d: string, fresh = false) => {
+      if (planningContext.current.date !== d || planningContext.current.view !== "day") return;
+      const request = ++planningRequest.current;
       setLoading(true);
       setError(null);
       try {
         // Séquentiel à dessein : /api/planning réconcilie la base (résas annulées ailleurs),
         // puis /api/bookings lit un journal déjà à jour.
         const pr = await fetch(`/api/planning?date=${d}${fresh ? "&fresh=1" : ""}`);
+        if (request !== planningRequest.current) return;
         if (pr.status === 401) {
           setMe(null);
           return;
         }
         const pdata = await pr.json();
+        if (request !== planningRequest.current) return;
         if (!pr.ok) throw new Error(pdata.error ?? `Erreur ${pr.status}`);
         setPlanning(pdata);
         const jr = await fetch(`/api/bookings?date=${d}`);
-        setJournal(jr.ok ? await jr.json() : []);
-        loadWaitCounts(d, d);
+        const journal = jr.ok ? await jr.json() : [];
+        if (request !== planningRequest.current) return;
+        setJournal(journal);
+        void loadWaitCounts(d, d, request).catch(() => {});
       } catch (e) {
+        if (request !== planningRequest.current) return;
         setError((e as Error).message);
         setPlanning(null);
       } finally {
-        setLoading(false);
+        if (request === planningRequest.current) setLoading(false);
       }
     },
     [loadWaitCounts],
   );
 
   const loadWeek = useCallback(async (d: string, fresh = false) => {
+    if (planningContext.current.date !== d || planningContext.current.view !== "week") return;
+    const request = ++planningRequest.current;
     setLoading(true);
     setError(null);
     try {
       // Un seul appel : /api/week renvoie les 7 jours (planning brut, sans réconciliation).
       const r = await fetch(`/api/week?date=${d}${fresh ? "&fresh=1" : ""}`);
+      if (request !== planningRequest.current) return;
       if (r.status === 401) {
         setMe(null);
         return;
       }
       const j = await r.json();
+      if (request !== planningRequest.current) return;
       if (!r.ok) throw new Error(j.error ?? `Erreur ${r.status}`);
       const wk = j as { date: string; planning: PlanningDay }[];
       setWeek(wk);
-      if (wk.length) loadWaitCounts(wk[0].date, wk[wk.length - 1].date);
+      if (wk.length) void loadWaitCounts(wk[0].date, wk[wk.length - 1].date, request).catch(() => {});
     } catch (e) {
+      if (request !== planningRequest.current) return;
       setError((e as Error).message);
       setWeek([]);
     } finally {
-      setLoading(false);
+      if (request === planningRequest.current) setLoading(false);
     }
   }, [loadWaitCounts]);
 
-  // Lecture de l'état initial : `view`/`range` depuis l'URL (sinon localStorage). La DATE
-  // n'est volontairement PAS restaurée : l'app s'ouvre toujours sur le jour par défaut
-  // (aujourd'hui, ou demain après 21 h — cf. defaultOpenDate), pas sur le dernier jour vu.
+  // La date de l'URL est un LIEN EXPLICITE — une notification de créneau libre en porte une —
+  // et on l'ouvre. Un démarrage ordinaire, lui, garde le jour par défaut (aujourd'hui, ou
+  // demain après 21 h — cf. defaultOpenDate), et jamais le dernier jour vu.
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
+    const linkedDate = p.get("date");
+    if (linkedDate && isRealDateISO(linkedDate)) setDate(linkedDate);
 
     // « forum » a été ajouté à l'union de `view` et au menu, mais PAS ici : la vue s'écrivait
     // donc bien dans l'URL et dans localStorage, et cette garde la refusait à la relecture.
@@ -558,7 +576,7 @@ export default function Home() {
     // il couvre aussi la coupure d'un flag EN COURS de session, pas seulement le démarrage.
     // Au LANCEMENT, on n'ouvre jamais directement la vue Semaine : /api/week (7 fetches
     // ResaMania) est lourd sur le chemin critique du démarrage. La Semaine reste à un clic
-    // une fois l'appli chargée. (Comme la DATE, ce n'est volontairement pas restauré.)
+    // une fois l'appli chargée.
     if (v === "week") v = "day";
     if (v) setView(v);
 
@@ -604,9 +622,13 @@ export default function Home() {
     if (!me || !hydrated) return;
     if (view === "money" || view === "tourney" || view === "interclub" || view === "forum")
       return; // ces vues chargent leurs propres données
+    setPlanning(null);
+    setJournal([]);
+    setWeek([]);
     if (view === "week") loadWeek(date);
     else load(date);
-  }, [me, hydrated, date, view, load, loadWeek]);
+    return invalidatePlanningRequest;
+  }, [me, hydrated, date, view, load, loadWeek, invalidatePlanningRequest]);
 
   // On sort du mode « sélection multiple » dès qu'on change de vue ou de date,
   // pour ne pas traîner une sélection devenue hors contexte.
@@ -722,7 +744,7 @@ export default function Home() {
     }
     // Blocage « même créneau » : impossible de réserver 2 terrains au même horaire
     // (ResaMania le refuse). On prévient tout de suite si on a déjà une résa à cette heure.
-    const clash = planning?.slots.find((s) => s.startsAt === slot.startsAt && s.mine);
+    const clash = !actingAsId && planning?.slots.find((s) => s.startsAt === slot.startsAt && s.mine);
     if (clash) {
       toast("info", `Tu joues déjà sur ${clash.courtName} à cet horaire — un seul terrain à la fois.`);
       return;
@@ -806,7 +828,7 @@ export default function Home() {
   const onCancelMine = async (slot: Slot) => {
     if (busy || confirmState) return;
     const ok = await askConfirm({
-      title: actingForName ? `Annuler la réservation de ${actingForName} ?` : "Annuler ta réservation ?",
+      title: "Annuler ta réservation ?",
       body: `${slot.courtName} — ${fmtTime(slot.startsAt)} le ${prettyDate(slot.startsAt.slice(0, 10))}`,
       confirmLabel: "Annuler la résa",
       danger: true,
@@ -819,7 +841,7 @@ export default function Home() {
       const res = await fetch("/api/cancel-slot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ classEventId: slot.id, onBehalfOf: actingAsId ?? undefined }),
+        body: JSON.stringify({ classEventId: slot.id }),
       });
       if (handleExpired(res.status)) return;
       const data = await res.json();

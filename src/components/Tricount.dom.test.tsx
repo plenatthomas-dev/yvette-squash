@@ -102,7 +102,7 @@ describe("fmtEuros — ce qui sort à l'écran", () => {
 //
 // Ces tests mesurent donc la PRÉSENCE des boutons, seul endroit où ces deux règles existent.
 
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
 import Tricount from "@/components/Tricount";
 import { afterEach, vi as vitest } from "vitest";
 
@@ -117,7 +117,7 @@ function charge(o: { emailOnly: boolean; settled: boolean }) {
     payerId: "moi",
     payerKind: "user",
     payerName: "Alice",
-    participants: [{ id: "u2", kind: "user", name: "Bob" }],
+    participants: [{ id: "u2", kind: "user", name: "Bob", amountCents: 1500 }],
     canDelete: true,
     canEdit: !isRefund,
   });
@@ -193,4 +193,28 @@ describe("Tricount — ce que l'écran offre sur un tricount SOLDÉ", () => {
     expect(b.supprDepense).toBeNull();
     expect(b.supprRemb).not.toBeNull();
   });
+});
+
+
+it("conserve les centimes pondérés enregistrés quand on retouche le libellé", async () => {
+  const data = charge({ emailOnly: false, settled: false });
+  const expense = data.tricounts[0].expenses[0];
+  expense.amountCents = 3000;
+  expense.participants = [
+    { id: "moi", kind: "user", name: "Alice", amountCents: 2000 },
+    { id: "u2", kind: "user", name: "Bob", amountCents: 1000 },
+  ];
+  const fetcher = vitest.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, status: 200, json: async () => data }) as Response);
+  vitest.stubGlobal("fetch", fetcher);
+  render(<Tricount toast={() => {}} onExpired={() => false} />);
+  await waitFor(() => expect(screen.getByLabelText(/Modifier.*Repas/)).toBeTruthy());
+  fireEvent.click(screen.getByLabelText(/Modifier.*Repas/));
+  expect(screen.getByRole("button", { name: "Conserver la r\u00e9partition" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByText("20,00 \u20ac")).toBeTruthy();
+  expect(screen.getByText("10,00 \u20ac")).toBeTruthy();
+  fireEvent.change(screen.getByDisplayValue("Repas"), { target: { value: "Diner" } });
+  fireEvent.submit(screen.getByDisplayValue("Diner").closest("form")!);
+  await waitFor(() => expect(fetcher.mock.calls.some((args) => String(args[0]).includes("/expenses/"))).toBe(true));
+  const [, init] = fetcher.mock.calls.find((args) => String(args[0]).includes("/expenses/"))!;
+  expect(JSON.parse(String(init?.body))).toMatchObject({ label: "Diner", amountCents: 3000, preserveSplit: true });
 });

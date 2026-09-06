@@ -151,6 +151,7 @@ model Session {
   accessToken     String? // token Bearer chiffré (AES-256-GCM, court ~1h)
   refreshTokenEnc String? // refresh token chiffré (AES-256-GCM)
   tokenExpiresAt  DateTime?
+  refreshClaimedAt DateTime? // verrou de rafraîchissement, distinct de la validité du jeton
   identityJson    String? // ResaIdentity sérialisée (contactId, clubId, nom…)
   expiresAt       DateTime // expiration de la session applicative
   createdAt       DateTime  @default(now())
@@ -262,6 +263,16 @@ model EmailToken {
   // l'approbation, un jeton frais est régénéré et ce champ est daté. Voir src/lib/admin.ts.
   approvedAt   DateTime?
   createdAt    DateTime  @default(now())
+
+  @@index([email, createdAt])
+  @@index([ip, createdAt])
+}
+
+model EmailRequestAttempt {
+  id        String   @id @default(cuid())
+  email     String
+  ip        String
+  createdAt DateTime @default(now())
 
   @@index([email, createdAt])
   @@index([ip, createdAt])
