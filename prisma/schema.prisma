@@ -804,6 +804,11 @@ model Interclub {
   // quotidien redemanderait chaque matin à la même équipe si elle est disponible.
   availabilityOpenedAt   DateTime?
   availabilityRemindedAt DateTime?
+  // Le RAPPEL DE LA VEILLE, troisième et dernier marqueur de la série. L'appel (J-10) et la
+  // relance (J-3) demandent « qui peut venir » ; celui-ci ne demande rien — il dit l'heure, le
+  // lieu et l'adresse à ceux qui sont ALIGNÉS, la veille au matin. C'est l'information qui
+  // manquait : entre J-3 et le coup d'envoi, plus rien ne partait.
+  eveRemindedAt          DateTime?
   createdById            String
   createdBy              User                    @relation("InterclubCreator", fields: [createdById], references: [id], onDelete: Restrict)
   createdAt              DateTime                @default(now())

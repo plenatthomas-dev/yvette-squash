@@ -1,0 +1,15 @@
+-- LE RAPPEL DE LA VEILLE : un troisième marqueur sur `Interclub`.
+--
+-- L'appel de disponibilité (J-10) et sa relance (J-3) portent chacun le leur
+-- (`availabilityOpenedAt`, `availabilityRemindedAt`) : c'est ce qui distingue « personne n'a
+-- encore été prévenu » de « tout le monde l'a été », et sans quoi un cron QUOTIDIEN reposerait
+-- la même question chaque matin.
+--
+-- Celui-ci sert le troisième et dernier envoi, qui manquait : entre J-3 et le coup d'envoi,
+-- plus rien ne partait. Il ne demande rien — il DIT l'heure, le lieu et l'adresse, aux seuls
+-- joueurs alignés, la veille.
+--
+-- Nullable et sans valeur par défaut : les rencontres déjà en base sont donc toutes « pas
+-- encore rappelées », ce qui est exact. Celles qui se jouent demain recevront le rappel au
+-- prochain passage du cron, ce qui est également ce qu'on veut.
+ALTER TABLE "Interclub" ADD COLUMN IF NOT EXISTS "eveRemindedAt" TIMESTAMP(3);

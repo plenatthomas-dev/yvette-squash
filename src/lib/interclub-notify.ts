@@ -303,6 +303,45 @@ export async function notifyAvailabilityReminder(
   );
 }
 
+/**
+ * LE RAPPEL DE LA VEILLE — aux joueurs ALIGNÉS, et à eux seuls.
+ *
+ * Les deux notifications ci-dessus posent une question ; celle-ci n'en pose aucune. Elle dit
+ * ce qu'on cherche la veille au soir en préparant son sac : à quelle heure, chez qui, et à
+ * quelle adresse. Entre J-3 et le coup d'envoi, plus rien ne partait — c'est-à-dire au moment
+ * précis où l'information sert.
+ *
+ * PAS À TOUTE L'ÉQUIPE. Un joueur non retenu n'a rien à faire de cette adresse, et une
+ * notification qu'on n'attendait pas est exactement ce qui apprend à les ignorer toutes. La
+ * liste vient de l'appelant, qui lit la composition ; les joueurs sans compte n'y figurent pas
+ * — c'est au capitaine de les appeler, et le récapitulatif de J-3 le lui a déjà dit.
+ *
+ * `tagSuffix` distinct : la veille, ce rappel ne doit pas remplacer sur l'écran verrouillé la
+ * relance ou le récapitulatif encore non lus.
+ */
+export async function notifyEveReminder(
+  ids: string[],
+  ctx: Ctx,
+  fixture: { date: string; time: string | null; home: boolean; venue: string | null; venueAddress: string | null },
+  /** Vrai quand la rencontre se joue AUJOURD'HUI (rencontre inscrite tardivement). */
+  aujourdhui = false,
+): Promise<void> {
+  const quand = aujourdhui ? "Ce soir" : "Demain";
+  // L'adresse ENTIÈRE, et non le seul nom du club : c'est elle qu'on cherche, et une
+  // notification qu'il faut quitter pour trouver un renseignement n'a servi à rien. À
+  // domicile, tout le monde sait où l'on joue — on ne recopie pas l'adresse du club.
+  const ou = fixture.home
+    ? "à domicile"
+    : [fixture.venue ?? `chez ${ctx.opponent}`, fixture.venueAddress].filter(Boolean).join(", ");
+  await sendTo(
+    ids,
+    ctx,
+    `⏰ ${ctx.teamName} – ${ctx.opponent}`,
+    `${quand}${fixture.time ? ` à ${fixture.time}` : ` (${frenchDate(fixture.date)})`} — ${ou}. Tu es aligné.`,
+    "-veille",
+  );
+}
+
 /** La rencontre a été déplacée — à toute l'équipe, y compris ceux qui avaient déjà répondu. */
 export async function notifyFixtureMoved(
   ctx: Ctx,

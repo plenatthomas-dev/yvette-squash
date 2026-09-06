@@ -27,6 +27,7 @@ const h = vi.hoisted(() => ({
   calls: [] as unknown[][],
   reminders: [] as unknown[][],
   digests: [] as unknown[][],
+  eves: [] as unknown[][],
 }));
 
 vi.mock("@/lib/features-server", () => ({ getFeatures: async () => ({ interclub: h.interclub }) }));
@@ -46,6 +47,9 @@ vi.mock("@/lib/interclub-notify", () => ({
   }),
   notifyCaptainDigest: vi.fn(async (...a: unknown[]) => {
     h.digests.push(a);
+  }),
+  notifyEveReminder: vi.fn(async (...a: unknown[]) => {
+    h.eves.push(a);
   }),
 }));
 vi.mock("@/lib/db", () => ({
@@ -79,7 +83,13 @@ const fixture = (over: Record<string, unknown> = {}) => ({
   dateConfirmed: true,
   availabilityOpenedAt: null,
   availabilityRemindedAt: null,
+  eveRemindedAt: null,
   opponent: "Montmartre 1",
+  venue: null,
+  venueAddress: null,
+  // LA COMPOSITION : c'est d'elle que sortent les destinataires du rappel de la veille, et non
+  // du roster. Une ligne sans `homeUserId` est un joueur sans compte — personne à notifier.
+  matches: [{ homeUserId: "u1" }, { homeUserId: null }],
   team: { name: "Équipe 1", captainId: "cap", captain: { disabledAt: null } },
   ...over,
 });
@@ -103,6 +113,7 @@ beforeEach(() => {
   h.calls = [];
   h.reminders = [];
   h.digests = [];
+  h.eves = [];
 });
 
 describe("gardes", () => {
@@ -265,6 +276,70 @@ describe("relance (J-3) et récapitulatif du capitaine", () => {
     expect(appels).toHaveLength(1);
     expect(String(appels[0][2])).toMatch(/sous-effectif/i);
     expect(String(appels[0][2])).toMatch(/1\/4/);
+  });
+
+  // LE RAPPEL DE LA VEILLE — le seul envoi de ce cron qui ne pose aucune question.
+  //
+  // Il dit l'heure, le lieu et l'adresse à ceux qui JOUENT, au moment où l'on prépare son sac.
+  // Entre J-3 et le coup d'envoi, plus rien ne partait.
+  describe("le rappel de la veille", () => {
+    /** Appel ouvert, relance faite : l'état normal d'une rencontre à la veille. */
+    const veille = (over: Record<string, unknown> = {}) =>
+      fixture({
+        date: "2026-10-02",
+        availabilityOpenedAt: new Date("2026-09-25"),
+        availabilityRemindedAt: new Date("2026-09-30"),
+        ...over,
+      });
+
+    it("ne va qu'aux joueurs ALIGNÉS, pas à toute l'équipe", async () => {
+      // Bob est du roster mais ne joue pas : cette adresse ne lui sert à rien, et une
+      // notification qu'on n'attendait pas est ce qui apprend à les ignorer toutes.
+      h.fixtures = [veille()];
+      await GET(req());
+      expect(h.eves).toHaveLength(1);
+      expect(h.eves[0][0]).toEqual(["u1"]);
+    });
+
+    it("porte le lieu et l'adresse — c'est ce qu'on y cherche", async () => {
+      h.fixtures = [
+        veille({ home: false, venue: "Squash de Massy", venueAddress: "12 rue du Stade" }),
+      ];
+      await GET(req());
+      expect(h.eves[0][2]).toMatchObject({
+        time: "20:00",
+        home: false,
+        venue: "Squash de Massy",
+        venueAddress: "12 rue du Stade",
+      });
+    });
+
+    it("marque la rencontre APRÈS l'envoi, et ne repasse pas le lendemain", async () => {
+      h.fixtures = [veille()];
+      await GET(req());
+      expect(h.updates.at(-1)).toHaveProperty("eveRemindedAt");
+
+      h.eves = [];
+      h.fixtures = [veille({ eveRemindedAt: new Date("2026-10-01") })];
+      await GET(req());
+      expect(h.eves).toEqual([]);
+    });
+
+    it("marque MÊME sans personne à prévenir : repasser demain ne trouverait rien de plus", async () => {
+      // Une composition encore vide la veille ne sera pas remplie par ce cron. Sans le
+      // marqueur, la rencontre serait réexaminée à chaque passage jusqu'au coup d'envoi.
+      h.fixtures = [veille({ matches: [{ homeUserId: null }] })];
+      await GET(req());
+      expect(h.eves).toEqual([]);
+      expect(h.updates.at(-1)).toHaveProperty("eveRemindedAt");
+    });
+
+    it("RIEN sur une date prévisionnelle, comme l'appel et la relance", async () => {
+      h.fixtures = [veille({ dateConfirmed: false })];
+      await GET(req());
+      expect(h.eves).toEqual([]);
+      expect(h.updates).toEqual([]);
+    });
   });
 
   it("un « incertain » compte comme une réponse, mais pas comme un présent", async () => {
