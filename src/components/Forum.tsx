@@ -103,6 +103,19 @@ const TYPING_EVERY_MS = 3_000;
 /** Au-delà, on considère que la personne a cessé d'écrire (elle a pu fermer l'onglet). */
 const TYPING_FORGET_MS = 5_000;
 
+/**
+ * Durée d'un APPUI LONG sur une bulle avant que la palette de réactions ne s'ouvre.
+ *
+ * 450 ms, et le chiffre est choisi : c'est juste EN DEÇÀ du seuil auquel iOS et Android
+ * déclenchent leur propre sélection de texte (~500 ms). On passe donc devant eux, et l'ouverture
+ * de la palette efface la sélection que le navigateur aurait pu commencer — sans avoir à poser
+ * `user-select: none` sur les messages, ce qui interdirait de copier une adresse ou un numéro.
+ */
+const APPUI_LONG_MS = 450;
+
+/** Au-delà de ce déplacement, l'appui est un DÉFILEMENT et non un appui long. */
+const APPUI_TOLERANCE_PX = 10;
+
 /** L'heure d'un message, à la SECONDE.
  *
  *  Les secondes sont inhabituelles dans une messagerie, mais c'est le cas normal d'une
@@ -183,6 +196,8 @@ export default function Forum({
   const [paletteReaction, setPaletteReaction] = useState<string | null>(null);
   /** Composeur de sondage : `null` = fermé. */
   const [sondage, setSondage] = useState<{ question: string; options: string[] } | null>(null);
+  /** La pop-up de choix bascule SOUS la bulle quand il n'y a pas la place au-dessus. */
+  const [choixDessous, setChoixDessous] = useState(false);
 
   const onExpiredRef = useRef(onExpired);
   onExpiredRef.current = onExpired;
@@ -201,6 +216,15 @@ export default function Forum({
   const reacEnVolRef = useRef<Set<string>>(new Set());
   /** Écritures de sondage déjà parties, par sondage — même raison. */
   const voteEnVolRef = useRef<Set<string>>(new Set());
+  /** L'appui long en cours : son minuteur, son point de départ, et s'il a abouti. */
+  const appuiRef = useRef<{ timer: number | null; x: number; y: number; abouti: boolean }>({
+    timer: null,
+    x: 0,
+    y: 0,
+    abouti: false,
+  });
+  /** La pop-up de choix, pour y porter le focus dès qu'elle s'ouvre. */
+  const choixRef = useRef<HTMLDivElement | null>(null);
   /** Numéro de la dernière écriture émise par sondage. Une réponse dont le numéro n'est plus
    *  le dernier est PÉRIMÉE : l'appliquer laisserait une réponse ancienne écraser une plus
    *  récente, et afficher un état faux jusqu'au prochain événement du courtier. */
@@ -565,6 +589,79 @@ export default function Forum({
     }
   };
 
+  // APPUI LONG SUR UNE BULLE — le geste des messageries : on maintient le doigt sur un message,
+  // une palette d'emoji s'ouvre au-dessus, on en choisit un. Le bouton ⊕ de l'en-tête reste :
+  // c'est le SEUL chemin au clavier, et un appui long ne s'annonce à aucun lecteur d'écran.
+  const annulerAppui = useCallback(() => {
+    if (appuiRef.current.timer !== null) {
+      clearTimeout(appuiRef.current.timer);
+      appuiRef.current.timer = null;
+    }
+  }, []);
+
+  const commencerAppui = (e: React.PointerEvent, messageId: string) => {
+    // Pas à la souris : maintenir un clic n'y veut rien dire, et l'on empêcherait la sélection
+    // d'un texte qu'on est simplement en train de lire.
+    if (e.pointerType === "mouse") return;
+    // Un appui qui commence SUR un bouton appartient à ce bouton — répondre, supprimer, voter.
+    if ((e.target as HTMLElement).closest("button, a")) return;
+    annulerAppui();
+    appuiRef.current.abouti = false;
+    appuiRef.current.x = e.clientX;
+    appuiRef.current.y = e.clientY;
+    appuiRef.current.timer = window.setTimeout(() => {
+      appuiRef.current.timer = null;
+      appuiRef.current.abouti = true;
+      // Le navigateur a pu commencer sa propre sélection : on la défait, sinon le surlignage
+      // reste sous la pop-up.
+      window.getSelection?.()?.removeAllRanges();
+      // Le retour haptique dit que l'appui a « pris ». Absent partout sauf sur Android, d'où
+      // l'appel facultatif — c'est un agrément, jamais le signal principal.
+      navigator.vibrate?.(12);
+      setPaletteReaction(messageId);
+    }, APPUI_LONG_MS);
+  };
+
+  const bougerPendantAppui = (e: React.PointerEvent) => {
+    if (appuiRef.current.timer === null) return;
+    const { x, y } = appuiRef.current;
+    if (
+      Math.abs(e.clientX - x) > APPUI_TOLERANCE_PX ||
+      Math.abs(e.clientY - y) > APPUI_TOLERANCE_PX
+    ) {
+      // Le doigt part : c'est un défilement du fil, pas un appui sur ce message.
+      annulerAppui();
+    }
+  };
+
+  // Le minuteur ne doit pas survivre au démontage : il appellerait `setPaletteReaction` sur un
+  // composant disparu.
+  useEffect(() => annulerAppui, [annulerAppui]);
+
+  // Ouverture de la pop-up : on la place, puis on lui donne le focus.
+  //
+  // LA PLACE D'ABORD. Elle s'ouvre au-DESSUS de la bulle, pour qu'on voie encore le message
+  // auquel on réagit. Mais la liste est un conteneur à défilement (`overflow-y`), qui ROGNE ce
+  // qui dépasse : sur le premier message visible, la pop-up serait coupée par le haut. On
+  // mesure, et on bascule dessous s'il n'y a pas la place — la même règle qu'un menu déroulant.
+  //
+  // LE FOCUS ENSUITE. Il fait deux choses d'un seul geste : Échap fonctionne dans la pop-up, et
+  // le navigateur fait défiler le conteneur pour l'amener entièrement à l'écran.
+  useEffect(() => {
+    if (!paletteReaction) {
+      setChoixDessous(false);
+      return;
+    }
+    const pop = choixRef.current;
+    const zone = zoneRef.current;
+    if (pop && zone && pop.getBoundingClientRect().top < zone.getBoundingClientRect().top) {
+      setChoixDessous(true);
+    }
+    pop?.querySelector("button")?.focus();
+  }, [paletteReaction]);
+
+  const fermerChoix = useCallback(() => setPaletteReaction(null), []);
+
   const reagir = async (messageId: string, emoji: string) => {
     if (!moi) return;
     setPaletteReaction(null);
@@ -793,7 +890,10 @@ export default function Forum({
                 const reacs = reactions[m.id] ?? [];
                 const poll = polls[m.id];
                 return (
-                  <li key={m.id} className="forum-ligne">
+                  // `a-reac` réserve, EN CSS, la place que les pastilles prennent en dehors
+                  // de la bulle : sans elle, elles mordraient sur le message suivant au lieu
+                  // de mordre sur le leur.
+                  <li key={m.id} className={reacs.length > 0 ? "forum-ligne a-reac" : "forum-ligne"}>
                     {nouveauJour && (
                       <p className="forum-jour" role="presentation">
                         <span>{libelleJour(m.createdAt)}</span>
@@ -808,145 +908,168 @@ export default function Forum({
                           {initiales(m.authorName)}
                         </span>
                       )}
-                      <div className={mine ? "forum-msg is-mine" : "forum-msg"}>
-                        {/* Les trois champs de la citation vont ensemble : ou bien la cible
-                            existe encore et ils sont tous renseignés, ou bien elle a disparu et
-                            ils sont tous nuls. Pas de branche « Message supprimé » — la base
-                            n'en garde aucune trace, donc l'écran non plus. */}
-                        {m.replyToExcerpt && (
-                          <p className="forum-citation">
-                            <strong>{m.replyToAuthor}</strong>
-                            <span>{m.replyToExcerpt}</span>
-                          </p>
-                        )}
-                        <div className="forum-msg-head">
-                          <strong>{m.authorName}</strong>
-                          <small>{horodatage(m.createdAt)}</small>
-                          <span className="forum-actions">
-                            <button
-                              type="button"
-                              className="forum-action"
-                              onClick={() => {
-                                setCitation(m);
-                                saisieRef.current?.focus();
-                              }}
-                              aria-label={`Répondre à ${m.authorName}`}
-                            >
-                              Répondre
-                            </button>
-                            <button
-                              type="button"
-                              className="forum-action"
-                              onClick={() =>
-                                setPaletteReaction((x) => (x === m.id ? null : m.id))
-                              }
-                              aria-expanded={paletteReaction === m.id}
-                              aria-label={`Réagir au message de ${m.authorName}`}
-                            >
-                              ⊕
-                            </button>
-                            {canDelete && (
+                      {/* La BULLE et ce qui s'y accroche. Ce conteneur existe pour deux choses
+                          que la bulle seule ne peut pas porter : les pastilles de réaction, qui
+                          se posent À CHEVAL sur son bord bas, et la pop-up de choix, qui
+                          s'ancre dessus. Il porte donc la largeur, et la bulle l'apparence. */}
+                      <div
+                        className="forum-bulle"
+                        onPointerDown={(e) => commencerAppui(e, m.id)}
+                        onPointerMove={bougerPendantAppui}
+                        onPointerUp={annulerAppui}
+                        onPointerCancel={annulerAppui}
+                        onPointerLeave={annulerAppui}
+                        onContextMenu={(e) => {
+                          // Le menu contextuel du navigateur ferait double emploi avec la
+                          // pop-up qui vient de s'ouvrir, et la recouvrirait.
+                          if (appuiRef.current.abouti) e.preventDefault();
+                        }}
+                      >
+                        <div className={mine ? "forum-msg is-mine" : "forum-msg"}>
+                          {/* Les trois champs de la citation vont ensemble : ou bien la cible
+                              existe encore et ils sont tous renseignés, ou bien elle a disparu et
+                              ils sont tous nuls. Pas de branche « Message supprimé » — la base
+                              n'en garde aucune trace, donc l'écran non plus. */}
+                          {m.replyToExcerpt && (
+                            <p className="forum-citation">
+                              <strong>{m.replyToAuthor}</strong>
+                              <span>{m.replyToExcerpt}</span>
+                            </p>
+                          )}
+                          <div className="forum-msg-head">
+                            <strong>{m.authorName}</strong>
+                            <small>{horodatage(m.createdAt)}</small>
+                            <span className="forum-actions">
                               <button
                                 type="button"
-                                className="forum-action forum-suppr"
-                                onClick={() => void supprimer(m.id)}
-                                aria-label={`Supprimer le message de ${m.authorName}`}
+                                className="forum-action"
+                                onClick={() => {
+                                  setCitation(m);
+                                  saisieRef.current?.focus();
+                                }}
+                                aria-label={`Répondre à ${m.authorName}`}
                               >
-                                Suppr.
+                                Répondre
                               </button>
-                            )}
-                          </span>
-                        </div>
-                        <Corps texte={m.body} />
-
-                        {poll && moi && (
-                          <div className="forum-poll">
-                            {(() => {
-                              // Le nombre de VOTANTS, pas la somme des voix : en choix
-                              // multiple les deux diffèrent, et c'est le premier qui sert de
-                              // base aux barres — sinon 100 % est inatteignable et les
-                              // proportions mentent.
-                              const votants = new Set(
-                                poll.options.flatMap((o) => o.voters.map((v) => v.id)),
-                              );
-                              const voix = poll.options.reduce((n, o) => n + o.voters.length, 0);
-                              return (
-                                <>
-                                  {poll.options.map((o) => {
-                                    const coche = o.voters.some((v) => v.id === moi.id);
-                                    const part = votants.size
-                                      ? Math.round((o.voters.length / votants.size) * 100)
-                                      : 0;
-                                    return (
-                                      <button
-                                        key={o.id}
-                                        type="button"
-                                        className={coche ? "forum-opt is-coche" : "forum-opt"}
-                                        onClick={() => void voter(poll, o.id)}
-                                        disabled={Boolean(poll.closedAt)}
-                                        aria-pressed={coche}
-                                        title={
-                                          o.voters.length
-                                            ? o.voters.map((v) => v.name).join(", ")
-                                            : "Personne pour l'instant"
-                                        }
-                                        // ⚠️ Pico applique `pointer-events: none` aux boutons
-                                        // `[disabled]` : sur un sondage CLOS, l'infobulle
-                                        // disparaît même à la souris — au moment précis où
-                                        // l'on veut lire le résultat. Le nom accessible reste,
-                                        // lui, disponible dans tous les cas ; et les votants
-                                        // sont écrits en clair sous la barre quand c'est clos.
-                                        aria-label={`${o.label}, ${o.voters.length} voix${
-                                          o.voters.length
-                                            ? ` : ${o.voters.map((v) => v.name).join(", ")}`
-                                            : ""
-                                        }`}
-                                      >
-                                        <span
-                                          className="forum-opt-jauge"
-                                          style={{ width: `${part}%` }}
-                                          aria-hidden="true"
-                                        />
-                                        <span className="forum-opt-texte">
-                                          {coche ? "☑" : "☐"} {o.label}
-                                        </span>
-                                        <span className="forum-opt-nb">{o.voters.length}</span>
-                                      </button>
-                                    );
-                                  })}
-                                  {/* Sur un sondage CLOS, les votants passent EN CLAIR sous la
-                                      barre : c'est là qu'on vient lire qui vient, et c'est
-                                      exactement là que Pico rend les infobulles inatteignables. */}
-                                  {poll.closedAt &&
-                                    poll.options.map((o) =>
-                                      o.voters.length ? (
-                                        <p key={o.id} className="forum-poll-votants">
-                                          <strong>{o.label}</strong> :{" "}
-                                          {o.voters.map((v) => v.name).join(", ")}
-                                        </p>
-                                      ) : null,
-                                    )}
-                                  <p className="forum-poll-pied">
-                                    {votants.size} votant{votants.size > 1 ? "s" : ""} · {voix}{" "}
-                                    voix
-                                    {poll.closedAt ? " · clos" : ""}
-                                    {canDelete && (
-                                      <button
-                                        type="button"
-                                        className="forum-action"
-                                        onClick={() => void clore(poll)}
-                                      >
-                                        {poll.closedAt ? "Rouvrir" : "Clore"}
-                                      </button>
-                                    )}
-                                  </p>
-                                </>
-                              );
-                            })()}
+                              <button
+                                type="button"
+                                className="forum-action"
+                                onClick={() =>
+                                  setPaletteReaction((x) => (x === m.id ? null : m.id))
+                                }
+                                aria-expanded={paletteReaction === m.id}
+                                aria-label={`Réagir au message de ${m.authorName}`}
+                              >
+                                ⊕
+                              </button>
+                              {canDelete && (
+                                <button
+                                  type="button"
+                                  className="forum-action forum-suppr"
+                                  onClick={() => void supprimer(m.id)}
+                                  aria-label={`Supprimer le message de ${m.authorName}`}
+                                >
+                                  Suppr.
+                                </button>
+                              )}
+                            </span>
                           </div>
-                        )}
+                          <Corps texte={m.body} />
 
-                        {(reacs.length > 0 || paletteReaction === m.id) && (
+                          {poll && moi && (
+                            <div className="forum-poll">
+                              {(() => {
+                                // Le nombre de VOTANTS, pas la somme des voix : en choix
+                                // multiple les deux diffèrent, et c'est le premier qui sert de
+                                // base aux barres — sinon 100 % est inatteignable et les
+                                // proportions mentent.
+                                const votants = new Set(
+                                  poll.options.flatMap((o) => o.voters.map((v) => v.id)),
+                                );
+                                const voix = poll.options.reduce((n, o) => n + o.voters.length, 0);
+                                return (
+                                  <>
+                                    {poll.options.map((o) => {
+                                      const coche = o.voters.some((v) => v.id === moi.id);
+                                      const part = votants.size
+                                        ? Math.round((o.voters.length / votants.size) * 100)
+                                        : 0;
+                                      return (
+                                        <button
+                                          key={o.id}
+                                          type="button"
+                                          className={coche ? "forum-opt is-coche" : "forum-opt"}
+                                          onClick={() => void voter(poll, o.id)}
+                                          disabled={Boolean(poll.closedAt)}
+                                          aria-pressed={coche}
+                                          title={
+                                            o.voters.length
+                                              ? o.voters.map((v) => v.name).join(", ")
+                                              : "Personne pour l'instant"
+                                          }
+                                          // ⚠️ Pico applique `pointer-events: none` aux boutons
+                                          // `[disabled]` : sur un sondage CLOS, l'infobulle
+                                          // disparaît même à la souris — au moment précis où
+                                          // l'on veut lire le résultat. Le nom accessible reste,
+                                          // lui, disponible dans tous les cas ; et les votants
+                                          // sont écrits en clair sous la barre quand c'est clos.
+                                          aria-label={`${o.label}, ${o.voters.length} voix${
+                                            o.voters.length
+                                              ? ` : ${o.voters.map((v) => v.name).join(", ")}`
+                                              : ""
+                                          }`}
+                                        >
+                                          <span
+                                            className="forum-opt-jauge"
+                                            style={{ width: `${part}%` }}
+                                            aria-hidden="true"
+                                          />
+                                          <span className="forum-opt-texte">
+                                            {coche ? "☑" : "☐"} {o.label}
+                                          </span>
+                                          <span className="forum-opt-nb">{o.voters.length}</span>
+                                        </button>
+                                      );
+                                    })}
+                                    {/* Sur un sondage CLOS, les votants passent EN CLAIR sous la
+                                        barre : c'est là qu'on vient lire qui vient, et c'est
+                                        exactement là que Pico rend les infobulles inatteignables. */}
+                                    {poll.closedAt &&
+                                      poll.options.map((o) =>
+                                        o.voters.length ? (
+                                          <p key={o.id} className="forum-poll-votants">
+                                            <strong>{o.label}</strong> :{" "}
+                                            {o.voters.map((v) => v.name).join(", ")}
+                                          </p>
+                                        ) : null,
+                                      )}
+                                    <p className="forum-poll-pied">
+                                      {votants.size} votant{votants.size > 1 ? "s" : ""} · {voix}{" "}
+                                      voix
+                                      {poll.closedAt ? " · clos" : ""}
+                                      {canDelete && (
+                                        <button
+                                          type="button"
+                                          className="forum-action"
+                                          onClick={() => void clore(poll)}
+                                        >
+                                          {poll.closedAt ? "Rouvrir" : "Clore"}
+                                        </button>
+                                      )}
+                                    </p>
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* LES PASTILLES SONT HORS DE LA BULLE, posées à cheval sur son bord
+                            bas — la convention de toutes les messageries, et ce qui les
+                            distingue du message : une réaction commente le message, elle n'en
+                            fait pas partie. Dedans, elles se lisaient comme une dernière ligne
+                            écrite par l'auteur. */}
+                        {reacs.length > 0 && (
                           <div className="forum-reacs">
                             {reacs.map((r) => {
                               const mienne = moi !== null && r.users.some((u) => u.id === moi.id);
@@ -969,13 +1092,35 @@ export default function Forum({
                                 </button>
                               );
                             })}
-                            {/* LA PALETTE MONTRE CE QU'ON A DÉJÀ POSÉ. Ses six boutons appellent
-                                `reagir`, qui BASCULE : cliquer 👍 alors qu'on l'avait déjà mis
-                                le retirait, sans que rien à l'écran ne l'annonce. Le filet
-                                `is-mienne` et `aria-pressed` disent l'état avant le clic, et
-                                le libellé accessible dit ce que le clic va faire. */}
-                            {paletteReaction === m.id &&
-                              FORUM_REACTIONS.map((e) => {
+                          </div>
+                        )}
+
+                        {/* POP-UP DE CHOIX — ouverte par un appui long sur la bulle, ou par le
+                            bouton ⊕ de l'en-tête. Elle MONTRE CE QU'ON A DÉJÀ POSÉ : ses six
+                            boutons appellent `reagir`, qui BASCULE, et cliquer 👍 alors qu'on
+                            l'avait déjà mis le RETIRE. Le filet `is-mienne` et `aria-pressed`
+                            disent l'état avant le clic, le libellé accessible dit ce que le
+                            clic va faire. */}
+                        {paletteReaction === m.id && (
+                          <>
+                            {/* Voile de fermeture : un appui n'importe où ailleurs referme,
+                                comme on attend d'une pop-up. Il capte aussi le premier appui,
+                                qui ne doit pas agir sur ce qu'il y a dessous. */}
+                            <div
+                              className="forum-voile"
+                              onPointerDown={fermerChoix}
+                              aria-hidden="true"
+                            />
+                            <div
+                              className={choixDessous ? "forum-choix est-dessous" : "forum-choix"}
+                              ref={choixRef}
+                              role="group"
+                              aria-label={`Réagir au message de ${m.authorName}`}
+                              onKeyDown={(e) => {
+                                if (e.key === "Escape") fermerChoix();
+                              }}
+                            >
+                              {FORUM_REACTIONS.map((e) => {
                                 const posee =
                                   moi !== null &&
                                   (reacs.find((r) => r.emoji === e)?.users ?? []).some(
@@ -985,11 +1130,7 @@ export default function Forum({
                                   <button
                                     key={e}
                                     type="button"
-                                    className={
-                                      posee
-                                        ? "forum-reac forum-reac-choix is-mienne"
-                                        : "forum-reac forum-reac-choix"
-                                    }
+                                    className={posee ? "forum-choix-un is-mienne" : "forum-choix-un"}
                                     onClick={() => void reagir(m.id, e)}
                                     aria-pressed={posee}
                                     aria-label={posee ? `Retirer ${e}` : `Réagir avec ${e}`}
@@ -998,7 +1139,8 @@ export default function Forum({
                                   </button>
                                 );
                               })}
-                          </div>
+                            </div>
+                          </>
                         )}
                       </div>
                     </div>
