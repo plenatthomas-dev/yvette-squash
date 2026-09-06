@@ -57,6 +57,16 @@ export async function ensurePushSubscribed(): Promise<boolean> {
     });
   }
 
+  return declarerAuServeur(sub);
+}
+
+/**
+ * Déclare au serveur que cet abonnement est celui du COMPTE CONNECTÉ.
+ *
+ * La route fait un `upsert` sur l'endpoint : si la ligne existait au nom d'un autre compte,
+ * elle CHANGE de main. C'est tout le mécanisme sur lequel repose `syncPushSubscription`.
+ */
+async function declarerAuServeur(sub: PushSubscription): Promise<boolean> {
   const json = sub.toJSON();
   const res = await fetch("/api/push/subscribe", {
     method: "POST",
@@ -67,6 +77,41 @@ export async function ensurePushSubscribed(): Promise<boolean> {
     }),
   });
   return res.ok;
+}
+
+/**
+ * Réaffirme EN SILENCE que l'abonnement de cet appareil appartient au compte connecté.
+ *
+ * LE DÉFAUT QU'ELLE CORRIGE. Un abonnement push appartient à un APPAREIL — le navigateur en
+ * garde un seul par origine, et il survit à tout : déconnexion, changement de compte, mois
+ * d'inactivité. La table, elle, le range sous un COMPTE, celui qui était connecté au moment où
+ * l'on a pressé le bouton des réglages. Rien ne remettait ensuite les deux en accord :
+ * `/api/auth/logout` ne touche pas à la ligne, et `ensurePushSubscribed` n'est appelée que sur
+ * un geste. Un téléphone qui change de main — ou de compte — continuait donc de recevoir les
+ * notifications de l'ANCIEN membre. Symptôme visible : on écrit dans le fil, et son propre
+ * message revient en notification, parce que le serveur l'adresse à l'ancien compte (qui, lui,
+ * n'est pas l'auteur) et que c'est le même appareil qui le reçoit.
+ *
+ * Silencieuse, à trois conditions près : permission DÉJÀ accordée, worker DÉJÀ enregistré,
+ * abonnement DÉJÀ pris. Elle ne demande donc jamais rien et n'abonne personne — un membre qui
+ * n'a pas voulu des notifications n'en reçoit pas davantage. Elle ne fait que corriger le NOM
+ * porté par une ligne qui existe.
+ */
+export async function syncPushSubscription(): Promise<boolean> {
+  if (!pushSupported()) return false;
+  // Pas `pushEnabledOnServer()` : sans clé VAPID il n'existe aucun abonnement à réaffirmer,
+  // et le `getSubscription()` ci-dessous rendra `null` de lui-même.
+  if (Notification.permission !== "granted") return false;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    if (!sub) return false;
+    return await declarerAuServeur(sub);
+  } catch {
+    // Aucune conséquence visible : au pire la ligne reste au nom de l'ancien compte jusqu'au
+    // prochain chargement. Ce n'est pas un chemin dont on doive avertir le membre.
+    return false;
+  }
 }
 
 /**

@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ensurePushSubscribed, pushSubscriptionState, pushSupported, unsubscribePush } from "./pushClient";
+import {
+  ensurePushSubscribed,
+  syncPushSubscription,
+  pushSubscriptionState,
+  pushSupported,
+  unsubscribePush,
+} from "./pushClient";
 
 // L'ABONNEMENT AUX NOTIFICATIONS, MESURÉ AILLEURS QUE DANS UN MOCK DE LUI-MÊME.
 //
@@ -168,6 +174,62 @@ describe("ensurePushSubscribed", () => {
     navigateurCapable({ abonnement: abonnement() });
     fetchMock.mockResolvedValue({ ok: false } as Response);
     expect(await ensurePushSubscribed()).toBe(false);
+  });
+});
+
+// À QUI APPARTIENT L'ABONNEMENT DE CET APPAREIL. Le navigateur en garde UN par origine, qui
+// survit à la déconnexion ; la table le range sous le compte connecté au moment du geste. Rien
+// ne remettait les deux en accord — d'où un téléphone qui recevait encore les notifications de
+// l'ancien compte, et son propre message en notification dès qu'on écrivait dans le fil.
+//
+// Toute la valeur de cette fonction tient dans ce qu'elle NE fait PAS : ne rien demander, ne
+// rien créer. Le seul moyen de le vérifier est de compter les appels qui n'ont pas eu lieu.
+describe("syncPushSubscription", () => {
+  it("réaffirme au serveur l'abonnement existant — c'est lui qui le change de main", async () => {
+    navigateurCapable({ abonnement: abonnement() });
+    expect(await syncPushSubscription()).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/push/subscribe");
+    expect(JSON.parse(init.body as string)).toEqual({
+      endpoint: "https://push.example/abc",
+      keys: { p256dh: "P", auth: "A" },
+    });
+  });
+
+  it("NE DEMANDE JAMAIS la permission — elle tourne à l'ouverture, sans geste", async () => {
+    // Le point qui la distingue d'`ensurePushSubscribed` : une popup système à chaque
+    // ouverture de l'appli serait insupportable, et un refus ne se redemande pas.
+    navigateurCapable({ permission: "default", abonnement: abonnement() });
+    expect(await syncPushSubscription()).toBe(false);
+    expect(requestPermission).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("n'abonne PERSONNE : sans abonnement pris, elle n'a rien à corriger", async () => {
+    // Un membre qui n'a pas voulu des notifications ne doit pas en recevoir parce qu'il a
+    // ouvert l'appli. Cette fonction corrige un NOM, elle ne crée pas de ligne.
+    navigateurCapable({ abonnement: null });
+    expect(await syncPushSubscription()).toBe(false);
+    expect(registre.subscribe).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("ne réveille pas un service worker absent — elle n'enregistre rien", async () => {
+    navigateurCapable({ registrationAbsente: true });
+    expect(await syncPushSubscription()).toBe(false);
+    expect(registre.register).not.toHaveBeenCalled();
+  });
+
+  it("se tait quand le service worker est indisponible", async () => {
+    // Navigation privée, contexte non sécurisé : au pire la ligne reste au nom de l'ancien
+    // compte jusqu'au prochain chargement. Ce n'est pas un chemin dont on avertit le membre.
+    navigateurCapable({ serviceWorkerJette: true });
+    await expect(syncPushSubscription()).resolves.toBe(false);
+  });
+
+  it("renonce sans rien toucher sur un navigateur sans push", async () => {
+    expect(await syncPushSubscription()).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
