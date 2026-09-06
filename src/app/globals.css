@@ -6409,6 +6409,15 @@ body[data-bottombar] .install-banner {
   left: auto;
   right: 0;
 }
+/* Six emoji à 44 px, un filet et l'icône « copier » font 327 px : trois de trop sur un
+   iPhone SE (320 px), et la pop-up se mettrait à défiler en cachant précisément l'action qui
+   se trouve au bout. On resserre les EMOJI à 40 px de large sur ces écrans — la hauteur, elle,
+   reste à 44 px, donc la cible garde sa dimension dans l'axe où le pouce se trompe. */
+@media (max-width: 380px) {
+  .forum-choix-un {
+    min-width: 40px;
+  }
+}
 /* Bascule SOUS la bulle quand il n'y a pas la place au-dessus — c'est-à-dire sur le premier
    message visible, que le haut de la zone de défilement rognerait. La mesure est faite à
    l'ouverture par le composant ; ici on ne fait que retourner l'ancrage. */
@@ -6446,6 +6455,25 @@ body[data-bottombar] .install-banner {
 .forum-choix-un.is-mienne {
   border-color: var(--good-edge);
   background: var(--good-wash);
+}
+/* Filet de séparation. Ce qui le suit n'est pas une réaction de plus : c'est une ACTION, qui
+   ne laisse rien sur le message. Sans ce trait, l'icône se lirait comme un septième choix. */
+.forum-choix-sep {
+  flex: 0 0 auto;
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 3px;
+  background: var(--pico-card-border-color);
+}
+/* COPIER. La contrepartie de `user-select: none` : au doigt on ne peut plus sélectionner le
+   texte d'un message, ce bouton rend ce qu'on a retiré — au même geste, dans la même pop-up.
+   `--pico-color: inherit` n'est pas facultatif ici : le tracé SVG suit `currentColor`, et
+   l'encre blanche que Pico pose sur les boutons rendrait l'icône invisible en thème clair.
+   C'est le même piège que les pastilles, cette fois sur un trait et non sur un chiffre. */
+.forum-choix-copier {
+  display: grid;
+  place-items: center;
+  color: var(--pico-muted-color);
 }
 /* Voile de fermeture. Transparent à dessein, ou presque : assombrir toute l'appli pour six
    emoji serait hors de proportion, mais un voile strictement invisible ne dirait pas qu'un
