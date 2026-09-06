@@ -45,6 +45,7 @@ import { NOTIFICATION_RETENTION_DAYS } from "@/lib/notifications-shared";
 import { downloadIcs } from "@/lib/ics";
 import {
   ensurePushSubscribed,
+  syncPushSubscription,
   pushSupported,
   pushEnabledOnServer,
 } from "@/lib/pushClient";
@@ -335,6 +336,18 @@ export default function Home() {
   useEffect(() => {
     checkMe();
   }, [checkMe]);
+
+  // À QUI APPARTIENT L'ABONNEMENT PUSH DE CET APPAREIL. Le navigateur n'en garde qu'un par
+  // origine, et il survit à la déconnexion ; la table, elle, le range sous le compte qui était
+  // connecté quand on a pressé le bouton des réglages. Un appareil qui change de compte
+  // continuait donc de recevoir les notifications du précédent — dont celles qu'il déclenche
+  // lui-même en écrivant dans le fil, puisque le serveur les adresse à ce compte-là, qui n'est
+  // pas l'auteur. On remet les deux en accord à chaque ouverture, dès que l'identité est
+  // connue. Silencieux : rien n'est demandé, rien n'est créé (cf. `syncPushSubscription`).
+  useEffect(() => {
+    if (!myId) return;
+    void syncPushSubscription();
+  }, [myId]);
 
   // Plancher anti-flash de l'écran de chargement : au bout de SPLASH_MIN_MS, on autorise le
   // passage à l'appli (le rendu attend AUSSI que /api/auth/me ait répondu — cf. `me`).
