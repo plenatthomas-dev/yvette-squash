@@ -6,8 +6,17 @@
 // composant transforme en nœuds React. Il n'y a jamais de `dangerouslySetInnerHTML` au bout,
 // donc jamais d'injection possible, quel que soit ce qu'un membre écrit.
 
-/** Un morceau de message : du texte nu, ou une adresse à rendre cliquable. */
-export type Segment = { type: "texte"; valeur: string } | { type: "lien"; valeur: string };
+/**
+ * Un morceau de message : du texte nu, une adresse à rendre cliquable, ou un passage TROUVÉ
+ * par la recherche.
+ *
+ * `trouve` est du texte, pas du balisage : le composant décide qu'il le rend en `<mark>`. La
+ * règle du module ne bouge donc pas d'un pouce — on découpe, on ne rend pas.
+ */
+export type Segment =
+  | { type: "texte"; valeur: string }
+  | { type: "lien"; valeur: string }
+  | { type: "trouve"; valeur: string };
 
 // UNIQUEMENT http(s). C'est ce qui écarte `javascript:`, `data:` et `vbscript:` — non par un
 // filtre qui pourrait être contourné, mais parce qu'ils ne sont jamais reconnus au départ.
@@ -52,6 +61,99 @@ export function segmenter(texte: string): Segment[] {
     curseur = debut + url.length;
   }
   if (curseur < texte.length) out.push({ type: "texte", valeur: texte.slice(curseur) });
+  return out;
+}
+
+// ============================================================================
+//  LA RECHERCHE DANS LE FIL — repli sans accent, et soulignage du terme trouvé.
+// ============================================================================
+
+/** Diacritiques combinants, tels que NFD les détache de leur lettre. */
+const COMBINANTS = /[̀-ͯ]/g;
+
+/**
+ * Replie une chaîne — sans accent, sans casse — EN CONSERVANT LES POSITIONS.
+ *
+ * `normalize()` de `squashnet/match.ts` fait presque cela, et ne convient pas ici : il compacte
+ * la ponctuation et les espaces (`[^a-z0-9]+ → " "`), donc une position dans son résultat ne
+ * désigne plus rien dans l'original. C'est sans conséquence pour rapprocher deux noms — son
+ * emploi là-bas — mais c'est rédhibitoire pour SOULIGNER, où il faut savoir quelle tranche de
+ * l'original la concordance recouvre.
+ *
+ * D'où le repli caractère par caractère, et la table `index` qui ramène chaque position du
+ * repli vers l'octet correspondant de l'entrée. Elle compte une entrée de plus que `plie` : la
+ * borne de fin, pour que `index[fin]` soit toujours lisible.
+ *
+ * Un caractère peut se replier en PLUSIEURS (« İ » donne « i̇ ») ; toutes ses positions
+ * pointent alors le même caractère d'origine, et la tranche reste juste.
+ */
+export function replier(s: string): { plie: string; index: number[] } {
+  let plie = "";
+  const index: number[] = [];
+  let position = 0;
+  // Itération par POINT DE CODE (`for…of`), comme partout où ce fil découpe du texte : un
+  // emoji est une seule unité pour le lecteur, et le couper en deux moitiés d'unité UTF-16
+  // fabrique un caractère cassé.
+  for (const c of s) {
+    const f = c.normalize("NFD").replace(COMBINANTS, "").toLowerCase() || c;
+    for (let k = 0; k < f.length; k++) index.push(position);
+    plie += f;
+    position += c.length;
+  }
+  index.push(s.length);
+  return { plie, index };
+}
+
+/**
+ * Le texte contient-il la requête, accents et casse ignorés ? Le test que la liste applique à
+ * chaque message. Une requête vide ne concorde avec rien — c'est le mode « pas de recherche ».
+ */
+export function concorde(texte: string, requete: string): boolean {
+  const q = replier(requete).plie.trim();
+  return q !== "" && replier(texte).plie.includes(q);
+}
+
+/**
+ * Découpe les segments de TEXTE sur les occurrences de la requête, en marquant les passages
+ * trouvés. Les segments de lien ressortent intacts : une adresse coupée en deux n'est plus une
+ * adresse cliquable, et c'est un prix qu'un surlignage ne vaut pas.
+ *
+ * Sans cela, un message de mille caractères remonté par la recherche ne dit pas POURQUOI il
+ * remonte, et il faut le relire en entier — soit exactement le travail que la recherche était
+ * censée éviter.
+ *
+ * Invariant repris de `segmenter` : une requête vide, ou qui ne concorde nulle part, rend les
+ * segments STRICTEMENT inchangés.
+ */
+export function souligner(segments: Segment[], requete: string): Segment[] {
+  const q = replier(requete).plie.trim();
+  if (q === "") return segments;
+  const out: Segment[] = [];
+  for (const seg of segments) {
+    if (seg.type !== "texte") {
+      out.push(seg);
+      continue;
+    }
+    const { plie, index } = replier(seg.valeur);
+    let curseur = 0; // position dans le REPLI
+    let trouve = plie.indexOf(q);
+    if (trouve < 0) {
+      out.push(seg);
+      continue;
+    }
+    while (trouve >= 0) {
+      if (trouve > curseur) {
+        out.push({ type: "texte", valeur: seg.valeur.slice(index[curseur], index[trouve]) });
+      }
+      const fin = trouve + q.length;
+      out.push({ type: "trouve", valeur: seg.valeur.slice(index[trouve], index[fin]) });
+      curseur = fin;
+      trouve = plie.indexOf(q, curseur);
+    }
+    if (curseur < plie.length) {
+      out.push({ type: "texte", valeur: seg.valeur.slice(index[curseur]) });
+    }
+  }
   return out;
 }
 

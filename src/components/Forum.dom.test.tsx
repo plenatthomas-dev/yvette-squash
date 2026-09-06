@@ -96,6 +96,8 @@ let page: {
   polls?: Record<string, unknown>;
 };
 let postReponse: { message: unknown } | "erreur";
+/** Ce que rend `/api/forum/recherche` — le fil ENTIER, pas la page affichée. */
+let corpus: { messages: unknown[]; tronque?: boolean } | "erreur";
 
 const toast = vi.fn();
 const rendre = () => render(<Forum toast={toast} onExpired={() => false} />);
@@ -115,6 +117,7 @@ beforeEach(() => {
   postReponse = {
     message: msg({ id: "mien", body: "Coucou", authorId: "u1", authorName: "Thomas" }),
   };
+  corpus = { messages: [], tronque: false };
   toast.mockClear();
   vi.stubGlobal(
     "fetch",
@@ -134,6 +137,10 @@ beforeEach(() => {
       }
       if (init?.method === "PATCH") return { ok: true, status: 200, json: async () => ({}) };
       if (init?.method === "DELETE") return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      if (url.includes("/api/forum/recherche")) {
+        if (corpus === "erreur") throw new Error("offline");
+        return { ok: true, status: 200, json: async () => corpus };
+      }
       return { ok: true, status: 200, json: async () => page };
     }),
   );
@@ -1072,5 +1079,252 @@ describe("la citation", () => {
     expect(corpsDe("POST", "/api/forum")).toEqual({ body: "Je viens", replyTo: "m1" });
     // La barre de citation disparaît une fois le message parti.
     expect(screen.queryByText(/Réponse à/)).toBeNull();
+  });
+});
+
+// ============================================================================
+//  LA RECHERCHE DANS LE FIL.
+//
+//  Elle répond à « qui a dit quoi et quand » sur douze mois, là où le fil ne charge que trente
+//  messages à la fois. Deux propriétés la gouvernent, et aucune ne se relit dans le JSX :
+//
+//   1. ELLE NE TOUCHE PAS AU FIL. `messages`, `reactions` et `polls` restent intacts : le fil
+//      porte un protocole où chaque réponse dit s'il faut substituer, compléter ou ÉLAGUER, et
+//      y mêler une seconde source de messages ferait disparaître des messages légitimes.
+//   2. ELLE NE COÛTE RIEN À QUI NE CHERCHE PAS. Le corpus part à la première frappe, une seule
+//      fois. Un chargement par caractère serait le polling que ce fil s'interdit.
+// ============================================================================
+
+describe("la recherche dans le fil", () => {
+  /** Le fil affiche « Salut » de Gégé ; le corpus contient en plus deux messages anciens. */
+  const avecCorpus = () => {
+    corpus = {
+      messages: [
+        msg({
+          id: "vieux",
+          body: "J'ai réservé le 3 pour samedi",
+          authorId: "u3",
+          authorName: "Marie",
+          createdAt: "2026-03-12T18:04:00.000Z",
+        }),
+        msg({
+          id: "moyen",
+          body: "Qui prête une raquette ?",
+          authorId: "u2",
+          authorName: "Gégé",
+          createdAt: "2026-06-08T19:47:00.000Z",
+        }),
+        msg(),
+      ],
+      tronque: false,
+    };
+  };
+
+  /**
+   * Le fil contient-il ce texte, dans le corps d'un message ?
+   *
+   * ⚠️ ET NON `getByText`. Le soulignage découpe le corps en plusieurs nœuds
+   * (`<span>Qui prête une </span><mark>raquette</mark><span> ?</span>`), or les requêtes de
+   * testing-library ne lisent que les nœuds de texte DIRECTS d'un élément : le `<p>` du corps
+   * n'en a alors plus aucun, et une recherche qui marche parfaitement à l'écran fait échouer
+   * l'assertion. On lit donc le `textContent`, qui est ce que l'œil voit.
+   */
+  const corpsAffiches = () =>
+    [...document.querySelectorAll(".forum-msg-body")].map((e) => e.textContent ?? "");
+  const affiche = (motif: RegExp) => corpsAffiches().some((c) => motif.test(c));
+
+  const champ = () => screen.getByLabelText("Rechercher dans le fil") as HTMLInputElement;
+  const taper = (q: string) => fireEvent.change(champ(), { target: { value: q } });
+  const ouvrir = async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+  };
+
+  // Le fil s'ouvre bien plus souvent qu'on n'y cherche : le corpus entier ne doit pas partir
+  // avec lui. Chaque requête évitée est un réveil de Neon évité (PRODUCT.md).
+  it("ne demande RIEN tant que personne ne cherche", async () => {
+    avecCorpus();
+    await ouvrir();
+    expect(appels.filter((a) => a.includes("/recherche"))).toHaveLength(0);
+  });
+
+  // Un chargement par caractère tapé serait exactement le polling que ce fil s'interdit.
+  it("ne charge le corpus QU'UNE FOIS, quoi qu'on tape ensuite", async () => {
+    avecCorpus();
+    await ouvrir();
+    taper("r");
+    taper("ra");
+    taper("raq");
+    await waitFor(() => expect(affiche(/prête une raquette/)).toBe(true));
+    taper("raqu");
+    expect(appels.filter((a) => a.includes("/recherche"))).toHaveLength(1);
+  });
+
+  // C'EST LE POINT DE TOUTE LA FONCTION : le message cherché a huit mois et n'est pas dans les
+  // trente chargés. Filtrer la seule fenêtre affichée aurait rendu « aucun résultat ».
+  it("trouve un message que le fil n'a PAS chargé", async () => {
+    avecCorpus();
+    await ouvrir();
+    expect(affiche(/prête une raquette/)).toBe(false);
+    taper("raquette");
+    await waitFor(() => expect(affiche(/prête une raquette/)).toBe(true));
+  });
+
+  // Un club français écrit avec des accents et cherche sans. L'inverse aussi.
+  it("trouve « réservé » quand on tape « reserve »", async () => {
+    avecCorpus();
+    await ouvrir();
+    taper("reserve");
+    await waitFor(() => expect(affiche(/pour samedi/)).toBe(true));
+  });
+
+  // La moitié du « qui a dit quoi », sans avoir construit de filtre par auteur.
+  it("ramène tout ce qu'un membre a dit quand on tape son nom", async () => {
+    avecCorpus();
+    await ouvrir();
+    taper("marie");
+    await waitFor(() => expect(affiche(/pour samedi/)).toBe(true));
+    expect(affiche(/prête une raquette/)).toBe(false);
+  });
+
+  it("souligne le passage trouvé, accents ignorés", async () => {
+    avecCorpus();
+    await ouvrir();
+    taper("reserve");
+    await waitFor(() => expect(document.querySelector("mark")).toBeTruthy());
+    expect(document.querySelector("mark")?.textContent).toBe("réservé");
+  });
+
+  // Le « quand » de la question tient dans ce séparateur : les résultats sautent d'un mois à
+  // l'autre, et une heure seule ne dirait pas laquelle.
+  it("garde les séparateurs de jour, qui portent le « quand »", async () => {
+    avecCorpus();
+    await ouvrir();
+    taper("a");
+    await waitFor(() => expect(affiche(/pour samedi/)).toBe(true));
+    expect(document.querySelectorAll(".forum-jour").length).toBeGreaterThan(1);
+  });
+
+  // Le corpus ne porte NI réactions NI sondages — c'est ce qui rend la route bon marché. Une
+  // bulle qui offrirait de réagir afficherait « aucune réaction » sur un message qui en a.
+  it("rend les résultats EN LECTURE SEULE : ni Répondre, ni Réagir, ni Suppr.", async () => {
+    avecCorpus();
+    await ouvrir();
+    expect(screen.queryByLabelText(/^Répondre à/)).toBeTruthy();
+    taper("raquette");
+    await waitFor(() => expect(affiche(/prête une raquette/)).toBe(true));
+    expect(screen.queryByLabelText(/^Répondre à/)).toBeNull();
+    expect(screen.queryByLabelText(/^Réagir au message/)).toBeNull();
+    expect(screen.queryByLabelText(/^Supprimer le message/)).toBeNull();
+  });
+
+  // La recherche ne touche pas à l'état du fil : l'effacer doit le rendre entier, réactions
+  // comprises. Si elle l'avait fusionné, l'élagage du rattrapage suivant l'aurait amputé.
+  it("rend le fil INTACT quand on efface le champ", async () => {
+    avecCorpus();
+    page = { ...page, reactions: { m1: [{ emoji: "👍", users: [{ id: "u2", name: "Gégé" }] }] } };
+    await ouvrir();
+    taper("raquette");
+    await waitFor(() => expect(affiche(/prête une raquette/)).toBe(true));
+    taper("");
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    expect(affiche(/prête une raquette/)).toBe(false);
+    expect(screen.queryByLabelText(/^Répondre à/)).toBeTruthy();
+    expect(screen.getByText("👍 1")).toBeTruthy();
+  });
+
+  it("efface aussi par le bouton ✕", async () => {
+    avecCorpus();
+    await ouvrir();
+    taper("raquette");
+    await waitFor(() => expect(affiche(/prête une raquette/)).toBe(true));
+    fireEvent.click(screen.getByLabelText("Effacer la recherche"));
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    expect(champ().value).toBe("");
+  });
+
+  // Le cas le plus déroutant qui soit : on vient de voir le message passer, et la recherche
+  // jure qu'il n'existe pas.
+  it("trouve un message arrivé par le courtier PENDANT la recherche", async () => {
+    avecCorpus();
+    await ouvrir();
+    taper("raquette");
+    await waitFor(() => expect(affiche(/prête une raquette/)).toBe(true));
+    act(() => {
+      canal.handlers.get("message")?.(
+        msg({ id: "neuf", body: "j'apporte ma raquette", authorId: "u4", authorName: "Léa" }),
+      );
+    });
+    await waitFor(() => expect(affiche(/apporte ma raquette/)).toBe(true));
+  });
+
+  // Un message supprimé qui reste trouvable est précisément ce que le pouvoir de modération
+  // de l'admin cherche à éviter.
+  it("cesse de trouver un message supprimé ailleurs", async () => {
+    avecCorpus();
+    await ouvrir();
+    taper("raquette");
+    await waitFor(() => expect(affiche(/prête une raquette/)).toBe(true));
+    act(() => canal.handlers.get("deleted")?.({ id: "moyen" }));
+    await waitFor(() => expect(affiche(/prête une raquette/)).toBe(false));
+  });
+
+  // La liste affichée est celle des résultats : elle ne suit pas `messages`, donc rien ne
+  // justifie de la faire sauter en bas quand un message arrive.
+  it("ne fait PAS sauter la liste quand un message arrive pendant la recherche", async () => {
+    avecCorpus();
+    await ouvrir();
+    taper("raquette");
+    await waitFor(() => expect(affiche(/prête une raquette/)).toBe(true));
+    (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mockClear();
+    act(() => {
+      canal.handlers.get("message")?.(msg({ id: "neuf", body: "coucou", authorId: "u4" }));
+    });
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("dit combien de messages il a trouvés", async () => {
+    avecCorpus();
+    await ouvrir();
+    taper("raquette");
+    await waitFor(() => expect(screen.getByText("1 message trouvé")).toBeTruthy());
+  });
+
+  it("dit qu'il n'a rien trouvé, plutôt que d'afficher une liste vide", async () => {
+    avecCorpus();
+    await ouvrir();
+    taper("badminton");
+    await waitFor(() => expect(screen.getByText(/Aucun message ne contient/)).toBeTruthy());
+  });
+
+  // ET SURTOUT PAS « aucun résultat », qui se lirait comme « personne n'en a jamais parlé »
+  // alors que la question n'a jamais atteint le serveur.
+  it("dit l'échec du corpus, au lieu de le faire passer pour un silence", async () => {
+    corpus = "erreur";
+    await ouvrir();
+    taper("raquette");
+    await waitFor(() => expect(screen.getByText(/Recherche indisponible/)).toBeTruthy());
+    expect(screen.queryByText(/Aucun message ne contient/)).toBeNull();
+  });
+
+  // Une recherche qui ne couvre qu'une partie du fil sans le dire est pire que pas de
+  // recherche : on conclut d'un silence qui n'est que le plafond de la route.
+  it("avoue quand le fil dépasse ce qu'il peut fouiller", async () => {
+    avecCorpus();
+    corpus = { ...(corpus as { messages: unknown[] }), tronque: true };
+    await ouvrir();
+    taper("raquette");
+    await waitFor(() =>
+      expect(screen.getByText(/seuls les messages les plus récents/)).toBeTruthy(),
+    );
+  });
+
+  // Des blancs seuls ne sont pas une recherche : le fil doit rester le fil.
+  it("ne cherche pas sur une requête faite d'espaces", async () => {
+    avecCorpus();
+    await ouvrir();
+    taper("   ");
+    expect(screen.getByText("Salut")).toBeTruthy();
+    expect(appels.filter((a) => a.includes("/recherche"))).toHaveLength(0);
   });
 });
