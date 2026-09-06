@@ -5524,7 +5524,17 @@ body[data-bottombar] .install-banner {
   border-color: var(--pico-card-border-color);
   color: var(--pico-muted-color);
 }
-.ic-dispo-buttons button:not(:disabled):hover {
+/* ⚠️ LE SURVOL NE TOUCHE PAS LE BOUTON RETENU, et il le touchait.
+   `…button:not(:disabled):hover` pèse (0,3,1), `…button[aria-pressed="true"]` (0,2,1) : le
+   survol l'emportait donc sur le choix retenu et lui rendait sa couleur de texte,
+   `--pico-contrast` — c'est-à-dire EXACTEMENT le fond que la règle du dessous lui donne. Libellé
+   invisible, dans les quatre thèmes, puisque les deux déclarations tirent la même variable.
+   Au doigt, le défaut ne se rattrape pas tout seul : un appareil tactile GARDE l'état `:hover`
+   sur le dernier élément touché jusqu'à ce qu'on touche ailleurs. On tapait « Dispo », le
+   bouton devenait un rectangle plein et muet, et le libellé ne réapparaissait qu'au premier
+   appui sur un autre bouton — le temps de croire que la réponse n'avait pas été prise.
+   Le choix retenu se passe de survol : il est déjà plein, gras, et `aria-pressed` le dit. */
+.ic-dispo-buttons button:not(:disabled):not([aria-pressed="true"]):hover {
   border-color: var(--grid-line);
   color: var(--pico-contrast);
 }
