@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { NextRequest } from "next/server";
+import { Prisma } from "@prisma/client";
 
 // LA SUPPRESSION D'UN MESSAGE.
 //
@@ -18,6 +19,10 @@ const h = vi.hoisted(() => ({
   message: { id: "m1", authorId: "u1" } as null | { id: string; authorId: string },
   deleted: null as null | string,
   diffuse: null as null | [string, Record<string, unknown>],
+  /** Toutes les écritures vues, pour prouver qu'AUCUNE n'a lieu en dehors du `delete`. */
+  ecritures: [] as string[],
+  /** Ce que `delete` doit jeter, pour éprouver la course entre deux suppressions. */
+  jette: null as null | Error,
 }));
 
 // `normalizeEmail` est réexporté pour `admin.ts`, qui lit l'allowlist avec : le neutraliser
@@ -38,10 +43,19 @@ vi.mock("@/lib/db", () => ({
     forumMessage: {
       findUnique: vi.fn(async () => h.message),
       delete: vi.fn(async (args: { where: { id: string } }) => {
+        h.ecritures.push("delete");
+        if (h.jette) throw h.jette;
         h.deleted = args.where.id;
         return {};
       }),
+      // Présent MAIS JAMAIS APPELÉ : c'est ce que le dernier test de ce fichier verrouille.
+      // Le blanchiment d'instantanés dénormalisés n'existe plus — il n'y a plus d'instantané.
+      updateMany: vi.fn(async () => {
+        h.ecritures.push("updateMany");
+        return { count: 0 };
+      }),
     },
+    $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
   },
 }));
 
@@ -58,6 +72,8 @@ beforeEach(() => {
   h.message = { id: "m1", authorId: "u1" };
   h.deleted = null;
   h.diffuse = null;
+  h.ecritures = [];
+  h.jette = null;
 });
 
 describe("DELETE /api/forum/{id}", () => {
@@ -112,6 +128,45 @@ describe("DELETE /api/forum/{id}", () => {
   // fil ouvert — précisément ceux que la modération vise à protéger.
   it("referme le message chez tout le monde, sans attendre un rafraîchissement", async () => {
     await DELETE(req(), ctx);
+    expect(h.diffuse).toEqual(["deleted", { id: "m1" }]);
+  });
+});
+
+// SUPPRIMER, C'EST AUSSI EFFACER LES CITATIONS — ET C'EST LA BASE QUI LE FAIT.
+//
+// Une version antérieure dénormalisait un instantané de la cible chez chacune de ses réponses,
+// que cette route devait alors blanchir. Le dispositif ne couvrait qu'UN CHEMIN SUR TROIS : ni
+// la purge des 12 mois ni la cascade de suppression d'un compte ne passent par ici, et le texte
+// d'un membre survivait donc à son effacement comme à son départ. Il n'y a plus d'instantané :
+// `ON DELETE SET NULL` sur `replyToId` fait disparaître la citation entière, partout, toujours.
+describe("DELETE — ce que le message laisse derrière lui", () => {
+  it("supprime le message, et RIEN d'autre : plus aucun instantané à blanchir", async () => {
+    await DELETE(req(), ctx);
+    expect(h.deleted).toBe("m1");
+    // Le test le plus important du fichier : une seule écriture. Si un blanchiment réapparaît,
+    // c'est qu'une copie de texte est revenue quelque part.
+    expect(h.ecritures).toEqual(["delete"]);
+  });
+
+  it("n'écrit rien quand le refus tombe", async () => {
+    h.session = { userId: "quidam", displayName: "Quidam", email: "quidam@example.com" };
+    h.message = { id: "m1", authorId: "u2" };
+    await DELETE(req(), ctx);
+    expect(h.ecritures).toEqual([]);
+    expect(h.deleted).toBeNull();
+  });
+
+  // LE CAS RÉEL : l'auteur supprime depuis son téléphone pendant que l'admin supprime depuis
+  // son ordinateur — ou un simple double-clic, que rien ne garde côté écran. La ligne est déjà
+  // partie, Prisma jette P2025, et la route rendait un 500 pour un geste qui a abouti.
+  it("traite une suppression jouée deux fois comme un succès, pas comme un 500", async () => {
+    h.jette = new Prisma.PrismaClientKnownRequestError("Record to delete does not exist.", {
+      code: "P2025",
+      clientVersion: "6",
+    });
+    const res = await DELETE(req(), ctx);
+    expect(res.status).toBe(200);
+    // Et le fil se referme quand même chez les autres : c'est le seul état vrai.
     expect(h.diffuse).toEqual(["deleted", { id: "m1" }]);
   });
 });

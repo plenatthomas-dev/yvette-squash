@@ -16,6 +16,10 @@ import Forum from "@/components/Forum";
 //     ferait dix fois le volume des messages, et les deux courtiers comptent PAR ABONNÉ.
 //  4. LE PUSH RECHARGE LE FIL, mais seulement le sien : le service worker prévient les onglets
 //     pour TOUS les push, y compris les alertes de créneau qui n'ont rien à voir.
+//  5. « C'EST MOI QUI PARLE » SE DÉRIVE DE `meId`, JAMAIS D'UN DROIT. L'écran s'appuyait sur
+//     `canDelete`, qui vaut `admin || auteur` : un ADMIN voyait donc tout le fil aligné à
+//     droite, et un message reçu par le courtier n'avait pas le même comportement que le même
+//     message après rechargement. Les tests d'alignement ci-dessous ferment cette porte.
 
 // Le module `pusher-js` est chargé dynamiquement par le composant. On le remplace par un
 // double inerte : ces tests portent sur le comportement de l'écran, pas sur le réseau.
@@ -48,7 +52,9 @@ const msg = (over: Record<string, unknown> = {}) => ({
   authorId: "u2",
   authorName: "Gégé",
   createdAt: "2026-09-05T18:00:00.000Z",
-  canDelete: false,
+  replyToId: null,
+  replyToAuthor: null,
+  replyToExcerpt: null,
   ...over,
 });
 
@@ -65,7 +71,30 @@ Object.defineProperty(globalThis.navigator, "serviceWorker", {
 });
 
 let appels: string[] = [];
-let page: { messages: unknown[]; hasMore?: boolean; muted?: boolean };
+/**
+ * Les requêtes SORTANTES, corps compris.
+ *
+ * Le double ne gardait que la méthode et l'URL. Quatre tests promettaient donc ce qui est
+ * ENVOYÉ sans jamais le regarder : envoyer `{ optionIds: [celle qui vient de changer] }` au
+ * lieu de l'ensemble des cases — l'invariant n°1 du choix multiple — les laissait tous verts.
+ * Un corps non lu est un test qui ne teste rien.
+ */
+let envois: Array<{ methode: string; url: string; corps: Record<string, unknown> | null }> = [];
+
+/** Le corps du dernier envoi correspondant à `methode` et à un fragment d'URL. */
+const corpsDe = (methode: string, urlContient: string) =>
+  [...envois].reverse().find((e) => e.methode === methode && e.url.includes(urlContient))?.corps ??
+  null;
+let page: {
+  messages: unknown[];
+  hasMore?: boolean;
+  muted?: boolean;
+  meId?: string;
+  meName?: string;
+  admin?: boolean;
+  reactions?: Record<string, unknown>;
+  polls?: Record<string, unknown>;
+};
 let postReponse: { message: unknown } | "erreur";
 
 const toast = vi.fn();
@@ -77,19 +106,26 @@ beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_PUSHER_KEY", "cle-de-test");
   vi.stubEnv("NEXT_PUBLIC_PUSHER_CLUSTER", "eu");
   appels = [];
+  envois = [];
   swListeners = [];
   canal.handlers.clear();
   canal.emis = [];
   canal.membres = null;
-  page = { messages: [msg()], hasMore: false, muted: false };
+  page = { messages: [msg()], hasMore: false, muted: false, meId: "u1", meName: "Thomas" };
   postReponse = {
-    message: msg({ id: "mien", body: "Coucou", authorId: "u1", authorName: "Thomas", canDelete: true }),
+    message: msg({ id: "mien", body: "Coucou", authorId: "u1", authorName: "Thomas" }),
   };
   toast.mockClear();
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: string, init?: { method?: string }) => {
-      appels.push(`${init?.method ?? "GET"} ${url}`);
+    vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+      const methode = init?.method ?? "GET";
+      appels.push(`${methode} ${url}`);
+      envois.push({
+        methode,
+        url,
+        corps: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+      });
       if (init?.method === "POST") {
         if (postReponse === "erreur") {
           return { ok: false, status: 429, json: async () => ({ error: "Trop de messages" }) };
@@ -139,6 +175,10 @@ describe("envoi", () => {
     fireEvent.change(screen.getByLabelText("Votre message"), { target: { value: "Coucou 👍" } });
     fireEvent.click(screen.getByRole("button", { name: "Envoyer" }));
     await waitFor(() => expect(appels.some((a) => a.startsWith("POST"))).toBe(true));
+    // Ce qui est ENVOYÉ, et pas seulement le fait qu'une requête soit partie.
+    expect(corpsDe("POST", "/api/forum")?.body).toBe("Coucou 👍");
+    // Et « le montre tout de suite » : la réponse est insérée sans attendre le courtier.
+    await waitFor(() => expect(screen.getByText("Coucou")).toBeTruthy());
   });
 
   it("vide le champ après un envoi réussi, et le garde après un refus", async () => {
@@ -227,7 +267,16 @@ describe("le courtier", () => {
     fireEvent.change(zone, { target: { value: "abc" } });
     const typing = canal.emis.filter(([e]) => e === "client-typing");
     expect(typing).toHaveLength(1);
-    expect(typing[0][1]).toEqual({ name: "Thomas" });
+    // L'identifiant voyage AVEC le nom : la frappe est indexée par id, sinon deux homonymes
+    // — un club en a — se confondent en une seule personne et l'un fait taire l'autre.
+    expect(typing[0][1]).toEqual({ id: "u1", name: "Thomas" });
+
+    // LA MOITIÉ QUI MANQUAIT. Sans elle, un drapeau « une seule fois par montage » passerait le
+    // test : ce qu'on veut n'est pas « un signal », c'est « un signal PAR FENÊTRE ». On avance
+    // au-delà des 3 s et on vérifie qu'un second signal repart.
+    vi.setSystemTime(Date.now() + 4_000);
+    fireEvent.change(zone, { target: { value: "abcd" } });
+    expect(canal.emis.filter(([e]) => e === "client-typing")).toHaveLength(2);
   });
 
   it("affiche qui est en ligne, sans se compter soi-même", async () => {
@@ -294,31 +343,421 @@ describe("notifications du fil", () => {
   it("coupe et rétablit, et le dit au serveur", async () => {
     rendre();
     await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: /Notifications/ }));
+    // NOM ACCESSIBLE STABLE : c'est `aria-pressed` qui porte l'état, pas le libellé. « Couper
+    // les notifications, enfoncé » se lit sans ambiguïté ; « Notifications coupées, enfoncé »
+    // ne disait pas si « coupées » décrivait l'état ou l'effet du clic.
+    const bouton = () => screen.getByRole("button", { name: /Couper les notifications/ });
+    expect(bouton().getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(bouton());
     await waitFor(() => expect(appels.some((a) => a.startsWith("PATCH"))).toBe(true));
-    await waitFor(() => expect(screen.getByRole("button", { name: /coupées/ })).toBeTruthy());
+    // L'affichage est OPTIMISTE : sans lire le corps, envoyer `{ muted: false }` en dur
+    // laisserait l'écran dire « coupées » et le serveur ne rien couper du tout.
+    expect(corpsDe("PATCH", "/api/forum")).toEqual({ muted: true });
+    await waitFor(() => expect(bouton().getAttribute("aria-pressed")).toBe("true"));
+    // Le libellé VISIBLE, lui, change bien : c'est ce qu'on lit d'un coup d'œil.
+    expect(bouton().textContent).toContain("coupées");
+
+    fireEvent.click(bouton());
+    await waitFor(() => expect(corpsDe("PATCH", "/api/forum")).toEqual({ muted: false }));
   });
 
   it("reflète l'état reçu du serveur au chargement", async () => {
-    page = { messages: [msg()], muted: true };
+    page = { messages: [msg()], muted: true, meId: "u1", meName: "Thomas" };
     rendre();
-    await waitFor(() => expect(screen.getByRole("button", { name: /coupées/ })).toBeTruthy());
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: /Couper les notifications/ })
+          .getAttribute("aria-pressed"),
+      ).toBe("true"),
+    );
   });
 });
 
 describe("suppression", () => {
   it("n'offre le bouton qu'à qui en a le droit", async () => {
-    page = { messages: [msg({ id: "a", canDelete: false }), msg({ id: "b", canDelete: true })] };
+    page = {
+      messages: [msg({ id: "a", authorId: "u2" }), msg({ id: "b", authorId: "u1" })],
+      meId: "u1",
+      meName: "Thomas",
+    };
     rendre();
     await waitFor(() => expect(screen.getAllByText("Salut")).toHaveLength(2));
     expect(screen.getAllByRole("button", { name: /Supprimer le message/ })).toHaveLength(1);
   });
 
+  it("offre le bouton à l'admin sur TOUS les messages : le fil a besoin d'un modérateur", async () => {
+    page = {
+      messages: [msg({ id: "a", authorId: "u2" }), msg({ id: "b", authorId: "u3" })],
+      meId: "chef",
+      meName: "Chef",
+      admin: true,
+    };
+    rendre();
+    await waitFor(() => expect(screen.getAllByText("Salut")).toHaveLength(2));
+    expect(screen.getAllByRole("button", { name: /Supprimer le message/ })).toHaveLength(2);
+  });
+
   it("retire le message de l'écran une fois supprimé", async () => {
-    page = { messages: [msg({ canDelete: true })] };
+    page = { messages: [msg({ authorId: "u1" })], meId: "u1", meName: "Thomas" };
     rendre();
     await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: /Supprimer le message/ }));
     await waitFor(() => expect(screen.queryByText("Salut")).toBeNull());
+  });
+});
+
+// LE DÉFAUT CORRIGÉ, ET SA GARDE.
+//
+// L'alignement lisait `canDelete`, qui vaut `admin || auteur`. Un administrateur voyait donc
+// TOUS les messages du club à droite, comme s'il les avait écrits. Et un message arrivé par le
+// courtier était figé à `canDelete: false`, donc jamais aligné à droite pour son auteur.
+describe("alignement — « c'est moi qui parle »", () => {
+  const estAMoi = (texte: string) =>
+    screen.getByText(texte).closest(".forum-rangee")?.classList.contains("is-mine");
+
+  it("aligne à droite les siens, à gauche ceux des autres", async () => {
+    page = {
+      messages: [
+        msg({ id: "a", body: "Des autres", authorId: "u2" }),
+        msg({ id: "b", body: "De moi", authorId: "u1" }),
+      ],
+      meId: "u1",
+      meName: "Thomas",
+    };
+    rendre();
+    await waitFor(() => expect(screen.getByText("De moi")).toBeTruthy());
+    expect(estAMoi("De moi")).toBe(true);
+    expect(estAMoi("Des autres")).toBe(false);
+  });
+
+  it("ne donne PAS à l'admin les messages des autres, malgré son droit de supprimer", async () => {
+    page = {
+      messages: [msg({ id: "a", body: "Des autres", authorId: "u2" })],
+      meId: "chef",
+      meName: "Chef",
+      admin: true,
+    };
+    rendre();
+    await waitFor(() => expect(screen.getByText("Des autres")).toBeTruthy());
+    expect(estAMoi("Des autres")).toBe(false);
+    // Il garde bien le bouton : c'est le DROIT qui est admin, pas la paternité.
+    expect(screen.getByRole("button", { name: /Supprimer le message/ })).toBeTruthy();
+  });
+
+  it("aligne à droite un message de soi arrivé PAR LE COURTIER", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    act(() => {
+      canal.handlers.get("message")?.(
+        msg({ id: "direct", body: "Depuis un autre onglet", authorId: "u1" }),
+      );
+    });
+    await waitFor(() => expect(screen.getByText("Depuis un autre onglet")).toBeTruthy());
+    expect(estAMoi("Depuis un autre onglet")).toBe(true);
+  });
+});
+
+// LA STRUCTURE DONT DÉPEND LA CORRECTION DE LA PUCE.
+//
+// Pico pose `ul li { list-style: square }` — spécificité (0,0,2), qui vise le LI et bat donc
+// l'héritage de `list-style: none` posé sur le UL : une puce carrée s'affichait devant chaque
+// bulle. La règle corrective est `.forum-list li`. La feuille de style n'est pas chargée en
+// test, mais sa CIBLE l'est : si le balisage cesse d'être des `li` dans une `ul.forum-list`,
+// la correction ne s'applique plus en silence, et ce test est ce qui le dit.
+describe("structure de la liste", () => {
+  it("rend chaque message comme un `li` de `ul.forum-list`", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    const li = screen.getByText("Salut").closest("li");
+    expect(li).not.toBeNull();
+    expect(li?.parentElement?.tagName).toBe("UL");
+    expect(li?.parentElement?.classList.contains("forum-list")).toBe(true);
+  });
+});
+
+describe("séparateurs de date", () => {
+  // DATES LOCALES, SANS `Z`, comme le fait déjà `forum-texte.test.ts`. `memeJour` compare des
+  // jours CIVILS LOCAUX : avec des instants UTC, ces trois horodatages tombent le même jour à
+  // Honolulu (UTC−10) et le test rendait un séparateur au lieu de deux. Un test qui dépend du
+  // fuseau de la machine passe en local et échoue en intégration continue, ou l'inverse.
+  it("pose un séparateur par jour, et un seul", async () => {
+    page = {
+      messages: [
+        msg({ id: "a", body: "Hier soir", createdAt: "2026-09-04T18:00:00" }),
+        msg({ id: "b", body: "Hier plus tard", createdAt: "2026-09-04T20:00:00" }),
+        msg({ id: "c", body: "Ce matin", createdAt: "2026-09-05T09:00:00" }),
+      ],
+      meId: "u1",
+      meName: "Thomas",
+    };
+    rendre();
+    await waitFor(() => expect(screen.getByText("Ce matin")).toBeTruthy());
+    expect(document.querySelectorAll(".forum-jour")).toHaveLength(2);
+  });
+});
+
+describe("les liens dans un message", () => {
+  it("rend une adresse cliquable, sans toucher au reste du texte", async () => {
+    page = {
+      messages: [msg({ body: "Le tournoi c'est sur https://squashnet.fr/x merci" })],
+      meId: "u1",
+      meName: "Thomas",
+    };
+    rendre();
+    const lien = await screen.findByRole("link");
+    expect(lien.getAttribute("href")).toBe("https://squashnet.fr/x");
+    expect(lien.getAttribute("rel")).toContain("noopener");
+    expect(screen.getByText(/Le tournoi/)).toBeTruthy();
+    expect(screen.getByText(/merci/)).toBeTruthy();
+  });
+
+  it("ne fabrique aucun lien pour un `javascript:`", async () => {
+    page = {
+      messages: [msg({ body: "javascript:alert(1)" })],
+      meId: "u1",
+      meName: "Thomas",
+    };
+    rendre();
+    await waitFor(() => expect(screen.getByText("javascript:alert(1)")).toBeTruthy());
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+});
+
+describe("la palette d'emoji", () => {
+  it("insère À LA POSITION DU CURSEUR, pas en fin de champ", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    const champ = screen.getByLabelText("Votre message") as HTMLTextAreaElement;
+    fireEvent.change(champ, { target: { value: "Bien joue" } });
+    champ.setSelectionRange(4, 4); // juste après « Bien »
+    fireEvent.click(screen.getByRole("button", { name: "Emoji" }));
+    // Des BOUTONS ordinaires, plus un `role="menu"` : ce rôle promettait des flèches
+    // directionnelles et un piège de focus que rien n'implémentait.
+    fireEvent.click(screen.getByRole("button", { name: "Insérer 🔥" }));
+    await waitFor(() => expect(champ.value).toBe("Bien🔥 joue"));
+  });
+});
+
+describe("les réactions", () => {
+  it("affiche le décompte et met en avant la sienne", async () => {
+    page = {
+      messages: [msg()],
+      meId: "u1",
+      meName: "Thomas",
+      reactions: {
+        m1: [
+          { emoji: "👍", users: [{ id: "u1", name: "Thomas" }, { id: "u2", name: "Gégé" }] },
+          { emoji: "💪", users: [{ id: "u2", name: "Gégé" }] },
+        ],
+      },
+    };
+    rendre();
+    const pouce = await screen.findByRole("button", { name: /👍 2/ });
+    expect(pouce.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /💪 1/ }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+  });
+
+  // Le delta diffusé doit pouvoir être rejoué : il arrive après l'affichage optimiste.
+  it("applique un delta reçu du courtier sans compter double", async () => {
+    page = {
+      messages: [msg()],
+      meId: "u1",
+      meName: "Thomas",
+      reactions: { m1: [{ emoji: "👍", users: [{ id: "u2", name: "Gégé" }] }] },
+    };
+    rendre();
+    await screen.findByRole("button", { name: /👍 1/ });
+    const delta = { messageId: "m1", emoji: "👍", userId: "u3", userName: "Léa", on: true };
+    act(() => canal.handlers.get("reaction")?.(delta));
+    await waitFor(() => expect(screen.getByRole("button", { name: /👍 2/ })).toBeTruthy());
+    act(() => canal.handlers.get("reaction")?.(delta)); // rejoué : rien ne doit bouger
+    await waitFor(() => expect(screen.getByRole("button", { name: /👍 2/ })).toBeTruthy());
+  });
+
+  it("retire la pastille quand la dernière réaction s'en va", async () => {
+    page = {
+      messages: [msg()],
+      meId: "u1",
+      meName: "Thomas",
+      reactions: { m1: [{ emoji: "🎾", users: [{ id: "u2", name: "Gégé" }] }] },
+    };
+    rendre();
+    await screen.findByRole("button", { name: /🎾 1/ });
+    act(() =>
+      canal.handlers
+        .get("reaction")
+        ?.({ messageId: "m1", emoji: "🎾", userId: "u2", userName: "Gégé", on: false }),
+    );
+    await waitFor(() => expect(screen.queryByRole("button", { name: /🎾 1/ })).toBeNull());
+  });
+});
+
+describe("le sondage", () => {
+  const sondage = {
+    id: "p1",
+    messageId: "m1",
+    closedAt: null,
+    options: [
+      {
+        id: "o1",
+        label: "Jeudi",
+        voters: [{ id: "u1", name: "Thomas" }, { id: "u2", name: "Gégé" }],
+      },
+      { id: "o2", label: "Vendredi", voters: [{ id: "u1", name: "Thomas" }] },
+      { id: "o3", label: "Samedi", voters: [] },
+    ],
+  };
+
+  // LE PIÈGE DU CHOIX MULTIPLE : le total des voix dépasse le nombre de votants. L'écran doit
+  // dire les deux, sans quoi « 3 voix » pour 2 personnes passe pour une erreur de comptage.
+  it("distingue les votants des voix", async () => {
+    page = { messages: [msg()], meId: "u1", meName: "Thomas", polls: { m1: sondage } };
+    rendre();
+    await waitFor(() => expect(screen.getByText(/2 votants · 3 voix/)).toBeTruthy());
+  });
+
+  it("montre ce que l'on a coché", async () => {
+    page = { messages: [msg()], meId: "u1", meName: "Thomas", polls: { m1: sondage } };
+    rendre();
+    const jeudi = await screen.findByRole("button", { name: /Jeudi/ });
+    expect(jeudi.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /Samedi/ }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+  });
+
+  it("nomme les votants d'une option, parce que le vote n'est pas secret", async () => {
+    page = { messages: [msg()], meId: "u1", meName: "Thomas", polls: { m1: sondage } };
+    rendre();
+    const jeudi = await screen.findByRole("button", { name: /Jeudi/ });
+    expect(jeudi.getAttribute("title")).toBe("Thomas, Gégé");
+  });
+
+  // L'INVARIANT N°1 DU CHOIX MULTIPLE, et le seul endroit où il se vérifie côté client. La
+  // fixture a déjà « Jeudi » coché par u1 : cocher « Samedi » doit envoyer LES DEUX. N'envoyer
+  // que l'option qui vient de changer effacerait le vote précédent, puisque la route REMPLACE.
+  it("envoie l'ENSEMBLE des cases cochées, pas la seule qui vient de changer", async () => {
+    page = { messages: [msg()], meId: "u1", meName: "Thomas", polls: { m1: sondage } };
+    rendre();
+    fireEvent.click(await screen.findByRole("button", { name: /Samedi/ }));
+    await waitFor(() =>
+      expect(appels.some((a) => a === "POST /api/forum/poll/p1/vote")).toBe(true),
+    );
+    // u1 avait déjà « Jeudi » (o1) et « Vendredi » (o2) : cocher « Samedi » doit envoyer LES
+    // TROIS, et non le seul o3.
+    const envoye = corpsDe("POST", "/vote")?.optionIds as string[];
+    expect([...envoye].sort()).toEqual(["o1", "o2", "o3"]);
+  });
+
+  // Décocher est le geste symétrique : la case retirée ne doit PAS repartir dans la liste.
+  it("retire la case décochée de l'ensemble envoyé", async () => {
+    page = { messages: [msg()], meId: "u1", meName: "Thomas", polls: { m1: sondage } };
+    rendre();
+    fireEvent.click(await screen.findByRole("button", { name: /Jeudi/ }));
+    await waitFor(() =>
+      expect(appels.some((a) => a === "POST /api/forum/poll/p1/vote")).toBe(true),
+    );
+    // « Jeudi » retiré, « Vendredi » conservé : c'est bien l'ensemble qui part, amputé d'une
+    // case, et non un différentiel.
+    expect(corpsDe("POST", "/vote")?.optionIds).toEqual(["o2"]);
+  });
+
+  it("interdit le vote sur un sondage clos", async () => {
+    page = {
+      messages: [msg()],
+      meId: "u1",
+      meName: "Thomas",
+      polls: { m1: { ...sondage, closedAt: "2026-09-05T20:00:00.000Z" } },
+    };
+    rendre();
+    const jeudi = await screen.findByRole("button", { name: /Jeudi/ });
+    expect((jeudi as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/clos/)).toBeTruthy();
+  });
+});
+
+describe("la citation", () => {
+  it("montre l'auteur et l'extrait de ce à quoi on répond", async () => {
+    page = {
+      messages: [
+        msg({
+          id: "b",
+          body: "Je prends une place",
+          replyToId: "a",
+          replyToAuthor: "Gégé",
+          replyToExcerpt: "Covoit jeudi : 4 places",
+        }),
+      ],
+      meId: "u1",
+      meName: "Thomas",
+    };
+    rendre();
+    await waitFor(() => expect(screen.getByText("Covoit jeudi : 4 places")).toBeTruthy());
+    // L'auteur cité est lu DANS la citation : « Gégé » apparaît aussi comme auteur du
+    // message dans d'autres cas, et une recherche globale confondrait les deux.
+    const citation = document.querySelector(".forum-citation");
+    expect(citation?.querySelector("strong")?.textContent).toBe("Gégé");
+  });
+
+  // Ce que la notice promet : effacer son message l'efface PARTOUT. La citation ne survit donc
+  // pas à sa cible — ni son texte, ni un « Message supprimé » à sa place. La base ne garde
+  // aucune trace (`ON DELETE SET NULL`), l'écran non plus, et les deux chemins s'accordent.
+  it("n'affiche aucune citation quand la cible a disparu", async () => {
+    page = {
+      messages: [msg({ id: "b", body: "Je prends une place", replyToId: null })],
+      meId: "u1",
+      meName: "Thomas",
+    };
+    rendre();
+    await waitFor(() => expect(screen.getByText("Je prends une place")).toBeTruthy());
+    expect(document.querySelector(".forum-citation")).toBeNull();
+  });
+
+  // LE DÉFAUT QUE CE TEST VERROUILLE : l'affichage divergeait selon le chemin. En direct le
+  // client gardait `replyToId` et affichait « Message supprimé » ; après rechargement la clé
+  // arrivait nulle de la base et la citation disparaissait entièrement. Le même geste donnait
+  // deux écrans différents selon qu'on avait rafraîchi ou non.
+  it("retire la citation entière quand le courtier annonce la suppression de la cible", async () => {
+    page = {
+      messages: [
+        msg({ id: "a", body: "Covoit jeudi" }),
+        msg({
+          id: "b",
+          body: "Je prends une place",
+          replyToId: "a",
+          replyToAuthor: "Gégé",
+          replyToExcerpt: "Covoit jeudi",
+        }),
+      ],
+      meId: "u1",
+      meName: "Thomas",
+    };
+    rendre();
+    await waitFor(() => expect(screen.getAllByText("Covoit jeudi")).toHaveLength(2));
+    act(() => canal.handlers.get("deleted")?.({ id: "a" }));
+    await waitFor(() => expect(document.querySelector(".forum-citation")).toBeNull());
+    expect(screen.queryByText("Covoit jeudi")).toBeNull();
+    expect(screen.queryByText("Message supprimé")).toBeNull();
+    // La réponse, elle, reste : effacer une question n'efface pas la discussion.
+    expect(screen.getByText("Je prends une place")).toBeTruthy();
+  });
+
+  it("joint la citation à l'envoi après un clic sur « Répondre »", async () => {
+    rendre();
+    await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /Répondre à Gégé/ }));
+    await waitFor(() => expect(screen.getByText(/Réponse à/)).toBeTruthy());
+    const champ = screen.getByLabelText("Votre message");
+    fireEvent.change(champ, { target: { value: "Je viens" } });
+    fireEvent.submit(champ.closest("form") as HTMLFormElement);
+    await waitFor(() => expect(screen.getByText("Coucou")).toBeTruthy());
+    // C'est `replyTo` qui fait la citation : sans cette assertion, le supprimer de l'envoi
+    // laissait le test vert et la réponse partait sans rattacher à quoi elle répond.
+    expect(corpsDe("POST", "/api/forum")).toEqual({ body: "Je viens", replyTo: "m1" });
+    // La barre de citation disparaît une fois le message parti.
+    expect(screen.queryByText(/Réponse à/)).toBeNull();
   });
 });

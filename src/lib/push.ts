@@ -1,6 +1,6 @@
 import webpush from "web-push";
 import { prisma } from "./db";
-import { recordNotifications } from "./notify-store";
+import { recordNotifications, type RecordedNotification } from "./notify-store";
 
 // Clés VAPID (à générer une fois : `npx web-push generate-vapid-keys`).
 //  - NEXT_PUBLIC_VAPID_PUBLIC_KEY : publique, aussi lue côté client pour s'abonner.
@@ -111,18 +111,9 @@ export async function pushToAll(payload: PushPayload): Promise<{ recipients: num
     payload,
   );
   if (!ensureConfigured()) return { recipients: 0, sent: 0 };
-  let recipients = 0;
-  let sent = 0;
-  await Promise.all(
-    subs.map(async ({ userId }) => {
-      const n = await pushToUser(userId, payload, { record: false });
-      if (n > 0) {
-        recipients++;
-        sent += n;
-      }
-    }),
-  );
-  return { recipients, sent };
+  // Une seule lecture d'abonnements pour tout le club, et non une par membre : voir la note
+  // sur `envoyerAux`.
+  return envoyerAux(subs.map((s) => s.userId), payload);
 }
 
 // Envoie une notif à tous les abonnements d'un joueur.
@@ -147,28 +138,9 @@ export async function pushToUser(
     return 0;
   }
   let sent = 0;
-  await Promise.all(
-    subs.map(async (s) => {
-      try {
-        await webpush.sendNotification(
-          { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-          JSON.stringify(payload),
-        );
-        sent++;
-      } catch (e) {
-        const code = (e as { statusCode?: number }).statusCode;
-        if (code === 404 || code === 410) {
-          await prisma.pushSubscription.delete({ where: { id: s.id } }).catch(() => {});
-        } else {
-          // Échec non lié à un abonnement mort (réseau, VAPID, quota…) : à tracer dans
-          // les logs Vercel — sinon les notifications perdues sont indiagnosticables.
-          console.warn(
-            `[push] envoi échoué (user ${userId}, code ${code ?? "?"}) : ${(e as Error).message}`,
-          );
-        }
-      }
-    }),
-  );
+  await Promise.all(subs.map(async (s) => {
+    if (await envoyerA({ ...s, userId }, payload)) sent++;
+  }));
   return sent;
 }
 
@@ -176,33 +148,92 @@ export async function pushToUser(
  * Envoie une notif à une LISTE de membres. Sert au suivi interclub, où l'on ne touche que les
  * abonnés d'une équipe et d'un niveau donnés — `pushToAll` arroserait tout le club.
  *
- * Dédoublonne les ids reçus (un même membre peut remonter de plusieurs abonnements) et
- * s'appuie sur `pushToUser`, qui gère déjà les appareils multiples et purge les abonnements
- * morts. Best-effort, comme le reste du module : un envoi en échec n'interrompt pas les autres
- * et ne jette jamais — configuration VAPID invalide et base injoignable comprises, qui étaient
- * les deux chemins par lesquels cette promesse était fausse.
+ * Dédoublonne les ids reçus (un même membre peut remonter de plusieurs abonnements). Lit les
+ * abonnements de TOUTE la liste EN UNE REQUÊTE : la version précédente déléguait à
+ * `pushToUser`, qui interroge `PushSubscription` pour son seul destinataire — soit un ordre
+ * SQL par membre. Invisible tant que l'émetteur dominant était l'interclub (quelques messages
+ * par soirée), le N+1 devenait le poste principal avec le fil de discussion, où chaque phrase
+ * écrite touche tout le club.
+ *
+ * Best-effort, comme le reste du module : un envoi en échec n'interrompt pas les autres et ne
+ * jette jamais — configuration VAPID invalide et base injoignable comprises, qui étaient les
+ * deux chemins par lesquels cette promesse était fausse.
+ *
+ * `opts.journal` DISSOCIE ce qu'on envoie de ce qu'on GARDE. Le push est transitoire : il vit
+ * dans le centre de notifications du téléphone, que son propriétaire vide. La ligne
+ * `AppNotification`, elle, est une copie durable (30 jours) chez CHAQUE destinataire, que la
+ * suppression du message d'origine n'atteint pas et que la suppression du compte de son auteur
+ * n'atteint pas non plus. Pour un score d'interclub (« Le match a commencé ») c'est sans
+ * conséquence ; pour la parole d'un membre, c'en est une. Passer un `journal` sans corps —
+ * ou `false` pour ne rien journaliser — laisse la cloche prévenir sans rien recopier.
  */
 export async function pushToUsers(
   userIds: readonly string[],
   payload: PushPayload,
+  opts: { journal?: RecordedNotification | false } = {},
 ): Promise<{ recipients: number; sent: number }> {
   const unique = [...new Set(userIds)];
   // Journalisé pour TOUTE la liste visée, avant le contrôle de configuration et sans se
   // soucier de qui a un abonnement push. C'est le point du dispositif : un membre abonné au
   // suivi d'une équipe voit la notification dans l'appli même si son téléphone n'en reçoit
   // aucune — permission refusée, iPhone hors écran d'accueil, ou clés absentes.
-  await recordNotifications(unique, payload);
+  if (opts.journal !== false) await recordNotifications(unique, opts.journal ?? payload);
   if (!ensureConfigured()) return { recipients: 0, sent: 0 };
-  let recipients = 0;
+  return envoyerAux(unique, payload);
+}
+
+/**
+ * Envoie `payload` aux appareils d'une liste de membres, EN UNE LECTURE d'abonnements.
+ *
+ * Le coeur partagé de `pushToAll` et `pushToUsers`. `pushToUser` reste à part : il sert les
+ * envois à UN destinataire (délégations, alertes de créneau), où la requête groupée n'aurait
+ * rien à grouper.
+ */
+async function envoyerAux(
+  userIds: readonly string[],
+  payload: PushPayload,
+): Promise<{ recipients: number; sent: number }> {
+  if (userIds.length === 0) return { recipients: 0, sent: 0 };
+  let subs: { id: string; userId: string; endpoint: string; p256dh: string; auth: string }[];
+  try {
+    subs = await prisma.pushSubscription.findMany({ where: { userId: { in: [...userIds] } } });
+  } catch (e) {
+    console.warn(`[push] abonnements illisibles : ${(e as Error).message}`);
+    return { recipients: 0, sent: 0 };
+  }
+  const servis = new Set<string>();
   let sent = 0;
-  await Promise.all(
-    unique.map(async (userId) => {
-      const n = await pushToUser(userId, payload, { record: false });
-      if (n > 0) {
-        recipients += 1;
-        sent += n;
-      }
-    }),
-  );
-  return { recipients, sent };
+  await Promise.all(subs.map(async (s) => {
+    if (await envoyerA(s, payload)) {
+      servis.add(s.userId);
+      sent++;
+    }
+  }));
+  return { recipients: servis.size, sent };
+}
+
+/** Un envoi, un appareil. Purge l'abonnement s'il est mort (404/410). `true` = parti. */
+async function envoyerA(
+  s: { id: string; userId: string; endpoint: string; p256dh: string; auth: string },
+  payload: PushPayload,
+): Promise<boolean> {
+  try {
+    await webpush.sendNotification(
+      { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
+      JSON.stringify(payload),
+    );
+    return true;
+  } catch (e) {
+    const code = (e as { statusCode?: number }).statusCode;
+    if (code === 404 || code === 410) {
+      await prisma.pushSubscription.delete({ where: { id: s.id } }).catch(() => {});
+    } else {
+      // Échec non lié à un abonnement mort (réseau, VAPID, quota…) : à tracer dans les logs
+      // Vercel — sinon les notifications perdues sont indiagnosticables.
+      console.warn(
+        `[push] envoi échoué (user ${s.userId}, code ${code ?? "?"}) : ${(e as Error).message}`,
+      );
+    }
+    return false;
+  }
 }

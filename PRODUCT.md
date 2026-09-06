@@ -66,7 +66,11 @@ le défaut d'environnement est surchargeable à chaud depuis `/admin`) : plannin
 (simple et groupée), annulation, journal des réservations, présences sur créneau, alertes
 terrain libéré, frais partagés (« Tricount ») avec commentaires, annuaire des membres, tournois
 internes, classement fédéral (source publique squashnet.fr), délégation temporaire de droits,
-annonces (push, bannière, modale), espace d'administration, blocage de l'appli aux membres.
+annonces (push, bannière, modale), espace d'administration, blocage de l'appli aux membres,
+**fil de discussion du club** (un seul fil, citations, réactions, sondages, présence et
+« en train d'écrire » via un courtier temps réel facultatif ; conservation 12 mois),
+**suivi interclub** (calendrier, compositions, disponibilités, marquage en direct, poules et
+classements).
 
 **Authentification** : compte ResaMania (principal), connexion « email seul » (lecture seule,
 sans réservation), passkeys / biométrie. Sessions de 30 jours. Droits d'admin par allowlist
@@ -112,7 +116,9 @@ pas trancher à la place de l'utilisateur, et à ne pas présenter comme réglé
   (780×1688) — déjà utilisées par la PWA install UI de Chrome.
 - **Documentation interne** : `docs/flux-branches.md`, `docs/neon-keep-alive.md`,
   `docs/delegation-droits.md`, `docs/biometrie.md`, `docs/idees-developpement.md`.
-- **Suite de tests** : 345 tests vitest au vert.
+- **Suite de tests** : plus de 2 000 tests vitest au vert (`npm test`). Le chiffre exact bouge
+  à chaque branche ; ce qui est confirmé, c'est l'ordre de grandeur et le fait que la suite
+  passe entièrement. Ne pas recopier un nombre figé ici — il a déjà été faux d'un facteur six.
 - **Absences à ne jamais fabriquer** : aucun témoignage, aucun client, aucune tarification,
   aucun chiffre d'audience, aucun partenariat avec ResaMania. C'est un outil associatif
   gratuit ; toute preuve sociale devra venir de l'utilisateur.

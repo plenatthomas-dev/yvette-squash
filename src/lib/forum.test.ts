@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { parseForumBody, forumLength, forumPreview, MAX_FORUM_LEN } from "./forum";
+import {
+  parseForumBody,
+  parseForumOption,
+  forumLength,
+  forumPreview,
+  isForumReaction,
+  MAX_FORUM_LEN,
+  MAX_POLL_OPTION_LEN,
+  FORUM_REACTIONS,
+} from "./forum";
 
 // LA TRONCATURE DES EMOJI, ET RIEN D'AUTRE.
 //
@@ -10,21 +19,31 @@ import { parseForumBody, forumLength, forumPreview, MAX_FORUM_LEN } from "./foru
 // l'existante ; s'ils tombent, le module n'a plus de raison d'être.
 
 describe("parseForumBody — la limite", () => {
-  it("NE CASSE PAS un emoji posé exactement sur la limite", () => {
+  it("ACCEPTE un message posé exactement sur la limite, emoji compris", () => {
     // 999 caractères puis un 👍 : le pouce est le millième, il doit passer ENTIER.
     const s = "a".repeat(MAX_FORUM_LEN - 1) + "👍";
     const out = parseForumBody(s)!;
     expect(forumLength(out)).toBe(MAX_FORUM_LEN);
     expect(out.endsWith("👍")).toBe(true);
-    // La preuve par la négative : c'est exactement ce que `slice` aurait produit.
+    // La preuve par la négative : c'est ce qu'une découpe en unités UTF-16 aurait produit.
     expect(s.slice(0, MAX_FORUM_LEN).endsWith("👍")).toBe(false);
   });
 
-  it("coupe ENTRE deux emoji, jamais au milieu d'un", () => {
-    const out = parseForumBody("👍".repeat(MAX_FORUM_LEN + 10))!;
-    expect(forumLength(out)).toBe(MAX_FORUM_LEN);
-    // Un demi-emoji se lit \uD83D ou \uDC4D orphelin : aucun substitut isolé ne doit rester.
-    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(out)).toBe(false);
+  // LE DÉFAUT QUE CE TEST VERROUILLE : la fonction TRONQUAIT, et la route répondait 201. Un
+  // compte rendu de 1300 caractères revenait dans le fil coupé net, sans ellipse, et son
+  // auteur croyait avoir tout envoyé. Refuser rend la main à celui qui écrit.
+  it("REFUSE au-delà de la limite au lieu de tronquer en silence", () => {
+    expect(parseForumBody("a".repeat(MAX_FORUM_LEN + 1))).toBeNull();
+    expect(parseForumBody("a".repeat(MAX_FORUM_LEN))).not.toBeNull();
+  });
+
+  it("mesure la limite en POINTS DE CODE : 1000 emoji passent, 1001 non", () => {
+    // 1000 pouces = 2000 unités UTF-16. Compter celles-ci refuserait un message que l'écran
+    // annonce comme long de 1000 caractères, et le compteur mentirait.
+    const mille = "👍".repeat(MAX_FORUM_LEN);
+    expect(mille.length).toBe(MAX_FORUM_LEN * 2);
+    expect(parseForumBody(mille)).toBe(mille);
+    expect(parseForumBody("👍".repeat(MAX_FORUM_LEN + 1))).toBeNull();
   });
 
   it("compte en caractères visibles, pas en unités UTF-16", () => {
@@ -84,5 +103,44 @@ describe("forumPreview", () => {
 
   it("laisse un message court intact, sans ellipse", () => {
     expect(forumPreview("Bien joué 💪")).toBe("Bien joué 💪");
+  });
+});
+
+describe("parseForumOption — un libellé de sondage", () => {
+  it("réduit TOUS les blancs : une option tient sur une ligne", () => {
+    expect(parseForumOption("  Chez   Marco\n\net Cie ")).toBe("Chez Marco et Cie");
+  });
+
+  it("rejette le vide et ce qui n'est pas une chaîne", () => {
+    expect(parseForumOption("")).toBeNull();
+    expect(parseForumOption("   ")).toBeNull();
+    expect(parseForumOption(42)).toBeNull();
+    expect(parseForumOption(null)).toBeNull();
+  });
+
+  it("borne à la longueur d'option, pas à celle d'un message", () => {
+    expect(forumLength(parseForumOption("a".repeat(200))!)).toBe(MAX_POLL_OPTION_LEN);
+    expect(MAX_POLL_OPTION_LEN).toBeLessThan(MAX_FORUM_LEN);
+  });
+
+  // Même piège que pour le corps d'un message : un libellé « Chez Marco 🍕 » tronqué pile
+  // entre les deux moitiés de l'emoji écrirait un demi-caractère en base.
+  it("ne casse pas un emoji à la limite exacte", () => {
+    const out = parseForumOption("🍕".repeat(100))!;
+    expect(forumLength(out)).toBe(MAX_POLL_OPTION_LEN);
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(out)).toBe(false);
+  });
+});
+
+// LISTE FERMÉE, et pas un motif : sans elle la colonne `emoji` accepterait n'importe quelle
+// chaîne envoyée par un client bricolé, et une rangée de vingt pastilles ne dirait plus rien.
+describe("isForumReaction", () => {
+  it("accepte chacune des réactions offertes, et rien d'autre", () => {
+    for (const e of FORUM_REACTIONS) expect(isForumReaction(e)).toBe(true);
+    expect(isForumReaction("🤮")).toBe(false);
+    expect(isForumReaction("pas un emoji")).toBe(false);
+    expect(isForumReaction("")).toBe(false);
+    expect(isForumReaction(42)).toBe(false);
+    expect(isForumReaction(null)).toBe(false);
   });
 });
