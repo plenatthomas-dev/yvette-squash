@@ -27,6 +27,22 @@ export const FORUM_CHANNEL = "presence-forum";
 export const FORUM_EVENT_MESSAGE = "message";
 /** Nom de l'événement portant une suppression, pour que le fil se referme chez tout le monde. */
 export const FORUM_EVENT_DELETED = "deleted";
+/**
+ * Bascule d'une réaction : `{ messageId, emoji, userId, on }`.
+ *
+ * On diffuse le DELTA et non le décompte : deux clics simultanés sur deux appareils
+ * enverraient sinon deux totaux concurrents, dont le dernier arrivé écraserait l'autre. Un
+ * delta se rejoue dans n'importe quel ordre pour le même résultat.
+ */
+export const FORUM_EVENT_REACTION = "reaction";
+/**
+ * État d'un sondage après un vote ou une clôture.
+ *
+ * Ici on diffuse au contraire l'ÉTAT COMPLET : un vote à choix multiple remplace l'ensemble
+ * des cases d'un membre, ce qui n'est pas un delta exprimable simplement. Le volume reste
+ * dérisoire (six options, trente membres).
+ */
+export const FORUM_EVENT_POLL = "poll";
 
 let client: Pusher | null = null;
 let configFailed = false;
@@ -56,7 +72,15 @@ function broker(): Pusher | null {
   }
 }
 
-/** Le courtier est-il utilisable ? Sert à l'écran pour ne pas promettre ce qu'il n'aura pas. */
+/**
+ * Le courtier est-il utilisable ?
+ *
+ * ⚠️ Le commentaire disait « sert à l'écran pour ne pas promettre ce qu'il n'aura pas » — et
+ * l'écran ne l'appelait pas, ne pouvait pas l'appeler (ce module est serveur) et n'en a pas
+ * besoin : le composant lit `NEXT_PUBLIC_PUSHER_KEY` lui-même et renonce en silence. La
+ * fonction reste, mais pour ce qu'elle fait RÉELLEMENT : donner à `forum-realtime.test.ts` un
+ * moyen d'observer la mémoïsation de `broker()`, qu'aucune autre porte ne rend visible.
+ */
 export function realtimeConfigured(): boolean {
   return broker() !== null;
 }
@@ -104,7 +128,8 @@ export async function broadcastForum(event: string, payload: unknown): Promise<v
   }
 }
 
-/** Réinitialise la mémoïsation. Réservé aux tests, qui changent l'environnement en cours de route. */
+/** Réinitialise la mémoïsation. Réservé à `forum-realtime.test.ts`, qui change l'environnement
+ *  d'un cas à l'autre — sans cette porte, le premier cas figerait le module pour tous. */
 export function resetForumRealtimeForTests(): void {
   client = null;
   configFailed = false;
