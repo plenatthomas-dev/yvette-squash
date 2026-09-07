@@ -1097,6 +1097,7 @@ export default function AdminPage() {
       const res = await fetch("/api/admin/backfill-rankings", { method: "POST" });
       const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
+        months?: number;
         written?: number;
         already?: number;
         unresolved?: number;
@@ -1109,6 +1110,7 @@ export default function AdminPage() {
         setRkHistResult({ ok: false, text: data.error ?? "Complètement impossible." });
         return;
       }
+      const months = data.months ?? 0;
       const written = data.written ?? 0;
       const unresolved = data.unresolved ?? 0;
       const failed = data.failed ?? 0;
@@ -1121,7 +1123,13 @@ export default function AdminPage() {
         `${unresolved ? `, ${unresolved} sans réponse (non licencié à l'époque, le plus souvent)` : ""}` +
         (remaining > 0
           ? ` — il reste ${remaining} couple${remaining > 1 ? "s" : ""} à voir, reclique pour continuer.`
-          : " — historique complet sur les 24 derniers mois.");
+          // Le nombre de périodes vient de la RÉPONSE, jamais de la profondeur qu'on a demandée :
+          // la fédération n'en publie pas toujours vingt-quatre, et annoncer « complet sur les
+          // 24 derniers mois » sur une source qui n'en sert que neuf ferait chercher un défaut
+          // dans l'appli — c'est exactement la question qu'on s'est posée devant une courbe qui
+          // s'arrêtait en janvier.
+          : ` — historique complet sur les ${months} période${months > 1 ? "s" : ""} que` +
+            ` squashnet publie.`);
       setRkHistResult({ ok: data.ok ?? true, text });
     } catch {
       setRkHistResult({ ok: false, text: "Complètement impossible." });
@@ -2127,9 +2135,10 @@ export default function AdminPage() {
                 <hr className="adm-sep" />
                 <p className="muted tiny">
                   <strong>Historique (courbe « Progression »).</strong> Va chercher les
-                  classements des <strong>24 derniers mois</strong> pour les joueurs qui n'en ont
-                  pas encore. Le travail est découpé en tranches d'environ une minute&nbsp;:
-                  reclique jusqu'à « historique complet ». Rien n'est jamais redemandé deux fois.
+                  classements des <strong>24 derniers mois</strong> — ou moins, si la fédération
+                  n'en publie pas autant — pour les joueurs qui n'en ont pas encore. Le travail
+                  est découpé en tranches d'environ une minute&nbsp;: reclique jusqu'à
+                  « historique complet ». Rien n'est jamais redemandé deux fois.
                 </p>
                 <button
                   type="button"

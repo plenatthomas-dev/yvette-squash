@@ -119,6 +119,33 @@ jour, recliquer ne coûte **aucune requête**.
 jamais de mesure sur les mois d'avant. Seul `remaining` (les couples pas encore *regardés*)
 tombe à zéro — c'est lui que le bouton affiche.
 
+#### La courbe s'arrête à une date qu'on n'explique pas
+
+Trois causes possibles, et une seule commande pour les départager :
+
+```bash
+npm run rankings:mois     # imprime le sélecteur de période de squashnet
+```
+
+1. **La fédération ne publie pas plus loin.** Si la liste s'arrête à la même date que la courbe,
+   il n'y a rien à récupérer au-delà : `MOIS_PAR_DEFAUT` (24) est une profondeur que la source
+   ne peut pas tenir. Ce n'est pas un défaut de l'appli, et le bouton d'admin le dit
+   (« complet sur les N périodes que squashnet publie »).
+2. **Le remplissage n'a pas fini.** Il balaie du **plus récent au plus ancien** : un run
+   interrompu — budget de la tranche épuisé, script coupé — laisse donc manquants exactement
+   les mois les **plus vieux**. Reclique « Compléter l'historique » jusqu'à zéro restant.
+3. **Le bogue du `distinct` paginé** (corrigé). `findMany({ distinct: ["month"], take: 36 })`
+   ne fait pas de `SELECT DISTINCT` : Prisma dédoublonne **en mémoire, après le `take`**. La
+   route demandait donc « les 36 dernières **lignes** », soit un seul mois à quarante joueurs —
+   le nombre de mois affichés dépendait du nombre de joueurs mesurés. Remplacé par un
+   `groupBy(["month"])`, qui se traduit par un vrai `GROUP BY`.
+
+Pour savoir si la base contient plus que ce que l'écran montre :
+
+```sql
+SELECT month, count(*) FROM "SquashnetRankingPoint" GROUP BY month ORDER BY month;
+```
+
 ### 4. Historique des matchs d'un joueur — **endpoint inconnu**
 
 C'est la seule demande qui n'a pas de chemin identifié. Les lignes du classement des joueurs

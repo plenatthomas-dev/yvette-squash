@@ -46,9 +46,18 @@ export async function GET(req: NextRequest) {
 
   // Les périodes réellement présentes, les plus récentes d'abord pour la coupe — puis remises
   // dans l'ordre chronologique, qui est celui de la courbe.
-  const moisRows = await prisma.squashnetRankingPoint.findMany({
-    distinct: ["month"],
-    select: { month: true },
+  //
+  // ⚠️ `groupBy` ET NON `findMany({ distinct })`, ET LA DIFFÉRENCE N'EST PAS COSMÉTIQUE.
+  // Le `distinct` de Prisma n'est pas un `SELECT DISTINCT` : sauf option de prévisualisation,
+  // il est appliqué EN MÉMOIRE, après que la base a rendu ses lignes — donc APRÈS le `take`.
+  // « Les 36 dernières périodes » demandait en réalité « les 36 dernières LIGNES, dédoublonnées
+  // ensuite » : à quarante joueurs mesurés par mois, cela rendait UN mois, et la courbe se
+  // coupait net à une date que rien n'expliquait. Le nombre de mois affichés dépendait du
+  // nombre de joueurs, ce qui n'a aucun sens et ne se voyait pas.
+  //
+  // `groupBy` se traduit par un vrai `GROUP BY` : le `take` porte alors sur des MOIS.
+  const moisRows = await prisma.squashnetRankingPoint.groupBy({
+    by: ["month"],
     orderBy: { month: "desc" },
     take: MOIS_MAX,
   });

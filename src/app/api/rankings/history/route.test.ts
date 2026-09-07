@@ -4,9 +4,10 @@ import type { NextRequest } from "next/server";
 const h = vi.hoisted(() => ({
   flags: { ranking: true, interclub: true },
   session: null as null | { userId: string },
-  /** Périodes distinctes rendues par le `distinct: ["month"]`, les plus récentes d'abord. */
+  /** Périodes rendues par le `groupBy(["month"])`, les plus récentes d'abord. */
   months: [] as Array<{ month: string }>,
   points: [] as Array<Record<string, unknown>>,
+  groupBy: vi.fn(),
   findMany: vi.fn(),
 }));
 
@@ -23,7 +24,15 @@ vi.mock("@/lib/features-server", () => ({
 }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
 vi.mock("@/lib/db", () => ({
-  prisma: { squashnetRankingPoint: { findMany: (...a: unknown[]) => h.findMany(...a) } },
+  prisma: {
+    squashnetRankingPoint: {
+      // Deux appels DISTINCTS, et c'est le sujet d'un test : les MOIS passent par un vrai
+      // `GROUP BY` (le `distinct` de Prisma se ferait en mémoire, après le `take`), les POINTS
+      // par un `findMany` borné à ces mois.
+      groupBy: (...a: unknown[]) => h.groupBy(...a),
+      findMany: (...a: unknown[]) => h.findMany(...a),
+    },
+  },
 }));
 
 import { GET } from "./route";
@@ -35,10 +44,9 @@ beforeEach(() => {
   h.session = { userId: "u1" };
   h.months = [];
   h.points = [];
-  // La route fait DEUX requêtes sur la même table : les mois distincts, puis les points.
-  h.findMany.mockReset().mockImplementation(async (args: { distinct?: string[] }) =>
-    args?.distinct ? h.months : h.points,
-  );
+  // La route fait DEUX requêtes sur la même table : les mois (groupBy), puis les points.
+  h.groupBy.mockReset().mockImplementation(async () => h.months);
+  h.findMany.mockReset().mockImplementation(async () => h.points);
 });
 
 /** Un point porté par un MEMBRE. */
@@ -69,7 +77,23 @@ describe("GET /api/rankings/history", () => {
   it("historique vide → charge utile vide, sans deuxième requête", async () => {
     const res = await GET(req());
     expect(await res.json()).toEqual({ months: [], series: [] });
-    expect(h.findMany).toHaveBeenCalledOnce();
+    expect(h.findMany).not.toHaveBeenCalled();
+  });
+
+  // LE BOGUE QUI COUPAIT LA COURBE À UNE DATE INEXPLIQUÉE. `findMany({ distinct, take })` ne
+  // fait pas un `SELECT DISTINCT` : Prisma dédoublonne EN MÉMOIRE, après le `take`. « Les 36
+  // dernières périodes » demandait donc « les 36 dernières LIGNES », soit — à quarante joueurs
+  // par mois — un seul mois. Le nombre de mois affichés dépendait du nombre de joueurs.
+  it("compte les mois par un GROUP BY, jamais par un `distinct` paginé", async () => {
+    h.months = [{ month: "2026-03-02" }];
+    h.points = [pointMembre("2026-03-02")];
+    await GET(req());
+    expect(h.groupBy).toHaveBeenCalledWith(expect.objectContaining({ by: ["month"] }));
+    // Et la borne de profondeur porte bien sur des MOIS, donc sur le groupBy.
+    const args = h.groupBy.mock.calls[0][0] as { take: number };
+    expect(args.take).toBeGreaterThanOrEqual(24);
+    // Le second appel ne redemande jamais un dédoublonnage : il est borné aux mois retenus.
+    expect(h.findMany.mock.calls[0][0]).not.toHaveProperty("distinct");
   });
 
   it("rend les mois dans l'ORDRE CHRONOLOGIQUE, celui de la courbe", async () => {
@@ -141,7 +165,7 @@ describe("GET /api/rankings/history", () => {
     expect(series[0].team).toBeNull();
     // Même garde que l'annuaire : le flag à 0 doit rendre les équipes aussi invisibles que
     // l'onglet qui les sert — la jointure elle-même est retirée de la requête.
-    const args = h.findMany.mock.calls[1][0] as { select: { user: { select: Record<string, unknown> } } };
+    const args = h.findMany.mock.calls[0][0] as { select: { user: { select: Record<string, unknown> } } };
     expect(args.select.user.select.team).toBe(false);
   });
 
