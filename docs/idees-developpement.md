@@ -334,7 +334,10 @@ réservé** via un code couleur (asso vs autre asso) — **comme en vue jour**.
   PASSÉES, et `ic_a=131079` les sert toutes — d'où un remplissage **rétroactif** (24 mois d'un
   coup, `npm run rankings:backfill`) au lieu d'un écran vide pendant deux ans. Table
   `SquashnetRankingPoint` (1 ligne / joueur / mois, membres ET joueurs sans compte), alimentée
-  ensuite par le cron mensuel `warm-rankings` lui-même. On trace la **moyenne de points**
+  ensuite par le cron mensuel `warm-rankings` lui-même, et complétable à la main depuis
+  `/admin` (« Compléter l'historique », par tranches d'une minute — le remplissage est
+  reprenable, donc on reclique jusqu'à « complet » sans jamais repayer le travail fait).
+  On trace la **moyenne de points**
   (la seule valeur qui bouge tous les mois) ou le **rang mixte**, axe inversé pour que « ça
   monte » veuille toujours dire « ça progresse ». Un mois non mesuré **coupe** le trait : un
   trou dit « on ne sait pas ». `/api/rankings/history` (jamais licence ni club), écran

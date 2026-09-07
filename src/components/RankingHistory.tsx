@@ -198,8 +198,9 @@ export function RankingHistory({
         <p className="muted tiny">{erreur}</p>
       ) : data.months.length === 0 ? (
         <p className="muted tiny">
-          Aucun historique pour le moment. Il se remplit à chaque passe mensuelle de classement —
-          et rétroactivement avec <code>npm run rankings:backfill</code>.
+          Aucun historique pour le moment. Il se remplit tout seul à chaque passe mensuelle de
+          classement&nbsp;; pour aller chercher les mois passés d&apos;un coup, un administrateur
+          peut lancer « Compléter l&apos;historique » depuis l&apos;espace d&apos;administration.
         </p>
       ) : (
         <>

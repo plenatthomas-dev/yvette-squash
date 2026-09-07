@@ -2427,6 +2427,16 @@ td.cell.past {
   font-weight: 600;
 }
 
+/* Séparateur DANS une carte d'admin : deux travaux voisins mais distincts (rafraîchir le
+   classement du mois / compléter l'historique) partagent le même encadré parce qu'ils parlent
+   de la même source, et un filet suffit à dire qu'on change de sujet. Un second `.adm-carte`
+   les aurait empilées — une carte sur une carte ne sépare rien (Règle de la Carte sur Carte). */
+.adm-sep {
+  margin: 14px 0 10px;
+  border: 0;
+  border-top: 1px solid var(--pico-card-border-color);
+}
+
 /* LES AUTRES PAGES DE L'ADMIN, en tuiles et non en liens soulignés.
    Trois liens nus posés sur la page ne disaient ni où ils mènent ni ce qu'on y trouve : le
    libellé « Historique & blocklist » ne renseigne que celui qui connaît déjà la page. Une

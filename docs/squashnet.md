@@ -99,8 +99,25 @@ parsing. Le rapprochement avec nos rencontres existe déjà (`snMatchKey = <even
 
 Voir `SquashnetRankingPoint`, `lib/squashnet/history.ts`, `lib/squashnet/backfill.ts` et
 l'écran « Progression ». Aucun nouvel endpoint : le `<select id="month">` du classement expose
-les **publications passées**, et `131079` les sert toutes. D'où le remplissage **rétroactif**
-(`npm run rankings:backfill`), au lieu d'attendre deux ans que la courbe se dessine.
+les **publications passées**, et `131079` les sert toutes. D'où le remplissage **rétroactif**,
+au lieu d'attendre deux ans que la courbe se dessine.
+
+**Deux portes pour le même remplissage**, parce qu'un chargement complet (≈ 960 couples
+joueur × mois) dure un quart d'heure quand une fonction Vercel est tuée à soixante secondes :
+
+| Porte | Usage | Comment |
+|---|---|---|
+| `npm run rankings:backfill` | **Premier chargement** (24 mois d'un coup) | Sans couperet, 1,1 s entre deux appels, ~15 min |
+| `/admin` › « Compléter l'historique » | **Entretien** (un nouvel inscrit, un mois qui manque) | Tranches de ~45 s, 600 ms entre deux appels, on reclique jusqu'à « complet » |
+| cron `warm-rankings` (le 8) | **Automatique** | Consigne le point du mois courant à chaque rapprochement réussi |
+
+Le découpage en tranches n'est sûr que parce que le remplissage est **reprenable** : les
+couples déjà en base sont sautés sans un seul appel réseau (`knownPoints`). Sur un historique à
+jour, recliquer ne coûte **aucune requête**.
+
+⚠️ « Sans réponse » n'est pas du travail restant : un membre arrivé au club l'an dernier n'aura
+jamais de mesure sur les mois d'avant. Seul `remaining` (les couples pas encore *regardés*)
+tombe à zéro — c'est lui que le bouton affiche.
 
 ### 4. Historique des matchs d'un joueur — **endpoint inconnu**
 

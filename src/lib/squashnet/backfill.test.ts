@@ -154,6 +154,55 @@ describe("backfillHistory", () => {
     expect(h.knownPoints).not.toHaveBeenCalled();
   });
 
+  // LE BUDGET — ce qui rend le bouton d'admin possible sans qu'une fonction Vercel soit tuée
+  // en vol, donc sans compte-rendu.
+  describe("budget de temps", () => {
+    it("s'arrête proprement au budget et dit ce qu'il reste", async () => {
+      h.subjectsToRefresh.mockResolvedValue([sujet("u1", "Jean Dupont"), sujet("u2", "Paul Martin")]);
+      h.searchRanking.mockImplementation(async () => {
+        // Chaque appel « coûte » du temps réel : le budget se mesure sur l'horloge.
+        await new Promise((r) => setTimeout(r, 12));
+        return [row("DUPONT JEAN"), row("MARTIN PAUL")];
+      });
+      const res = await backfillHistory({ delayMs: 0, budgetMs: 15 });
+      expect(res.stopped).toBe(true);
+      // 3 mois × 2 joueurs = 6 couples ; on s'arrête bien avant la fin.
+      expect(res.written).toBeLessThan(6);
+      expect(res.remaining).toBe(6 - res.written - res.unresolved - res.already - res.failed);
+      expect(res.remaining).toBeGreaterThan(0);
+    });
+
+    it("un run qui va au bout ne laisse RIEN à faire, et ne se dit pas arrêté", async () => {
+      h.searchRanking.mockResolvedValue([row("DUPONT JEAN")]);
+      const res = await run();
+      expect(res).toMatchObject({ stopped: false, remaining: 0, written: 3 });
+    });
+
+    // « Sans réponse » n'est pas du travail restant : un joueur non licencié à l'époque n'aura
+    // jamais de mesure ces mois-là. Les compter promettrait un « terminé » qui n'arriverait pas.
+    it("les couples sans réponse ne comptent pas comme restants", async () => {
+      h.searchRanking.mockResolvedValue([row("MARTIN PIERRE")]);
+      const res = await run();
+      expect(res).toMatchObject({ unresolved: 3, remaining: 0, stopped: false });
+    });
+
+    it("le budget se vérifie AVANT d'engager un couple, jamais après avoir payé la requête", async () => {
+      // Budget déjà épuisé à l'entrée : aucune requête ne part, et tout reste à faire.
+      const res = await backfillHistory({ delayMs: 0, budgetMs: 0 });
+      expect(res).toMatchObject({ requests: 0, written: 0, stopped: true, remaining: 3 });
+      expect(h.searchRanking).not.toHaveBeenCalled();
+    });
+
+    // Sur un historique déjà complet, recliquer ne doit RIEN coûter à squashnet.
+    it("un second passage sur un historique complet ne fait aucune requête et ne dit rien de restant", async () => {
+      h.knownPoints.mockResolvedValue(
+        new Set(["member:u1:2026-03-02", "member:u1:2026-02-02", "member:u1:2026-01-05"]),
+      );
+      const res = await backfillHistory({ delayMs: 0, budgetMs: 45_000 });
+      expect(res).toMatchObject({ requests: 0, already: 3, remaining: 0, stopped: false });
+    });
+  });
+
   it("rend l'avancement mois par mois, pour qu'un long run se suive", async () => {
     h.searchRanking.mockResolvedValue([row("DUPONT JEAN")]);
     const vus: string[] = [];

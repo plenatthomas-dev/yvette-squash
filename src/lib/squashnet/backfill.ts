@@ -58,10 +58,25 @@ export interface BackfillResult {
   written: number;
   /** Couples (joueur, mois) sautés parce que déjà en base. */
   already: number;
-  /** Cherchés sans conclure : squashnet muet, introuvable, homonymes ambigus, joueur parti. */
+  /**
+   * Cherchés SANS CONCLURE : squashnet muet, joueur introuvable, homonymes ambigus, licencié
+   * ailleurs ce mois-là.
+   *
+   * ⚠️ CE N'EST PAS DU TRAVAIL RESTANT, et c'est la distinction qui compte pour l'écran : un
+   * membre arrivé au club l'an dernier n'aura JAMAIS de mesure sur les mois d'avant. Ces
+   * couples-là seront réessayés à chaque passage sans jamais aboutir. Les compter comme
+   * « à faire » ferait promettre un « terminé » qui n'arriverait pas.
+   */
   unresolved: number;
   /** Écritures base en échec (imputées à la base, jamais à squashnet). */
   failed: number;
+  /**
+   * Couples (joueur, mois) que ce run n'a PAS ATTEINTS — budget de temps épuisé. C'est le
+   * travail que le passage suivant reprendra, et le seul nombre qui doit tomber à zéro.
+   */
+  remaining: number;
+  /** Vrai si le run s'est arrêté sur le budget plutôt qu'au bout de la liste. */
+  stopped: boolean;
 }
 
 export interface BackfillOptions {
@@ -69,6 +84,18 @@ export interface BackfillOptions {
   months?: number;
   /** Délai entre deux appels réseau (défaut : `DELAI_MS`). 0 en test. */
   delayMs?: number;
+  /**
+   * Budget de temps, en millisecondes. Au-delà, le run s'ARRÊTE PROPREMENT et rend ce qu'il a
+   * fait — il ne se coupe pas au milieu d'une écriture.
+   *
+   * Il existe pour le chemin INTERACTIF : une fonction Vercel est tuée à soixante secondes, et
+   * un run tué en vol ne rend aucun compte-rendu, donc l'admin ne sait pas ce qui a été fait ni
+   * s'il doit recliquer. Non borné par défaut, pour le script, qui a tout son temps.
+   *
+   * C'est la reprise (`knownPoints`) qui rend ce découpage sûr : chaque passage repart là où le
+   * précédent s'est arrêté, sans jamais redemander ce qu'il tient déjà.
+   */
+  budgetMs?: number;
   /** Appelé après chaque mois traité, pour donner à voir l'avancement d'un long run. */
   onMonth?: (month: string, index: number, total: number, result: BackfillResult) => void;
 }
@@ -79,13 +106,17 @@ const dodo = (ms: number) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : P
  * Télécharge l'historique du classement de tous les joueurs balayés, sur les N dernières
  * périodes publiées.
  *
- * ⚠️ CE N'EST PAS UNE ROUTE HTTP, et ça ne peut pas l'être : quarante joueurs sur vingt-quatre
- * mois, c'est un quart d'heure de requêtes espacées, là où une fonction Vercel est coupée à
- * soixante secondes. Il se lance depuis `scripts/backfill-rankings.ts`, une fois, à la main —
- * ensuite le cron mensuel suffit à entretenir la courbe.
+ * ⚠️ UN CHARGEMENT COMPLET N'EST PAS UNE ROUTE HTTP. Quarante joueurs sur vingt-quatre mois,
+ * c'est un quart d'heure de requêtes espacées, là où une fonction Vercel est coupée à soixante
+ * secondes : la première fois, ça se lance depuis `scripts/backfill-rankings.ts`. Le bouton
+ * d'admin appelle la MÊME fonction avec un `budgetMs`, et reprend là où il s'était arrêté —
+ * c'est le chemin de l'entretien (un nouvel inscrit, un mois qui manque), pas du chargement.
  */
 export async function backfillHistory(opts: BackfillOptions = {}): Promise<BackfillResult> {
   const delayMs = opts.delayMs ?? DELAI_MS;
+  const debut = Date.now();
+  const budgetEpuise = () => opts.budgetMs !== undefined && Date.now() - debut >= opts.budgetMs;
+
   const months = (await getMonths()).slice(0, opts.months ?? MOIS_PAR_DEFAUT);
   const subjects = await subjectsToRefresh();
   const result: BackfillResult = {
@@ -96,12 +127,14 @@ export async function backfillHistory(opts: BackfillOptions = {}): Promise<Backf
     already: 0,
     unresolved: 0,
     failed: 0,
+    remaining: 0,
+    stopped: false,
   };
   if (months.length === 0 || subjects.length === 0) return result;
 
   const deja = await knownPoints(months);
 
-  for (const [i, month] of months.entries()) {
+  boucle: for (const [i, month] of months.entries()) {
     // Le mémo vit le temps D'UN mois : c'est la même recherche d'un mois à l'autre, mais pas
     // la même réponse — la partager donnerait à février le classement de janvier.
     const memo = new Map<string, RankingRow[] | null>();
@@ -110,6 +143,13 @@ export async function backfillHistory(opts: BackfillOptions = {}): Promise<Backf
       if (deja.has(pointKey(subject, month))) {
         result.already++;
         continue;
+      }
+      // Le budget se vérifie AVANT d'engager un couple, jamais au milieu : un run coupé entre
+      // la réponse de squashnet et son écriture aurait payé la requête pour rien, et le
+      // passage suivant la repaierait.
+      if (budgetEpuise()) {
+        result.stopped = true;
+        break boucle;
       }
       const rows = await rechercher(subject, month, memo, delayMs, result);
       // `null` = squashnet n'a pas répondu pour cette recherche. On ne conclut rien, et on ne
@@ -132,6 +172,12 @@ export async function backfillHistory(opts: BackfillOptions = {}): Promise<Backf
     }
     opts.onMonth?.(month, i + 1, months.length, result);
   }
+
+  // Ce qui n'a pas été REGARDÉ, et rien d'autre. Les couples tentés sans conclure (`unresolved`)
+  // n'en font pas partie : ils ont été vus, et les compter ici promettrait un « terminé » qui
+  // n'arriverait jamais pour un joueur non licencié à l'époque.
+  const traites = result.already + result.written + result.unresolved + result.failed;
+  result.remaining = months.length * subjects.length - traites;
   return result;
 }
 
