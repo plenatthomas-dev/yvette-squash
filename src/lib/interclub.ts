@@ -189,6 +189,138 @@ export function isValidMatchCount(n: unknown): boolean {
   return Number.isInteger(n) && (n as number) >= MIN_MATCH_COUNT && (n as number) <= MAX_MATCH_COUNT;
 }
 
+/* ────────────────────────────────────────────────────────────────────────────────────────────
+   L'AVANCE, PENDANT QUE ÇA SE JOUE
+
+   `tieOutcome` (interclub-db.ts) dit ce qu'une rencontre TERMINÉE rapporte, et refuse
+   délibérément de se prononcer avant : annoncer un verdict à mi-parcours ferait passer un 2-1
+   en cours pour une victoire acquise.
+
+   Mais ce qui manque pendant la soirée n'est pas le verdict — c'est le COMPTE. Depuis que la
+   division 4 se joue en quatre simples, un 2-2 vaut deux points de classement ou un seul selon
+   l'average de JEUX, puis, à jeux égaux, selon l'average de POINTS. La rencontre peut donc se
+   décider au point près, sur le dernier échange du dernier match — et personne sur place ne
+   peut le savoir : il faudrait additionner de tête les jeux et les points de quatre matchs,
+   dont un en cours.
+
+   Cette fonction COMPTE, et dit ce que le compte peut encore décider. Elle ne conclut rien :
+   `settled` ne parle que de ce qui est arithmétiquement hors d'atteinte, jamais de ce qui est
+   probable.
+   ──────────────────────────────────────────────────────────────────────────────────────────── */
+
+/** Ce qu'un simple apporte au compte de la rencontre. Forme commune au client et au serveur. */
+export interface TallyMatch {
+  status: string;
+  gamesHome: number | null;
+  gamesAway: number | null;
+  /** Jeux TERMINÉS, avec leurs points. Absent ⇒ le total des points sera déclaré incomplet. */
+  games?: readonly GameScore[];
+  /** Jeu EN COURS, tel que le marqueur le publie. `null` hors direct. */
+  live?: { current: GameScore } | null;
+}
+
+export interface RunningTally {
+  /** Matchs gagnés de chaque côté — TERMINÉS seulement, même règle que `fixtureScore`. */
+  matches: GameScore;
+  /** Simples qui restent à décider. Zéro ⇒ la rencontre est jouée. */
+  pending: number;
+  /**
+   * Jeux gagnés, LES MATCHS EN COURS COMPRIS : c'est là que se joue l'average pendant la
+   * soirée, et s'en tenir aux matchs finis rendrait le compteur immobile pendant vingt minutes.
+   * Le jeu en cours n'en fait pas partie — il n'est gagné par personne.
+   */
+  games: GameScore;
+  /**
+   * Points cumulés de tous les jeux, LE JEU EN COURS COMPRIS. C'est ce qui rend le compteur
+   * vivant échange après échange, et c'est bien la somme que la ligue fera à la fin.
+   *
+   * `null` dès qu'un détail manque : un simple saisi « 3-1 » sans son jeu par jeu rendrait un
+   * total PARTIEL présenté comme un total — et c'est précisément le chiffre qui départage.
+   * Même refus que `tieOutcome`, pour la même raison.
+   */
+  rallies: GameScore | null;
+  /** Le nul aux matchs est-il encore ATTEIGNABLE ? Sinon l'average ne décidera rien. */
+  drawReachable: boolean;
+  /** Le score de matchs qui ferait ce nul (2 à quatre simples). `null` s'il est hors d'atteinte. */
+  drawAt: number | null;
+  /** Issue déjà ACQUISE aux matchs, quoi qu'il advienne des simples restants. */
+  settled: "win" | "loss" | null;
+}
+
+export function runningTally(
+  matchCount: number,
+  matches: readonly TallyMatch[],
+): RunningTally {
+  const won: GameScore = { home: 0, away: 0 };
+  const games: GameScore = { home: 0, away: 0 };
+  const rallies: GameScore = { home: 0, away: 0 };
+  let complet = true;
+  let decides = 0;
+
+  for (const m of matches) {
+    const jh = m.gamesHome ?? 0;
+    const ja = m.gamesAway ?? 0;
+
+    // Le MATCH ne compte que TERMINÉ. `gamesHome !== null` ne suffirait pas : cette colonne est
+    // renseignée dès le premier jeu, et un soir où les quatre simples ont joué un jeu la
+    // rencontre se lirait 3-1 alors que rien n'est joué (cf. `fixtureScore`).
+    if (m.status === "done" && m.gamesHome !== null && m.gamesAway !== null && jh !== ja) {
+      decides += 1;
+      if (jh > ja) won.home += 1;
+      else won.away += 1;
+    }
+
+    // Les JEUX, eux, comptent dès qu'ils sont gagnés — c'est exactement ce qu'on vient chercher.
+    games.home += jh;
+    games.away += ja;
+
+    // Les POINTS ne se totalisent que sur un détail COMPLET. Le nombre de jeux détaillés doit
+    // égaler le nombre de jeux joués : seule vérification qui distingue « tout est saisi » de
+    // « il en manque un ».
+    const detail = m.games ?? [];
+    if (detail.length !== jh + ja) {
+      complet = false;
+    } else {
+      for (const g of detail) {
+        rallies.home += g.home;
+        rallies.away += g.away;
+      }
+    }
+
+    // Le jeu EN COURS : ses points comptent déjà, son gain non. Gardé sur le statut et pas
+    // seulement sur la présence de l'instantané — un `liveJson` oublié sur un match terminé
+    // ajouterait des points déjà comptés dans son détail.
+    if (m.live && m.status !== "done") {
+      rallies.home += m.live.current.home;
+      rallies.away += m.live.current.away;
+    }
+  }
+
+  // ⚠️ `matchCount` PEUT MANQUER, et c'est un cas réel, pas de la prudence gratuite : le
+  // panneau du direct lit une charge utile servie par le Data Cache, dont une entrée écrite par
+  // le déploiement PRÉCÉDENT peut survivre à la mise en ligne. Sans ce repli, `undefined`
+  // traversait toute l'arithmétique et l'écran affichait « NaN » pendant le TTL. Le nombre de
+  // simples fournis est le meilleur substitut : c'est ce que la rencontre a réellement ouvert.
+  const total = Number.isInteger(matchCount) && matchCount > 0 ? matchCount : matches.length;
+  const pending = Math.max(0, total - decides);
+  const ecart = Math.abs(won.home - won.away);
+  // Un nul se rattrape si l'écart tient dans ce qui reste ET si la PARITÉ le permet : à un seul
+  // simple restant, un 1-1 ne peut PAS finir à égalité — quelqu'un gagnera ce match. C'est la
+  // moitié du sujet : sans la parité, l'écran annoncerait un départage à l'average un soir où
+  // il ne peut arithmétiquement pas y en avoir.
+  const drawReachable = ecart <= pending && (pending - ecart) % 2 === 0;
+
+  return {
+    matches: won,
+    pending,
+    games,
+    rallies: complet ? rallies : null,
+    drawReachable,
+    drawAt: drawReachable ? (won.home + won.away + pending) / 2 : null,
+    settled: won.home > won.away + pending ? "win" : won.away > won.home + pending ? "loss" : null,
+  };
+}
+
 function emptyState(): MatchState {
   return {
     games: [],

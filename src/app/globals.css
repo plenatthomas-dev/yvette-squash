@@ -5830,6 +5830,55 @@ body[data-bottombar] .install-banner {
   margin: -4px 0 10px;
 }
 
+/* ── L'AVANCE EN COURS DE RENCONTRE ────────────────────────────────────────────────────────
+   Le pendant VIVANT de `.ic-outcome` : même vocabulaire (gris, chiffres tabulaires, le seul
+   chiffre décisif qui sort du gris), parce que c'est la même information à deux moments —
+   pendant, puis après. Deux dispositifs visuels différents pour « jeux 7–4 » selon que la
+   rencontre est finie ou non n'auraient rien appris à personne.
+
+   Pas de vert malgré l'avance (Règle du Vert Actionnable : une avance est un ÉTAT), et pas de
+   couleur seule : le signe porte l'information, la phrase l'explique, et la ligne reste
+   lisible en niveaux de gris. */
+.ic-tally {
+  margin: -4px 0 10px;
+}
+.ic-tally-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+  font-variant-numeric: tabular-nums;
+}
+.ic-tally-label {
+  font-weight: 700;
+  color: var(--pico-contrast);
+}
+/* L'average qui peut ENCORE départager sort du gris — les autres restent une indication. Sans
+   ce repère, deux chiffres côte à côte se lisent comme deux enjeux égaux, alors qu'un seul des
+   deux décide, et seulement sur un nul. */
+.ic-tally-avg.is-decisive {
+  color: var(--pico-contrast);
+  font-weight: 600;
+}
+.ic-tally-diff { font-weight: 700; }
+/* La phrase : ce que le compte veut dire, y compris « rien ». Plus petite que les chiffres,
+   qu'on vient lire en premier. */
+.ic-tally-say {
+  margin: 2px 0 0;
+  font-size: 0.75rem;
+  color: var(--pico-muted-color);
+}
+
+/* Dans la carte du direct, déjà dense : on serre, sans rien retirer. */
+.ic-tally.is-compact {
+  margin: 6px 0 0;
+}
+.ic-tally.is-compact .ic-tally-row { font-size: 0.78rem; }
+.ic-tally.is-compact .ic-tally-say { font-size: 0.72rem; }
+
 /* ── LE CLASSEMENT DE LA POULE ─────────────────────────────────────────────────────────────
    Donnée de RÉFÉRENCE, pas d'action : repliée par défaut, posée entre le filtre d'équipe et la
    liste des résultats — l'endroit exact où naît la question « on est où ? ».
