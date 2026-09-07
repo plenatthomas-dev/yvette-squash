@@ -15,6 +15,7 @@ import { EmptyState, Skeleton } from "@/components/Placeholders";
 import InterclubScorer from "@/components/InterclubScorer";
 import InterclubFollow from "@/components/InterclubFollow";
 import InterclubLive from "@/components/InterclubLive";
+import InterclubTally from "@/components/InterclubTally";
 import { InterclubAvailability } from "@/components/InterclubAvailability";
 import { CLUB_TZ } from "@/lib/time";
 import { downloadFixtureIcs } from "@/lib/ics";
@@ -1230,6 +1231,13 @@ function FixtureDialog({
         <p className="ic-outcome-line">
           <TieOutcomeLine outcome={fixture.outcome} />
         </p>
+      )}
+      {/* PENDANT la rencontre, à la place exacte qu'occupera la ligne de résultat une fois
+          qu'elle sera finie — et jamais les deux à la fois : l'une compte ce qui se joue,
+          l'autre dit ce que ça a rapporté. Le calcul se fait sur les simples DÉJÀ CHARGÉS de
+          la fiche, sans requête de plus. */}
+      {fixture.status === "live" && (
+        <InterclubTally matchCount={fixture.matchCount} matches={fixture.matches} />
       )}
 
       {/* LES DISPONIBILITÉS AVANT LA COMPOSITION, et c'est l'ordre du geste réel : on demande

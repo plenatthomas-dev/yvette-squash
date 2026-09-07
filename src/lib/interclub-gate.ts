@@ -85,6 +85,12 @@ export interface LiveFixture {
   teamName: string;
   opponent: string;
   home: boolean;
+  /**
+   * Nombre de simples de la rencontre. Publié parce que le compteur d'avance en a besoin pour
+   * savoir COMBIEN il en reste, donc si un nul — et donc l'average — est encore atteignable.
+   * Il vient de la ligne déjà lue : aucune requête de plus.
+   */
+  matchCount: number;
   status: string;
   score: { home: number; away: number };
   matches: LiveMatch[];
@@ -116,6 +122,7 @@ async function readLive(): Promise<LiveFixture[]> {
     teamName: f.team.name,
     opponent: f.opponent,
     home: f.home,
+    matchCount: f.matchCount,
     // Statut DÉDUIT des matchs, pas la colonne stockée. Deux marqueurs qui écrivent en même
     // temps sur deux matchs de la même rencontre peuvent laisser cette colonne en retard
     // (chacun relit les matchs voisins avant que l'autre n'ait écrit). La colonne se
