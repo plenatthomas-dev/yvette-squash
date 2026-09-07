@@ -7032,3 +7032,10 @@ body[data-bottombar] .install-banner {
   margin: 12px 0;
   text-align: center;
 }
+
+/* Indice « la plupart des joueurs n'ont qu'une mesure » sur la courbe de progression.
+   Une notice et non un `muted` : ce n'est pas une précision de bas de page, c'est la
+   réponse à la question que se pose celui qui regarde un graphique sans courbe. */
+.rankhist-indice {
+  margin: 0 0 10px;
+}

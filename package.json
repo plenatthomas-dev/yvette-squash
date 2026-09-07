@@ -20,7 +20,8 @@
     "db:studio": "prisma studio",
     "resa:test": "tsx scripts/resa-test.ts",
     "rankings:backfill": "node --env-file=.env --import tsx scripts/backfill-rankings.ts",
-    "rankings:mois": "node --import tsx scripts/squashnet-months.ts"
+    "rankings:mois": "node --import tsx scripts/squashnet-months.ts",
+    "rankings:diag": "node --env-file=.env --import tsx scripts/rankings-diagnostic.ts"
   },
   "dependencies": {
     "@picocss/pico": "^2.1.1",

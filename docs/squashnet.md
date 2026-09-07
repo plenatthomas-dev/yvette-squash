@@ -146,6 +146,37 @@ Pour savoir si la base contient plus que ce que l'écran montre :
 SELECT month, count(*) FROM "SquashnetRankingPoint" GROUP BY month ORDER BY month;
 ```
 
+#### « Tout le monde a une seule mesure, sauf une personne »
+
+C'est le motif le plus fréquent, et il ne vient d'aucun défaut : **une mesure = le mois
+courant**, écrit par la passe mensuelle pour tout joueur rapproché. Les joueurs qui n'en ont
+qu'une n'ont donc **jamais** été traités par le remplissage rétroactif — typiquement parce que
+celui-ci a tourné avant qu'ils ne soient `listed` ou alignés en équipe, donc avant qu'ils
+n'entrent dans `subjectsToRefresh`.
+
+Le remplissage ne rattrape jamais tout seul : il balaie les joueurs d'**aujourd'hui**, mais
+seulement quand on le lance. Il faut donc le relancer après chaque vague d'inscriptions.
+
+⚠️ **Le relancer par le bouton coûte cher dans ce cas** : ~40 joueurs × ~23 mois manquants ≈
+900 couples, soit une douzaine de clics de 45 s. Le script fait la même chose d'une traite :
+
+```bash
+npm run rankings:backfill
+```
+
+Pour établir le diagnostic avant d'agir :
+
+```bash
+npm run rankings:diag          # qui a combien de mesures, et sur quelle plage
+npm run rankings:diag -- "Dupont" 2026-01-05    # le verdict live d'un joueur, un mois
+```
+
+Le second mode rejoue à l'identique ce que fait le remplissage et imprime le verdict. Il
+débusque la panne silencieuse que le schéma documente déjà : quand ResaMania a enregistré
+« Nom Prénom », le terme cherché est un **prénom**, la réponse déborde d'homonymes, et le
+verdict est « introuvable » tous les mois sans que rien ne le signale. Remède :
+`squashnetGivenName` / `squashnetFamilyName` sur le membre.
+
 ### 4. Historique des matchs d'un joueur — **endpoint inconnu**
 
 C'est la seule demande qui n'a pas de chemin identifié. Les lignes du classement des joueurs

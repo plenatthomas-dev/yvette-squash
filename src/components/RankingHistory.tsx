@@ -147,6 +147,20 @@ export function RankingHistory({
   const aiguille = q.trim().toLowerCase();
   const listables = (data?.series ?? []).filter((s) => s.name.toLowerCase().includes(aiguille));
 
+  // UNE COURBE À UN POINT N'EST PAS UNE COURBE, et l'écran doit le dire lui-même.
+  //
+  // Quand l'historique n'a jamais été rempli en arrière — ou qu'il l'a été avant que ces
+  // joueurs-là n'existent —, chacun ne porte que la mesure du mois courant, écrite par la passe
+  // mensuelle. L'écran affiche alors des points isolés, sans rien qui explique pourquoi : la
+  // question « pourquoi n'ai-je pas de données avant janvier ? » se pose devant CET écran, et
+  // c'est donc lui qui doit y répondre.
+  //
+  // Le seuil porte sur la MAJORITÉ, pas sur un joueur : un nouvel inscrit à une seule mesure
+  // est normal, tout le club à une seule mesure ne l'est pas.
+  const series = data?.series ?? [];
+  const seuls = series.filter((s) => s.points.length <= 1).length;
+  const presqueVide = series.length >= 3 && seuls > series.length / 2;
+
   const bascule = (id: string) =>
     setChoisis((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
@@ -335,6 +349,14 @@ export function RankingHistory({
             onChange={(e) => setQ(e.target.value)}
             aria-label="Rechercher un joueur à comparer"
           />
+          {presqueVide && (
+            <p className="notice info tiny rankhist-indice">
+              {seuls} joueur{seuls > 1 ? "s" : ""} sur {series.length} n&apos;
+              {seuls > 1 ? "ont" : "a"} qu&apos;une seule mesure&nbsp;: les mois passés n&apos;ont
+              pas encore été récupérés pour eux. Un administrateur peut lancer « Compléter
+              l&apos;historique » depuis l&apos;espace d&apos;administration.
+            </p>
+          )}
           <ul className="rankhist-choix">
             {listables.length === 0 ? (
               <li className="muted tiny">Aucun résultat.</li>

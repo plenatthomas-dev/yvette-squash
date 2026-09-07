@@ -158,6 +158,36 @@ describe("RankingHistory", () => {
     expect(screen.getByText(/Choisis au moins un joueur/)).toBeTruthy();
   });
 
+  // La question qui a motivé cet indice, posée mot pour mot devant l'écran : « pourquoi je n'ai
+  // pas de données avant janvier ? ». Elle se pose ici, donc elle se répond ici.
+  it("dit lui-même que l'historique n'a pas été rempli quand la plupart n'ont qu'une mesure", async () => {
+    monte(
+      [
+        serie("u1", "Jean Dupont", [{ mean: 1000, rangM: 2300 }, { mean: 1050, rangM: 2200 }, { mean: 1100, rangM: 1800 }]),
+        serie("u2", "Paul Martin", [null, null, { mean: 900, rangM: 2600 }]),
+        serie("u3", "Luc Bernard", [null, null, { mean: 950, rangM: 2500 }]),
+      ],
+      "Jean Dupont",
+    );
+    await souffle();
+    expect(screen.getByText(/2 joueurs sur 3/)).toBeTruthy();
+    expect(screen.getByText(/Compléter l'historique/)).toBeTruthy();
+  });
+
+  it("se tait quand l'historique est correctement rempli", async () => {
+    monte(
+      [
+        serie("u1", "Jean Dupont", [{ mean: 1000, rangM: 2300 }, { mean: 1050, rangM: 2200 }, null]),
+        serie("u2", "Paul Martin", [{ mean: 900, rangM: 2600 }, { mean: 920, rangM: 2550 }, null]),
+        // Un seul nouvel inscrit à une mesure unique est NORMAL, et ne doit rien déclencher.
+        serie("u3", "Luc Bernard", [null, null, { mean: 950, rangM: 2500 }]),
+      ],
+      "Jean Dupont",
+    );
+    await souffle();
+    expect(screen.queryByText(/une seule mesure/)).toBeNull();
+  });
+
   it("historique vide → dit comment le remplir, sans graphique fantôme", async () => {
     monte([], undefined, []);
     await souffle();
