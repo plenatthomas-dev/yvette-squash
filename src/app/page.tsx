@@ -10,6 +10,7 @@ import { Dialog } from "@/components/Dialog";
 import { SettingsButton } from "@/components/SettingsButton";
 import { PasskeyEnrollPrompt } from "@/components/PasskeyEnrollPrompt";
 import { DirectoryModal } from "@/components/DirectoryModal";
+import { RankingHistory } from "@/components/RankingHistory";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
 import { ShareModal } from "@/components/ShareModal";
 import { HeaderMenu } from "@/components/HeaderMenu";
@@ -25,6 +26,7 @@ import {
   TeamsIcon,
   BellIcon,
   UsersIcon,
+  TrendIcon,
   ShareIcon,
   RefreshIcon,
   CalendarIcon,
@@ -180,7 +182,8 @@ interface AlertItem {
 const SPLASH_MIN_MS = 250;
 
 export default function Home() {
-  const { tricount, directory, delegation, tournament, interclub, forum } = useFeatures();
+  const { tricount, directory, delegation, tournament, interclub, forum, ranking } =
+    useFeatures();
   // Voir le garde des vues coupées plus bas : sans ça, « pas encore chargé » se lit « coupé ».
   const featuresReady = useFeaturesReady();
   const [me, setMe] = useState<string | null | undefined>(undefined); // undefined = chargement
@@ -270,6 +273,7 @@ export default function Home() {
   // Modales du menu ⋯ (partage / annuaire), pilotées depuis HeaderMenu.
   const [shareOpen, setShareOpen] = useState(false);
   const [directoryOpen, setDirectoryOpen] = useState(false);
+  const [rankHistOpen, setRankHistOpen] = useState(false);
   const today = toISODate(new Date());
   // Notifications disponibles seulement une fois monté (évite un décalage d'hydratation)
   // ET si le navigateur les supporte ET si les clés VAPID sont configurées côté serveur.
@@ -1329,6 +1333,17 @@ export default function Home() {
                   onClick: () => setDirectoryOpen(true),
                 },
                 {
+                  key: "rankhist",
+                  label: "Progression",
+                  icon: <TrendIcon />,
+                  // Gated sur `ranking` et non sur `directory` : la courbe ne montre pas
+                  // l'annuaire, elle montre le classement fédéral — c'est la même fonction que
+                  // le badge « 5A », vue dans le temps.
+                  disabled: !ranking,
+                  comingSoon: !ranking,
+                  onClick: () => setRankHistOpen(true),
+                },
+                {
                   key: "share",
                   label: "Partager l'appli",
                   icon: <ShareIcon />,
@@ -1364,6 +1379,13 @@ export default function Home() {
         open={directoryOpen}
         onClose={() => setDirectoryOpen(false)}
         toast={toast}
+      />
+      <RankingHistory
+        open={rankHistOpen}
+        onClose={() => setRankHistOpen(false)}
+        // Le pseudo s'il existe, comme partout ailleurs : c'est sous ce nom que le joueur se
+        // reconnaît dans la liste, et c'est celui que la route renvoie.
+        meName={nickname || me || undefined}
       />
 
       {delegation &&

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { getLatestMonth, searchRanking } from "./client";
-import { classifyRanking, searchQuery, type MemberIdentity } from "./match";
+import { classifyRanking, searchQuery, type MemberIdentity, type RankingMatch } from "./match";
+import { writePoint } from "./history";
 import type { RankingRow } from "./client";
 
 // ============================================================================
@@ -69,7 +70,7 @@ export interface RefreshResult {
  * c'est là que se loge la correction admin d'un nom, et l'y appliquer à deux endroits reviendrait
  * à pouvoir en oublier un.
  */
-type Subject = {
+export type Subject = {
   kind: "member" | "guest";
   id: string;
   /** Nom affiché, pour les journaux et les messages — jamais utilisé pour rapprocher. */
@@ -98,7 +99,7 @@ function defaultIdentity(name: string): { query: string; identity: MemberIdentit
 }
 
 /** Les joueurs à balayer, dans l'ordre : membres d'abord, joueurs sans compte ensuite. */
-async function subjectsToRefresh(): Promise<Subject[]> {
+export async function subjectsToRefresh(): Promise<Subject[]> {
   const [users, guests] = await Promise.all([
     // `listed` OU rattaché à une équipe : cf. l'en-tête du module. Un membre retiré de
     // l'annuaire mais aligné en championnat a besoin de son classement — pas pour être affiché,
@@ -143,12 +144,27 @@ function memberIdentity(u: {
   return defaultIdentity(u.displayName.trim());
 }
 
-/** Écrit un rapprochement RÉUSSI, là où cette population le range. */
-async function writeMatch(
-  subject: Subject,
-  hit: { clt: string; rang: number | null; rangM: number | null; licence: string; cat: string; club: string },
-  month: string,
-): Promise<void> {
+/**
+ * Écrit un rapprochement RÉUSSI, là où cette population le range — ET le consigne dans
+ * l'historique mensuel.
+ *
+ * Les deux écritures sont dans la MÊME fonction, et c'est délibéré : l'état courant et le point
+ * de courbe décrivent la même observation. Les séparer laisserait un chemin par lequel un
+ * classement peut être mis à jour sans laisser de trace, et la courbe aurait alors des trous
+ * là où l'annuaire, lui, a bien changé de valeur — un écart impossible à expliquer six mois
+ * plus tard.
+ */
+async function writeMatch(subject: Subject, hit: RankingMatch, month: string): Promise<void> {
+  // L'ÉTAT COURANT D'ABORD, LE POINT DE COURBE ENSUITE, et cet ordre n'est pas un détail : le
+  // premier est lu par l'annuaire et par l'ordre des simples, le second par un écran qu'on
+  // ouvre de temps en temps. Écrire la courbe en tête ferait dépendre le classement du club
+  // d'une table qui ne le sert pas — une panne sur l'historique gèlerait l'annuaire.
+  await writeCurrent(subject, hit, month);
+  await writePoint(subject, hit, month);
+}
+
+/** L'état COURANT, là où cette population le range. */
+async function writeCurrent(subject: Subject, hit: RankingMatch, month: string): Promise<void> {
   if (subject.kind === "member") {
     const data = {
       clt: hit.clt,

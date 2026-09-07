@@ -29,6 +29,8 @@ const h = vi.hoisted(() => ({
   guestFindMany: vi.fn(),
   guestUpdate: vi.fn(),
   guestUpdateMany: vi.fn(),
+  // L'historique mensuel : `writeMatch` y consigne le point après avoir écrit l'état courant.
+  pointUpsert: vi.fn(),
 }));
 
 vi.mock("./client", () => ({
@@ -39,6 +41,7 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     user: { findMany: h.findMany, findUnique: h.findUnique },
     squashnetRanking: { upsert: h.upsert, deleteMany: h.deleteMany },
+    squashnetRankingPoint: { upsert: h.pointUpsert },
     interclubGuest: {
       findMany: h.guestFindMany,
       update: h.guestUpdate,
@@ -71,6 +74,7 @@ beforeEach(() => {
   h.getLatestMonth.mockReset().mockResolvedValue("2026-07-07");
   h.searchRanking.mockReset();
   h.upsert.mockReset().mockResolvedValue({});
+  h.pointUpsert.mockReset().mockResolvedValue({});
   h.deleteMany.mockReset().mockResolvedValue({ count: 1 });
   // Remis à zéro comme `guests` : sans cela, l'effectif du test précédent débordait sur le
   // suivant et consommait ses `mockResolvedValueOnce`.
@@ -109,6 +113,38 @@ describe("refreshRankings", () => {
     expect(res).toMatchObject({ matched: 1, cleared: 0, skipped: 0 });
     expect(h.upsert).toHaveBeenCalledOnce();
     expect(h.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("consigne AUSSI le point d'historique du mois, pour la courbe de progression", async () => {
+    h.members = [{ id: "u1", displayName: "Jean Dupont" }];
+    h.searchRanking.mockResolvedValueOnce([row("DUPONT JEAN", { mean: "3 832.17" })]);
+    await refreshRankings();
+    // La moyenne de points est LA valeur de la courbe : c'est la seule qui bouge tous les mois.
+    // Elle doit traverser le rapprochement, qui ne la portait pas avant l'historique.
+    expect(h.pointUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId_month: { userId: "u1", month: "2026-07-07" } },
+        create: expect.objectContaining({ userId: "u1", month: "2026-07-07", mean: 3832.17 }),
+      }),
+    );
+  });
+
+  it("n'écrit AUCUN point pour un mois non concluant — un trou vaut mieux qu'une valeur inventée", async () => {
+    h.members = [{ id: "u1", displayName: "Jean Dupont" }];
+    h.searchRanking.mockResolvedValueOnce([]); // squashnet muet / joueur introuvable
+    await refreshRankings();
+    expect(h.pointUpsert).not.toHaveBeenCalled();
+  });
+
+  it("une panne sur l'historique ne bloque pas l'annuaire : l'état courant est écrit d'abord", async () => {
+    h.members = [{ id: "u1", displayName: "Jean Dupont" }];
+    h.searchRanking.mockResolvedValueOnce([row("DUPONT JEAN")]);
+    h.pointUpsert.mockRejectedValueOnce(new Error("table absente"));
+    const res = await refreshRankings();
+    // Le classement du membre est à jour malgré la panne de la courbe…
+    expect(h.upsert).toHaveBeenCalledOnce();
+    // …et l'échec est compté comme une panne base, jamais imputé à squashnet.
+    expect(res).toMatchObject({ failed: 1, skipped: 0 });
   });
 
   it("membre retrouvé UNIQUEMENT dans un autre club → suppression (moved)", async () => {

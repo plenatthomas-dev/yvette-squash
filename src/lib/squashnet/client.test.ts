@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseRankingFragment, parseLatestMonth } from "./client";
+import { parseRankingFragment, parseLatestMonth, parseMonths } from "./client";
 
 // Fragment réel capté sur squashnet.fr (POST ic_a=131079, name=courtaut) : sélecteur de mois
 // + bloc résultats. La 1re ligne est authentique ; la 2e est synthétique (homonyme dans un
@@ -67,6 +67,35 @@ describe.each([
     });
     it("null si aucun select mois", () => {
       expect(parseLatestMonth(q("<div>rien</div>"))).toBeNull();
+    });
+  });
+
+  // C'est ce sélecteur qui rend l'historique remplissable EN ARRIÈRE : la fédération garde les
+  // publications passées accessibles à la même requête, à un paramètre près. Sans lui, la courbe
+  // de progression aurait été un écran vide pendant deux ans.
+  describe("parseMonths", () => {
+    it("rend TOUTES les périodes, la plus récente en tête", () => {
+      expect(parseMonths(q(wrap(ROW_JEROME)))).toEqual(["2026-07-07", "2026-06-02", "2026-05-05"]);
+    });
+    it("liste vide si aucun select mois", () => {
+      expect(parseMonths(q("<div>rien</div>"))).toEqual([]);
+    });
+    it("ne déborde pas sur les dates d'un AUTRE select de la page", () => {
+      // Le select `#month` est le seul dont on veut les valeurs : balayer le document entier
+      // ferait dépendre la profondeur de l'historique de ce que squashnet ajoute ailleurs.
+      const autre = "<select id='saison'><option value='2001-01-01'>2001</option></select>";
+      expect(parseMonths(q(wrap(ROW_JEROME)) + autre)).toEqual([
+        "2026-07-07",
+        "2026-06-02",
+        "2026-05-05",
+      ]);
+    });
+    it("dédoublonne : un mois répété ne vaut qu'un point de courbe et qu'une requête", () => {
+      const doublon = q(
+        "<select id='month'><option value='2026-07-07'>Juillet</option>" +
+          "<option value='2026-07-07'>Juillet</option></select>",
+      );
+      expect(parseMonths(doublon)).toEqual(["2026-07-07"]);
     });
   });
 

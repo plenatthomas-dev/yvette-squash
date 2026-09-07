@@ -88,6 +88,11 @@ model User {
   tournamentPlayers        TournamentPlayer[]
   // Classement fédéral (idée squashnet) : dernier classement rapproché, source publique.
   squashnetRanking         SquashnetRanking?
+  // Historique MENSUEL du même classement (courbe de progression). Une table à part et non
+  // des colonnes de plus sur `SquashnetRanking` : celle-ci porte L'ÉTAT COURANT, lu par
+  // l'annuaire et par l'ordre des simples à chaque affichage, et lui faire porter aussi
+  // vingt-quatre mois de mesures obligerait tous ses lecteurs à trier avant de lire.
+  rankingHistory           SquashnetRankingPoint[]
   // Interclub : équipe de l'asso où ce membre est aligné (NULL = non aligné, cas le plus
   // fréquent). Affiché comme colonne de l'annuaire. SetNull à la suppression de l'équipe.
   team                     InterclubTeam?          @relation(fields: [teamId], references: [id], onDelete: SetNull)
@@ -630,6 +635,52 @@ model SquashnetRanking {
   fetchedAt DateTime @updatedAt // dernier rafraîchissement
 }
 
+/// UN POINT DE MESURE DU CLASSEMENT FÉDÉRAL, un joueur, un mois.
+///
+/// `SquashnetRanking` répond à « où en est-il ? » ; cette table-ci répond à « d'où vient-il ? ».
+/// Ce sont deux questions distinctes et deux chemins de lecture distincts — l'un chaud (chaque
+/// ouverture de l'annuaire, chaque composition d'équipe), l'autre froid (un écran qu'on ouvre
+/// pour regarder une courbe) —, d'où deux tables plutôt qu'un historique greffé sur l'état
+/// courant.
+///
+/// DEUX POPULATIONS, comme partout dans ce module : un MEMBRE (`userId`) ou un joueur SANS
+/// COMPTE (`guestId`), jamais les deux, jamais aucun. Prisma ne sait pas exprimer ce XOR ; il
+/// est tenu par le code qui écrit (`lib/squashnet/history.ts`) et par la contrainte SQL
+/// `sn_point_un_seul_sujet` que porte la migration.
+///
+/// LE MOIS EST CELUI DE LA FÉDÉRATION, pas le nôtre : « 2026-07-07 » est la valeur exacte que
+/// squashnet met dans son sélecteur de période, recopiée telle quelle. La rebaser sur un
+/// premier-du-mois ferait diverger deux points qui sont la même publication, et casserait le
+/// rapprochement avec `SquashnetRanking.month`.
+///
+/// ⚠️ ON N'ÉCRIT QUE CE QU'ON A VU. Aucune ligne n'est créée pour un mois où le rapprochement
+/// n'a pas abouti : un trou dans la courbe dit « on ne sait pas », un zéro dirait « il a chuté ».
+model SquashnetRankingPoint {
+  id        String          @id @default(cuid())
+  user      User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String?
+  guest     InterclubGuest? @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  guestId   String?
+  month     String // période de classement fédérale, « YYYY-MM-DD »
+  clt       String // classement affiché, ex. « 5A », « NC »
+  rang      Int? // rang national DANS SON GENRE
+  rangM     Int? // rang national MIXTE, toutes catégories — l'échelle comparable entre joueurs
+  /// La MOYENNE DE POINTS (« 3 832.17 »), et c'est elle qui fait la courbe. Le classement
+  /// (« 5A ») ne bouge que deux ou trois fois dans une vie de joueur, et le rang dépend autant
+  /// des autres que de soi ; la moyenne, elle, bouge à chaque mois joué. Une courbe de `clt`
+  /// serait une ligne plate, ce qui n'apprendrait rien à personne.
+  mean      Float?
+  fetchedAt DateTime        @default(now())
+
+  // Un joueur, un mois, un point. C'est ce qui rend le backfill et le cron mensuel rejouables
+  // autant de fois qu'on veut : un run qui repasse corrige la ligne au lieu d'en ajouter une.
+  // NULL étant distinct de NULL en Postgres, la contrainte « membre » ne gêne pas les invités
+  // (dont `userId` est NULL) et réciproquement.
+  @@unique([userId, month])
+  @@unique([guestId, month])
+  @@index([month])
+}
+
 // --- Interclub (rencontres de championnat par équipes) ----------------------
 // Une RENCONTRE = une équipe de l'asso contre un club adverse, un soir donné, en N matchs
 // de simple. Chaque match se compte en JEUX gagnés (comme Tournament/Match), et le détail
@@ -753,6 +804,7 @@ model InterclubGuest {
   createdAt     DateTime                @default(now())
   matches       InterclubMatch[]        @relation("InterclubHomeGuest")
   availability  InterclubAvailability[]
+  rankingHistory SquashnetRankingPoint[]
 
   // Deux fois le même nom dans la même équipe est une faute de saisie, pas un cas d'usage.
   @@unique([teamId, name])

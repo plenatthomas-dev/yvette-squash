@@ -6876,3 +6876,149 @@ body[data-bottombar] .install-banner {
   min-height: 44px;
   font-size: 0.72rem;
 }
+
+/* ============================================================================
+   COURBE DE PROGRESSION (RankingHistory) — le classement fédéral dans le temps.
+
+   Le graphique est en SVG INLINE et sans librairie : une courbe à quatre points
+   par joueur ne justifie pas 60 ko de JavaScript sur un produit dont DESIGN.md
+   dit qu'il ne charge même pas une police. Il hérite donc du thème par
+   `currentColor` et les jetons habituels — pas de palette parallèle à tenir,
+   sauf les couleurs de série (dans `lib/ranking-history.ts`, avec le pourquoi).
+   ============================================================================ */
+
+/* Aide sous le sélecteur de métrique : elle dit dans quel sens LIRE la courbe,
+   ce qu'aucun axe ne dit tout seul quand le rang est inversé. */
+.rankhist-aide {
+  margin: 0 0 10px;
+}
+
+/* Plage de mois. Deux <select> et non un double curseur : le curseur est
+   imprécis au doigt sur trente valeurs, et n'annonce rien aux lecteurs d'écran. */
+.rankhist-plage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+.rankhist-plage label {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.rankhist-plage select {
+  margin: 0;
+  height: 40px;
+  padding: 0 8px;
+  font-size: 0.85rem;
+}
+
+.rankhist-graph {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Le tracé s'appuie sur la surface EN CREUX (Règle du Fond Toujours Plus Sombre) :
+     un graphique posé à plat sur la modale flotterait sans être délimité. */
+  background: var(--sunken);
+  border-radius: 8px;
+  margin: 0 0 10px;
+}
+.rankhist-grille {
+  stroke: var(--grid-line);
+  stroke-width: 1;
+}
+.rankhist-axe {
+  fill: var(--pico-muted-color);
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.rankhist-trace {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Légende : elle porte les CHIFFRES (dernière valeur, évolution), parce qu'un
+   graphique tactile ne se survole pas. C'est aussi la version lisible de
+   l'écran quand on ne peut pas voir la courbe. */
+.rankhist-legende {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+.rankhist-legende li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--pico-card-border-color);
+}
+.rankhist-puce {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.rankhist-nom {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rankhist-val {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--pico-muted-color);
+}
+/* L'évolution est la seule valeur COLORÉE de la ligne : c'est la réponse à la
+   question qu'on est venu poser. Les filets d'issue déjà réglés dans les trois
+   thèmes (--good-edge / --bad-edge) plutôt qu'une quatrième famille de verts. */
+.rankhist-evo {
+  flex: 0 0 auto;
+  min-width: 3.5em;
+  text-align: right;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--pico-muted-color);
+}
+.rankhist-evo.up {
+  color: var(--good-edge);
+}
+.rankhist-evo.down {
+  color: var(--bad-edge);
+}
+
+/* Choix des joueurs à comparer. */
+.rankhist-choix {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  max-height: 32vh;
+  overflow-y: auto;
+}
+.rankhist-choix li {
+  border-bottom: 1px solid var(--pico-card-border-color);
+}
+.rankhist-choix label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* 44 px : la cible tactile minimale du produit — la ligne entière coche, pas
+     seulement la case. */
+  min-height: 44px;
+  margin: 0;
+  padding: 0 4px;
+  font-size: 0.85rem;
+}
+.rankhist-choix input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 0;
+}
+.rankhist-vide {
+  margin: 12px 0;
+  text-align: center;
+}

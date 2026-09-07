@@ -191,10 +191,28 @@ export function PrivacyNotice() {
                       rattaché à une <strong>équipe interclub</strong>, ton classement et ton
                       rang continuent d&apos;être rapprochés même hors annuaire — la compétition
                       impose de composer les simples dans l&apos;ordre du classement, et sans lui
-                      tu ne pourrais être aligné nulle part. Il reste alors visible des seuls
-                      membres qui composent une rencontre, pas dans l&apos;annuaire.
+                      tu ne pourrais être aligné nulle part. Il n&apos;apparaît alors pas dans
+                      l&apos;annuaire, mais reste visible des membres qui composent une rencontre
+                      — et sur l&apos;écran « Progression » décrit juste en dessous.
                     </>
                   )}
+                </p>
+              )}
+              {ranking && (
+                <p>
+                  <strong>Progression (historique du classement).</strong> À chaque
+                  rafraîchissement mensuel, l&apos;appli conserve une <strong>mesure</strong> de
+                  plus&nbsp;: le classement, les deux rangs et la moyenne de points publiés ce
+                  mois-là. Elles alimentent l&apos;écran <strong>« Progression »</strong>, où
+                  chaque membre connecté peut suivre une courbe et <strong>comparer</strong>
+                  {" "}
+                  celles de plusieurs joueurs. Les mesures antérieures à l&apos;installation de
+                  l&apos;appli peuvent avoir été récupérées d&apos;un coup&nbsp;: squashnet
+                  garde ses publications passées accessibles, et elles sont
+                  {" "}
+                  <em>déjà publiques</em> à la même adresse. On n&apos;y montre ni ta licence ni
+                  ton club de rattachement. Les joueurs concernés sont les mêmes que ci-dessus —
+                  membres de l&apos;annuaire et joueurs alignés en interclub.
                 </p>
               )}
               <p>
