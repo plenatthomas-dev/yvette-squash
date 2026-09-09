@@ -16,6 +16,7 @@ const env: Features = {
   delegation: false,
   tournament: false,
   ranking: true,
+  rankingHistory: false,
   externalBookings: false,
   interclub: false,
   forum: false,

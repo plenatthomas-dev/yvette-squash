@@ -96,8 +96,42 @@ export function parseRankingFragment(html: string): RankingRow[] {
  * Le select est présent dans toute réponse, même sans résultat. Null si introuvable.
  */
 export function parseLatestMonth(html: string): string | null {
-  const m = html.match(/id=['"]month['"][\s\S]*?<option value=['"](\d{4}-\d{2}-\d{2})['"]/);
-  return m ? m[1] : null;
+  return parseMonths(html)[0] ?? null;
+}
+
+/**
+ * TOUTES les périodes du select `#month`, LA PLUS RÉCENTE EN TÊTE — parce qu'on les trie, et
+ * non parce que squashnet les rend dans cet ordre.
+ *
+ * ⚠️ LE TRI N'EST PAS DÉCORATIF. Deux appelants dépendent de cet ordre sans pouvoir le
+ * vérifier : `parseLatestMonth` prend `[0]`, et le remplissage rétroactif fait `slice(0, 24)`.
+ * S'en remettre à l'ordre du document faisait reposer la passe mensuelle sur une propriété que
+ * seule une fixture attestait — or ce fournisseur a déjà changé ses guillemets sous nos pieds.
+ * Un `<select>` retourné aurait écrit le classement de 2024 dans l'annuaire ET dans l'ordre des
+ * simples, sous un mois de 2024, sans lever une seule erreur : les valeurs auraient été bien
+ * formées, les compteurs normaux, et la panne muette. Le format `YYYY-MM-DD` rend l'ordre
+ * lexical identique à l'ordre chronologique — une ligne, et la dépendance disparaît.
+ *
+ * C'est ce qui rend l'historique REMPLISSABLE EN ARRIÈRE. La fédération ne republie pas
+ * seulement le classement du mois : elle garde les publications passées accessibles à la même
+ * requête, à un paramètre près. Un club qui installe l'appli aujourd'hui n'a donc pas à
+ * attendre deux ans pour avoir deux ans de courbe (cf. `scripts/backfill-rankings.ts`).
+ *
+ * On borne le découpage au SELECT lui-même : une autre liste déroulante de la page (la ligue,
+ * la catégorie…) n'a aucune raison de contenir des dates, mais balayer le document entier
+ * ferait dépendre le résultat de ce que squashnet ajoute ailleurs. Le `</select>` ferme la
+ * portée ; à défaut, on lit jusqu'au bout plutôt que de ne rien rendre.
+ */
+export function parseMonths(html: string): string[] {
+  const debut = html.search(/id=['"]month['"]/);
+  if (debut < 0) return [];
+  const reste = html.slice(debut);
+  const fin = reste.search(/<\/select>/i);
+  const scope = fin >= 0 ? reste.slice(0, fin) : reste;
+  const mois = [...scope.matchAll(/<option value=['"](\d{4}-\d{2}-\d{2})['"]/g)].map((m) => m[1]);
+  // Dédoublonnage : le même mois deux fois produirait deux points identiques dans la courbe,
+  // et deux requêtes pour rien pendant le backfill.
+  return [...new Set(mois)].sort((a, b) => b.localeCompare(a));
 }
 
 // --- Réseau ----------------------------------------------------------------
@@ -157,6 +191,14 @@ function post(name: string, month: string | null): Promise<string> {
 /** Période de classement courante (une requête légère, sans résultat). */
 export async function getLatestMonth(): Promise<string | null> {
   return parseLatestMonth(await post("", null));
+}
+
+/**
+ * Toutes les périodes publiées, la plus récente en tête. Une seule requête, sans résultat —
+ * le select accompagne n'importe quelle réponse, y compris vide.
+ */
+export async function getMonths(): Promise<string[]> {
+  return parseMonths(await post("", null));
 }
 
 /**

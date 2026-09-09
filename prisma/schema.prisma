@@ -88,6 +88,12 @@ model User {
   tournamentPlayers        TournamentPlayer[]
   // Classement fédéral (idée squashnet) : dernier classement rapproché, source publique.
   squashnetRanking         SquashnetRanking?
+  // Historique MENSUEL du même classement (courbe de progression). Une table à part et non
+  // des colonnes de plus sur `SquashnetRanking` : celle-ci porte L'ÉTAT COURANT, lu par
+  // l'annuaire et par l'ordre des simples à chaque affichage, et lui faire porter aussi
+  // vingt-quatre mois de mesures obligerait tous ses lecteurs à trier avant de lire.
+  rankingHistory           SquashnetRankingPoint[]
+  rankingProbes            SquashnetRankingProbe[]
   // Interclub : équipe de l'asso où ce membre est aligné (NULL = non aligné, cas le plus
   // fréquent). Affiché comme colonne de l'annuaire. SetNull à la suppression de l'équipe.
   team                     InterclubTeam?          @relation(fields: [teamId], references: [id], onDelete: SetNull)
@@ -144,17 +150,17 @@ model User {
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
 // des access tokens sans redemander le mot de passe tant que la session est valide.
 model Session {
-  id              String    @id // jeton aléatoire (valeur du cookie)
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId          String
+  id               String    @id // jeton aléatoire (valeur du cookie)
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId           String
   // Champs ResaMania : NULL pour une session « email seul » (aucun jeton).
-  accessToken     String? // token Bearer chiffré (AES-256-GCM, court ~1h)
-  refreshTokenEnc String? // refresh token chiffré (AES-256-GCM)
-  tokenExpiresAt  DateTime?
+  accessToken      String? // token Bearer chiffré (AES-256-GCM, court ~1h)
+  refreshTokenEnc  String? // refresh token chiffré (AES-256-GCM)
+  tokenExpiresAt   DateTime?
   refreshClaimedAt DateTime? // verrou de rafraîchissement, distinct de la validité du jeton
-  identityJson    String? // ResaIdentity sérialisée (contactId, clubId, nom…)
-  expiresAt       DateTime // expiration de la session applicative
-  createdAt       DateTime  @default(now())
+  identityJson     String? // ResaIdentity sérialisée (contactId, clubId, nom…)
+  expiresAt        DateTime // expiration de la session applicative
+  createdAt        DateTime  @default(now())
 
   @@index([userId])
 }
@@ -630,6 +636,92 @@ model SquashnetRanking {
   fetchedAt DateTime @updatedAt // dernier rafraîchissement
 }
 
+/// UN POINT DE MESURE DU CLASSEMENT FÉDÉRAL, un joueur, un mois.
+///
+/// `SquashnetRanking` répond à « où en est-il ? » ; cette table-ci répond à « d'où vient-il ? ».
+/// Ce sont deux questions distinctes et deux chemins de lecture distincts — l'un chaud (chaque
+/// ouverture de l'annuaire, chaque composition d'équipe), l'autre froid (un écran qu'on ouvre
+/// pour regarder une courbe) —, d'où deux tables plutôt qu'un historique greffé sur l'état
+/// courant.
+///
+/// DEUX POPULATIONS, comme partout dans ce module : un MEMBRE (`userId`) ou un joueur SANS
+/// COMPTE (`guestId`), jamais les deux, jamais aucun. Prisma ne sait pas exprimer ce XOR ; il
+/// est tenu par le code qui écrit (`lib/squashnet/history.ts`) et par la contrainte SQL
+/// `sn_point_un_seul_sujet` que porte la migration.
+///
+/// LE MOIS EST CELUI DE LA FÉDÉRATION, pas le nôtre : « 2026-07-07 » est la valeur exacte que
+/// squashnet met dans son sélecteur de période, recopiée telle quelle. La rebaser sur un
+/// premier-du-mois ferait diverger deux points qui sont la même publication, et casserait le
+/// rapprochement avec `SquashnetRanking.month`.
+///
+/// ⚠️ ON N'ÉCRIT QUE CE QU'ON A VU. Aucune ligne n'est créée pour un mois où le rapprochement
+/// n'a pas abouti : un trou dans la courbe dit « on ne sait pas », un zéro dirait « il a chuté ».
+model SquashnetRankingPoint {
+  id        String          @id @default(cuid())
+  user      User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String?
+  guest     InterclubGuest? @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  guestId   String?
+  month     String // période de classement fédérale, « YYYY-MM-DD »
+  clt       String // classement affiché, ex. « 5A », « NC »
+  rang      Int? // rang national DANS SON GENRE
+  rangM     Int? // rang national MIXTE, toutes catégories — l'échelle comparable entre joueurs
+  /// La MOYENNE DE POINTS (« 3 832.17 »), et c'est elle qui fait la courbe. Le classement
+  /// (« 5A ») ne bouge que deux ou trois fois dans une vie de joueur, et le rang dépend autant
+  /// des autres que de soi ; la moyenne, elle, bouge à chaque mois joué. Une courbe de `clt`
+  /// serait une ligne plate, ce qui n'apprendrait rien à personne.
+  mean      Float?
+  fetchedAt DateTime        @default(now())
+
+  // Un joueur, un mois, un point. C'est ce qui rend le backfill et le cron mensuel rejouables
+  // autant de fois qu'on veut : un run qui repasse corrige la ligne au lieu d'en ajouter une.
+  // NULL étant distinct de NULL en Postgres, la contrainte « membre » ne gêne pas les invités
+  // (dont `userId` est NULL) et réciproquement.
+  @@unique([userId, month])
+  @@unique([guestId, month])
+  @@index([month])
+}
+
+/// CE QU'ON A DÉJÀ DEMANDÉ SANS RIEN OBTENIR — la mémoire des trous.
+///
+/// `SquashnetRankingPoint` dit ce qu'on SAIT. Sans cette table-ci, le remplissage rétroactif ne
+/// gardait aucune trace de ce qu'il avait CHERCHÉ en vain, et redemandait donc à la fédération,
+/// à chaque passage, tous les couples (joueur, mois) qui n'aboutiront jamais — un membre entré
+/// au club l'an dernier n'a pas de classement sur les mois d'avant, et n'en aura jamais.
+///
+/// Ce que ça coûtait : le bouton d'admin travaille par tranches de 45 s et invite à recliquer
+/// « jusqu'à ce que reste tombe à zéro ». Chaque clic repartait du mois le plus récent en
+/// repayant ces recherches-là, s'épuisait au même endroit, et le compteur ne descendait plus.
+/// À quarante joueurs sur vingt-quatre périodes, c'étaient des centaines de requêtes par clic
+/// envoyées à un site associatif, pour un résultat connu d'avance.
+///
+/// ⚠️ ON NE MARQUE QUE CE QUE SQUASHNET A RÉPONDU. Une requête qui échoue (réseau, 5xx, timeout)
+/// ne laisse AUCUNE marque : c'est un incident, pas un verdict, et le passage suivant doit la
+/// reprendre. Seule une réponse REÇUE où le joueur n'apparaît pas est consignée — un classement
+/// publié ne change plus, donc l'absence est définitive.
+///
+/// `verdict` garde la nuance de `classifyRanking` pour l'audit : « moved » (nom retrouvé, mais
+/// hors du club ce mois-là) ou « unknown » (introuvable, ou homonymes indépartageables). Le
+/// second peut se dénouer si un admin corrige le nom de recherche du membre : c'est à ça que
+/// sert la reprise forcée du script (`npm run rankings:backfill -- --reprise`), qui ignore ces
+/// marques.
+model SquashnetRankingProbe {
+  id       String          @id @default(cuid())
+  user     User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId   String?
+  guest    InterclubGuest? @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  guestId  String?
+  month    String // période de classement fédérale, « YYYY-MM-DD »
+  verdict  String // « moved » | « unknown » (cf. classifyRanking)
+  probedAt DateTime        @default(now())
+
+  // Mêmes deux index uniques que `SquashnetRankingPoint`, et pour la même raison : un couple
+  // (joueur, mois) n'a qu'un état, et repasser doit corriger la ligne au lieu d'en empiler une.
+  @@unique([userId, month])
+  @@unique([guestId, month])
+  @@index([month])
+}
+
 // --- Interclub (rencontres de championnat par équipes) ----------------------
 // Une RENCONTRE = une équipe de l'asso contre un club adverse, un soir donné, en N matchs
 // de simple. Chaque match se compte en JEUX gagnés (comme Tournament/Match), et le détail
@@ -720,10 +812,10 @@ model InterclubTeam {
 /// le rafraîchissement mensuel écraserait la correction de l'admin — ou, symétriquement, une
 /// correction ancienne figerait un classement que la fédération a fait bouger depuis.
 model InterclubGuest {
-  id            String                  @id @default(cuid())
-  team          InterclubTeam           @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  teamId        String
-  name          String // « Prénom Nom », saisi par l'admin — un seul champ, comme TricountGuest
+  id             String                  @id @default(cuid())
+  team           InterclubTeam           @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId         String
+  name           String // « Prénom Nom », saisi par l'admin — un seul champ, comme TricountGuest
   // --- Correction ADMIN (prioritaire) ---
   // Classement fédéral (« 5A », « NC »…) et rang mixte forcés à la main, pour l'ORDRE des
   // simples interclub (cf. lib/interclub-order.ts) : un joueur mieux classé doit jouer un
@@ -732,27 +824,29 @@ model InterclubGuest {
   // joueur pas encore licencié). NULL = on se fie au rapprochement.
   // ⚠️ Cette colonne s'appelait `clt` : elle portait DÉJÀ une saisie manuelle, d'où le renommage
   // plutôt qu'une colonne de plus (cf. migration 39_interclub_rangm).
-  cltOverride   String?
-  rangMOverride Int?
+  cltOverride    String?
+  rangMOverride  Int?
   // --- Rapprochement SQUASHNET (automatique, jamais écrasé par l'admin et réciproquement) ---
   // Mêmes champs que `SquashnetRanking` pour un membre, à plat : un invité n'a pas de `User`
   // à qui accrocher la relation, et une table polymorphe coûterait plus qu'elle ne rapporte
   // pour six colonnes.
-  snClt         String? // classement lu sur squashnet, ex. « 5A »
-  snRangM       Int? // rang national MIXTE (« M » = mixte, pas masculin) — départage les ex æquo
-  snLicence     String? // n° de licence FFSquash (traçabilité du rapprochement)
-  snClub        String? // libellé du club rapproché (audit)
-  snMonth       String? // période de classement, « YYYY-MM-DD »
+  snClt          String? // classement lu sur squashnet, ex. « 5A »
+  snRangM        Int? // rang national MIXTE (« M » = mixte, pas masculin) — départage les ex æquo
+  snLicence      String? // n° de licence FFSquash (traçabilité du rapprochement)
+  snClub         String? // libellé du club rapproché (audit)
+  snMonth        String? // période de classement, « YYYY-MM-DD »
   // Verdict de la DERNIÈRE tentative (cf. `classifyRanking`) : « matched » (rapproché),
   // « moved » (retrouvé, mais dans un autre club) ou « unknown » (introuvable ou homonymes
   // ambigus). C'est ce que l'écran d'admin affiche pour dire « pas trouvable sur squashnet »
   // au lieu de laisser une ligne muette, et donc pour savoir quand l'override est nécessaire.
   // NULL = jamais tenté.
-  snStatus      String?
-  snCheckedAt   DateTime? // dernière TENTATIVE (réussie ou non), pas le dernier succès
-  createdAt     DateTime                @default(now())
-  matches       InterclubMatch[]        @relation("InterclubHomeGuest")
-  availability  InterclubAvailability[]
+  snStatus       String?
+  snCheckedAt    DateTime? // dernière TENTATIVE (réussie ou non), pas le dernier succès
+  createdAt      DateTime                @default(now())
+  matches        InterclubMatch[]        @relation("InterclubHomeGuest")
+  availability   InterclubAvailability[]
+  rankingHistory SquashnetRankingPoint[]
+  rankingProbes  SquashnetRankingProbe[]
 
   // Deux fois le même nom dans la même équipe est une faute de saisie, pas un cas d'usage.
   @@unique([teamId, name])

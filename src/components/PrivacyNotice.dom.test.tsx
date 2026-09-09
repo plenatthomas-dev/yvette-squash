@@ -30,6 +30,7 @@ const TOUT_OFF: Features = {
   delegation: false,
   tournament: false,
   ranking: false,
+  rankingHistory: false,
   externalBookings: false,
   interclub: false,
   forum: false,

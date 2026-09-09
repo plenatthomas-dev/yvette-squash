@@ -327,6 +327,33 @@ réservé** via un code couleur (asso vs autre asso) — **comme en vue jour**.
   rien). Modèle `SquashnetRanking` (1/membre) rafraîchi par le **cron mensuel**
   `warm-rankings` (le 8). `/api/directory` expose `clt`/`rang`/`cat` (jamais licence ni
   club). **ACTIVÉ EN PROD** (exception à la convention flags-off-en-prod).
+- **S2. Progression — historique des classements** · ✅ fait · ⭐⭐ · **M** · gated `FEATURE_RANKING`
+  La courbe du classement fédéral dans le temps, et la **comparaison** de plusieurs joueurs
+  sur une plage de mois choisie. L'annuaire donnait une photo ; celui-ci donne le film.
+  **Aucun nouvel endpoint** : le `<select id="month">` du classement expose les publications
+  PASSÉES, et `ic_a=131079` les sert toutes — d'où un remplissage **rétroactif** (24 mois d'un
+  coup, `npm run rankings:backfill`) au lieu d'un écran vide pendant deux ans. Table
+  `SquashnetRankingPoint` (1 ligne / joueur / mois, membres ET joueurs sans compte), alimentée
+  ensuite par le cron mensuel `warm-rankings` lui-même, et complétable à la main depuis
+  `/admin` (« Compléter l'historique », par tranches d'une minute — le remplissage est
+  reprenable, donc on reclique jusqu'à « complet » sans jamais repayer le travail fait).
+  On trace la **moyenne de points**
+  (la seule valeur qui bouge tous les mois) ou le **rang mixte**, axe inversé pour que « ça
+  monte » veuille toujours dire « ça progresse ». Un mois non mesuré **coupe** le trait : un
+  trou dit « on ne sait pas ». `/api/rankings/history` (jamais licence ni club), écran
+  `RankingHistory` (menu ⋯ › Progression).
+- **S3. Roster de l'équipe adverse** · 💡 à étudier · ⭐⭐ · **S–M** · dépend d'une capture
+  Le `teamid` de l'adversaire est **déjà lu** par le calendrier ; la fiche d'équipe est servie
+  par `ic_a=393480`. Il ne manque que la capture d'un fragment pour écrire le parsing. Le
+  classement de chaque joueur adverse ne demande, lui, **rien de neuf** (`matchRanking` accepte
+  déjà un autre club). Cf. [docs/squashnet.md](squashnet.md).
+- **S4. « Contre qui on a joué » (résultats fédéraux)** · 💡 à étudier · ⭐⭐ · **M** · idem
+  Section « Résultats » d'une épreuve (`ic_a=394243`), à rapprocher de nos rencontres par
+  `snMatchKey`. Moitié déjà en base pour les rencontres marquées dans l'appli
+  (`InterclubMatch.awayName`). Cf. [docs/squashnet.md](squashnet.md).
+- **S5. Historique des matchs d'un joueur** · ❓ endpoint inconnu · ⭐⭐ · **?**
+  Les lignes du classement ne sont pas cliquables : aucune fiche joueur observée à ce jour.
+  Contournement borné mais sûr : reconstituer depuis S4. Cf. [docs/squashnet.md](squashnet.md).
 
 ---
 
@@ -346,6 +373,10 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 | 4 | Délégation de droits | ⭐⭐ | M–L | — | ✅ **fait** (gated `FEATURE_DELEGATION`) |
 | 3 | Tournois internes | ⭐⭐ | XL | 6 | ✅ **fait** (gated `FEATURE_TOURNAMENT`) |
 | S | Classement squashnet | ⭐⭐ | M | 3, 6 | ✅ **fait** (gated `FEATURE_RANKING`, **on en prod**) |
+| S2 | Progression (courbes de classement) | ⭐⭐ | M | S | ✅ **fait** (gated `FEATURE_RANKING`) |
+| S3 | Roster de l'équipe adverse | ⭐⭐ | S–M | S, interclub | 💡 à étudier (capture à faire) |
+| S4 | Résultats fédéraux (« contre qui ») | ⭐⭐ | M | interclub | 💡 à étudier (capture à faire) |
+| S5 | Historique des matchs d'un joueur | ⭐⭐ | ? | S4 | ❓ endpoint inconnu |
 | 2 | Reprise auto via « +1 » | ⭐⭐ | L | Attendance | À cadrer (risqué) |
 | 5b | Messagerie générale | ⭐⭐ | L–XL | 6 | Basse |
 | 6a | Annuaire — « je cherche à jouer » | ⭐⭐⭐ | M | 6, push | 💡 à étudier |

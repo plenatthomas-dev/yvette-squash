@@ -10,6 +10,7 @@ import { Dialog } from "@/components/Dialog";
 import { SettingsButton } from "@/components/SettingsButton";
 import { PasskeyEnrollPrompt } from "@/components/PasskeyEnrollPrompt";
 import { DirectoryModal } from "@/components/DirectoryModal";
+import { RankingHistory } from "@/components/RankingHistory";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
 import { ShareModal } from "@/components/ShareModal";
 import { HeaderMenu } from "@/components/HeaderMenu";
@@ -25,6 +26,7 @@ import {
   TeamsIcon,
   BellIcon,
   UsersIcon,
+  TrendIcon,
   ShareIcon,
   RefreshIcon,
   CalendarIcon,
@@ -180,7 +182,21 @@ interface AlertItem {
 const SPLASH_MIN_MS = 250;
 
 export default function Home() {
-  const { tricount, directory, delegation, tournament, interclub, forum } = useFeatures();
+  const {
+    tricount,
+    directory,
+    delegation,
+    tournament,
+    interclub,
+    forum,
+    ranking,
+    rankingHistory,
+  } = useFeatures();
+  // « ET », jamais « ou » : la courbe n'a de sens que si la passe mensuelle mesure encore. Avec
+  // `ranking` coupé, l'historique existe toujours en base mais cesse d'être alimenté — l'écran
+  // montrerait alors une courbe gelée sans rien dire. Miroir exact de la garde de
+  // `GET /api/rankings/history`.
+  const progression = ranking && rankingHistory;
   // Voir le garde des vues coupées plus bas : sans ça, « pas encore chargé » se lit « coupé ».
   const featuresReady = useFeaturesReady();
   const [me, setMe] = useState<string | null | undefined>(undefined); // undefined = chargement
@@ -270,6 +286,7 @@ export default function Home() {
   // Modales du menu ⋯ (partage / annuaire), pilotées depuis HeaderMenu.
   const [shareOpen, setShareOpen] = useState(false);
   const [directoryOpen, setDirectoryOpen] = useState(false);
+  const [rankHistOpen, setRankHistOpen] = useState(false);
   const today = toISODate(new Date());
   // Notifications disponibles seulement une fois monté (évite un décalage d'hydratation)
   // ET si le navigateur les supporte ET si les clés VAPID sont configurées côté serveur.
@@ -1329,6 +1346,20 @@ export default function Home() {
                   onClick: () => setDirectoryOpen(true),
                 },
                 {
+                  key: "rankhist",
+                  label: "Progression",
+                  icon: <TrendIcon />,
+                  // Gated sur son PROPRE flag, et non sur `directory` ni sur `ranking` seul.
+                  // La courbe ne montre pas l'annuaire ; et si elle montre bien le classement
+                  // fédéral, elle n'en est pas le badge « 5A » vu dans le temps : celui-ci dit
+                  // où un joueur en est, celle-ci rend lisible à tous les membres le chemin de
+                  // chacun sur trois ans, côte à côte. Une finalité de plus, donc son
+                  // interrupteur (cf. `rankingHistory` dans features.ts).
+                  disabled: !progression,
+                  comingSoon: !progression,
+                  onClick: () => setRankHistOpen(true),
+                },
+                {
                   key: "share",
                   label: "Partager l'appli",
                   icon: <ShareIcon />,
@@ -1364,6 +1395,16 @@ export default function Home() {
         open={directoryOpen}
         onClose={() => setDirectoryOpen(false)}
         toast={toast}
+      />
+      <RankingHistory
+        // `&& progression` : un override de flag arrive à chaud (features-server, sans
+        // redéploiement). Sans ça, une modale ouverte au moment où l'admin coupe la fonction
+        // resterait ouverte devant une route qui répond déjà 404.
+        open={rankHistOpen && progression}
+        onClose={() => setRankHistOpen(false)}
+        // Le pseudo s'il existe, comme partout ailleurs : c'est sous ce nom que le joueur se
+        // reconnaît dans la liste, et c'est celui que la route renvoie.
+        meName={nickname || me || undefined}
       />
 
       {delegation &&

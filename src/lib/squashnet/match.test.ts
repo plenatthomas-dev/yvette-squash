@@ -64,6 +64,28 @@ describe("matchRanking", () => {
     expect(matchRanking(jerome, dirty)?.rang).toBeNull();
   });
 
+  // La moyenne de points ne sert ni à l'annuaire ni à l'ordre des simples : elle n'existe que
+  // pour la COURBE, dont elle est la seule valeur qui bouge tous les mois.
+  it("lit la moyenne de points, espace de milliers comprise", () => {
+    const rows = [row({ name: "COURTAUT JEROME", club: YVETTE_CLUB, mean: "3 832.17" })];
+    expect(matchRanking(jerome, rows)?.mean).toBe(3832.17);
+    // Espace insécable et fine insécable : c'est ce que rend un HTML français, et `parseFloat`
+    // s'arrêterait au premier espace en rendant 3 — une valeur mille fois trop petite qui a
+    // l'air d'un nombre, donc qui s'afficherait.
+    const nbsp = [row({ name: "COURTAUT JEROME", club: YVETTE_CLUB, mean: "3\u00a0832.17" })];
+    expect(matchRanking(jerome, nbsp)?.mean).toBe(3832.17);
+  });
+
+  it("refuse une moyenne vide, nulle ou illisible plutôt que d'écraser la courbe", () => {
+    for (const mean of ["", "0", "—", "3 832,17.5"]) {
+      const rows = [row({ name: "COURTAUT JEROME", club: YVETTE_CLUB, mean })];
+      expect(matchRanking(jerome, rows)?.mean).toBeNull();
+    }
+    // La virgule décimale est acceptée, au cas où la fédération francise son rendu.
+    const fr = [row({ name: "COURTAUT JEROME", club: YVETTE_CLUB, mean: "3 832,17" })];
+    expect(matchRanking(jerome, fr)?.mean).toBe(3832.17);
+  });
+
   it("ignore un homonyme dans un AUTRE club (filtre club)", () => {
     const rows = [
       row({ name: "COURTAUT JEROME", club: "Squash Club de Rennes", clt: "2C" }),
