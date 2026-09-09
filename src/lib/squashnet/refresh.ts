@@ -89,6 +89,22 @@ export type Subject = {
   query: string;
   /** Identité que `classifyRanking` doit retrouver dans une ligne du club. */
   identity: MemberIdentity;
+  /**
+   * Numéro de licence FFSquash déjà rapproché, s'il y en a un.
+   *
+   * Sert au REMPLISSAGE RÉTROACTIF, pas au rafraîchissement mensuel : c'est un identifiant
+   * fédéral, donc le seul moyen de retrouver un joueur sur un mois où il était licencié dans un
+   * autre club, sans jamais rien devoir supposer sur les homonymes.
+   *
+   * `null` tant que le joueur n'a jamais été rapproché — le cas d'un nouvel inscrit, pour qui
+   * le premier passage mensuel le renseignera.
+   *
+   * OPTIONNEL à dessein : les chemins à UN SEUL sujet (rapprocher un invité, rapprocher un
+   * membre) travaillent dans le club et le club seul, et n'ont donc rien à en faire. Laisser le
+   * champ obligatoire les forcerait à écrire `licence: null` — une valeur qui a l'air d'un fait
+   * (« ce joueur n'a pas de licence ») là où elle ne dit que « pas pertinent ici ».
+   */
+  licence?: string | null;
 };
 
 /**
@@ -116,9 +132,16 @@ export async function subjectsToRefresh(): Promise<Subject[]> {
     // mais pour pouvoir être composé.
     prisma.user.findMany({
       where: { OR: [{ listed: true }, { teamId: { not: null } }] },
-      select: { id: true, displayName: true, squashnetGivenName: true, squashnetFamilyName: true },
+      select: {
+        id: true,
+        displayName: true,
+        squashnetGivenName: true,
+        squashnetFamilyName: true,
+        // La licence déjà rapprochée, pour le remplissage rétroactif (cf. `Subject.licence`).
+        squashnetRanking: { select: { licence: true } },
+      },
     }),
-    prisma.interclubGuest.findMany({ select: { id: true, name: true } }),
+    prisma.interclubGuest.findMany({ select: { id: true, name: true, snLicence: true } }),
   ]);
 
   // On matche sur le VRAI nom (`displayName`), jamais le pseudo (`nickname`). On écarte tout de
@@ -128,8 +151,20 @@ export async function subjectsToRefresh(): Promise<Subject[]> {
   // Un joueur SANS COMPTE n'a pas de correction de nom, et n'en a pas besoin : son nom est saisi
   // par l'admin, qui peut simplement le corriger là où il l'a écrit.
   return [
-    ...users.map((u) => ({ kind: "member" as const, id: u.id, name: u.displayName.trim(), ...memberIdentity(u) })),
-    ...guests.map((g) => ({ kind: "guest" as const, id: g.id, name: g.name.trim(), ...defaultIdentity(g.name.trim()) })),
+    ...users.map((u) => ({
+      kind: "member" as const,
+      id: u.id,
+      name: u.displayName.trim(),
+      licence: u.squashnetRanking?.licence ?? null,
+      ...memberIdentity(u),
+    })),
+    ...guests.map((g) => ({
+      kind: "guest" as const,
+      id: g.id,
+      name: g.name.trim(),
+      licence: g.snLicence ?? null,
+      ...defaultIdentity(g.name.trim()),
+    })),
   ].filter((s) => s.name !== "");
 }
 

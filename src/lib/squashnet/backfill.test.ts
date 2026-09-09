@@ -8,8 +8,9 @@ const h = vi.hoisted(() => ({
   getMonths: vi.fn(),
   searchRanking: vi.fn(),
   subjectsToRefresh: vi.fn(),
-  knownPoints: vi.fn(),
+  knownCouples: vi.fn(),
   writePoint: vi.fn(),
+  writeProbe: vi.fn(),
 }));
 
 vi.mock("./client", () => ({ getMonths: h.getMonths, searchRanking: h.searchRanking }));
@@ -18,8 +19,9 @@ vi.mock("./history", async (orig) => ({
   // `pointKey` reste le VRAI : c'est la clé partagée entre ce qu'on lit et ce qu'on saute, et
   // la mocker rendrait le test aveugle au seul endroit où les deux peuvent diverger.
   ...(await orig<typeof import("./history")>()),
-  knownPoints: h.knownPoints,
+  knownCouples: h.knownCouples,
   writePoint: h.writePoint,
+  writeProbe: h.writeProbe,
 }));
 
 import { backfillHistory } from "./backfill";
@@ -41,7 +43,7 @@ function row(name: string, over: Partial<RankingRow> = {}): RankingRow {
 }
 
 /** Un sujet au format de `subjectsToRefresh` (nom de famille en terme de recherche). */
-function sujet(id: string, nom: string) {
+function sujet(id: string, nom: string, licence?: string) {
   const tokens = nom.split(/\s+/);
   return {
     kind: "member" as const,
@@ -49,6 +51,7 @@ function sujet(id: string, nom: string) {
     name: nom,
     query: tokens[tokens.length - 1],
     identity: { givenName: "", familyName: nom },
+    licence: licence ?? null,
   };
 }
 
@@ -56,7 +59,8 @@ beforeEach(() => {
   h.getMonths.mockReset().mockResolvedValue(["2026-03-02", "2026-02-02", "2026-01-05"]);
   h.searchRanking.mockReset().mockResolvedValue([]);
   h.subjectsToRefresh.mockReset().mockResolvedValue([sujet("u1", "Jean Dupont")]);
-  h.knownPoints.mockReset().mockResolvedValue(new Set<string>());
+  h.knownCouples.mockReset().mockResolvedValue(new Set<string>());
+  h.writeProbe.mockReset().mockResolvedValue(undefined);
   h.writePoint.mockReset().mockResolvedValue(undefined);
 });
 
@@ -86,7 +90,7 @@ describe("backfillHistory", () => {
   // lendemain, il ne redemande pas à la fédération ce qu'il tient déjà. Un second passage sur un
   // club à jour ne fait AUCUNE requête.
   it("saute les couples (joueur, mois) déjà en base, sans appeler squashnet", async () => {
-    h.knownPoints.mockResolvedValue(
+    h.knownCouples.mockResolvedValue(
       new Set(["member:u1:2026-03-02", "member:u1:2026-02-02", "member:u1:2026-01-05"]),
     );
     const res = await run();
@@ -117,7 +121,7 @@ describe("backfillHistory", () => {
 
   // « On n'écrit que ce qu'on a vu » : un trou dit « on ne sait pas », une valeur reportée
   // affirmerait une stabilité qu'on n'a pas mesurée.
-  it("n'écrit RIEN sur un mois non concluant (introuvable, homonymes, autre club)", async () => {
+  it("n'écrit RIEN sur un mois non concluant (introuvable, homonymes)", async () => {
     h.searchRanking.mockResolvedValue([row("MARTIN PIERRE")]); // personne au nom du sujet
     const res = await run();
     expect(res).toMatchObject({ written: 0, unresolved: 3 });
@@ -151,7 +155,7 @@ describe("backfillHistory", () => {
     h.getMonths.mockResolvedValue([]);
     const res = await run();
     expect(res).toMatchObject({ months: [], written: 0, requests: 0 });
-    expect(h.knownPoints).not.toHaveBeenCalled();
+    expect(h.knownCouples).not.toHaveBeenCalled();
   });
 
   // LE BUDGET — ce qui rend le bouton d'admin possible sans qu'une fonction Vercel soit tuée
@@ -195,7 +199,7 @@ describe("backfillHistory", () => {
 
     // Sur un historique déjà complet, recliquer ne doit RIEN coûter à squashnet.
     it("un second passage sur un historique complet ne fait aucune requête et ne dit rien de restant", async () => {
-      h.knownPoints.mockResolvedValue(
+      h.knownCouples.mockResolvedValue(
         new Set(["member:u1:2026-03-02", "member:u1:2026-02-02", "member:u1:2026-01-05"]),
       );
       const res = await backfillHistory({ delayMs: 0, budgetMs: 45_000 });
@@ -208,5 +212,84 @@ describe("backfillHistory", () => {
     const vus: string[] = [];
     await run({ onMonth: (m: string) => vus.push(m) });
     expect(vus).toEqual(["2026-03-02", "2026-02-02", "2026-01-05"]);
+  });
+});
+
+describe("backfillHistory — l'historique suit le JOUEUR, pas le membre du club", () => {
+  it("capte un mois où le joueur était licencié AILLEURS", async () => {
+    // LE CAS QUI MOTIVE TOUT CE MODE. Un membre arrivé au club l'an dernier a une progression
+    // avant son arrivée ; la refuser parce que le libellé du club diffère confondrait « il est
+    // parti » avec « il n'était pas encore là ». Le rafraîchissement mensuel, lui, garde le
+    // filtre par club — c'est de là qu'il tire son verdict `moved`.
+    h.searchRanking.mockResolvedValue([row("DUPONT JEAN", { club: "Squash Club de Massy" })]);
+    const res = await run();
+    expect(res).toMatchObject({ written: 3, unresolved: 0 });
+  });
+
+  it("la LICENCE tranche entre deux homonymes, là où le nom seul renonce", async () => {
+    h.subjectsToRefresh.mockResolvedValue([sujet("u1", "Jean Dupont", "0000042")]);
+    h.searchRanking.mockResolvedValue([
+      row("DUPONT JEAN", { club: "Squash Club de Massy", licence: "0000042", rangM: "1800" }),
+      row("DUPONT JEAN", { club: "Squash de Palaiseau", licence: "0000099", rangM: "2500" }),
+    ]);
+    const res = await run();
+    expect(res).toMatchObject({ written: 3, unresolved: 0 });
+    expect(h.writePoint).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ licence: "0000042", rangM: 1800 }),
+      expect.any(String),
+    );
+  });
+
+  it("sans licence, deux homonymes restent AMBIGUS plutôt que tirés au sort", async () => {
+    h.searchRanking.mockResolvedValue([
+      row("DUPONT JEAN", { club: "Squash Club de Massy", licence: "0000042" }),
+      row("DUPONT JEAN", { club: "Squash de Palaiseau", licence: "0000099" }),
+    ]);
+    const res = await run();
+    expect(res).toMatchObject({ written: 0, unresolved: 3 });
+  });
+});
+
+describe("backfillHistory — la mémoire des trous", () => {
+  it("MARQUE un couple cherché en vain alors que squashnet a répondu", async () => {
+    h.searchRanking.mockResolvedValue([row("MARTIN PIERRE")]); // quelqu'un d'autre
+    await run();
+    expect(h.writeProbe).toHaveBeenCalledTimes(3);
+    expect(h.writeProbe).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "u1" }),
+      "2026-03-02",
+      "unknown",
+    );
+  });
+
+  it("ne marque RIEN quand squashnet n'a pas répondu : c'est un incident, pas un verdict", async () => {
+    h.searchRanking.mockRejectedValue(new Error("timeout"));
+    const res = await run();
+    expect(res).toMatchObject({ written: 0 });
+    expect(h.writeProbe).not.toHaveBeenCalled();
+  });
+
+  it("saute les couples DÉJÀ MARQUÉS — c'est ce qui fait converger « reste »", async () => {
+    h.knownCouples.mockResolvedValue(
+      new Set(["member:u1:2026-03-02", "member:u1:2026-02-02", "member:u1:2026-01-05"]),
+    );
+    const res = await run();
+    expect(res).toMatchObject({ already: 3, written: 0, remaining: 0 });
+    expect(h.searchRanking).not.toHaveBeenCalled();
+  });
+
+  it("`retryProbes` demande la reprise des marques, pour un nom corrigé", async () => {
+    await run({ retryProbes: true });
+    expect(h.knownCouples).toHaveBeenCalledWith(expect.any(Array), { retryProbes: true });
+  });
+
+  it("un échec d'écriture de la MARQUE ne fait pas perdre le lot", async () => {
+    // La marque est un confort, pas une donnée : au pire le couple sera redemandé au passage
+    // suivant, ce qui est exactement l'ancien comportement.
+    h.searchRanking.mockResolvedValue([row("MARTIN PIERRE")]);
+    h.writeProbe.mockRejectedValue(new Error("base injoignable"));
+    const res = await run();
+    expect(res).toMatchObject({ unresolved: 3, failed: 0 });
   });
 });
