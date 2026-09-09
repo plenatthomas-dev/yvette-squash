@@ -8,6 +8,7 @@ import {
   chemin,
   couleurDe,
   dernierPoint,
+  frontieresClassement,
   moisDansPlage,
   moisLabel,
   ordonnee,
@@ -39,6 +40,13 @@ import {
 //   3. UN TROU RESTE UN TROU. Un mois non mesuré coupe le trait au lieu d'être
 //      enjambé (cf. `chemin`) : la fédération ne publie pas tout le monde tous
 //      les mois, et relier par-dessus l'absence inventerait une progression.
+//   4. LA COURBE SE LIT SUR UNE RÈGLE GRADUÉE. Derrière les points passent les
+//      lignes de passage d'un classement à l'autre (« 5B », « 5A »…), déduites
+//      de nos propres mesures (cf. `frontieresClassement`). Sans elles, « 1 180
+//      points » ne veut rien dire pour personne ; avec elles, on voit d'un coup
+//      d'œil de quel côté de la marche on se trouve, et ce qu'il reste à faire.
+//      Elles ne s'affichent QUE sur les points : un classement ne correspond à
+//      aucun rang fixe.
 //
 //  TOUT LE FILTRAGE EST LOCAL. La charge utile est servie d'un coup (cf. la
 //  route) : cocher un joueur ou tirer la plage de mois ne redemande rien, et
@@ -56,8 +64,19 @@ const MAX_ETIQUETTES = 5;
 /** Combien de joueurs pré-cochés quand on ne reconnaît pas celui qui regarde. */
 const DEFAUT_SANS_MOI = 3;
 
+/**
+ * Une valeur d'axe, telle qu'on l'écrit.
+ *
+ * ⚠️ ARRONDI DES DEUX CÔTÉS. Seule la moyenne l'était, et le rang sortait brut : or les
+ * graduations valent `min + (max−min)·t` avec `t = 0,5`, donc une plage impaire donnait
+ * « #2050.5 » — un rang national n'est pas fractionnaire, et le point décimal anglo-saxon
+ * détonnait en plus au milieu d'un écran qui écrit « 3 832 ».
+ *
+ * Le rang reste SANS séparateur de milliers, contrairement à la moyenne : « #1800 » est un
+ * repère qu'on lit comme un identifiant, « 3 832 » une quantité qu'on compare.
+ */
 const nombre = (v: number, metrique: Metrique) =>
-  metrique === "mean" ? Math.round(v).toLocaleString("fr-FR") : `#${v}`;
+  metrique === "mean" ? Math.round(v).toLocaleString("fr-FR") : `#${Math.round(v)}`;
 
 /**
  * « +128 » / « −40 » / « ±0 ». Le signe dit toujours le PROGRÈS (cf. `progression`).
@@ -144,6 +163,27 @@ export function RankingHistory({
     [tracees, months, metrique],
   );
 
+  // LES MARCHES DU CLASSEMENT, sur TOUT le corpus reçu — pas sur `tracees`, ni sur `months`.
+  // Une frontière est une propriété de l'échelle fédérale, pas de qui l'on regarde : la calculer
+  // sur la sélection la ferait bouger à chaque case cochée, et le repère cesserait d'en être un.
+  // On la déduit donc du plus grand nombre d'observations disponibles, et une seule fois.
+  const frontieres = useMemo(
+    () => frontieresClassement(data?.series ?? [], metrique),
+    [data, metrique],
+  );
+
+  // Celles qui tombent DANS la fenêtre visible, converties en ordonnées. Une ligne hors bornes
+  // serait tracée sur le bord du cadre, où elle se lirait comme une frontière atteinte.
+  const marches = useMemo(
+    () =>
+      bornes === null
+        ? []
+        : frontieres
+            .filter((f) => f.valeur >= bornes.min && f.valeur <= bornes.max)
+            .map((f) => ({ ...f, y: ordonnee(f.valeur, bornes, metrique, CADRE) })),
+    [frontieres, bornes, metrique],
+  );
+
   const aiguille = q.trim().toLowerCase();
   const listables = (data?.series ?? []).filter((s) => s.name.toLowerCase().includes(aiguille));
 
@@ -175,12 +215,22 @@ export function RankingHistory({
 
   // Trois graduations horizontales : le minimum pour donner une échelle, le maximum avant que
   // le fond ne devienne une grille qui capte plus l'œil que les courbes.
-  const graduations = bornes
-    ? [0, 0.5, 1].map((t) => {
-        const v = bornes.min + (bornes.max - bornes.min) * t;
-        return { v, y: ordonnee(v, bornes, metrique, CADRE) };
-      })
-    : [];
+  //
+  // ⚠️ UNE SEULE QUAND L'ÉTENDUE EST NULLE, et c'est un cas COURANT, pas une curiosité :
+  // un joueur qui n'a qu'une mesure, ou une plage resserrée sur un mois — l'écran a un état
+  // dédié pour ça (`presqueVide`). Les trois graduations valaient alors la même chose, donc
+  // trois traits et trois étiquettes empilés au même pixel, et surtout trois `<g>` de MÊME
+  // CLÉ : React avertit, et se réserve le droit de réutiliser le mauvais nœud. `ordonnee`
+  // protège bien du NaN (c'est testé) ; c'est l'appelant qui dédoublonnait.
+  const graduations =
+    bornes === null
+      ? []
+      : bornes.max === bornes.min
+        ? [{ v: bornes.min, y: ordonnee(bornes.min, bornes, metrique, CADRE) }]
+        : [0, 0.5, 1].map((t) => {
+            const v = bornes.min + (bornes.max - bornes.min) * t;
+            return { v, y: ordonnee(v, bornes, metrique, CADRE) };
+          });
 
   return (
     <Dialog onClose={onClose} label="Progression du classement" className="rankhist" autoFocus={false}>
@@ -202,7 +252,9 @@ export function RankingHistory({
       </div>
       <p className="muted tiny rankhist-aide">
         {metrique === "mean"
-          ? "Moyenne de points de la fédération : elle monte quand on progresse."
+          ? marches.length > 0
+            ? "Moyenne de points de la fédération : elle monte quand on progresse. Les traits horizontaux marquent le passage d'un classement à l'autre, déduit des mesures du club."
+            : "Moyenne de points de la fédération : elle monte quand on progresse."
           : "Rang national toutes catégories : il baisse quand on progresse — la courbe, elle, monte toujours dans le bon sens."}
       </p>
 
@@ -256,11 +308,45 @@ export function RankingHistory({
               aria-label={
                 `Courbes de ${metrique === "mean" ? "moyenne de points" : "rang national"} ` +
                 `entre ${moisLabel(months[0])} et ${moisLabel(months[months.length - 1])}. ` +
+                // Les marches sont ANNONCÉES : à la voix, une ligne pointillée n'existe pas, et
+                // c'est pourtant elle qui donne son sens à « 1 180 points ».
+                (marches.length > 0
+                  ? `Lignes de passage de classement affichées : ` +
+                    `${marches.map((f) => f.clt).join(", ")}. `
+                  : "") +
                 `Les valeurs chiffrées sont listées sous le graphique.`
               }
             >
-              {graduations.map((g) => (
-                <g key={g.v}>
+              {/* Les marches d'abord : elles passent DERRIÈRE tout le reste. Une ligne de
+                  repère qui masquerait un point de mesure ferait perdre à l'écran ce qu'il est
+                  venu montrer. */}
+              {marches.map((f) => (
+                <g key={`palier-${f.clt}`}>
+                  <line
+                    className="rankhist-palier"
+                    x1={CADRE.padL}
+                    x2={CADRE.w - CADRE.padR}
+                    y1={f.y}
+                    y2={f.y}
+                  />
+                  {/* L'étiquette DANS le cadre et posée SUR la ligne (`y - 2`), à droite : la
+                      marge gauche est déjà prise par les valeurs de l'axe, et un classement
+                      écrit sous la ligne se lirait comme appartenant à la zone du dessous. */}
+                  <text
+                    className="rankhist-palier-txt"
+                    x={CADRE.w - CADRE.padR - 2}
+                    y={f.y - 2}
+                    textAnchor="end"
+                  >
+                    {f.clt}
+                  </text>
+                </g>
+              ))}
+              {/* Clé sur l'INDICE et non sur la valeur : deux graduations peuvent partager la
+                  même valeur (étendue nulle), et deux clés identiques laissent React réutiliser
+                  le mauvais nœud. L'ordre de cette liste, lui, ne bouge jamais. */}
+              {graduations.map((g, gi) => (
+                <g key={gi}>
                   <line
                     className="rankhist-grille"
                     x1={CADRE.padL}

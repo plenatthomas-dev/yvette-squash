@@ -11,7 +11,10 @@ import type { HistorySeries } from "@/lib/ranking-history";
 //      lisible quand on ne voit pas le dessin ;
 //   3. l'évolution dit le PROGRÈS, pas la variation brute : descendre au classement est un
 //      « + », et c'est le piège que ce module existe pour éviter ;
-//   4. le filtrage est LOCAL — cocher un joueur ne redemande rien au serveur.
+//   4. le filtrage est LOCAL — cocher un joueur ne redemande rien au serveur ;
+//   5. les MARCHES DU CLASSEMENT ne s'affichent que là où elles ont un sens (les points, jamais
+//      le rang) et ne bougent pas quand la sélection change — un repère qui suit ce qu'on
+//      regarde n'est plus un repère.
 
 function reponse(corps: unknown): Response {
   return { ok: true, status: 200, json: async () => corps } as unknown as Response;
@@ -37,6 +40,26 @@ function serie(
     team: null,
     points: vals.flatMap((v, i) =>
       v === null ? [] : [{ month: MOIS[i], clt: "5A", rang: null, rangM: v.rangM, mean: v.mean }],
+    ),
+  };
+}
+
+/**
+ * Une série dont chaque mesure porte SON classement — `serie` fige « 5A », si bien qu'aucune
+ * frontière ne peut s'en déduire (il en faut deux, adjacentes et disjointes).
+ */
+function serieCltee(
+  id: string,
+  name: string,
+  vals: Array<{ clt: string; mean: number; rangM: number } | null>,
+): HistorySeries {
+  return {
+    id,
+    kind: "member",
+    name,
+    team: null,
+    points: vals.flatMap((v, i) =>
+      v === null ? [] : [{ month: MOIS[i], clt: v.clt, rang: null, rangM: v.rangM, mean: v.mean }],
     ),
   };
 }
@@ -203,5 +226,95 @@ describe("RankingHistory", () => {
     const d = document.querySelector(".rankhist-trace")?.getAttribute("d") ?? "";
     expect(d).not.toContain("L");
     expect(d.match(/M/g)).toHaveLength(2);
+  });
+});
+
+describe("les graduations de l'axe", () => {
+  it("n'affiche pas un rang fractionnaire au milieu de l'échelle", async () => {
+    // Les graduations valent min + (max−min)·t, avec t = 0,5 : une étendue impaire donnait
+    // « #2050.5 », qu'aucun classement fédéral ne peut valoir.
+    monte(
+      [serie("u1", "Jean Dupont", [{ mean: 1000, rangM: 1800 }, null, { mean: 1100, rangM: 2301 }])],
+      "Jean Dupont",
+    );
+    await souffle();
+    fireEvent.click(screen.getByRole("button", { name: "Rang" }));
+    const graphe = document.querySelector(".rankhist-graph") as SVGElement;
+    expect(graphe.textContent).not.toMatch(/#\d+\.\d/);
+    expect(graphe.textContent).toContain("#2051");
+  });
+
+  it("trace la marche entre deux classements, étiquetée par celui qu'on atteint", async () => {
+    monte(
+      [
+        serieCltee("u1", "Jean Dupont", [
+          { clt: "5B", mean: 900, rangM: 2400 },
+          { clt: "5B", mean: 1000, rangM: 2300 },
+          { clt: "5A", mean: 1200, rangM: 2000 },
+        ]),
+      ],
+      "Jean Dupont",
+    );
+    await souffle();
+    const paliers = document.querySelectorAll(".rankhist-palier");
+    expect(paliers).toHaveLength(1);
+    // Étiquetée « 5A » : la question devant cet écran est « il me manque combien pour passer ? ».
+    expect(document.querySelector(".rankhist-palier-txt")?.textContent).toBe("5A");
+    // Et posée au milieu de [1000, 1200], donc DANS le cadre, pas sur un bord.
+    const y = Number(paliers[0].getAttribute("y1"));
+    expect(y).toBeGreaterThan(10);
+    expect(y).toBeLessThan(148);
+  });
+
+  it("ne trace AUCUNE marche sur le rang : aucun classement n'y correspond à une valeur fixe", async () => {
+    monte(
+      [
+        serieCltee("u1", "Jean Dupont", [
+          { clt: "5B", mean: 900, rangM: 2400 },
+          { clt: "5B", mean: 1000, rangM: 2300 },
+          { clt: "5A", mean: 1200, rangM: 2000 },
+        ]),
+      ],
+      "Jean Dupont",
+    );
+    await souffle();
+    expect(document.querySelectorAll(".rankhist-palier")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Rang" }));
+    expect(document.querySelectorAll(".rankhist-palier")).toHaveLength(0);
+  });
+
+  it("place la marche sur TOUT le corpus, pas sur les seules courbes tracées", async () => {
+    // L'écran s'ouvre sur Jean seul. Marie est dans la charge utile sans être tracée, et sa
+    // mesure RESSERRE l'encadrement de la frontière :
+    //   — sur le corpus  : max(5B) = 1000 (Marie), min(5A) = 1300 (Jean) → ligne à 1150 ;
+    //   — sur Jean seul  : max(5B) =  900,        min(5A) = 1300        → ligne à 1100.
+    // Les deux tombent dans la fenêtre visible (900–1300), donc seule l'ordonnée les sépare :
+    // c'est la mesure qui tranche, et non un simple « il y a bien une ligne ».
+    monte(
+      [
+        serieCltee("u1", "Jean Dupont", [
+          { clt: "5B", mean: 900, rangM: 2400 },
+          null,
+          { clt: "5A", mean: 1300, rangM: 1900 },
+        ]),
+        serieCltee("u2", "Marie Martin", [{ clt: "5B", mean: 1000, rangM: 2300 }, null, null]),
+      ],
+      "Jean Dupont",
+    );
+    await souffle();
+
+    // Cadre : h 170, padT 10, padB 22 → 138 px utiles, axe des points non inversé.
+    const y = (v: number) => 10 + 138 * (1 - (v - 900) / 400);
+    const trace = Number(document.querySelector(".rankhist-palier")?.getAttribute("y1"));
+    expect(trace).toBeCloseTo(y(1150), 1);
+    expect(trace).not.toBeCloseTo(y(1100), 1);
+  });
+
+  it("ne pose qu'UNE graduation quand toutes les valeurs sont égales", async () => {
+    // Cas courant, et l'écran a un état dédié pour lui : un joueur qui n'a qu'une mesure.
+    // Trois graduations identiques, c'est trois traits au même pixel et trois clés en double.
+    monte([serie("u1", "Jean Dupont", [{ mean: 1000, rangM: 2300 }, null, null])], "Jean Dupont");
+    await souffle();
+    expect(document.querySelectorAll(".rankhist-grille")).toHaveLength(1);
   });
 });

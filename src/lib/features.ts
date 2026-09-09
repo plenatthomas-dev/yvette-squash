@@ -25,6 +25,7 @@ export const FEATURE_KEYS = [
   "delegation",
   "tournament",
   "ranking",
+  "rankingHistory",
   "externalBookings",
   "interclub",
   "forum",
@@ -47,6 +48,7 @@ export const FEATURE_LABELS: Record<FeatureKey, string> = {
   delegation: "Délégation de droits",
   tournament: "Tournois internes",
   ranking: "Classement fédéral",
+  rankingHistory: "Progression (courbe du classement)",
   externalBookings: "Détection des résas faites directement sur ResaMania",
   interclub: "Rencontres par équipes (interclub)",
   forum: "Fil de discussion",
@@ -81,6 +83,18 @@ export const ENV_FEATURES: Features = {
   // Classement fédéral (squashnet.fr, source publique) : affiché dans l'annuaire et proposé
   // comme ordre par défaut des têtes de série au tournoi.
   ranking: isOn(process.env.NEXT_PUBLIC_FEATURE_RANKING),
+  // Courbe « Progression » : l'écran d'historique du classement + la route
+  // /api/rankings/history. SÉPARÉ de `ranking` À DESSEIN — `ranking` est le seul flag ouvert en
+  // prod, si bien que la courbe y serait apparue le jour du merge, sans décision. Or elle ne
+  // montre pas la même chose que le badge « 5A » : celui-ci dit où un joueur EN EST, celle-là
+  // rend PUBLIC AUX MEMBRES le chemin parcouru par chacun sur trois ans, et invite à comparer
+  // les courbes de plusieurs joueurs. C'est une finalité de plus, elle a son paragraphe dans la
+  // note de confidentialité, donc elle a son interrupteur.
+  //
+  // ⚠️ SUBORDONNÉ à `ranking` : la courbe lit les mesures que la passe mensuelle écrit. Flag
+  // seul à ON sur un `ranking` coupé, elle afficherait un historique qui gèle sans le dire.
+  // L'UI et la route exigent donc les DEUX (« et », jamais « ou »).
+  rankingHistory: isOn(process.env.NEXT_PUBLIC_FEATURE_RANKING_HISTORY),
   // Détection des résas faites directement sur ResaMania (hors appli) : lors de la
   // réconciliation planning ↔ base, une résa dont le réservataire est un membre connu mais
   // sans ligne Booking correspondante se voit créer une ligne `source: "resamania"`. Étend le

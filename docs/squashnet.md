@@ -119,6 +119,61 @@ jour, recliquer ne coûte **aucune requête**.
 jamais de mesure sur les mois d'avant. Seul `remaining` (les couples pas encore *regardés*)
 tombe à zéro — c'est lui que le bouton affiche.
 
+#### Son propre flag : `NEXT_PUBLIC_FEATURE_RANKING_HISTORY`
+
+L'écran « Progression » **n'est pas adossé à `ranking`**, et c'est délibéré. `ranking` est le
+seul flag ouvert en production (cf. `docs/flux-branches.md`) : la courbe y serait apparue devant
+les membres le jour de son merge, sans que personne l'ait décidé.
+
+Elle ne montre d'ailleurs pas la même chose que le badge « 5A ». Celui-ci dit **où un joueur en
+est** ; celle-là rend lisible, à tout membre connecté, **le chemin parcouru par chacun sur trois
+ans**, et invite à comparer les courbes côte à côte. C'est une finalité de plus, elle a son
+paragraphe dans `PrivacyNotice`, donc elle a son interrupteur.
+
+| Environnement | Valeur | Effet |
+|---|---|---|
+| Production | **absente** (fail-safe) | Entrée « Progression » grisée, `GET /api/rankings/history` en 404 |
+| Preview (Recette) | `1` | Écran ouvert |
+
+**Les deux flags sont exigés, « et » jamais « ou »** — à l'écran (`page.tsx`), à la route, et
+dans la note de confidentialité. `rankingHistory` seul sur un `ranking` coupé afficherait un
+historique qui gèle sans le dire, puisque c'est la passe mensuelle qui l'alimente.
+
+⚠️ **La conservation, elle, ne s'arrête pas avec l'écran.** `writePoint` ne consulte pas
+`rankingHistory` : flag coupé, les mesures continuent d'être écrites mois après mois. C'est
+voulu (le jour où l'on ouvre l'écran, l'historique est déjà là), et c'est pourquoi le paragraphe
+« Progression » de la note reste affiché sous `ranking` — il change seulement de phrase pour
+dire que rien n'est affiché pour l'instant. Masquer ce paragraphe avec l'écran tairait une
+conservation bien réelle.
+
+#### Les lignes de passage d'un classement à l'autre
+
+Derrière les courbes, en pointillés, passent les marches « 5B », « 5A »… (`frontieresClassement`,
+`lib/ranking-history.ts`). Sans elles, « 1 180 points » ne veut rien dire ; avec elles, on voit
+de quel côté de la marche on se trouve.
+
+**Elles ne viennent d'aucun barème écrit en dur** — ce dépôt ne connaît pas le barème de la
+fédération, et l'inventer donnerait un graphique crédible et faux. Elles se déduisent de nos
+propres mesures : chaque point porte à la fois le classement publié ce mois-là **et** la moyenne
+qui l'a produit. La plus haute moyenne jamais vue sous « 5B » et la plus basse jamais vue sous
+« 5A » encadrent la frontière, qu'on pose au milieu. Plus le corpus grossit, plus l'encadrement
+se resserre : la règle graduée s'affine seule.
+
+Trois cas où **aucune ligne n'est tracée**, plutôt qu'une ligne mal placée :
+
+- **sur le rang** — un classement ne correspond à aucun rang fixe (le rang dépend du champ), donc
+  la « ligne du 5A » se déplacerait tous les mois ;
+- **quand deux catégories se chevauchent** — une moyenne vue sous « 5A » sous une moyenne vue sous
+  « 5B » : le corpus se contredit (barème révisé, classement corrigé à la main) ;
+- **entre deux échelons non adjacents** — « 5C » puis « 5A » sans « 5B » observé : la marche en
+  recouvrirait deux, et l'étiqueter « 5A » ferait lire un seuil unique là où il y en a deux.
+
+Le calcul porte sur **tout le corpus reçu**, jamais sur la sélection à l'écran : une frontière est
+une propriété de l'échelle fédérale, pas de qui l'on regarde. Cocher un joueur ne doit pas
+déplacer les repères sous ses pieds. Seul l'**affichage** est borné à la fenêtre visible — une
+ligne hors bornes serait plaquée sur le bord du cadre, où elle se lirait comme une frontière
+atteinte.
+
 #### La courbe s'arrête à une date qu'on n'explique pas
 
 Trois causes possibles, et une seule commande pour les départager :

@@ -1,10 +1,11 @@
 // ============================================================================
 //  LA COURBE DE CLASSEMENT — géométrie et mise en forme, PURES et testées.
 //
-//  Aucun import : ce module est lu par la route (qui trie et borne) comme par le
-//  composant (qui trace). Le calcul d'une courbe est le genre de code qu'on ne
-//  sait relire qu'en le testant — et un axe inversé au mauvais endroit produit
-//  un graphique parfaitement lisible qui raconte l'inverse de la vérité.
+//  Un seul import, et PUR (`interclub-order`) : ce module est lu par la route
+//  (qui trie et borne) comme par le composant (qui trace). Le calcul d'une
+//  courbe est le genre de code qu'on ne sait relire qu'en le testant — et un axe
+//  inversé au mauvais endroit produit un graphique parfaitement lisible qui
+//  raconte l'inverse de la vérité.
 //
 //  DEUX MÉTRIQUES, ET ELLES NE SE LISENT PAS DANS LE MÊME SENS :
 //
@@ -17,8 +18,11 @@
 //
 //  LE CLASSEMENT (« 5A ») N'EST PAS UNE MÉTRIQUE. Il change deux ou trois fois
 //  dans une vie de joueur : sa courbe serait un trait plat. Il s'affiche à côté
-//  du nom, il ne se trace pas.
+//  du nom, et il sert de RÈGLE GRADUÉE derrière la courbe des points
+//  (`frontieresClassement`) — mais il ne se trace pas lui-même.
 // ============================================================================
+
+import { classementPower, KNOWN_CLASSEMENTS } from "./interclub-order";
 
 /** Une mesure, telle que la fédération l'a publiée ce mois-là. */
 export interface HistoryPoint {
@@ -231,3 +235,115 @@ export const COULEURS = [
 ];
 
 export const couleurDe = (i: number) => COULEURS[i % COULEURS.length];
+
+// ----------------------------------------------------------------------------
+//  LES LIGNES DE PASSAGE D'UN CLASSEMENT À L'AUTRE
+// ----------------------------------------------------------------------------
+
+/** Une ligne horizontale : la moyenne de points où l'on bascule dans `clt`. */
+export interface Frontiere {
+  /**
+   * Le classement que l'on ATTEINT en franchissant la ligne vers le haut — donc le plus fort
+   * des deux qu'elle sépare. C'est l'étiquette qui répond à « il me manque combien pour passer
+   * 5A ? », qui est la question qu'on se pose devant cet écran.
+   */
+  clt: string;
+  /** La moyenne de points où on la place. */
+  valeur: number;
+}
+
+/**
+ * La pyramide du plus FAIBLE au plus fort, NC exclu.
+ *
+ * DÉRIVÉE de `KNOWN_CLASSEMENTS` et non recopiée : une liste jumelle se désynchroniserait le
+ * jour où la fédération ajouterait un échelon, et la frontière disparaîtrait sans que rien ne
+ * le signale. `KNOWN_CLASSEMENTS` est déjà ordonnée du plus faible au plus fort.
+ */
+const ECHELLE: readonly string[] = KNOWN_CLASSEMENTS.filter((c) => c !== "NC");
+
+/**
+ * Ces deux classements se suivent-ils dans la pyramide fédérale ?
+ *
+ * Lu dans `ECHELLE` plutôt que calculé sur `classementPower` : ce poids est un détail
+ * d'implémentation de la comparaison (il saute de 1 à 22 entre « 1N » et « 2A »), et s'y fier
+ * ferait dépendre l'adjacence d'un choix d'encodage.
+ */
+function sontAdjacents(bas: string, haut: string): boolean {
+  const i = ECHELLE.indexOf(bas);
+  const j = ECHELLE.indexOf(haut);
+  return i >= 0 && j === i + 1;
+}
+
+/**
+ * OÙ PASSE-T-ON DE « 5B » À « 5A » — déduit de nos propres mesures, jamais d'un barème écrit
+ * en dur.
+ *
+ * ⚠️ CE MODULE NE CONNAÎT PAS LE BARÈME DE LA FÉDÉRATION, et n'a pas à l'inventer. Poser des
+ * seuils au jugé donnerait un graphique parfaitement crédible et faux, du genre qui ne se
+ * dément jamais : un joueur lirait « il me manque 200 points pour passer 5A » sur une ligne
+ * sortie de nulle part.
+ *
+ * Ce qu'on a est suffisant : CHAQUE MESURE PORTE À LA FOIS le classement publié ce mois-là et
+ * la moyenne de points qui l'a produit. Le corpus dit donc lui-même où sont les marches — la
+ * plus haute moyenne jamais vue sous « 5B » et la plus basse jamais vue sous « 5A » encadrent
+ * la frontière, et on la pose au milieu. Plus le club accumule de mois, plus l'encadrement se
+ * resserre : la règle graduée s'affine toute seule, sans que personne n'ait à la tenir à jour.
+ *
+ * TROIS REFUS, chacun pour ne pas dessiner une ligne qu'on ne sait pas placer :
+ *
+ *  1. **Rien pour le RANG.** Un classement ne correspond à aucun rang fixe — le rang dépend du
+ *     champ, donc la « ligne du 5A » se déplacerait tous les mois. Une ligne qui bouge sur un
+ *     axe qui bouge n'est plus un repère. `metrique !== "mean"` ⇒ aucune frontière.
+ *  2. **Rien entre deux catégories qui SE CHEVAUCHENT.** Si une moyenne vue sous « 5A » est
+ *     inférieure à une moyenne vue sous « 5B », le corpus se contredit (barème révisé entre
+ *     deux saisons, classement corrigé à la main, mesure fausse). On saute cette frontière-là
+ *     plutôt que d'en inventer une au milieu du désordre.
+ *  3. **Rien entre deux échelons NON ADJACENTS.** Si le club n'a que des « 5C » et des « 5A »,
+ *     la marche entre les deux en recouvre DEUX : la tracer et l'étiqueter « 5A » ferait lire
+ *     un seuil unique là où il y en a deux, et placerait le premier au hasard.
+ *
+ * `NC` est écarté : ce n'est pas un échelon mais l'absence d'échelon, et la fédération ne
+ * l'ordonne pas (cf. `isNC`). Une « frontière du NC » n'aurait pas de sens.
+ *
+ * Le calcul porte sur TOUTES les séries et TOUS leurs mois, jamais sur la seule sélection à
+ * l'écran : une frontière est une propriété de l'échelle fédérale, pas de qui l'on regarde.
+ * Cocher un joueur de plus ne doit pas déplacer les repères sous ses pieds.
+ */
+export function frontieresClassement(series: HistorySeries[], metrique: Metrique): Frontiere[] {
+  if (metrique !== "mean") return [];
+
+  // Étendue de moyenne observée sous chaque classement, avec son rang dans la pyramide.
+  const vus = new Map<string, { power: number; min: number; max: number }>();
+  for (const s of series) {
+    for (const p of s.points) {
+      if (p.mean === null) continue;
+      const clt = p.clt.trim().toUpperCase();
+      const power = classementPower(clt);
+      // `null` = classement que la fédération n'a pas (faute de saisie) ; `Infinity` = NC.
+      if (power === null || !Number.isFinite(power)) continue;
+      const e = vus.get(clt);
+      if (!e) {
+        vus.set(clt, { power, min: p.mean, max: p.mean });
+      } else {
+        if (p.mean < e.min) e.min = p.mean;
+        if (p.mean > e.max) e.max = p.mean;
+      }
+    }
+  }
+
+  // Du plus FAIBLE au plus fort : `classementPower` décroît quand on monte (1I vaut 0).
+  const echelons = [...vus.entries()]
+    .map(([clt, e]) => ({ clt, ...e }))
+    .sort((a, b) => b.power - a.power);
+
+  const out: Frontiere[] = [];
+  for (let i = 0; i + 1 < echelons.length; i++) {
+    const bas = echelons[i];
+    const haut = echelons[i + 1];
+    if (!sontAdjacents(bas.clt, haut.clt)) continue;
+    // Chevauchement : le corpus se contredit, on ne tranche pas.
+    if (!(bas.max < haut.min)) continue;
+    out.push({ clt: haut.clt, valeur: (bas.max + haut.min) / 2 });
+  }
+  return out;
+}

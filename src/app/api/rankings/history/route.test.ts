@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { NextRequest } from "next/server";
 
 const h = vi.hoisted(() => ({
-  flags: { ranking: true, interclub: true },
+  flags: { ranking: true, rankingHistory: true, interclub: true },
   session: null as null | { userId: string },
   /** Périodes rendues par le `groupBy(["month"])`, les plus récentes d'abord. */
   months: [] as Array<{ month: string }>,
@@ -19,6 +19,7 @@ vi.mock("@/lib/features-server", () => ({
     delegation: false,
     tournament: false,
     ranking: h.flags.ranking,
+    rankingHistory: h.flags.rankingHistory,
     interclub: h.flags.interclub,
   }),
 }));
@@ -40,7 +41,7 @@ import { GET } from "./route";
 const req = () => ({ cookies: { get: () => undefined } }) as unknown as NextRequest;
 
 beforeEach(() => {
-  h.flags = { ranking: true, interclub: true };
+  h.flags = { ranking: true, rankingHistory: true, interclub: true };
   h.session = { userId: "u1" };
   h.months = [];
   h.points = [];
@@ -66,6 +67,15 @@ function pointMembre(month: string, over: Record<string, unknown> = {}) {
 describe("GET /api/rankings/history", () => {
   it("404 si la fonction classement est coupée", async () => {
     h.flags.ranking = false;
+    expect((await GET(req())).status).toBe(404);
+  });
+
+  it("404 si la COURBE est coupée, classement fédéral ouvert par ailleurs", async () => {
+    // Les deux flags sont exigés séparément, et « et » n'est pas « ou » : `ranking` est le seul
+    // ouvert en production, si bien qu'adosser la courbe à lui l'aurait mise devant les membres
+    // le jour de son merge. C'est ce couplage-là que ce test interdit de rétablir par mégarde.
+    h.flags.rankingHistory = false;
+    expect(h.flags.ranking).toBe(true);
     expect((await GET(req())).status).toBe(404);
   });
 
@@ -167,6 +177,44 @@ describe("GET /api/rankings/history", () => {
     // l'onglet qui les sert — la jointure elle-même est retirée de la requête.
     const args = h.findMany.mock.calls[0][0] as { select: { user: { select: Record<string, unknown> } } };
     expect(args.select.user.select.team).toBe(false);
+  });
+
+  // ── QUI FIGURE SUR LA COURBE ────────────────────────────────────────────────────────────
+  // La visibilité se joue dans le `where`, pas dans le rendu : ces essais lisent donc les
+  // arguments passés à Prisma. Un test qui n'observerait que la charge utile serait satisfait
+  // par un mock complaisant, et c'est exactement ce qui a laissé passer la fuite.
+
+  const membreVisible = { user: { is: { OR: [{ listed: true }, { teamId: { not: null } }] } } };
+
+  it("ne lit que les membres opt-in ou alignés — l'opt-out d'annuaire masque aussi la courbe", async () => {
+    h.months = [{ month: "2026-03-02" }];
+    h.points = [pointMembre("2026-03-02")];
+    await GET(req());
+    const where = (h.findMany.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+    expect(where).toEqual({
+      month: { in: ["2026-03-02"] },
+      OR: [membreVisible, { guest: { isNot: null } }],
+    });
+  });
+
+  it("applique le MÊME filtre au relevé des mois, sans quoi une colonne resterait vide", async () => {
+    h.months = [{ month: "2026-03-02" }];
+    h.points = [pointMembre("2026-03-02")];
+    await GET(req());
+    const where = (h.groupBy.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+    expect(where).toEqual({ OR: [membreVisible, { guest: { isNot: null } }] });
+  });
+
+  it("interclub coupé → aucun joueur sans compte n'est LU, pas seulement son équipe", async () => {
+    h.flags.interclub = false;
+    h.months = [{ month: "2026-03-02" }];
+    h.points = [pointMembre("2026-03-02")];
+    await GET(req());
+    // Même garde que `/api/directory`, qui fait `interclub ? allTeamGuests() : []` : plus de
+    // branche `guest` du tout, donc aucun invité ne peut ressortir.
+    const where = (h.findMany.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+    expect(where).toEqual({ month: { in: ["2026-03-02"] }, ...membreVisible });
+    expect(JSON.stringify(where)).not.toContain("guest");
   });
 
   it("ignore une ligne sans sujet plutôt que de lever à l'affichage", async () => {

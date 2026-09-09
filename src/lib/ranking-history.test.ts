@@ -5,6 +5,7 @@ import {
   chemin,
   couleurDe,
   dernierPoint,
+  frontieresClassement,
   moisDansPlage,
   moisLabel,
   ordonnee,
@@ -17,6 +18,25 @@ import {
 } from "./ranking-history";
 
 const CADRE: Cadre = { w: 100, h: 100, padL: 0, padR: 0, padT: 0, padB: 0 };
+
+/**
+ * Une série dont CHAQUE mesure porte son propre classement — ce que `serie` ne permet pas
+ * (elle fige « 5A »), et ce dont les frontières ont besoin : elles se déduisent justement de
+ * la rencontre entre un classement et une moyenne.
+ */
+function serieCltee(
+  points: { month: string; clt: string; mean: number | null }[],
+  over: Partial<HistorySeries> = {},
+): HistorySeries {
+  return {
+    id: "u1",
+    kind: "member",
+    name: "Jean Dupont",
+    team: null,
+    points: points.map((p) => ({ month: p.month, clt: p.clt, rang: null, rangM: null, mean: p.mean })),
+    ...over,
+  };
+}
 
 function serie(
   points: { month: string; mean?: number | null; rangM?: number | null }[],
@@ -206,5 +226,104 @@ describe("plusGrandEstMieux", () => {
   it("dit dans quel sens se lit chaque métrique", () => {
     expect(plusGrandEstMieux("mean")).toBe(true);
     expect(plusGrandEstMieux("rangM")).toBe(false);
+  });
+});
+
+describe("frontieresClassement", () => {
+  it("pose la ligne ENTRE la plus haute moyenne du bas et la plus basse du haut", () => {
+    const f = frontieresClassement(
+      [
+        serieCltee([
+          { month: "m1", clt: "5B", mean: 900 },
+          { month: "m2", clt: "5B", mean: 1000 },
+          { month: "m3", clt: "5A", mean: 1200 },
+          { month: "m4", clt: "5A", mean: 1400 },
+        ]),
+      ],
+      "mean",
+    );
+    // Étiquetée par le classement qu'on ATTEINT en montant, et placée au milieu de [1000, 1200].
+    expect(f).toEqual([{ clt: "5A", valeur: 1100 }]);
+  });
+
+  it("ne rend RIEN pour le rang : aucun classement ne correspond à un rang fixe", () => {
+    const s = serieCltee([
+      { month: "m1", clt: "5B", mean: 900 },
+      { month: "m2", clt: "5A", mean: 1200 },
+    ]);
+    expect(frontieresClassement([s], "rangM")).toEqual([]);
+  });
+
+  it("saute une frontière quand les deux catégories se CHEVAUCHENT", () => {
+    // Une moyenne vue sous 5A (1000) sous une moyenne vue sous 5B (1100) : le corpus se
+    // contredit, donc on ne tranche pas plutôt que d'inventer un seuil au milieu du désordre.
+    const s = serieCltee([
+      { month: "m1", clt: "5B", mean: 800 },
+      { month: "m2", clt: "5B", mean: 1100 },
+      { month: "m3", clt: "5A", mean: 1000 },
+      { month: "m4", clt: "5A", mean: 1400 },
+    ]);
+    expect(frontieresClassement([s], "mean")).toEqual([]);
+  });
+
+  it("saute une marche qui recouvre DEUX passages (échelons non adjacents)", () => {
+    // 5C puis 5A : la marche entre les deux contient aussi le passage 5C→5B. L'étiqueter « 5A »
+    // ferait lire un seuil unique là où il y en a deux.
+    const s = serieCltee([
+      { month: "m1", clt: "5C", mean: 600 },
+      { month: "m2", clt: "5A", mean: 1200 },
+    ]);
+    expect(frontieresClassement([s], "mean")).toEqual([]);
+  });
+
+  it("écarte NC — absence d'échelon, que la fédération n'ordonne pas", () => {
+    const s = serieCltee([
+      { month: "m1", clt: "NC", mean: 100 },
+      { month: "m2", clt: "5D", mean: 400 },
+    ]);
+    expect(frontieresClassement([s], "mean")).toEqual([]);
+  });
+
+  it("ignore un classement que la fédération n'a pas, sans casser les autres", () => {
+    const s = serieCltee([
+      { month: "m1", clt: "6Z", mean: 10 },
+      { month: "m2", clt: "5B", mean: 900 },
+      { month: "m3", clt: "5A", mean: 1100 },
+    ]);
+    expect(frontieresClassement([s], "mean")).toEqual([{ clt: "5A", valeur: 1000 }]);
+  });
+
+  it("rend plusieurs marches, du plus faible au plus fort, et à travers les séries", () => {
+    const f = frontieresClassement(
+      [
+        serieCltee([
+          { month: "m1", clt: "5C", mean: 500 },
+          { month: "m2", clt: "5B", mean: 900 },
+        ]),
+        serieCltee([{ month: "m2", clt: "5A", mean: 1300 }], { id: "u2" }),
+      ],
+      "mean",
+    );
+    expect(f).toEqual([
+      { clt: "5B", valeur: 700 },
+      { clt: "5A", valeur: 1100 },
+    ]);
+  });
+
+  it("ignore les mesures sans moyenne plutôt que de les compter pour zéro", () => {
+    const s = serieCltee([
+      { month: "m1", clt: "5B", mean: null },
+      { month: "m2", clt: "5B", mean: 900 },
+      { month: "m3", clt: "5A", mean: 1100 },
+    ]);
+    expect(frontieresClassement([s], "mean")).toEqual([{ clt: "5A", valeur: 1000 }]);
+  });
+
+  it("ne rend rien quand une seule catégorie a été observée", () => {
+    const s = serieCltee([
+      { month: "m1", clt: "5A", mean: 1100 },
+      { month: "m2", clt: "5A", mean: 1300 },
+    ]);
+    expect(frontieresClassement([s], "mean")).toEqual([]);
   });
 });

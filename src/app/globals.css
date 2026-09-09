@@ -6942,6 +6942,21 @@ body[data-bottombar] .install-banner {
   font-size: 8px;
   font-variant-numeric: tabular-nums;
 }
+/* LES MARCHES DU CLASSEMENT — un repère, pas une donnée. Pointillé et discret, pour se
+   distinguer au premier coup d'oeil des graduations pleines de l'axe (qui, elles, sont des
+   valeurs) et pour ne jamais concurrencer les courbes. Meme jeton de couleur que la grille :
+   la piste que ces lignes donnent vaut ce que vaut le corpus, et ne merite pas plus d'encre. */
+.rankhist-palier {
+  stroke: var(--grid-line);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.rankhist-palier-txt {
+  fill: var(--pico-muted-color);
+  font-size: 7px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
 .rankhist-trace {
   fill: none;
   stroke-width: 2;
