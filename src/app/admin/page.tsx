@@ -364,6 +364,11 @@ export default function AdminPage() {
   // Rafraîchissement à la demande du classement squashnet (rattrape les nouveaux inscrits).
   const [rkBusy, setRkBusy] = useState(false);
   const [rkResult, setRkResult] = useState<{ ok: boolean; text: string } | null>(null);
+  // Complètement de l'HISTORIQUE (la courbe), distinct du rafraîchissement du mois courant :
+  // deux travaux, deux boutons, deux compte-rendus — l'un dit « les classements sont à jour »,
+  // l'autre « la courbe est complète », et les confondre cacherait celui qui a échoué.
+  const [rkHistBusy, setRkHistBusy] = useState(false);
+  const [rkHistResult, setRkHistResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [icBusy, setIcBusy] = useState(false);
   const [icResult, setIcResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [icTeams, setIcTeams] = useState<IcTeam[]>([]);
@@ -1079,6 +1084,57 @@ export default function AdminPage() {
       setRkResult({ ok: false, text: "Rafraîchissement impossible." });
     } finally {
       setRkBusy(false);
+    }
+  };
+
+  // Complète l'historique du classement, PAR TRANCHES. La route s'arrête avant le couperet de
+  // Vercel et dit ce qu'il reste ; le remplissage étant reprenable, recliquer reprend là où
+  // l'on s'était arrêté sans jamais repayer le travail déjà fait.
+  const backfillRankings = async () => {
+    setRkHistBusy(true);
+    setRkHistResult(null);
+    try {
+      const res = await fetch("/api/admin/backfill-rankings", { method: "POST" });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        months?: number;
+        written?: number;
+        already?: number;
+        unresolved?: number;
+        failed?: number;
+        remaining?: number;
+        stopped?: boolean;
+        error?: string;
+      };
+      if (!res.ok) {
+        setRkHistResult({ ok: false, text: data.error ?? "Complètement impossible." });
+        return;
+      }
+      const months = data.months ?? 0;
+      const written = data.written ?? 0;
+      const unresolved = data.unresolved ?? 0;
+      const failed = data.failed ?? 0;
+      const remaining = data.remaining ?? 0;
+      const text =
+        `${written} mesure${written > 1 ? "s" : ""} ajoutée${written > 1 ? "s" : ""}` +
+        `${failed ? `, ${failed} échec${failed > 1 ? "s" : ""} (base)` : ""}` +
+        // « Sans réponse » n'est PAS du travail restant, et le dire évite de faire recliquer
+        // pour rien : un joueur non licencié à l'époque n'aura jamais de mesure ces mois-là.
+        `${unresolved ? `, ${unresolved} sans réponse (non licencié à l'époque, le plus souvent)` : ""}` +
+        (remaining > 0
+          ? ` — il reste ${remaining} couple${remaining > 1 ? "s" : ""} à voir, reclique pour continuer.`
+          // Le nombre de périodes vient de la RÉPONSE, jamais de la profondeur qu'on a demandée :
+          // la fédération n'en publie pas toujours vingt-quatre, et annoncer « complet sur les
+          // 24 derniers mois » sur une source qui n'en sert que neuf ferait chercher un défaut
+          // dans l'appli — c'est exactement la question qu'on s'est posée devant une courbe qui
+          // s'arrêtait en janvier.
+          : ` — historique complet sur les ${months} période${months > 1 ? "s" : ""} que` +
+            ` squashnet publie.`);
+      setRkHistResult({ ok: data.ok ?? true, text });
+    } catch {
+      setRkHistResult({ ok: false, text: "Complètement impossible." });
+    } finally {
+      setRkHistBusy(false);
     }
   };
 
@@ -2058,9 +2114,9 @@ export default function AdminPage() {
               <section className="adm-carte">
                 <h3 className="adm-carte-titre">Classement squashnet</h3>
                 <p className="muted tiny">
-                  Récupère le classement fédéral de tous les membres listés dans l'annuaire. À
-                  utiliser pour les nouveaux inscrits (le rafraîchissement automatique n'a lieu
-                  qu'une fois par mois).
+                  <strong>Classement du mois.</strong> Récupère le classement fédéral de tous les
+                  membres listés dans l'annuaire. À utiliser pour les nouveaux inscrits (le
+                  rafraîchissement automatique n'a lieu qu'une fois par mois).
                 </p>
                 <button type="button" disabled={rkBusy} onClick={refreshRankings}>
                   {rkBusy ? "Récupération…" : "Rafraîchir les classements"}
@@ -2069,6 +2125,36 @@ export default function AdminPage() {
                   <div className={`notice ${rkResult.ok ? "info" : "error"}`} style={{ marginTop: 8 }}>
                     {rkResult.ok ? "✓ " : "⚠️ "}
                     {rkResult.text}
+                  </div>
+                )}
+
+                {/* L'HISTORIQUE (la courbe « Progression »), à part du classement courant.
+                    Deux travaux distincts : celui du dessus met à jour le mois qui compte pour
+                    l'annuaire et la composition des équipes ; celui-ci va rechercher les mois
+                    PASSÉS, que squashnet garde publiés. */}
+                <hr className="adm-sep" />
+                <p className="muted tiny">
+                  <strong>Historique (courbe « Progression »).</strong> Va chercher les
+                  classements des <strong>24 derniers mois</strong> — ou moins, si la fédération
+                  n'en publie pas autant — pour les joueurs qui n'en ont pas encore. Le travail
+                  est découpé en tranches d'environ une minute&nbsp;: reclique jusqu'à
+                  « historique complet ». Rien n'est jamais redemandé deux fois.
+                </p>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={rkHistBusy}
+                  onClick={backfillRankings}
+                >
+                  {rkHistBusy ? "Complètement… (jusqu'à 1 min)" : "Compléter l'historique"}
+                </button>
+                {rkHistResult && (
+                  <div
+                    className={`notice ${rkHistResult.ok ? "info" : "error"}`}
+                    style={{ marginTop: 8 }}
+                  >
+                    {rkHistResult.ok ? "✓ " : "⚠️ "}
+                    {rkHistResult.text}
                   </div>
                 )}
               </section>

@@ -29,6 +29,8 @@ const h = vi.hoisted(() => ({
   guestFindMany: vi.fn(),
   guestUpdate: vi.fn(),
   guestUpdateMany: vi.fn(),
+  // L'historique mensuel : `writeMatch` y consigne le point après avoir écrit l'état courant.
+  pointUpsert: vi.fn(),
 }));
 
 vi.mock("./client", () => ({
@@ -39,6 +41,7 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     user: { findMany: h.findMany, findUnique: h.findUnique },
     squashnetRanking: { upsert: h.upsert, deleteMany: h.deleteMany },
+    squashnetRankingPoint: { upsert: h.pointUpsert },
     interclubGuest: {
       findMany: h.guestFindMany,
       update: h.guestUpdate,
@@ -71,6 +74,7 @@ beforeEach(() => {
   h.getLatestMonth.mockReset().mockResolvedValue("2026-07-07");
   h.searchRanking.mockReset();
   h.upsert.mockReset().mockResolvedValue({});
+  h.pointUpsert.mockReset().mockResolvedValue({});
   h.deleteMany.mockReset().mockResolvedValue({ count: 1 });
   // Remis à zéro comme `guests` : sans cela, l'effectif du test précédent débordait sur le
   // suivant et consommait ses `mockResolvedValueOnce`.
@@ -96,6 +100,7 @@ describe("refreshRankings", () => {
       cleared: 0,
       skipped: 0,
       failed: 0,
+      pointFailed: 0,
       bulkMoveBlocked: false,
     });
     expect(h.findMany).not.toHaveBeenCalled();
@@ -109,6 +114,59 @@ describe("refreshRankings", () => {
     expect(res).toMatchObject({ matched: 1, cleared: 0, skipped: 0 });
     expect(h.upsert).toHaveBeenCalledOnce();
     expect(h.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("consigne AUSSI le point d'historique du mois, pour la courbe de progression", async () => {
+    h.members = [{ id: "u1", displayName: "Jean Dupont" }];
+    h.searchRanking.mockResolvedValueOnce([row("DUPONT JEAN", { mean: "3 832.17" })]);
+    await refreshRankings();
+    // La moyenne de points est LA valeur de la courbe : c'est la seule qui bouge tous les mois.
+    // Elle doit traverser le rapprochement, qui ne la portait pas avant l'historique.
+    expect(h.pointUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId_month: { userId: "u1", month: "2026-07-07" } },
+        create: expect.objectContaining({ userId: "u1", month: "2026-07-07", mean: 3832.17 }),
+      }),
+    );
+  });
+
+  it("n'écrit AUCUN point pour un mois non concluant — un trou vaut mieux qu'une valeur inventée", async () => {
+    h.members = [{ id: "u1", displayName: "Jean Dupont" }];
+    h.searchRanking.mockResolvedValueOnce([]); // squashnet muet / joueur introuvable
+    await refreshRankings();
+    expect(h.pointUpsert).not.toHaveBeenCalled();
+  });
+
+  it("une panne sur l'historique ne bloque pas l'annuaire : l'état courant est écrit d'abord", async () => {
+    h.members = [{ id: "u1", displayName: "Jean Dupont" }];
+    h.searchRanking.mockResolvedValueOnce([row("DUPONT JEAN")]);
+    h.pointUpsert.mockRejectedValueOnce(new Error("table absente"));
+    const res = await refreshRankings();
+    // Le classement du membre est à jour malgré la panne de la courbe…
+    expect(h.upsert).toHaveBeenCalledOnce();
+    // …et LE COMPTE-RENDU LE DIT. Ce test assertionnait `failed: 1` sans regarder `matched`,
+    // ce qui laissait passer l'inverse de la vérité : table d'historique indisponible, et la
+    // passe rapportait « 0 rapproché(s), 40 échec(s) base » au moment même où les quarante
+    // classements de l'annuaire venaient d'être écrits sans une erreur.
+    expect(res).toMatchObject({ matched: 1, failed: 0, pointFailed: 1, skipped: 0 });
+  });
+
+  it("dit la panne d'historique à part des échecs base, dans le résumé", async () => {
+    const info = summarizeRefresh({
+      month: "2026-07-07",
+      members: 1,
+      guests: 0,
+      matched: 1,
+      cleared: 0,
+      skipped: 0,
+      failed: 0,
+      pointFailed: 1,
+      bulkMoveBlocked: false,
+    });
+    expect(info.info).toContain("1 rapproché(s)");
+    expect(info.info).toContain("1 sans point d'historique");
+    // L'annuaire est à jour : rien ici n'est un échec, et le heartbeat ne doit pas rougir.
+    expect(info.ok).toBe(true);
   });
 
   it("membre retrouvé UNIQUEMENT dans un autre club → suppression (moved)", async () => {
@@ -402,6 +460,7 @@ describe("summarizeRefresh", () => {
     cleared: 1,
     skipped: 1,
     failed: 0,
+    pointFailed: 0,
     bulkMoveBlocked: false,
   };
 

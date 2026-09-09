@@ -131,3 +131,13 @@ export function ChatIcon() {
     </svg>
   );
 }
+
+/** Courbe montante — la progression du classement fédéral. */
+export function TrendIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 17l6-6 4 4 8-8" />
+      <path d="M15 7h6v6" />
+    </svg>
+  );
+}

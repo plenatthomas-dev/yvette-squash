@@ -24,6 +24,14 @@ export interface RankingMatch {
   cat: string;
   club: string;
   name: string; // nom tel qu'affiché par squashnet
+  /**
+   * MOYENNE DE POINTS (« 3 832.17 » → 3832.17), ou null si la case est vide ou illisible.
+   *
+   * Elle n'est affichée nulle part et ne sert à aucun tri : elle n'existe que pour
+   * l'HISTORIQUE (`SquashnetRankingPoint.mean`), où elle est la seule des quatre valeurs qui
+   * bouge tous les mois — donc la seule qui dessine une courbe.
+   */
+  mean: number | null;
 }
 
 /** Minuscule, sans accents, ponctuation/tirets/apostrophes → espaces, espaces compactés. */
@@ -73,6 +81,23 @@ function toRank(raw: string): number | null {
   return n > 0 ? n : null;
 }
 
+/**
+ * « 3 832.17 » → 3832.17. Les milliers sont séparés par une ESPACE (parfois insécable), la
+ * décimale par un point — c'est le format que rend squashnet, vérifié sur fixture.
+ *
+ * Lecture STRICTE comme `toRank`, et pour la même raison : `parseFloat("3 832.17")` rend 3,
+ * une valeur cent fois trop petite qui a l'air d'un nombre. Zéro est refusé — une moyenne nulle
+ * n'existe pas dans ce classement, c'est une case vide déguisée, et elle écraserait la courbe.
+ * La virgule décimale est acceptée au cas où la fédération francise son rendu un jour ; le
+ * point reste ce qu'on observe.
+ */
+function toMean(raw: string): number | null {
+  const nettoye = (raw ?? "").replace(/[\s\u00a0\u202f]/g, "").replace(",", ".");
+  if (!/^\d+(?:\.\d+)?$/.test(nettoye)) return null;
+  const n = Number.parseFloat(nettoye);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 function toMatch(c: RankingRow): RankingMatch {
   return {
     clt: c.clt,
@@ -82,6 +107,7 @@ function toMatch(c: RankingRow): RankingMatch {
     cat: c.cat,
     club: c.club,
     name: c.name,
+    mean: toMean(c.mean),
   };
 }
 
