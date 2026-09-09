@@ -113,11 +113,13 @@ describe("RankingHistory", () => {
   });
 
   it("la légende porte la dernière valeur ET l'évolution, en toutes lettres", async () => {
-    monte([serie("u1", "Jean Dupont", [{ mean: 1000, rangM: 2300 }, null, { mean: 1128, rangM: 1800 }])], "Jean Dupont");
+    // La moyenne suit le rang : 1 128 → 1 000 est une PROGRESSION de 128, et les deux colonnes
+    // doivent le dire du même côté du zéro.
+    monte([serie("u1", "Jean Dupont", [{ mean: 1128, rangM: 2300 }, null, { mean: 1000, rangM: 1800 }])], "Jean Dupont");
     await souffle();
     const li = legende("Jean Dupont");
     expect(li).not.toBeNull();
-    expect(within(li as HTMLElement).getByText("1 128")).toBeTruthy();
+    expect(within(li as HTMLElement).getByText("1 000")).toBeTruthy();
     expect(within(li as HTMLElement).getByText("+128")).toBeTruthy();
   });
 
@@ -151,9 +153,9 @@ describe("RankingHistory", () => {
     monte(
       [
         serie("u1", "Jean Dupont", [
-          { mean: 1000, rangM: 2300 },
+          { mean: 1100, rangM: 2300 },
           { mean: 1050, rangM: 2100 },
-          { mean: 1100, rangM: 1800 },
+          { mean: 1000, rangM: 1800 },
         ]),
       ],
       "Jean Dupont",
@@ -248,9 +250,9 @@ describe("les graduations de l'axe", () => {
     monte(
       [
         serieCltee("u1", "Jean Dupont", [
-          { clt: "5B", mean: 900, rangM: 2400 },
+          { clt: "5B", mean: 1200, rangM: 2400 },
           { clt: "5B", mean: 1000, rangM: 2300 },
-          { clt: "5A", mean: 1200, rangM: 2000 },
+          { clt: "5A", mean: 900, rangM: 2000 },
         ]),
       ],
       "Jean Dupont",
@@ -260,7 +262,7 @@ describe("les graduations de l'axe", () => {
     expect(paliers).toHaveLength(1);
     // Étiquetée « 5A » : la question devant cet écran est « il me manque combien pour passer ? ».
     expect(document.querySelector(".rankhist-palier-txt")?.textContent).toBe("5A");
-    // Et posée au milieu de [1000, 1200], donc DANS le cadre, pas sur un bord.
+    // Et posée au milieu de [900, 1000], donc DANS le cadre, pas sur un bord.
     const y = Number(paliers[0].getAttribute("y1"));
     expect(y).toBeGreaterThan(10);
     expect(y).toBeLessThan(148);
@@ -270,9 +272,9 @@ describe("les graduations de l'axe", () => {
     monte(
       [
         serieCltee("u1", "Jean Dupont", [
-          { clt: "5B", mean: 900, rangM: 2400 },
+          { clt: "5B", mean: 1200, rangM: 2400 },
           { clt: "5B", mean: 1000, rangM: 2300 },
-          { clt: "5A", mean: 1200, rangM: 2000 },
+          { clt: "5A", mean: 900, rangM: 2000 },
         ]),
       ],
       "Jean Dupont",
@@ -285,28 +287,29 @@ describe("les graduations de l'axe", () => {
 
   it("place la marche sur TOUT le corpus, pas sur les seules courbes tracées", async () => {
     // L'écran s'ouvre sur Jean seul. Marie est dans la charge utile sans être tracée, et sa
-    // mesure RESSERRE l'encadrement de la frontière :
-    //   — sur le corpus  : max(5B) = 1000 (Marie), min(5A) = 1300 (Jean) → ligne à 1150 ;
-    //   — sur Jean seul  : max(5B) =  900,        min(5A) = 1300        → ligne à 1100.
+    // mesure RESSERRE l'encadrement de la frontière (rappel : une moyenne PLUS PETITE est un
+    // MEILLEUR classement, donc 5A est en dessous de 5B) :
+    //   — sur le corpus  : min(5B) = 1200 (Marie), max(5A) = 900 (Jean) → ligne à 1050 ;
+    //   — sur Jean seul  : min(5B) = 1300,         max(5A) = 900        → ligne à 1100.
     // Les deux tombent dans la fenêtre visible (900–1300), donc seule l'ordonnée les sépare :
     // c'est la mesure qui tranche, et non un simple « il y a bien une ligne ».
     monte(
       [
         serieCltee("u1", "Jean Dupont", [
-          { clt: "5B", mean: 900, rangM: 2400 },
+          { clt: "5B", mean: 1300, rangM: 2400 },
           null,
-          { clt: "5A", mean: 1300, rangM: 1900 },
+          { clt: "5A", mean: 900, rangM: 1900 },
         ]),
-        serieCltee("u2", "Marie Martin", [{ clt: "5B", mean: 1000, rangM: 2300 }, null, null]),
+        serieCltee("u2", "Marie Martin", [{ clt: "5B", mean: 1200, rangM: 2300 }, null, null]),
       ],
       "Jean Dupont",
     );
     await souffle();
 
-    // Cadre : h 170, padT 10, padB 22 → 138 px utiles, axe des points non inversé.
-    const y = (v: number) => 10 + 138 * (1 - (v - 900) / 400);
+    // Cadre : h 170, padT 10, padB 22 → 138 px utiles, axe INVERSÉ (la petite moyenne en haut).
+    const y = (v: number) => 10 + 138 * ((v - 900) / 400);
     const trace = Number(document.querySelector(".rankhist-palier")?.getAttribute("y1"));
-    expect(trace).toBeCloseTo(y(1150), 1);
+    expect(trace).toBeCloseTo(y(1050), 1);
     expect(trace).not.toBeCloseTo(y(1100), 1);
   });
 

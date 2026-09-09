@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   abscisse,
+  bornesAvecMarches,
   bornesValeurs,
   chemin,
   couleurDe,
@@ -123,9 +124,14 @@ describe("ordonnee", () => {
 
   // C'est LE point du module : sans cette inversion, le joueur le plus en forme du club aurait
   // la courbe qui plonge, sur un graphique par ailleurs parfaitement lisible.
-  it("moyenne : la meilleure valeur est EN HAUT", () => {
-    expect(ordonnee(200, bornes, "mean", CADRE)).toBe(0);
-    expect(ordonnee(100, bornes, "mean", CADRE)).toBe(100);
+  //
+  // ⚠️ LES DEUX MÉTRIQUES VONT DANS LE MÊME SENS, et ce test l'a longtemps nié pour `mean`.
+  // Mesuré sur le corpus réel : r = 1,000 entre `mean` et `rangM`, et 4B (fort) tient entre
+  // 1496 et 1659 quand 5D (faible) tient entre 7240 et 9052. Une moyenne PLUS PETITE est un
+  // MEILLEUR classement, exactement comme un rang.
+  it("moyenne : la meilleure valeur est la PLUS PETITE, donc en haut", () => {
+    expect(ordonnee(100, bornes, "mean", CADRE)).toBe(0);
+    expect(ordonnee(200, bornes, "mean", CADRE)).toBe(100);
   });
   it("rang : la meilleure valeur est la PLUS PETITE, donc en haut aussi", () => {
     expect(ordonnee(100, bornes, "rangM", CADRE)).toBe(0);
@@ -138,8 +144,8 @@ describe("ordonnee", () => {
   });
   it("respecte les marges du cadre", () => {
     const c: Cadre = { w: 100, h: 100, padL: 10, padR: 5, padT: 20, padB: 10 };
-    expect(ordonnee(200, bornes, "mean", c)).toBe(20); // padT
-    expect(ordonnee(100, bornes, "mean", c)).toBe(90); // h - padB
+    expect(ordonnee(100, bornes, "mean", c)).toBe(20); // padT — la meilleure moyenne
+    expect(ordonnee(200, bornes, "mean", c)).toBe(90); // h - padB
   });
 });
 
@@ -158,14 +164,15 @@ describe("chemin", () => {
   const bornes = { min: 0, max: 100 };
 
   it("relie les points connus", () => {
-    expect(chemin([0, 50, 100], bornes, "mean", CADRE)).toBe("M0.0 100.0 L50.0 50.0 L100.0 0.0");
+    // 0 est la MEILLEURE moyenne, donc en haut (y = 0) ; 100 la pire, donc en bas.
+    expect(chemin([0, 50, 100], bornes, "mean", CADRE)).toBe("M0.0 0.0 L50.0 50.0 L100.0 100.0");
   });
 
   // Relier janvier à mars par-dessus février dessinerait une progression continue là où rien
   // n'a été observé : le trou se voit, c'est le but.
   it("COUPE le trait sur un mois non mesuré au lieu de l'enjamber", () => {
     const d = chemin([0, null, 100], bornes, "mean", CADRE);
-    expect(d).toBe("M0.0 100.0 M100.0 0.0");
+    expect(d).toBe("M0.0 0.0 M100.0 100.0");
     expect(d).not.toContain("L");
   });
 
@@ -177,8 +184,11 @@ describe("chemin", () => {
 describe("progression", () => {
   const mois = ["m1", "m2"];
 
-  it("moyenne : gagner des points est un progrès positif", () => {
-    expect(progression(serie([{ month: "m1", mean: 1000 }, { month: "m2", mean: 1100 }]), mois, "mean")).toBe(100);
+  // Même piège que pour le rang, et il est resté ouvert plus longtemps : une moyenne qui
+  // BAISSE est une progression. La colonne « évolution » mettait un moins devant la meilleure
+  // saison d'un joueur.
+  it("moyenne : voir sa moyenne BAISSER est un progrès positif", () => {
+    expect(progression(serie([{ month: "m1", mean: 1100 }, { month: "m2", mean: 1000 }]), mois, "mean")).toBe(100);
   });
 
   // Sans ce changement de signe, la colonne « évolution » afficherait un moins devant la
@@ -199,7 +209,8 @@ describe("progression", () => {
       { month: "m2", mean: null },
       { month: "m3", mean: 900 },
     ]);
-    expect(progression(s, ["m1", "m2", "m3"], "mean")).toBe(-100);
+    // 1000 → 900 : la moyenne baisse, donc le joueur progresse de 100.
+    expect(progression(s, ["m1", "m2", "m3"], "mean")).toBe(100);
   });
 });
 
@@ -223,45 +234,49 @@ describe("palette", () => {
 });
 
 describe("plusGrandEstMieux", () => {
-  it("dit dans quel sens se lit chaque métrique", () => {
-    expect(plusGrandEstMieux("mean")).toBe(true);
+  it("dit dans quel sens se lit chaque métrique — vers le BAS pour les deux", () => {
+    expect(plusGrandEstMieux("mean")).toBe(false);
     expect(plusGrandEstMieux("rangM")).toBe(false);
   });
 });
 
 describe("frontieresClassement", () => {
-  it("pose la ligne ENTRE la plus haute moyenne du bas et la plus basse du haut", () => {
+  // ⚠️ LE SENS. 5A est plus FORT que 5B, donc ses moyennes sont plus BASSES (mesuré : 4B tient
+  // entre 1496 et 1659, 5D entre 7240 et 9052). Les fixtures de ce bloc ont d'abord été écrites
+  // à l'envers, et la fonction ne traçait alors AUCUNE ligne — chaque paire échouait à son test
+  // d'encadrement, en silence.
+  it("pose la ligne ENTRE la plus basse moyenne du bas et la plus haute du haut", () => {
     const f = frontieresClassement(
       [
         serieCltee([
-          { month: "m1", clt: "5B", mean: 900 },
-          { month: "m2", clt: "5B", mean: 1000 },
-          { month: "m3", clt: "5A", mean: 1200 },
-          { month: "m4", clt: "5A", mean: 1400 },
+          { month: "m1", clt: "5B", mean: 1400 },
+          { month: "m2", clt: "5B", mean: 1200 },
+          { month: "m3", clt: "5A", mean: 1000 },
+          { month: "m4", clt: "5A", mean: 900 },
         ]),
       ],
       "mean",
     );
-    // Étiquetée par le classement qu'on ATTEINT en montant, et placée au milieu de [1000, 1200].
+    // Étiquetée par le classement qu'on ATTEINT en progressant, et posée au milieu de [1000, 1200].
     expect(f).toEqual([{ clt: "5A", valeur: 1100 }]);
   });
 
   it("ne rend RIEN pour le rang : aucun classement ne correspond à un rang fixe", () => {
     const s = serieCltee([
-      { month: "m1", clt: "5B", mean: 900 },
-      { month: "m2", clt: "5A", mean: 1200 },
+      { month: "m1", clt: "5B", mean: 1200 },
+      { month: "m2", clt: "5A", mean: 900 },
     ]);
     expect(frontieresClassement([s], "rangM")).toEqual([]);
   });
 
   it("saute une frontière quand les deux catégories se CHEVAUCHENT", () => {
-    // Une moyenne vue sous 5A (1000) sous une moyenne vue sous 5B (1100) : le corpus se
+    // Une moyenne vue sous 5A (1100) AU-DESSUS d'une moyenne vue sous 5B (1000) : le corpus se
     // contredit, donc on ne tranche pas plutôt que d'inventer un seuil au milieu du désordre.
     const s = serieCltee([
-      { month: "m1", clt: "5B", mean: 800 },
-      { month: "m2", clt: "5B", mean: 1100 },
-      { month: "m3", clt: "5A", mean: 1000 },
-      { month: "m4", clt: "5A", mean: 1400 },
+      { month: "m1", clt: "5B", mean: 1400 },
+      { month: "m2", clt: "5B", mean: 1000 },
+      { month: "m3", clt: "5A", mean: 1100 },
+      { month: "m4", clt: "5A", mean: 800 },
     ]);
     expect(frontieresClassement([s], "mean")).toEqual([]);
   });
@@ -270,16 +285,16 @@ describe("frontieresClassement", () => {
     // 5C puis 5A : la marche entre les deux contient aussi le passage 5C→5B. L'étiqueter « 5A »
     // ferait lire un seuil unique là où il y en a deux.
     const s = serieCltee([
-      { month: "m1", clt: "5C", mean: 600 },
-      { month: "m2", clt: "5A", mean: 1200 },
+      { month: "m1", clt: "5C", mean: 1200 },
+      { month: "m2", clt: "5A", mean: 600 },
     ]);
     expect(frontieresClassement([s], "mean")).toEqual([]);
   });
 
   it("écarte NC — absence d'échelon, que la fédération n'ordonne pas", () => {
     const s = serieCltee([
-      { month: "m1", clt: "NC", mean: 100 },
-      { month: "m2", clt: "5D", mean: 400 },
+      { month: "m1", clt: "NC", mean: 9000 },
+      { month: "m2", clt: "5D", mean: 7000 },
     ]);
     expect(frontieresClassement([s], "mean")).toEqual([]);
   });
@@ -287,8 +302,8 @@ describe("frontieresClassement", () => {
   it("ignore un classement que la fédération n'a pas, sans casser les autres", () => {
     const s = serieCltee([
       { month: "m1", clt: "6Z", mean: 10 },
-      { month: "m2", clt: "5B", mean: 900 },
-      { month: "m3", clt: "5A", mean: 1100 },
+      { month: "m2", clt: "5B", mean: 1100 },
+      { month: "m3", clt: "5A", mean: 900 },
     ]);
     expect(frontieresClassement([s], "mean")).toEqual([{ clt: "5A", valeur: 1000 }]);
   });
@@ -297,24 +312,24 @@ describe("frontieresClassement", () => {
     const f = frontieresClassement(
       [
         serieCltee([
-          { month: "m1", clt: "5C", mean: 500 },
+          { month: "m1", clt: "5C", mean: 1300 },
           { month: "m2", clt: "5B", mean: 900 },
         ]),
-        serieCltee([{ month: "m2", clt: "5A", mean: 1300 }], { id: "u2" }),
+        serieCltee([{ month: "m2", clt: "5A", mean: 500 }], { id: "u2" }),
       ],
       "mean",
     );
     expect(f).toEqual([
-      { clt: "5B", valeur: 700 },
-      { clt: "5A", valeur: 1100 },
+      { clt: "5B", valeur: 1100 },
+      { clt: "5A", valeur: 700 },
     ]);
   });
 
   it("ignore les mesures sans moyenne plutôt que de les compter pour zéro", () => {
     const s = serieCltee([
       { month: "m1", clt: "5B", mean: null },
-      { month: "m2", clt: "5B", mean: 900 },
-      { month: "m3", clt: "5A", mean: 1100 },
+      { month: "m2", clt: "5B", mean: 1100 },
+      { month: "m3", clt: "5A", mean: 900 },
     ]);
     expect(frontieresClassement([s], "mean")).toEqual([{ clt: "5A", valeur: 1000 }]);
   });
@@ -325,5 +340,51 @@ describe("frontieresClassement", () => {
       { month: "m2", clt: "5A", mean: 1300 },
     ]);
     expect(frontieresClassement([s], "mean")).toEqual([]);
+  });
+});
+
+describe("bornesAvecMarches", () => {
+  // Sans cet élargissement, l'écran s'ouvrant sur UN joueur cadre sur les quelques dizaines de
+  // points qu'il a parcourus : aucune frontière n'y tombe tant qu'il n'a pas changé de
+  // classement, donc aucune ligne dans la vue par défaut — le défaut qui a fait remonter que
+  // « les lignes ne s'affichent pas ».
+  it("fait entrer une marche PROCHE, en élargissant du seul côté utile", () => {
+    const b = { min: 1000, max: 1100 }; // étendue 100, marge tolérée 25
+    expect(bornesAvecMarches(b, [{ clt: "5A", valeur: 980 }])).toEqual({ min: 980, max: 1100 });
+    expect(bornesAvecMarches(b, [{ clt: "5B", valeur: 1120 }])).toEqual({ min: 1000, max: 1120 });
+  });
+
+  it("laisse dehors une marche LOINTAINE, plutôt que d'aplatir la courbe", () => {
+    // 900 est à 100 sous le minimum, soit toute l'étendue : l'y faire entrer doublerait
+    // l'échelle et le joueur deviendrait un trait plat, pour un repère hors de sa portée.
+    const b = { min: 1000, max: 1100 };
+    expect(bornesAvecMarches(b, [{ clt: "5A", valeur: 900 }])).toEqual(b);
+  });
+
+  it("prend la marche la plus éloignée parmi celles qui restent à portée", () => {
+    const b = { min: 1000, max: 1100 };
+    const out = bornesAvecMarches(b, [
+      { clt: "5A", valeur: 990 },
+      { clt: "4D", valeur: 978 },
+      { clt: "4C", valeur: 800 }, // hors de portée, ignorée
+    ]);
+    expect(out).toEqual({ min: 978, max: 1100 });
+  });
+
+  it("ne touche à rien quand une marche est DÉJÀ dans le cadre", () => {
+    const b = { min: 1000, max: 1100 };
+    expect(bornesAvecMarches(b, [{ clt: "5A", valeur: 1050 }])).toEqual(b);
+  });
+
+  it("n'élargit pas une étendue nulle : un quart de zéro ne fait entrer personne", () => {
+    // Cas courant (un joueur, une seule mesure), et l'écran a un état dédié pour lui. Élargir
+    // ici ne ferait qu'inventer un cadre autour d'un point unique.
+    const plat = { min: 1000, max: 1000 };
+    expect(bornesAvecMarches(plat, [{ clt: "5A", valeur: 995 }])).toEqual(plat);
+  });
+
+  it("sans aucune marche, rend l'échelle telle quelle", () => {
+    const b = { min: 1000, max: 1100 };
+    expect(bornesAvecMarches(b, [])).toEqual(b);
   });
 });

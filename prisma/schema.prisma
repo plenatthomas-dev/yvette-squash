@@ -666,10 +666,15 @@ model SquashnetRankingPoint {
   clt       String // classement affiché, ex. « 5A », « NC »
   rang      Int? // rang national DANS SON GENRE
   rangM     Int? // rang national MIXTE, toutes catégories — l'échelle comparable entre joueurs
-  /// La MOYENNE DE POINTS (« 3 832.17 »), et c'est elle qui fait la courbe. Le classement
-  /// (« 5A ») ne bouge que deux ou trois fois dans une vie de joueur, et le rang dépend autant
-  /// des autres que de soi ; la moyenne, elle, bouge à chaque mois joué. Une courbe de `clt`
-  /// serait une ligne plate, ce qui n'apprendrait rien à personne.
+  /// LA MOYENNE (« 3 832.17 »), et c'est elle qui fait la courbe. Le classement (« 5A ») ne
+  /// bouge que deux ou trois fois dans une vie de joueur, et le rang dépend autant des autres
+  /// que de soi ; la moyenne, elle, bouge à chaque mois joué. Une courbe de `clt` serait une
+  /// ligne plate, ce qui n'apprendrait rien à personne.
+  ///
+  /// ⚠️ CE N'EST PAS UNE MOYENNE DE POINTS QU'ON ACCUMULE : plus elle est PETITE, meilleur est
+  /// le classement. Mesuré sur 81 mesures réelles — corrélation r = 1,000 avec `rangM`, et 4B
+  /// (fort) entre 1496 et 1659 quand 5D (faible) est entre 7240 et 9052. C'est une moyenne de
+  /// RANG. Le sens a été pris à l'envers pendant tout le développement de la courbe.
   mean      Float?
   fetchedAt DateTime        @default(now())
 

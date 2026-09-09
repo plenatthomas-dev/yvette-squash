@@ -7,14 +7,30 @@
 //  inversé au mauvais endroit produit un graphique parfaitement lisible qui
 //  raconte l'inverse de la vérité.
 //
-//  DEUX MÉTRIQUES, ET ELLES NE SE LISENT PAS DANS LE MÊME SENS :
+//  DEUX MÉTRIQUES, ET TOUTES DEUX DESCENDENT QUAND ON PROGRESSE :
 //
-//   * la MOYENNE DE POINTS (« mean ») monte quand on progresse. C'est le défaut,
-//     et la seule des valeurs publiées qui bouge tous les mois ;
-//   * le RANG MIXTE (« rangM ») DESCEND quand on progresse — être 800e vaut
-//     mieux qu'être 2300e. Son axe est donc inversé, pour que « ça monte » veuille
-//     dire la même chose sur les deux graphiques. Sans cette inversion, le joueur
-//     le plus en forme du club aurait la courbe qui plonge.
+//   * la MOYENNE (« mean ») BAISSE quand on progresse. C'est le défaut, et la
+//     seule des valeurs publiées qui bouge tous les mois ;
+//   * le RANG MIXTE (« rangM ») baisse aussi — être 800e vaut mieux qu'être
+//     2300e.
+//
+//  Leurs axes sont donc inversés tous les deux, pour que « ça monte » veuille dire
+//  « ça progresse » sur les deux graphiques.
+//
+//  ⚠️ CE MODULE A LONGTEMPS AFFIRMÉ L'INVERSE POUR `mean` (« monte quand on
+//  progresse »), et le disait jusque dans le libellé sous le sélecteur. C'était
+//  faux, et mesuré comme tel sur le corpus réel le 2026-09-09 : sur 81 mesures, la
+//  corrélation entre `mean` et `rangM` vaut **r = 1,000**, et les sept classements
+//  observés s'ordonnent proprement en sens inverse de `mean` — 4B (le plus fort)
+//  entre 1496 et 1659, 5D (le plus faible) entre 7240 et 9052. Les six changements
+//  de classement de l'historique le confirment un par un : chaque montée
+//  s'accompagne d'un `mean` qui BAISSE.
+//
+//  Ce que squashnet appelle « moyenne » n'est donc pas une moyenne de POINTS qu'on
+//  accumulerait, mais une moyenne de RANG — d'où la corrélation parfaite. La courbe
+//  des « Points » était en conséquence dessinée à l'envers : le joueur qui
+//  progressait plongeait, et la colonne « évolution » mettait un moins devant sa
+//  meilleure saison.
 //
 //  LE CLASSEMENT (« 5A ») N'EST PAS UNE MÉTRIQUE. Il change deux ou trois fois
 //  dans une vie de joueur : sa courbe serait un trait plat. Il s'affiche à côté
@@ -47,9 +63,16 @@ export interface HistorySeries {
 /** Ce qu'on trace. Voir l'en-tête : les deux ne se lisent pas dans le même sens. */
 export type Metrique = "mean" | "rangM";
 
-/** Vrai si, pour cette métrique, un nombre plus GRAND vaut mieux. */
-export function plusGrandEstMieux(m: Metrique): boolean {
-  return m === "mean";
+/**
+ * Vrai si, pour cette métrique, un nombre plus GRAND vaut mieux.
+ *
+ * FAUX POUR LES DEUX, et ce n'est pas un oubli : `mean` suit `rangM` (cf. l'en-tête, r = 1,000
+ * sur le corpus réel). La fonction est gardée plutôt que supprimée parce qu'elle NOMME la
+ * question à chaque endroit qui en dépend — l'axe, le chemin, le signe de l'évolution — et
+ * qu'une troisième métrique un jour ajoutée y répondrait peut-être autrement.
+ */
+export function plusGrandEstMieux(_m: Metrique): boolean {
+  return false;
 }
 
 const MOIS_COURTS = [
@@ -284,10 +307,15 @@ function sontAdjacents(bas: string, haut: string): boolean {
  * sortie de nulle part.
  *
  * Ce qu'on a est suffisant : CHAQUE MESURE PORTE À LA FOIS le classement publié ce mois-là et
- * la moyenne de points qui l'a produit. Le corpus dit donc lui-même où sont les marches — la
- * plus haute moyenne jamais vue sous « 5B » et la plus basse jamais vue sous « 5A » encadrent
- * la frontière, et on la pose au milieu. Plus le club accumule de mois, plus l'encadrement se
- * resserre : la règle graduée s'affine toute seule, sans que personne n'ait à la tenir à jour.
+ * la moyenne qui l'a produit. Le corpus dit donc lui-même où sont les marches — la plus BASSE
+ * moyenne jamais vue sous « 5B » et la plus HAUTE jamais vue sous « 5A » encadrent la frontière,
+ * et on la pose au milieu. Plus le club accumule de mois, plus l'encadrement se resserre : la
+ * règle graduée s'affine toute seule, sans que personne n'ait à la tenir à jour.
+ *
+ * ⚠️ LE SENS COMPTE, ET IL EST CONTRE-INTUITIF : un `mean` PLUS PETIT est un MEILLEUR
+ * classement (cf. l'en-tête du module). La première version de cette fonction lisait le corpus
+ * dans l'autre sens et n'a jamais tracé la moindre ligne — chaque paire échouait à son test
+ * d'encadrement, en silence, exactement comme une catégorie qui se chevauche.
  *
  * TROIS REFUS, chacun pour ne pas dessiner une ligne qu'on ne sait pas placer :
  *
@@ -341,9 +369,60 @@ export function frontieresClassement(series: HistorySeries[], metrique: Metrique
     const bas = echelons[i];
     const haut = echelons[i + 1];
     if (!sontAdjacents(bas.clt, haut.clt)) continue;
-    // Chevauchement : le corpus se contredit, on ne tranche pas.
-    if (!(bas.max < haut.min)) continue;
-    out.push({ clt: haut.clt, valeur: (bas.max + haut.min) / 2 });
+    // `bas` est le classement le plus FAIBLE, donc celui dont les moyennes sont les plus
+    // GRANDES. Sa plus petite moyenne doit rester au-dessus de la plus grande de `haut`, sans
+    // quoi les deux catégories se chevauchent : le corpus se contredit, on ne tranche pas.
+    if (!(bas.min > haut.max)) continue;
+    out.push({ clt: haut.clt, valeur: (bas.min + haut.max) / 2 });
   }
   return out;
+}
+
+/**
+ * Combien on accepte d'ÉLARGIR l'échelle pour faire entrer une marche, en fraction de l'étendue
+ * déjà affichée.
+ *
+ * Ni zéro ni l'infini, et les deux extrêmes sont mauvais pour la même raison — ils rendent
+ * l'écran muet, l'un en cachant la marche, l'autre en aplatissant la courbe :
+ *
+ *  * à ZÉRO, l'écran s'ouvrant sur UN joueur (c'est son parti pris) cadre sur les quelques
+ *    dizaines de points que ce joueur a parcourus en un an. Aucune frontière ne tombe dans une
+ *    fenêtre aussi étroite tant qu'il n'a pas changé de classement — donc aucune ligne, jamais,
+ *    précisément dans la vue par défaut ;
+ *  * SANS BORNE, on ferait entrer une marche située à dix fois l'étendue du joueur. L'échelle
+ *    se dilaterait d'autant et sa courbe deviendrait un trait plat : on aurait remplacé une
+ *    information par un repère qu'il n'atteindra pas cette saison.
+ *
+ * Un quart de l'étendue déjà parcourue dit donc quelque chose d'assez juste : « la marche est à
+ * portée de ce que tu as bougé récemment ». Un joueur au milieu de sa catégorie ne voit rien,
+ * et c'est correct — il n'y a rien à lui dire.
+ */
+const MARGE_MARCHE = 0.25;
+
+/**
+ * L'échelle élargie, si peu, pour qu'une marche PROCHE entre dans le cadre.
+ *
+ * On ne bouge que le côté où une frontière attend, et jamais au-delà de `MARGE_MARCHE`. Les
+ * bornes rendues restent celles de TOUTES les courbes affichées (cf. `ordonnee`) : c'est
+ * toujours la même échelle pour tout le monde, juste un peu plus large.
+ *
+ * ⚠️ Étendue NULLE (un joueur, une seule mesure) : on ne s'accroche à rien, donc on n'élargit
+ * rien. Le cas a son état dédié à l'écran, et un quart de zéro ne ferait entrer aucune marche
+ * tout en risquant un cadre dégénéré.
+ */
+export function bornesAvecMarches(
+  bornes: { min: number; max: number },
+  frontieres: Frontiere[],
+): { min: number; max: number } {
+  const etendue = bornes.max - bornes.min;
+  if (etendue <= 0) return bornes;
+  const marge = etendue * MARGE_MARCHE;
+
+  let min = bornes.min;
+  let max = bornes.max;
+  for (const f of frontieres) {
+    if (f.valeur < bornes.min && f.valeur >= bornes.min - marge) min = Math.min(min, f.valeur);
+    if (f.valeur > bornes.max && f.valeur <= bornes.max + marge) max = Math.max(max, f.valeur);
+  }
+  return { min, max };
 }
