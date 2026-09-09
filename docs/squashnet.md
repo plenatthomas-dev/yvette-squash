@@ -159,10 +159,9 @@ qui l'a produit. La plus **basse** moyenne jamais vue sous « 5B » et la plus *
 sous « 5A » encadrent la frontière, qu'on pose au milieu. Plus le corpus grossit, plus
 l'encadrement se resserre : la règle graduée s'affine seule.
 
-#### ⚠️ `mean` se lit à l'ENVERS de ce que son nom suggère
+#### ⚠️ `mean` et `rangM` sont la MÊME grandeur — l'écran ne trace plus que le rang
 
-Une moyenne **plus petite** est un **meilleur** classement. Mesuré le 2026-09-09 sur les 81
-mesures de la recette, et sans ambiguïté possible :
+Mesuré le 2026-09-09 sur les 81 mesures de la recette, et sans ambiguïté possible :
 
 | Signal | Résultat |
 |---|---|
@@ -171,14 +170,25 @@ mesures de la recette, et sans ambiguïté possible :
 | Les 6 changements de classement de l'historique | chaque montée s'accompagne d'un `mean` qui **baisse** |
 
 Ce que squashnet appelle « moyenne » n'est donc pas une moyenne de POINTS qu'on accumulerait,
-mais une **moyenne de rang** — d'où la corrélation parfaite avec `rangM`.
+mais une **moyenne de rang** — d'où la corrélation parfaite, et d'où le fait qu'une moyenne
+**plus petite** soit un **meilleur** classement.
 
-Le code affirmait l'inverse (`plusGrandEstMieux("mean") === true`) et le disait jusque dans le
-libellé sous le sélecteur. **La courbe « Points » était dessinée à l'envers** : le joueur qui
-progressait plongeait, et la colonne « évolution » mettait un moins devant sa meilleure saison.
-Corrigé le 2026-09-09, en même temps que les marches — c'est ce même sens inversé qui empêchait
-la moindre ligne d'apparaître, chaque paire de classements échouant en silence à son test
-d'encadrement.
+Deux conséquences, toutes deux traitées le 2026-09-09 :
+
+1. **La courbe « Points » était dessinée à l'envers.** Le code affirmait
+   `plusGrandEstMieux("mean") === true` et le disait jusque dans le libellé sous le sélecteur :
+   le joueur qui progressait plongeait, et la colonne « évolution » mettait un moins devant sa
+   meilleure saison. C'est aussi ce sens inversé qui empêchait la moindre marche d'apparaître,
+   chaque paire de classements échouant en silence à son test d'encadrement.
+2. **Le sélecteur de métrique a été retiré.** Proposer « Points » ou « Rang » offrait un choix
+   sans conséquence — deux vues du même chiffre — payé par une décision à chaque ouverture.
+   L'écran ne trace plus que `rangM`, la valeur que la fédération publie telle quelle. `mean`
+   reste stocké : il ne coûte rien, et c'est la version lissée de la même mesure.
+
+⚠️ Le refus initial de tracer des marches sur le rang (« un classement ne correspond à aucun
+rang fixe ») reposait sur l'hypothèse que les deux grandeurs étaient indépendantes. Elles ne le
+sont pas, et **le rang donne une marche de plus que la moyenne** (5 contre 4 sur le corpus) : le
+passage 5B→5A est net en rangs et chevauchant en moyennes.
 
 #### L'échelle s'élargit un peu pour faire entrer une marche proche
 
@@ -191,10 +201,32 @@ déjà affichée** au maximum (`MARGE_MARCHE`). En dessous, la marche reste invi
 ferait entrer un repère hors de portée en aplatissant la courbe du joueur. Un joueur au milieu de
 sa catégorie ne voit toujours rien — il n'y a rien à lui dire.
 
-Sur le corpus réel de la recette (8 joueurs, 11 mois), cela donne **4 marches** (5B, 4D, 4C, 4B),
-dont **5 joueurs sur 8** en voient au moins une seuls à l'écran — deux d'entre eux grâce à
-l'élargissement. Les passages 5D→5C et 5B→5A ne sont pas tracés : leurs plages se chevauchent
-d'une publication à l'autre, et c'est exactement le cas où l'on préfère ne rien dire.
+Sur le corpus réel de la recette (8 joueurs, 11 mois), cela donne **5 marches** (5B, 5A, 4D, 4C,
+4B), dont **5 joueurs sur 8** en voient au moins une seuls à l'écran. Le passage 5D→5C n'est pas
+tracé : ses plages se chevauchent d'une publication à l'autre, et c'est exactement le cas où
+l'on préfère ne rien dire.
+
+⚠️ **Bornes INCLUSES des deux côtés**, dans le filtre des lignes comme dans `bandesClassement`.
+Une comparaison stricte d'un côté seulement les faisait diverger dans le cas le PLUS courant :
+`bornesAvecMarches` élargit l'échelle *jusqu'à* la frontière, donc `f.valeur === bornes.min` en
+sortie — le trait se dessinait et le fond restait vide. Mesuré : la moitié des joueurs qui
+voyaient une ligne n'avaient aucune bande.
+
+#### Les zones sont peintes en UNE teinte dosée, jamais une couleur par échelon
+
+Entre deux marches, le fond dit dans quel classement on se trouve — ce qui répond d'un coup
+d'œil à « je suis dans quoi, là ? » sans lire une étiquette.
+
+**Une seule teinte par thème, dosée en opacité** (`--rankhist-bande`, 4 % à 17 %), du plus pâle
+en bas au plus soutenu en haut. Les classements forment une **échelle** : une couleur par
+échelon — bleu pour 5B, orange pour 5A — obligerait à apprendre une légende au lieu de lire la
+pente, et détruirait l'ordre que le graphique existe pour montrer. Le plafond bas est ce qui
+garde les douze couleurs de courbes lisibles par-dessus.
+
+La teinte est propre à chaque thème : bleu froid en clair, bleu clairci en sombre (sur fond
+sombre il faut **éclaircir**, un bleu profond à 10 % ne se distingue de rien), rose soutenu en
+thème rose. Les libellés « 5A », eux, gardent le jeton de TEXTE — c'est la bande qui porte
+l'identité, le mot la nomme.
 
 Trois cas où **aucune ligne n'est tracée**, plutôt qu'une ligne mal placée :
 

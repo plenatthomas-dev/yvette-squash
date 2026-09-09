@@ -135,6 +135,9 @@
      · 1,94:1 (libre). L'ancien filet était meilleur sur « libre » (4,14:1) et INVISIBLE sur
      les cinq autres — c'est ce déséquilibre qu'on corrige, pas un chiffre qu'on maximise. */
   --grid-line: #9aa2ae;
+  /* Teinte des bandes de classement (cf. .rankhist-bande). Bleu froid, pose a 4-17 %
+     d'opacite : assez pour ordonner les zones, trop faible pour rivaliser avec une courbe. */
+  --rankhist-bande: #3d6ea8;
 
   /* Fond de page LÉGÈREMENT plus foncé que les cartes : c'est ce contraste qui fait
      « flotter » les cartes (blanches) au-dessus de la page (gris clair) et donne toute
@@ -213,6 +216,11 @@
        invisible (1,07:1). Mesuré ici : 2,04:1 (fermé) · 1,90:1 (carte) · 1,62:1 (asso)
        · 1,67:1 (réservé) · 1,76:1 (libre). */
     --grid-line: #434b58;
+  /* Cf. bloc prefers-color-scheme ci-dessus. */
+  --rankhist-bande: #8fb3e0;
+    /* Sur fond sombre la teinte doit ECLAIRCIR, pas assombrir : un bleu profond a 10 %
+       d'opacite sur une carte sombre ne se distingue de rien. */
+    --rankhist-bande: #8fb3e0;
     /* En sombre, l'élévation = carte PLUS CLAIRE que la page (le fond reste le plus foncé). */
     --pico-background-color: #0e1116;
     --ink-inverse: #0e1116;
@@ -358,6 +366,9 @@
   /* Quadrillage : cf. bloc clair, même arbitrage ≈2:1 (filet partagé). Mesuré ici :
      2,28:1 (carte) · 2,01:1 (réservé) · 1,98:1 (asso) · 1,88:1 (libre). */
   --grid-line: #c98aa8;
+  /* Rose soutenu plutot que le bleu des autres themes : la bande est un aplat d'ambiance, et
+     un bleu froid jurerait sur les cartes rosees. */
+  --rankhist-bande: #b3487e;
   /* Ombres teintées rose (2 couches, cohérentes avec l'ambiance pinky). */
   --elev-1: 0 2px 4px rgba(160, 16, 96, 0.16), 0 8px 18px rgba(160, 16, 96, 0.2);
   --elev-2: 0 4px 10px rgba(160, 16, 96, 0.2), 0 18px 38px rgba(160, 16, 96, 0.28);
@@ -6991,20 +7002,34 @@ body[data-bottombar] .install-banner {
   font-size: 8px;
   font-variant-numeric: tabular-nums;
 }
-/* LES MARCHES DU CLASSEMENT — un repère, pas une donnée. Pointillé et discret, pour se
+/* LES MARCHES DU CLASSEMENT — un repere, pas une donnee. Pointille et discret, pour se
    distinguer au premier coup d'oeil des graduations pleines de l'axe (qui, elles, sont des
-   valeurs) et pour ne jamais concurrencer les courbes. Meme jeton de couleur que la grille :
-   la piste que ces lignes donnent vaut ce que vaut le corpus, et ne merite pas plus d'encre. */
+   valeurs) et pour ne jamais concurrencer les courbes.
+   La teinte est celle des bandes, pour que le trait se lise comme LEUR bord et non comme un
+   troisieme systeme de lignes. */
 .rankhist-palier {
-  stroke: var(--grid-line);
+  stroke: var(--rankhist-bande);
   stroke-width: 1;
   stroke-dasharray: 3 3;
+  opacity: 0.75;
 }
 .rankhist-palier-txt {
+  /* Jeton de TEXTE, jamais la couleur de la bande : c'est la bande qui porte l'identite, le
+     mot la nomme. Un libelle teinte se lirait comme une donnee de plus. */
   fill: var(--pico-muted-color);
   font-size: 7px;
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+/* LES ZONES DE CLASSEMENT — le fond, et rien de plus.
+   UNE SEULE TEINTE PAR THEME, dosee en `fill-opacity` (pose a l'ecran, cf. le composant) : les
+   classements forment une ECHELLE, et une couleur par echelon obligerait a apprendre une
+   legende au lieu de lire la pente. La rampe va du plus pale (echelon le plus faible, en bas)
+   au plus soutenu (le plus fort, en haut), ce qui se lit sans rien apprendre.
+   Plafonnee a 0,17 : au-dela, le fond concurrence les douze couleurs de courbes. */
+.rankhist-bande {
+  fill: var(--rankhist-bande);
 }
 .rankhist-trace {
   fill: none;

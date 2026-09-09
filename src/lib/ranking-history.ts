@@ -7,30 +7,24 @@
 //  inversé au mauvais endroit produit un graphique parfaitement lisible qui
 //  raconte l'inverse de la vérité.
 //
-//  DEUX MÉTRIQUES, ET TOUTES DEUX DESCENDENT QUAND ON PROGRESSE :
+//  UNE SEULE MÉTRIQUE : LE RANG MIXTE (« rangM »). Il BAISSE quand on progresse —
+//  être 800e vaut mieux qu'être 2300e — donc son axe est inversé, pour que « ça
+//  monte » veuille dire « ça progresse ».
 //
-//   * la MOYENNE (« mean ») BAISSE quand on progresse. C'est le défaut, et la
-//     seule des valeurs publiées qui bouge tous les mois ;
-//   * le RANG MIXTE (« rangM ») baisse aussi — être 800e vaut mieux qu'être
-//     2300e.
+//  ⚠️ IL Y EN A EU DEUX, ET C'ÉTAIT UNE DE TROP. L'écran proposait au choix le rang
+//  ou la « moyenne de points » (`mean`), présentée comme montant quand on progresse.
+//  Mesuré sur le corpus réel le 2026-09-09 : sur 81 mesures, la corrélation entre
+//  `mean` et `rangM` vaut **r = 1,000**. Ce n'est pas une seconde grandeur, c'est la
+//  MÊME à un lissage près — ce que squashnet appelle « moyenne » est une moyenne de
+//  RANG, pas de points qu'on accumulerait. Les sept classements observés s'ordonnent
+//  d'ailleurs en sens inverse de `mean` (4B, le plus fort, entre 1496 et 1659 ; 5D,
+//  le plus faible, entre 7240 et 9052), et les six changements de classement de
+//  l'historique le confirment un par un.
 //
-//  Leurs axes sont donc inversés tous les deux, pour que « ça monte » veuille dire
-//  « ça progresse » sur les deux graphiques.
-//
-//  ⚠️ CE MODULE A LONGTEMPS AFFIRMÉ L'INVERSE POUR `mean` (« monte quand on
-//  progresse »), et le disait jusque dans le libellé sous le sélecteur. C'était
-//  faux, et mesuré comme tel sur le corpus réel le 2026-09-09 : sur 81 mesures, la
-//  corrélation entre `mean` et `rangM` vaut **r = 1,000**, et les sept classements
-//  observés s'ordonnent proprement en sens inverse de `mean` — 4B (le plus fort)
-//  entre 1496 et 1659, 5D (le plus faible) entre 7240 et 9052. Les six changements
-//  de classement de l'historique le confirment un par un : chaque montée
-//  s'accompagne d'un `mean` qui BAISSE.
-//
-//  Ce que squashnet appelle « moyenne » n'est donc pas une moyenne de POINTS qu'on
-//  accumulerait, mais une moyenne de RANG — d'où la corrélation parfaite. La courbe
-//  des « Points » était en conséquence dessinée à l'envers : le joueur qui
+//  La courbe des « Points » était donc dessinée à L'ENVERS — le joueur qui
 //  progressait plongeait, et la colonne « évolution » mettait un moins devant sa
-//  meilleure saison.
+//  meilleure saison — et proposait au lecteur un choix entre deux vues du même
+//  chiffre. Le sélecteur a été retiré, `mean` reste stocké et n'est plus tracé.
 //
 //  LE CLASSEMENT (« 5A ») N'EST PAS UNE MÉTRIQUE. Il change deux ou trois fois
 //  dans une vie de joueur : sa courbe serait un trait plat. Il s'affiche à côté
@@ -60,20 +54,6 @@ export interface HistorySeries {
   points: HistoryPoint[];
 }
 
-/** Ce qu'on trace. Voir l'en-tête : les deux ne se lisent pas dans le même sens. */
-export type Metrique = "mean" | "rangM";
-
-/**
- * Vrai si, pour cette métrique, un nombre plus GRAND vaut mieux.
- *
- * FAUX POUR LES DEUX, et ce n'est pas un oubli : `mean` suit `rangM` (cf. l'en-tête, r = 1,000
- * sur le corpus réel). La fonction est gardée plutôt que supprimée parce qu'elle NOMME la
- * question à chaque endroit qui en dépend — l'axe, le chemin, le signe de l'évolution — et
- * qu'une troisième métrique un jour ajoutée y répondrait peut-être autrement.
- */
-export function plusGrandEstMieux(_m: Metrique): boolean {
-  return false;
-}
 
 const MOIS_COURTS = [
   "janv.",
@@ -117,21 +97,20 @@ export function moisDansPlage(months: string[], from: string, to: string): strin
  * dans l'année verrait ses points s'étaler sur toute la largeur, à côté de son coéquipier
  * mesuré tous les mois, et les deux courbes ne parleraient pas du même temps.
  */
-export function valeurs(serie: HistorySeries, months: string[], metrique: Metrique): (number | null)[] {
+export function valeurs(serie: HistorySeries, months: string[]): (number | null)[] {
   const parMois = new Map(serie.points.map((p) => [p.month, p]));
-  return months.map((m) => parMois.get(m)?.[metrique] ?? null);
+  return months.map((m) => parMois.get(m)?.rangM ?? null);
 }
 
 /** Min et max sur TOUTES les séries, ou null si rien n'est mesurable. */
 export function bornesValeurs(
   series: HistorySeries[],
   months: string[],
-  metrique: Metrique,
 ): { min: number; max: number } | null {
   let min = Infinity;
   let max = -Infinity;
   for (const s of series) {
-    for (const v of valeurs(s, months, metrique)) {
+    for (const v of valeurs(s, months)) {
       if (v === null) continue;
       if (v < min) min = v;
       if (v > max) max = v;
@@ -164,7 +143,6 @@ export function abscisse(i: number, n: number, c: Cadre): number {
 export function ordonnee(
   v: number,
   bornes: { min: number; max: number },
-  metrique: Metrique,
   c: Cadre,
 ): number {
   const haut = c.h - c.padT - c.padB;
@@ -172,9 +150,9 @@ export function ordonnee(
   // Toutes les valeurs égales : une ligne au milieu. Diviser par zéro donnerait un NaN, et un
   // NaN dans un attribut `d` fait disparaître la courbe sans le moindre message.
   const part = etendue === 0 ? 0.5 : (v - bornes.min) / etendue;
-  // Axe INVERSÉ pour le rang : cf. l'en-tête. « Vers le haut » doit vouloir dire « progresse »
-  // sur les deux métriques.
-  return c.padT + haut * (plusGrandEstMieux(metrique) ? 1 - part : part);
+  // Axe INVERSÉ : cf. l'en-tête. Le rang baisse quand on progresse, et « vers le haut » doit
+  // vouloir dire « progresse ».
+  return c.padT + haut * part;
 }
 
 /**
@@ -187,7 +165,6 @@ export function ordonnee(
 export function chemin(
   vals: (number | null)[],
   bornes: { min: number; max: number },
-  metrique: Metrique,
   c: Cadre,
 ): string {
   const morceaux: string[] = [];
@@ -198,7 +175,7 @@ export function chemin(
       return;
     }
     const x = abscisse(i, vals.length, c).toFixed(1);
-    const y = ordonnee(v, bornes, metrique, c).toFixed(1);
+    const y = ordonnee(v, bornes, c).toFixed(1);
     morceaux.push(`${ouvert ? "L" : "M"}${x} ${y}`);
     ouvert = true;
   });
@@ -207,10 +184,7 @@ export function chemin(
 
 /**
  * L'évolution entre la PREMIÈRE et la DERNIÈRE mesure connue, exprimée dans le sens du progrès :
- * positive = a progressé, quelle que soit la métrique.
- *
- * Le rang change donc de signe (passer 2300e → 1800e est un gain de 500), sans quoi la colonne
- * « évolution » afficherait un moins devant la meilleure saison du club.
+ * positive = a progressé.
  *
  * Null s'il n'y a pas DEUX mesures : un joueur mesuré une seule fois n'a pas d'évolution, et
  * afficher « 0 » ferait croire à une stagnation observée.
@@ -218,12 +192,12 @@ export function chemin(
 export function progression(
   serie: HistorySeries,
   months: string[],
-  metrique: Metrique,
 ): number | null {
-  const vals = valeurs(serie, months, metrique).filter((v): v is number => v !== null);
+  const vals = valeurs(serie, months).filter((v): v is number => v !== null);
   if (vals.length < 2) return null;
-  const delta = vals[vals.length - 1] - vals[0];
-  return plusGrandEstMieux(metrique) ? delta : -delta;
+  // Le signe est INVERSÉ : passer 2300e → 1800e est un gain de 500, et la colonne « évolution »
+  // afficherait sans cela un moins devant la meilleure saison du club.
+  return -(vals[vals.length - 1] - vals[0]);
 }
 
 /** La dernière mesure connue d'un joueur sur la plage, ou null. */
@@ -317,16 +291,21 @@ function sontAdjacents(bas: string, haut: string): boolean {
  * dans l'autre sens et n'a jamais tracé la moindre ligne — chaque paire échouait à son test
  * d'encadrement, en silence, exactement comme une catégorie qui se chevauche.
  *
- * TROIS REFUS, chacun pour ne pas dessiner une ligne qu'on ne sait pas placer :
+ * LES DEUX MÉTRIQUES Y ONT DROIT, et c'est un revirement assumé. Cette fonction a d'abord
+ * refusé net de tracer quoi que ce soit sur le rang, au motif qu'« un classement ne correspond
+ * à aucun rang fixe, le rang dépend du champ ». Le raisonnement supposait `mean` et `rangM`
+ * indépendants. Ils ne le sont pas : r = 1,000 sur le corpus réel (cf. l'en-tête). Une
+ * frontière est donc exactement aussi stable — ou aussi instable — dans une échelle que dans
+ * l'autre, et c'est le test de chevauchement ci-dessous qui tranche, dans les deux cas, sur
+ * mesure plutôt que sur principe.
  *
- *  1. **Rien pour le RANG.** Un classement ne correspond à aucun rang fixe — le rang dépend du
- *     champ, donc la « ligne du 5A » se déplacerait tous les mois. Une ligne qui bouge sur un
- *     axe qui bouge n'est plus un repère. `metrique !== "mean"` ⇒ aucune frontière.
- *  2. **Rien entre deux catégories qui SE CHEVAUCHENT.** Si une moyenne vue sous « 5A » est
- *     inférieure à une moyenne vue sous « 5B », le corpus se contredit (barème révisé entre
+ * DEUX REFUS, chacun pour ne pas dessiner une ligne qu'on ne sait pas placer :
+ *
+ *  1. **Rien entre deux catégories qui SE CHEVAUCHENT.** Si une valeur vue sous « 5A » est
+ *     moins bonne qu'une valeur vue sous « 5B », le corpus se contredit (barème révisé entre
  *     deux saisons, classement corrigé à la main, mesure fausse). On saute cette frontière-là
  *     plutôt que d'en inventer une au milieu du désordre.
- *  3. **Rien entre deux échelons NON ADJACENTS.** Si le club n'a que des « 5C » et des « 5A »,
+ *  2. **Rien entre deux échelons NON ADJACENTS.** Si le club n'a que des « 5C » et des « 5A »,
  *     la marche entre les deux en recouvre DEUX : la tracer et l'étiqueter « 5A » ferait lire
  *     un seuil unique là où il y en a deux, et placerait le premier au hasard.
  *
@@ -337,24 +316,25 @@ function sontAdjacents(bas: string, haut: string): boolean {
  * l'écran : une frontière est une propriété de l'échelle fédérale, pas de qui l'on regarde.
  * Cocher un joueur de plus ne doit pas déplacer les repères sous ses pieds.
  */
-export function frontieresClassement(series: HistorySeries[], metrique: Metrique): Frontiere[] {
-  if (metrique !== "mean") return [];
-
-  // Étendue de moyenne observée sous chaque classement, avec son rang dans la pyramide.
+export function frontieresClassement(series: HistorySeries[]): Frontiere[] {
+  // Étendue observée sous chaque classement, DANS LA MÉTRIQUE DEMANDÉE, avec son rang dans la
+  // pyramide. Les deux métriques se lisent dans le même sens (plus petit = meilleur), donc le
+  // reste du calcul est rigoureusement identique.
   const vus = new Map<string, { power: number; min: number; max: number }>();
   for (const s of series) {
     for (const p of s.points) {
-      if (p.mean === null) continue;
+      const v = p.rangM;
+      if (v === null) continue;
       const clt = p.clt.trim().toUpperCase();
       const power = classementPower(clt);
       // `null` = classement que la fédération n'a pas (faute de saisie) ; `Infinity` = NC.
       if (power === null || !Number.isFinite(power)) continue;
       const e = vus.get(clt);
       if (!e) {
-        vus.set(clt, { power, min: p.mean, max: p.mean });
+        vus.set(clt, { power, min: v, max: v });
       } else {
-        if (p.mean < e.min) e.min = p.mean;
-        if (p.mean > e.max) e.max = p.mean;
+        if (v < e.min) e.min = v;
+        if (v > e.max) e.max = v;
       }
     }
   }
@@ -425,4 +405,88 @@ export function bornesAvecMarches(
     if (f.valeur > bornes.max && f.valeur <= bornes.max + marge) max = Math.max(max, f.valeur);
   }
   return { min, max };
+}
+
+/** Une zone du graphique où l'on est dans `clt`, bornée dans l'échelle affichée. */
+export interface Bande {
+  clt: string;
+  /** Bornes en valeurs, déjà rognées sur l'échelle visible. */
+  min: number;
+  max: number;
+  /**
+   * Position dans la pyramide, 0 pour le plus FAIBLE des échelons affichés. C'est ce qui dose
+   * la teinte : une rampe ordonnée, jamais une couleur par catégorie tirée au hasard.
+   */
+  rang: number;
+  /** Combien de bandes en tout — pour répartir la rampe sans la coder en dur à l'écran. */
+  total: number;
+}
+
+/**
+ * LES ZONES ENTRE LES MARCHES, prêtes à peindre.
+ *
+ * Les frontières disent OÙ l'on change de classement ; les bandes disent DANS QUOI on se
+ * trouve entre deux d'entre elles. C'est ce que le fond colore, et c'est ce qui répond d'un
+ * coup d'œil à « je suis dans quoi, là ? » sans lire une étiquette.
+ *
+ * ⚠️ UNE RAMPE ORDONNÉE, PAS UNE COULEUR PAR CATÉGORIE. Les classements forment une échelle
+ * (5D < 5C < … < 4B), et une teinte par échelon — bleu pour 5B, orange pour 5A — détruirait
+ * cet ordre : le lecteur devrait apprendre une légende au lieu de LIRE la pente. `rang` et
+ * `total` donnent donc à l'écran de quoi doser une seule teinte du plus clair (échelon le plus
+ * faible) au plus soutenu, ce qui se lit sans rien apprendre.
+ *
+ * La bande du haut et celle du bas s'étendent jusqu'au bord du cadre : on ne connaît pas leur
+ * frontière extérieure (aucune mesure au-delà), et laisser un liseré neutre au bord ferait
+ * croire à une zone sans classement.
+ */
+export function bandesClassement(
+  frontieres: Frontiere[],
+  bornes: { min: number; max: number },
+): Bande[] {
+  if (frontieres.length === 0) return [];
+
+  // Rognées à l'échelle visible, et triées du MEILLEUR au moins bon (valeur croissante).
+  //
+  // ⚠️ BORNES INCLUSES, exactement comme le filtre des lignes à l'écran. Une comparaison
+  // STRICTE laissait ces deux-là diverger dans le cas le plus courant : `bornesAvecMarches`
+  // élargit l'échelle JUSQU'À la frontière, donc `f.valeur === bornes.min` en sortie — le trait
+  // se dessinait, et le fond restait vide. Mesuré sur le corpus réel : la moitié des joueurs
+  // qui voyaient une ligne n'avaient aucune bande.
+  const dedans = frontieres
+    .filter((f) => f.valeur >= bornes.min && f.valeur <= bornes.max)
+    .sort((a, b) => a.valeur - b.valeur);
+  if (dedans.length === 0) return [];
+
+  const zones: { clt: string; min: number; max: number }[] = [];
+  // Au-dessus de la meilleure frontière visible : on EST dans le classement qu'elle nomme.
+  zones.push({ clt: dedans[0].clt, min: bornes.min, max: dedans[0].valeur });
+  for (let i = 0; i < dedans.length; i++) {
+    // Entre deux frontières : le classement est celui de la SUIVANTE dans l'ordre des valeurs,
+    // c'est-à-dire l'échelon immédiatement plus faible.
+    const bas = i + 1 < dedans.length ? dedans[i + 1].valeur : bornes.max;
+    const clt = i + 1 < dedans.length ? dedans[i + 1].clt : echelonSousLe(dedans[i].clt);
+    if (clt === null) continue;
+    zones.push({ clt, min: dedans[i].valeur, max: bas });
+  }
+
+  // Les zones D'ÉPAISSEUR NULLE sautent : une frontière posée pile sur le bord du cadre (le cas
+  // normal après `bornesAvecMarches`) ouvrirait au-dessus d'elle une zone haute de zéro pixel,
+  // invisible mais comptée — elle décalerait toute la rampe de teintes d'un cran.
+  const utiles = zones.filter((z) => z.max > z.min);
+
+  // `rang` compte depuis le bas (l'échelon le plus faible), donc depuis la dernière zone.
+  const total = utiles.length;
+  return utiles.map((z, i) => ({ ...z, rang: total - 1 - i, total }));
+}
+
+/**
+ * L'échelon juste EN DESSOUS de celui-ci dans la pyramide, ou `null` s'il n'y en a pas.
+ *
+ * Sert à nommer la bande du bas : sous la dernière frontière visible, on est dans le
+ * classement d'un cran plus faible que celui qu'elle fait atteindre. `null` (« 5D », le plus
+ * bas) fait taire la bande plutôt que de lui inventer un nom — NC n'est pas un échelon.
+ */
+function echelonSousLe(clt: string): string | null {
+  const i = ECHELLE.indexOf(clt);
+  return i > 0 ? ECHELLE[i - 1] : null;
 }

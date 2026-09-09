@@ -675,6 +675,10 @@ model SquashnetRankingPoint {
   /// le classement. Mesuré sur 81 mesures réelles — corrélation r = 1,000 avec `rangM`, et 4B
   /// (fort) entre 1496 et 1659 quand 5D (faible) est entre 7240 et 9052. C'est une moyenne de
   /// RANG. Le sens a été pris à l'envers pendant tout le développement de la courbe.
+  ///
+  /// Étant la MÊME grandeur que `rangM` à un lissage près, elle n'est plus TRACÉE : l'écran ne
+  /// montre que le rang, que la fédération publie tel quel. On la garde parce qu'elle ne coûte
+  /// rien et qu'elle est plus fine (décimale) que le rang entier.
   mean      Float?
   fetchedAt DateTime        @default(now())
 
