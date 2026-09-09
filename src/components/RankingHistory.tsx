@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Dialog } from "@/components/Dialog";
 import { readOk } from "@/lib/apiFetch";
 import {
+  bornesAvecMarches,
   bornesValeurs,
   chemin,
   couleurDe,
@@ -158,7 +159,9 @@ export function RankingHistory({
     () => choisis.flatMap((id) => (data?.series ?? []).filter((s) => s.id === id)),
     [choisis, data],
   );
-  const bornes = useMemo(
+  // L'échelle BRUTE : le min et le max des courbes affichées. Élargie juste après, et seulement
+  // si une marche de classement attend à portée (cf. `bornesAvecMarches`).
+  const brutes = useMemo(
     () => bornesValeurs(tracees, months, metrique),
     [tracees, months, metrique],
   );
@@ -170,6 +173,14 @@ export function RankingHistory({
   const frontieres = useMemo(
     () => frontieresClassement(data?.series ?? [], metrique),
     [data, metrique],
+  );
+
+  // L'échelle effective, une fois faite la place à une marche proche. Tout le reste du dessin
+  // (courbes, points, graduations) s'appuie dessus, sans quoi les repères et les courbes ne
+  // parleraient pas de la même échelle.
+  const bornes = useMemo(
+    () => (brutes === null ? null : bornesAvecMarches(brutes, frontieres)),
+    [brutes, frontieres],
   );
 
   // Celles qui tombent DANS la fenêtre visible, converties en ordonnées. Une ligne hors bornes
@@ -253,8 +264,8 @@ export function RankingHistory({
       <p className="muted tiny rankhist-aide">
         {metrique === "mean"
           ? marches.length > 0
-            ? "Moyenne de points de la fédération : elle monte quand on progresse. Les traits horizontaux marquent le passage d'un classement à l'autre, déduit des mesures du club."
-            : "Moyenne de points de la fédération : elle monte quand on progresse."
+            ? "Moyenne de classement de la fédération : elle baisse quand on progresse — la courbe, elle, monte toujours dans le bon sens. Les traits horizontaux marquent le passage d'un classement à l'autre, déduit des mesures du club."
+            : "Moyenne de classement de la fédération : elle baisse quand on progresse — la courbe, elle, monte toujours dans le bon sens."
           : "Rang national toutes catégories : il baisse quand on progresse — la courbe, elle, monte toujours dans le bon sens."}
       </p>
 

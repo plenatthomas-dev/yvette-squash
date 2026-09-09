@@ -155,9 +155,46 @@ de quel côté de la marche on se trouve.
 **Elles ne viennent d'aucun barème écrit en dur** — ce dépôt ne connaît pas le barème de la
 fédération, et l'inventer donnerait un graphique crédible et faux. Elles se déduisent de nos
 propres mesures : chaque point porte à la fois le classement publié ce mois-là **et** la moyenne
-qui l'a produit. La plus haute moyenne jamais vue sous « 5B » et la plus basse jamais vue sous
-« 5A » encadrent la frontière, qu'on pose au milieu. Plus le corpus grossit, plus l'encadrement
-se resserre : la règle graduée s'affine seule.
+qui l'a produit. La plus **basse** moyenne jamais vue sous « 5B » et la plus **haute** jamais vue
+sous « 5A » encadrent la frontière, qu'on pose au milieu. Plus le corpus grossit, plus
+l'encadrement se resserre : la règle graduée s'affine seule.
+
+#### ⚠️ `mean` se lit à l'ENVERS de ce que son nom suggère
+
+Une moyenne **plus petite** est un **meilleur** classement. Mesuré le 2026-09-09 sur les 81
+mesures de la recette, et sans ambiguïté possible :
+
+| Signal | Résultat |
+|---|---|
+| Corrélation `mean` ↔ `rangM` | **r = 1,000** — les deux sont la même grandeur à un lissage près |
+| Ordre des 7 classements observés | 4B (le plus fort) 1496–1659 … 5D (le plus faible) 7240–9052 |
+| Les 6 changements de classement de l'historique | chaque montée s'accompagne d'un `mean` qui **baisse** |
+
+Ce que squashnet appelle « moyenne » n'est donc pas une moyenne de POINTS qu'on accumulerait,
+mais une **moyenne de rang** — d'où la corrélation parfaite avec `rangM`.
+
+Le code affirmait l'inverse (`plusGrandEstMieux("mean") === true`) et le disait jusque dans le
+libellé sous le sélecteur. **La courbe « Points » était dessinée à l'envers** : le joueur qui
+progressait plongeait, et la colonne « évolution » mettait un moins devant sa meilleure saison.
+Corrigé le 2026-09-09, en même temps que les marches — c'est ce même sens inversé qui empêchait
+la moindre ligne d'apparaître, chaque paire de classements échouant en silence à son test
+d'encadrement.
+
+#### L'échelle s'élargit un peu pour faire entrer une marche proche
+
+L'écran s'ouvre sur **un** joueur (son parti pris), donc sur les quelques dizaines de points
+qu'il a parcourus en un an. Aucune frontière n'y tombe tant qu'il n'a pas changé de classement :
+sans correctif, la vue par défaut n'aurait jamais montré de ligne.
+
+`bornesAvecMarches` élargit donc l'échelle du seul côté utile, et d'un **quart de l'étendue
+déjà affichée** au maximum (`MARGE_MARCHE`). En dessous, la marche reste invisible ; au-delà, on
+ferait entrer un repère hors de portée en aplatissant la courbe du joueur. Un joueur au milieu de
+sa catégorie ne voit toujours rien — il n'y a rien à lui dire.
+
+Sur le corpus réel de la recette (8 joueurs, 11 mois), cela donne **4 marches** (5B, 4D, 4C, 4B),
+dont **5 joueurs sur 8** en voient au moins une seuls à l'écran — deux d'entre eux grâce à
+l'élargissement. Les passages 5D→5C et 5B→5A ne sont pas tracés : leurs plages se chevauchent
+d'une publication à l'autre, et c'est exactement le cas où l'on préfère ne rien dire.
 
 Trois cas où **aucune ligne n'est tracée**, plutôt qu'une ligne mal placée :
 

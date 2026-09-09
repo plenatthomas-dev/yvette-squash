@@ -33,7 +33,7 @@ export interface RankingRow {
   //    07 = 2300/2432, 06 = 2508/2673 — le 2339 d'août ne vaut pas le 2300 de juillet ;
   //  • ce n'est pas non plus un rang par catégorie d'ÂGE : sur 90 lignes couvrant 14 catégories
   //    (U9 → +65), aucune valeur de `rang` n'est dupliquée. C'est une échelle unique.
-  mean: string; // moyenne de points, ex. "3 832.17"
+  mean: string; // moyenne de RANG (plus petite = meilleure), ex. "3 832.17"
 }
 
 // --- Parsing (PUR, exporté pour les tests) ---------------------------------
