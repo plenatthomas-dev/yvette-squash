@@ -100,8 +100,17 @@ export function parseLatestMonth(html: string): string | null {
 }
 
 /**
- * TOUTES les périodes du select `#month`, dans l'ordre où squashnet les rend — la plus récente
- * en tête, cf. la fixture de `client.test.ts` (juillet, juin, mai).
+ * TOUTES les périodes du select `#month`, LA PLUS RÉCENTE EN TÊTE — parce qu'on les trie, et
+ * non parce que squashnet les rend dans cet ordre.
+ *
+ * ⚠️ LE TRI N'EST PAS DÉCORATIF. Deux appelants dépendent de cet ordre sans pouvoir le
+ * vérifier : `parseLatestMonth` prend `[0]`, et le remplissage rétroactif fait `slice(0, 24)`.
+ * S'en remettre à l'ordre du document faisait reposer la passe mensuelle sur une propriété que
+ * seule une fixture attestait — or ce fournisseur a déjà changé ses guillemets sous nos pieds.
+ * Un `<select>` retourné aurait écrit le classement de 2024 dans l'annuaire ET dans l'ordre des
+ * simples, sous un mois de 2024, sans lever une seule erreur : les valeurs auraient été bien
+ * formées, les compteurs normaux, et la panne muette. Le format `YYYY-MM-DD` rend l'ordre
+ * lexical identique à l'ordre chronologique — une ligne, et la dépendance disparaît.
  *
  * C'est ce qui rend l'historique REMPLISSABLE EN ARRIÈRE. La fédération ne republie pas
  * seulement le classement du mois : elle garde les publications passées accessibles à la même
@@ -122,7 +131,7 @@ export function parseMonths(html: string): string[] {
   const mois = [...scope.matchAll(/<option value=['"](\d{4}-\d{2}-\d{2})['"]/g)].map((m) => m[1]);
   // Dédoublonnage : le même mois deux fois produirait deux points identiques dans la courbe,
   // et deux requêtes pour rien pendant le backfill.
-  return [...new Set(mois)];
+  return [...new Set(mois)].sort((a, b) => b.localeCompare(a));
 }
 
 // --- Réseau ----------------------------------------------------------------

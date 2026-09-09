@@ -33,8 +33,21 @@ export async function POST(req: NextRequest) {
   // repasser au vert la ligne « warm-rankings » du tableau de bord et masquer une panne du cron.
   const { ok, info } = summarizeRefresh(result);
   await recordCronRun("warm-rankings-manuel", ok, info);
-  const { month, members, guests, matched, cleared, skipped, failed, bulkMoveBlocked } = result;
+  const { month, members, guests, matched, cleared, skipped, failed, pointFailed, bulkMoveBlocked } =
+    result;
   // On renvoie `ok` (même critère que le heartbeat) pour que l'UI n'affiche pas un faux succès
   // vert quand squashnet est muet (tous `skipped`) sans échec base ni blocage.
-  return NextResponse.json({ ok, month, members, guests, matched, cleared, skipped, failed, bulkMoveBlocked });
+  return NextResponse.json({
+    ok,
+    month,
+    members,
+    guests,
+    matched,
+    cleared,
+    skipped,
+    failed,
+    // Dit à part de `failed` : l'annuaire a été écrit, seule la courbe a un trou.
+    pointFailed,
+    bulkMoveBlocked,
+  });
 }

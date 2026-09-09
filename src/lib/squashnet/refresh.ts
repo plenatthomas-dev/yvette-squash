@@ -56,6 +56,16 @@ export interface RefreshResult {
   skipped: number;
   /** Joueurs dont l'ÉCRITURE base a échoué (imputé à la base, jamais à squashnet). */
   failed: number;
+  /**
+   * Rapprochements écrits dans l'annuaire mais dont le POINT DE COURBE n'a pas pu l'être.
+   *
+   * Compté à part, et surtout PAS dans `failed` : ces joueurs-là ont bien reçu leur classement
+   * courant, l'annuaire et l'ordre des simples sont à jour. Confondre les deux faisait dire au
+   * compte-rendu l'inverse de ce qui s'était passé — table d'historique indisponible (migration
+   * en cours, permissions), et la passe rapportait « 0 rapproché(s), 40 échec(s) base » alors
+   * que les quarante classements venaient d'être correctement écrits sur le chemin chaud.
+   */
+  pointFailed: number;
   /** Vrai si le disjoncteur a neutralisé un lot d'effacements (anomalie systémique probable). */
   bulkMoveBlocked: boolean;
 }
@@ -154,13 +164,25 @@ function memberIdentity(u: {
  * là où l'annuaire, lui, a bien changé de valeur — un écart impossible à expliquer six mois
  * plus tard.
  */
-async function writeMatch(subject: Subject, hit: RankingMatch, month: string): Promise<void> {
+async function writeMatch(subject: Subject, hit: RankingMatch, month: string): Promise<boolean> {
   // L'ÉTAT COURANT D'ABORD, LE POINT DE COURBE ENSUITE, et cet ordre n'est pas un détail : le
   // premier est lu par l'annuaire et par l'ordre des simples, le second par un écran qu'on
   // ouvre de temps en temps. Écrire la courbe en tête ferait dépendre le classement du club
   // d'une table qui ne le sert pas — une panne sur l'historique gèlerait l'annuaire.
   await writeCurrent(subject, hit, month);
-  await writePoint(subject, hit, month);
+
+  // ⚠️ L'ORDRE PROTÉGEAIT L'ANNUAIRE, LE COMPTE-RENDU NE LE DISAIT PAS. Les deux écritures
+  // partageaient le `try` de l'appelant : une panne du SEUL historique faisait compter le
+  // joueur en `failed` et jamais en `matched`, si bien que le résumé annonçait « 0 rapproché,
+  // 40 échecs base » au moment précis où le chemin chaud venait d'être mis à jour sans une
+  // seule erreur. On rend donc le verdict au lieu de le laisser remonter : l'annuaire a réussi,
+  // c'est ce que le compteur doit dire, et la panne d'historique est dite à côté.
+  try {
+    await writePoint(subject, hit, month);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** L'état COURANT, là où cette population le range. */
@@ -254,6 +276,7 @@ export async function refreshRankings(): Promise<RefreshResult> {
       cleared: 0,
       skipped: 0,
       failed: 0,
+      pointFailed: 0,
       bulkMoveBlocked: false,
     };
   }
@@ -265,6 +288,7 @@ export async function refreshRankings(): Promise<RefreshResult> {
   let cleared = 0;
   let skipped = 0;
   let failed = 0;
+  let pointFailed = 0;
   // Les effacements (`moved`) sont DIFFÉRÉS : on décide en fin de passe si le lot est crédible
   // (cf. disjoncteur ci-dessus) avant d'effacer quoi que ce soit.
   const moved: Subject[] = [];
@@ -284,7 +308,9 @@ export async function refreshRankings(): Promise<RefreshResult> {
     const verdict = classifyRanking(subject.identity, rows);
     if (verdict.status === "matched") {
       try {
-        await writeMatch(subject, verdict.match, month);
+        // Le booléen ne concerne QUE l'historique : l'annuaire, lui, a été écrit ou la fonction
+        // aurait jeté.
+        if (!(await writeMatch(subject, verdict.match, month))) pointFailed++;
         matched++;
       } catch {
         failed++; // panne base : imputée à la base, on continue le lot.
@@ -312,7 +338,17 @@ export async function refreshRankings(): Promise<RefreshResult> {
     }
   }
 
-  return { month, members: subjects.length, guests, matched, cleared, skipped, failed, bulkMoveBlocked };
+  return {
+    month,
+    members: subjects.length,
+    guests,
+    matched,
+    cleared,
+    skipped,
+    failed,
+    pointFailed,
+    bulkMoveBlocked,
+  };
 }
 
 /**
@@ -411,6 +447,10 @@ export function summarizeRefresh(r: RefreshResult): { ok: boolean; info: string 
   // la seule ligne qui dise à l'admin que leurs classements ont bien été cherchés.
   if (r.guests) parts.push(`dont ${r.guests} hors appli`);
   if (r.failed) parts.push(`${r.failed} échec(s) base`);
+  // Dit APRÈS les échecs et séparément d'eux : l'annuaire est à jour, seule la courbe a un
+  // trou. Les mêmes mots pour les deux pannes rendraient la ligne illisible le jour où elles
+  // arrivent ensemble.
+  if (r.pointFailed) parts.push(`${r.pointFailed} sans point d'historique`);
   if (r.bulkMoveBlocked) parts.push("suppression en masse BLOQUÉE");
   return { ok, info: parts.join(", ") };
 }
