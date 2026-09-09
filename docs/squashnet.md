@@ -115,9 +115,62 @@ Le découpage en tranches n'est sûr que parce que le remplissage est **reprenab
 couples déjà en base sont sautés sans un seul appel réseau (`knownPoints`). Sur un historique à
 jour, recliquer ne coûte **aucune requête**.
 
-⚠️ « Sans réponse » n'est pas du travail restant : un membre arrivé au club l'an dernier n'aura
-jamais de mesure sur les mois d'avant. Seul `remaining` (les couples pas encore *regardés*)
-tombe à zéro — c'est lui que le bouton affiche.
+⚠️ « Sans réponse » n'est pas du travail restant : un joueur n'aura jamais de mesure sur les mois
+où il n'était pas licencié. Seul `remaining` (les couples pas encore *regardés*) tombe à zéro —
+c'est lui que le bouton affiche.
+
+#### L'historique suit le JOUEUR, pas le membre du club
+
+Le rapprochement normal exige **nom + club** (`YVETTE_CLUB`) : c'est ce qui permet au passage
+mensuel de constater qu'un membre a quitté le club (verdict `moved`) et de retirer son
+classement. Appliqué tel quel au remplissage rétroactif, ce filtre confondait deux situations
+opposées — « il est parti » et « il n'était pas encore là » — et **tronquait la courbe à la date
+d'arrivée au club**.
+
+Le remplissage passe donc `classifyRanking(..., { horsClub: true, licence })`, avec deux niveaux :
+
+1. **La licence d'abord**, quand on la connaît (`SquashnetRanking.licence` pour un membre,
+   `InterclubGuest.snLicence` pour un invité — renseignées par le rapprochement déjà réussi au
+   club). C'est un identifiant fédéral : insensible au club, à l'orthographe et aux homonymes.
+   Une licence connue mais **absente** de la réponse ne conclut rien — elle peut manquer parce
+   que le joueur n'était pas licencié ce mois-là, mais aussi parce que la colonne est vide sur
+   cette ligne — et on retombe sur le nom.
+2. **À défaut, le nom, tous clubs confondus.** L'unique ligne au nom du joueur est acceptée.
+   **Plusieurs lignes restent `unknown`** : deux personnes du même nom un même mois sont deux
+   personnes, et rien ne dit laquelle. C'est le seul cas que la licence tranche pour de bon.
+
+⚠️ **Ce mode ne rend JAMAIS `moved`**, et c'est tout son intérêt : il n'y a plus de « dehors »
+dont on pourrait constater l'absence. Il ne doit donc **pas** servir au passage mensuel, qui a
+besoin de ce verdict — et dont le disjoncteur de volume en dépend. Le mensuel ne passe d'ailleurs
+ni `horsClub` ni `licence`.
+
+Conséquence assumée : un membre qui quitte le club voit sa courbe **continuer** avec les
+classements publiés sous son nouveau club. C'est cohérent avec « la progression du joueur », et
+c'est ce que l'écran annonce.
+
+#### La mémoire des trous — et l'aveu qui va avec
+
+`SquashnetRankingProbe` consigne ce qu'on a **cherché en vain**, là où `SquashnetRankingPoint`
+dit ce qu'on sait. Sans elle, les recherches vaines — l'essentiel du travail sur les vieux mois —
+étaient repayées à chaque clic, le budget de 45 s s'épuisait toujours au même endroit, et
+« reste » ne tombait jamais à zéro.
+
+⚠️ **Cette table et ses fonctions ont vécu un temps sans que rien ne les appelle.** La migration,
+`writeProbe` et `knownCouples` avaient été écrites et commitées, mais `backfill.ts` utilisait
+toujours `knownPoints` : le code était mort, la table vide dans les deux bases, et le défaut
+qu'elle devait fermer intact. Branché le 2026-09-09, en même temps que le mode hors club.
+
+Ce qu'elle marque, et ce qu'elle ne marque pas :
+
+| Situation | Marque | Pourquoi |
+|---|---|---|
+| squashnet a répondu, le joueur n'y est pas (`unknown`) | ✅ | Un classement publié ne change plus : l'absence est définitive |
+| squashnet a répondu, le joueur est ailleurs (`moved`) | ✅ | Idem — et en mode hors club ce verdict ne sort plus |
+| squashnet n'a **pas** répondu (réseau, 5xx, délai) | ❌ | C'est un incident, pas un verdict : le mois reste ouvert |
+| Échec d'écriture de la marque elle-même | ❌ | La marque est un confort, pas une donnée — le lot continue |
+
+`backfillHistory({ retryProbes: true })` ignore les marques : c'est la reprise à demander **après
+avoir corrigé le nom de recherche d'un membre**, seul cas où une absence peut se dénouer.
 
 #### Son propre flag : `NEXT_PUBLIC_FEATURE_RANKING_HISTORY`
 

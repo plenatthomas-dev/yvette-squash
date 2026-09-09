@@ -5,6 +5,16 @@ import type { RankingRow } from "./client";
 //  ResaMania n'expose pas de licence → on matche par NOM + CLUB. Règle d'or :
 //  on n'affirme un classement que si UNE SEULE ligne du club colle au membre ;
 //  sinon (0 ou plusieurs) on ne renvoie rien — jamais un mauvais classement.
+//
+//  DEUX ÉCHAPPATOIRES à cette règle, toutes deux réservées à l'HISTORIQUE :
+//
+//   * la LICENCE, quand on la connaît (elle vient du rapprochement déjà réussi au
+//     club) : identifiant fédéral, insensible au club comme à l'orthographe ;
+//   * le mode HORS CLUB, qui accepte l'unique ligne au nom du joueur quel que soit
+//     son club — parce que la progression d'un joueur précède son arrivée ici.
+//
+//  Le rafraîchissement MENSUEL n'utilise ni l'un ni l'autre : il a besoin de savoir
+//  qui a quitté le club, ce que seul le filtre par club permet de constater.
 // ============================================================================
 
 // Libellé du club tel que squashnet l'affiche (apostrophe déjà retirée par leur rendu).
@@ -153,11 +163,48 @@ export type RankingVerdict =
 export function classifyRanking(
   member: MemberIdentity,
   rows: RankingRow[],
-  opts: { club?: string } = {},
+  opts: { club?: string; horsClub?: boolean; licence?: string | null } = {},
 ): RankingVerdict {
+  // ── 1. LA LICENCE D'ABORD, quand on la connaît. ────────────────────────────────────────────
+  //
+  // C'est un identifiant fédéral : il ne dépend ni du club, ni de l'orthographe du nom, ni des
+  // homonymes. Quand le membre a déjà été rapproché une fois (donc aujourd'hui, au club), on
+  // tient son numéro, et les mois PASSÉS se retrouvent alors sans la moindre ambiguïté — y
+  // compris ceux où il était licencié ailleurs.
+  //
+  // Une licence connue mais absente de la réponse ne conclut RIEN : on retombe sur le nom. Elle
+  // peut manquer parce que le joueur n'était pas licencié ce mois-là, mais aussi parce que la
+  // colonne est vide sur cette ligne-là — deux situations qu'on ne sait pas départager ici.
+  const licence = (opts.licence ?? "").trim();
+  if (licence) {
+    const parLicence = rows.filter((r) => r.licence.trim() === licence);
+    if (parLicence.length === 1) return { status: "matched", match: toMatch(parLicence[0]) };
+  }
+
   const target = normalize(opts.club ?? YVETTE_CLUB);
   // Lignes qui portent le nom (et le genre) du membre, tous clubs confondus.
   const byName = rows.filter((r) => genderOk(member.gender, r.gender) && nameMatches(member, r.name));
+
+  // ── 2. HORS CLUB : l'historique suit le JOUEUR, pas le membre du club. ─────────────────────
+  //
+  // Demandé pour le remplissage rétroactif uniquement. Un membre arrivé l'an dernier a une
+  // progression avant son arrivée, et la refuser sous prétexte que le libellé du club diffère
+  // reviendrait à confondre « il est parti » avec « il n'était pas encore là ».
+  //
+  // ⚠️ CE MODE NE REND JAMAIS `moved`, ET C'EST TOUT SON INTÉRÊT : il n'y a plus de « dehors »
+  // dont on pourrait constater l'absence. Il ne doit donc PAS servir au rafraîchissement
+  // mensuel, qui a besoin de ce verdict pour retirer le classement de quelqu'un qui a quitté le
+  // club (et dont le disjoncteur de volume dépend).
+  //
+  // Plusieurs lignes au même nom restent `unknown` : deux personnes portant ce nom un même mois
+  // sont deux personnes, et rien ici ne dit laquelle. C'est le seul cas que la licence, quand
+  // on l'a, tranche pour de bon.
+  if (opts.horsClub) {
+    if (byName.length === 1) return { status: "matched", match: toMatch(byName[0]) };
+    return { status: "unknown" };
+  }
+
+  // ── 3. LE DÉFAUT : dans le club, et le club seul. ──────────────────────────────────────────
   const inClub = byName.filter((r) => normalize(r.club) === target);
   if (inClub.length === 1) return { status: "matched", match: toMatch(inClub[0]) };
   // Nom retrouvé, mais aucune occurrence dans le club cible → parti ailleurs (signal fiable).
