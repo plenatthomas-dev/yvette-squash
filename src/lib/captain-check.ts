@@ -6,6 +6,7 @@ import {
   type GameScore,
   type Side,
 } from "./interclub";
+import { isNC, lineupOrderConflict } from "./interclub-order";
 import { classifyRanking, normalize, type MemberIdentity } from "./squashnet/match";
 import type { RankingRow } from "./squashnet/client";
 
@@ -58,6 +59,12 @@ export interface PlayerCheck {
   /** Le nom tel que la FÉDÉRATION l'écrit — c'est celui à recopier dans le formulaire. */
   fedName: string | null;
   clt: string | null;
+  /**
+   * Rang mixte publié par la fédération. Il ne s'affiche nulle part — il sert à VÉRIFIER
+   * L'ORDRE DES SIMPLES ADVERSES (`checkAwayOrder`), où il départage deux joueurs de même
+   * classement. Sans lui, deux « 5A » alignés dans le mauvais sens passeraient inaperçus.
+   */
+  rangM: number | null;
   licence: string | null;
   club: string | null;
   /** Quoi faire, en clair. Null quand il n'y a rien à faire. */
@@ -73,6 +80,16 @@ export interface ScoreCheck {
   gamesHome: number;
   gamesAway: number;
   winner: Side | null;
+  /**
+   * LE DÉTAIL POINT PAR POINT, tel qu'il a été marqué — « 11-9, 8-11, 11-6 ».
+   *
+   * Il n'est pas là pour la vérification (rien ne s'en sert pour juger) mais pour la SAISIE :
+   * c'est exactement ce que le capitaine doit recopier dans le formulaire fédéral, jeu par jeu.
+   * L'écran de vérification est aussi la feuille de match qu'on a sous les yeux en saisissant —
+   * l'obliger à faire des allers-retours vers l'onglet Interclub pour relire un 11-9 serait
+   * lui faire rouvrir la seule chose qu'il est venu chercher.
+   */
+  games: GameScore[];
 }
 
 /** Le compte de la rencontre, une fois les simples additionnés. */
@@ -85,6 +102,34 @@ export interface TieCheck {
   problem: string | null;
 }
 
+/**
+ * L'ordre des simples ADVERSES — trois états, et le troisième n'est pas une faute.
+ *
+ * La règle fédérale vaut pour les deux équipes : le mieux classé joue le simple n° 1, et à
+ * classement égal le meilleur rang mixte passe devant. L'appli la fait déjà respecter à NOTRE
+ * composition (`lineupOrderConflict`, refusée à la saisie) ; personne ne la vérifiait en face.
+ *
+ * ⚠️ « NON VÉRIFIABLE » EST UN ÉTAT À PART ENTIÈRE, et c'est le point délicat. Le classement des
+ * adversaires ne nous est pas donné : il vient de NOTRE rapprochement sur un nom recopié à la
+ * main sur une feuille de match. Conclure « leur composition est irrégulière » sur un
+ * rapprochement incomplet enverrait un capitaine contester une composition parfaitement
+ * régulière — un coût bien supérieur à celui de se taire. Tant qu'un seul adversaire manque,
+ * on ne conclut rien.
+ */
+export type OrderStatus =
+  /** Tous rapprochés, ordre conforme. */
+  | "ok"
+  /** Tous rapprochés, et l'ordre est rompu — signalé, jamais affirmé comme une tricherie. */
+  | "violation"
+  /** Un ou plusieurs adversaires non rapprochés : on ne peut rien affirmer. */
+  | "unverifiable";
+
+export interface OrderCheck {
+  status: OrderStatus;
+  /** Ce qu'on a constaté, en clair. Null quand l'ordre est conforme. */
+  problem: string | null;
+}
+
 /** Le rapport complet, tel qu'il est stocké et affiché. */
 export interface CheckReport {
   /** Horodatage ISO de la vérification. */
@@ -92,6 +137,8 @@ export interface CheckReport {
   players: PlayerCheck[];
   scores: ScoreCheck[];
   tie: TieCheck;
+  /** L'ordre des simples d'en face (cf. `OrderStatus`). */
+  awayOrder: OrderCheck;
 }
 
 /** Ce qu'un simple apporte à la vérification. Volontairement minimal. */
@@ -167,7 +214,7 @@ export function checkPlayer(
   rows: RankingRow[],
   club: string,
 ): PlayerCheck {
-  const nu = { order, side, name, fedName: null, clt: null, licence: null, club: null };
+  const nu = { order, side, name, fedName: null, clt: null, rangM: null, licence: null, club: null };
   if (!name.trim() || name.trim() === UNSET_PLAYER) {
     return {
       ...nu,
@@ -185,6 +232,7 @@ export function checkPlayer(
       verdict: "found",
       fedName: v.match.name,
       clt: v.match.clt,
+      rangM: v.match.rangM,
       licence: v.match.licence,
       club: v.match.club,
       hint: null,
@@ -203,6 +251,9 @@ export function checkPlayer(
       verdict: "other-club",
       fedName: ailleurs?.name ?? null,
       clt: ailleurs?.clt ?? null,
+      // Le rang n'est pas lu ici : il ne sert qu'à l'ordre des simples, qu'on ne vérifie pas
+      // sur une composition dont un joueur n'est même pas dans le bon club.
+      rangM: null,
       licence: ailleurs?.licence ?? null,
       club: ailleurs?.club ?? null,
       hint: hintFor("other-club", side, ailleurs?.club ?? null),
@@ -244,6 +295,7 @@ export function checkScore(m: MatchInput): ScoreCheck {
     gamesHome: home,
     gamesAway: away,
     winner,
+    games: m.games,
   };
 }
 
@@ -273,6 +325,64 @@ export function checkTie(scores: ScoreCheck[], matchCount: number): TieCheck {
   return { ok: problem === null, home, away, undecided, problem };
 }
 
+// --- L'ordre des simples adverses -----------------------------------------
+
+/**
+ * La composition d'en face respecte-t-elle l'ordre des classements ?
+ *
+ * LA RÈGLE N'EST PAS RÉÉCRITE ICI : elle appartient à `lineupOrderConflict`
+ * (`interclub-order.ts`), qui l'applique déjà à notre propre composition et porte tout le
+ * détail — la pyramide des classements, le rang mixte qui départage les ex æquo, l'exception
+ * des NC équivalents entre eux. Deux copies de cette règle finiraient par diverger, et l'appli
+ * refuserait alors chez nous ce qu'elle tolère en face.
+ *
+ * Ce qui est fait ici, et que `lineupOrderConflict` ne peut pas faire : décider s'il y a
+ * seulement matière à conclure. Ses messages d'incomplétude sont écrits pour NOTRE composition
+ * (« attribue-lui un classement avant de composer »), ce qui n'a aucun sens pour un adversaire
+ * dont nous ne composons rien — d'où le tri en amont, et le statut `unverifiable`.
+ */
+export function checkAwayOrder(players: PlayerCheck[]): OrderCheck {
+  const away = players.filter((p) => p.side === "away");
+  // Moins de deux joueurs : aucun ordre à respecter, il n'y a personne à comparer.
+  if (away.length < 2) return { status: "ok", problem: null };
+
+  const nonRapproches = away.filter((p) => p.verdict !== "found" || !p.clt);
+  if (nonRapproches.length > 0) {
+    return {
+      status: "unverifiable",
+      problem:
+        `Ordre des simples adverses non vérifié : ${nonRapproches.length} joueur(s) que la ` +
+        `fédération ne nous a pas confirmés. Leur classement est inconnu, donc on ne conclut rien.`,
+    };
+  }
+
+  // Hors NC, le rang mixte est indispensable pour départager deux joueurs de même classement.
+  // Sans lui, deux « 5A » dans le mauvais sens passeraient pour conformes.
+  const sansRang = away.filter((p) => !isNC(p.clt as string) && p.rangM == null);
+  if (sansRang.length > 0) {
+    return {
+      status: "unverifiable",
+      problem:
+        `Ordre des simples adverses non vérifié : la fédération ne publie pas de rang pour ` +
+        `${sansRang.length} joueur(s), qui départage les joueurs de même classement.`,
+    };
+  }
+
+  const conflit = lineupOrderConflict(
+    // Le nom FÉDÉRAL quand on l'a : c'est celui que le capitaine retrouvera sur la feuille
+    // adverse et sur squashnet, donc celui qui rend le message actionnable.
+    away.map((p) => ({ order: p.order, name: p.fedName ?? p.name, clt: p.clt, rangM: p.rangM })),
+  );
+  return conflit === null
+    ? { status: "ok", problem: null }
+    : {
+        status: "violation",
+        // « À vérifier », jamais « ils ont triché » : notre lecture de leurs classements passe
+        // par un rapprochement de noms qui peut se tromper, et l'accusation coûte cher.
+        problem: `À vérifier sur la feuille de match — ${conflit}`,
+      };
+}
+
 // --- Le rapport -----------------------------------------------------------
 
 /** Combien de points bloquants — c'est le chiffre que porte le bouton et le bandeau. */
@@ -280,7 +390,10 @@ export function countProblems(r: CheckReport): number {
   return (
     r.players.filter((p) => p.verdict !== "found").length +
     r.scores.filter((s) => !s.ok).length +
-    (r.tie.ok ? 0 : 1)
+    (r.tie.ok ? 0 : 1) +
+    // « Non vérifiable » ne compte PAS : le joueur non rapproché qui en est la cause est déjà
+    // compté juste au-dessus, et le montrer deux fois gonflerait le chiffre sans rien ajouter.
+    (r.awayOrder.status === "violation" ? 1 : 0)
   );
 }
 
@@ -299,6 +412,7 @@ export function estRapportValide(v: unknown): v is CheckReport {
   if (typeof v !== "object" || v === null) return false;
   const r = v as Record<string, unknown>;
   const tie = r.tie as Record<string, unknown> | undefined;
+  const ordre = r.awayOrder as Record<string, unknown> | undefined;
   return (
     typeof r.checkedAt === "string" &&
     Array.isArray(r.players) &&
@@ -307,7 +421,13 @@ export function estRapportValide(v: unknown): v is CheckReport {
     tie !== null &&
     typeof tie.home === "number" &&
     typeof tie.away === "number" &&
-    typeof tie.ok === "boolean"
+    typeof tie.ok === "boolean" &&
+    // `awayOrder` est arrivé APRÈS les premiers rapports : ceux d'avant n'en ont pas, passent
+    // `JSON.parse` sans broncher, et lèveraient au rendu sur `report.awayOrder.status`. Les
+    // écarter les fait relire « pas encore vérifiée » — ce qui se rattrape d'un bouton.
+    typeof ordre === "object" &&
+    ordre !== null &&
+    typeof ordre.status === "string"
   );
 }
 

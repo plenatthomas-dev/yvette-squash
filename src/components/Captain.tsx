@@ -19,8 +19,12 @@ import { countProblems, type CheckReport, type PlayerCheck } from "@/lib/captain
 //   1. ON NE VÉRIFIE PAS TOUT SEUL. La vérification coûte huit recherches chez
 //      un site associatif : elle part sur un geste explicite, jamais à
 //      l'ouverture. Le dernier rapport, lui, se relit gratuitement.
-//   2. CE QUI VA BIEN SE TAIT. L'écran met en avant ce qu'il reste à régler ;
-//      les lignes vertes se replient. Une checklist où tout crie ne se lit plus.
+//   2. C'EST AUSSI LA FEUILLE DE MATCH. Noms fédéraux, jeux ET points de chaque
+//      simple sont TOUJOURS visibles — c'est ce qu'on recopie dans le formulaire
+//      de la ligue, un champ après l'autre, en gardant cet écran ouvert à côté.
+//      (Les lignes propres se repliaient, au début : c'était une checklist et
+//      rien d'autre. Replier ce qu'on est venu transcrire obligeait à rouvrir
+//      chaque simple pour saisir, soit exactement le geste que l'écran épargne.)
 //   3. CHAQUE PROBLÈME PORTE SON REMÈDE, en toutes lettres et à côté de lui.
 //      « Introuvable » sans la suite renvoie chercher au mauvais endroit — et le
 //      bon endroit, ici, est presque toujours l'orthographe.
@@ -73,8 +77,6 @@ export default function Captain({
   const [ouverte, setOuverte] = useState<Fixture | null>(null);
   const [rapport, setRapport] = useState<CheckReport | null>(null);
   const [busy, setBusy] = useState(false);
-  /** Les simples déjà réglés qu'on a rouverts à la main (cf. parti pris n°2). */
-  const [deplies, setDeplies] = useState<number[]>([]);
 
   const charger = useCallback(async () => {
     try {
@@ -96,7 +98,6 @@ export default function Captain({
   const ouvrir = async (f: Fixture) => {
     setOuverte(f);
     setRapport(null);
-    setDeplies([]);
     try {
       const res = await fetch(`/api/captain/check/${f.id}`, { cache: "no-store" });
       if (onExpired(res.status)) return;
@@ -116,7 +117,6 @@ export default function Captain({
       if (onExpired(res.status)) return;
       const { report } = await readOk<{ report: CheckReport }>(res);
       setRapport(report);
-      setDeplies([]);
       const n = countProblems(report);
       toast(
         n === 0 ? "ok" : "info",
@@ -157,9 +157,19 @@ export default function Captain({
           {ouverte.teamName ? ` · ${ouverte.teamName}` : ""}
         </p>
 
-        <button type="button" disabled={busy} onClick={verifier}>
-          {busy ? "Vérification… (jusqu'à 10 s)" : rapport ? "Revérifier" : "Vérifier la rencontre"}
+        <button type="button" disabled={busy} onClick={verifier} className="cap-verifier">
+          {busy && <span className="cap-spinner" aria-hidden="true" />}
+          {busy ? "Vérification…" : rapport ? "Revérifier" : "Vérifier la rencontre"}
         </button>
+        {/* LE TEXTE DIT CE QUE LA ROUE NE DIT PAS : combien de temps, et pourquoi. Dix secondes
+            sans explication se lisent « c'est planté » ; avec, elles s'attendent. `role="status"`
+            le fait annoncer aux lecteurs d'écran, à qui une roue purement décorative
+            (`aria-hidden`) n'apprendrait rien du tout. */}
+        {busy && (
+          <p className="muted tiny cap-attente" role="status">
+            Interrogation de la fédération, joueur par joueur — une dizaine de secondes.
+          </p>
+        )}
         <p className="muted tiny cap-aide">
           Interroge la fédération pour chaque joueur — les nôtres et les leurs — et contrôle les
           scores. Aucune donnée n&apos;est envoyée&nbsp;: on regarde, on ne saisit rien.
@@ -191,70 +201,76 @@ export default function Captain({
               </span>
             </div>
 
+            {/* L'ORDRE DES SIMPLES D'EN FACE. Il n'apparaît que s'il y a quelque chose à en
+                dire : conforme, il n'apprend rien et occuperait la place de ce qui compte. */}
+            {rapport.awayOrder.status !== "ok" && rapport.awayOrder.problem && (
+              <p
+                className={
+                  "cap-ordre" + (rapport.awayOrder.status === "violation" ? " cap-ordre-ko" : "")
+                }
+              >
+                {rapport.awayOrder.status === "violation" ? "⚠️ " : "ℹ️ "}
+                {rapport.awayOrder.problem}
+              </p>
+            )}
+
             <ul className="ic-list cap-simples">
               {rapport.scores.map((s) => {
                 const joueurs = parSimple.get(s.order) ?? [];
                 const soucis = joueurs.filter((p) => p.verdict !== "found").length + (s.ok ? 0 : 1);
-                const ouvert = soucis > 0 || deplies.includes(s.order);
+                const nous = joueurs.find((p) => p.side === "home");
+                const eux = joueurs.find((p) => p.side === "away");
                 return (
                   <li key={s.order}>
                     <div className={`ic-row cap-simple${soucis ? " cap-ko" : " cap-ok"}`}>
                       <div className="ic-row-head">
                         <span>
-                          <strong>Simple n°{s.order}</strong>{" "}
-                          <span className="muted tiny">
-                            {s.gamesHome} – {s.gamesAway}
-                          </span>
+                          <strong>Simple n°{s.order}</strong>
                         </span>
-                        {soucis === 0 ? (
-                          <button
-                            type="button"
-                            className="cap-pastille cap-pastille-ok"
-                            aria-expanded={ouvert}
-                            onClick={() =>
-                              setDeplies((prev) =>
-                                prev.includes(s.order)
-                                  ? prev.filter((x) => x !== s.order)
-                                  : [...prev, s.order],
-                              )
-                            }
-                          >
-                            ✓ <span className="sr-only">Détail du simple n°{s.order}</span>
-                          </button>
-                        ) : (
-                          <span className="cap-pastille cap-pastille-ko">
-                            {soucis} <span className="sr-only">point(s) à régler</span>
-                          </span>
-                        )}
+                        <span className="cap-jeux">
+                          {s.gamesHome} – {s.gamesAway}
+                        </span>
                       </div>
 
-                      {ouvert && (
-                        <>
-                          {!s.ok && s.problem && <p className="cap-probleme">{s.problem}</p>}
-                          {joueurs.map((p) => (
-                            <div key={p.side} className="cap-joueur">
-                              <span className="cap-marque" aria-hidden="true">
-                                {p.verdict === "found" ? "✅" : p.verdict === "other-club" ? "ℹ️" : "⚠️"}
-                              </span>
-                              <span className="cap-joueur-corps">
-                                <span className="cap-joueur-nom">
-                                  {p.name} <span className="muted tiny">({camp(p)})</span>
-                                </span>
-                                {p.verdict === "found" ? (
-                                  <span className="muted tiny">
-                                    {/* Le nom FÉDÉRAL, parce que c'est celui à recopier — et il
-                                        ne s'écrit pas toujours comme le nôtre. */}
-                                    {p.fedName}
-                                    {p.clt ? ` · ${p.clt}` : ""}
-                                    {p.licence ? ` · licence ${p.licence}` : ""}
-                                  </span>
-                                ) : (
-                                  <span className="cap-hint">{p.hint}</span>
-                                )}
-                              </span>
-                            </div>
+                      {/* LE DÉTAIL POINT PAR POINT — la ligne qu'on recopie chez la fédération.
+                          Toujours visible : c'est la raison d'être de l'écran, pas un détail
+                          qu'on déplie. `tabular-nums` aligne les colonnes d'un simple à l'autre. */}
+                      {s.games.length > 0 && (
+                        <p className="cap-points">
+                          {s.games.map((g, i) => (
+                            <span key={i} className="cap-jeu">
+                              {g.home}-{g.away}
+                            </span>
                           ))}
-                        </>
+                        </p>
+                      )}
+
+                      {!s.ok && s.problem && <p className="cap-probleme">{s.problem}</p>}
+
+                      {[nous, eux].map((p) =>
+                        !p ? null : (
+                          <div key={p.side} className="cap-joueur">
+                            <span className="cap-marque" aria-hidden="true">
+                              {p.verdict === "found" ? "✅" : p.verdict === "other-club" ? "ℹ️" : "⚠️"}
+                            </span>
+                            <span className="cap-joueur-corps">
+                              <span className="cap-joueur-nom">
+                                {p.name} <span className="muted tiny">({camp(p)})</span>
+                              </span>
+                              {p.verdict === "found" ? (
+                                <span className="muted tiny">
+                                  {/* Le nom FÉDÉRAL, parce que c'est celui à recopier — et il
+                                      ne s'écrit pas toujours comme le nôtre. */}
+                                  {p.fedName}
+                                  {p.clt ? ` · ${p.clt}` : ""}
+                                  {p.licence ? ` · licence ${p.licence}` : ""}
+                                </span>
+                              ) : (
+                                <span className="cap-hint">{p.hint}</span>
+                              )}
+                            </span>
+                          </div>
+                        ),
                       )}
                     </div>
                   </li>

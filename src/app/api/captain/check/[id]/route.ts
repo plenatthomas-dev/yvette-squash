@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { getLatestMonth, searchRanking, type RankingRow } from "@/lib/squashnet/client";
 import { YVETTE_CLUB } from "@/lib/squashnet/match";
 import {
+  checkAwayOrder,
   checkPlayer,
   checkScore,
   checkTie,
@@ -148,6 +149,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
           verdict: "unknown",
           fedName: null,
           clt: null,
+          rangM: null,
           licence: null,
           club: null,
           hint: "squashnet n'a pas répondu pour ce nom. Relance la vérification dans un moment.",
@@ -163,6 +165,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     players,
     scores,
     tie,
+    // L'ordre d'en face se déduit des joueurs qu'on vient de rapprocher — aucun appel de plus.
+    awayOrder: checkAwayOrder(players),
   };
 
   // Une rencontre, un rapport : relancer CORRIGE au lieu d'empiler. L'écran n'a donc jamais à

@@ -174,6 +174,47 @@ describe("POST /api/captain/check/{id}", () => {
     expect(args.create.interclubId).toBe("f1");
   });
 
+  // LE DÉTAIL POINT PAR POINT remonte tel quel : c'est ce que le capitaine recopie chez la ligue.
+  it("rend les points jeu par jeu, pas seulement le compte des jeux", async () => {
+    const { report } = await (await POST(req(), ctx())).json();
+    expect(report.scores[0].games).toEqual([
+      { home: 11, away: 5 },
+      { home: 11, away: 6 },
+      { home: 11, away: 7 },
+    ]);
+  });
+
+  // L'ordre d'en face se déduit des joueurs déjà rapprochés : aucun appel réseau de plus.
+  it("vérifie l'ordre des simples adverses sans une requête supplémentaire", async () => {
+    h.fixture = rencontre({
+      matchCount: 2,
+      matches: [
+        ...rencontre().matches,
+        {
+          order: 2,
+          homeDisplayName: "Marie Dupont",
+          awayName: "Luc Bernard",
+          games: [
+            { pointsHome: 11, pointsAway: 5 },
+            { pointsHome: 11, pointsAway: 6 },
+            { pointsHome: 11, pointsAway: 7 },
+          ],
+        },
+      ],
+    });
+    // Bernard (simple 2) est MIEUX classé que Martin (simple 1) : l'ordre est rompu.
+    h.searchRanking.mockImplementation(async (q: string) => {
+      if (q === "Dupont") return [ligne("DUPONT JEAN")];
+      if (q === "Martin") return [{ ...ligne("MARTIN PAUL", "Squash Club de Rennes"), clt: "5A", rangM: "900" }];
+      return [{ ...ligne("BERNARD LUC", "Squash Club de Rennes"), clt: "4A", rangM: "100" }];
+    });
+    const avant = h.searchRanking.mock.calls.length;
+    const { report } = await (await POST(req(), ctx())).json();
+    expect(report.awayOrder.status).toBe("violation");
+    // Trois termes distincts (Dupont, Martin, Bernard) — et rien de plus pour l'ordre.
+    expect(h.searchRanking.mock.calls.length - avant).toBe(3);
+  });
+
   it("contrôle les scores sans passer par le réseau, avec le bestOf de la RENCONTRE", async () => {
     // Un simple à deux jeux gagnés n'est pas terminé en bo5 : c'est un problème, et il se dit.
     h.fixture = rencontre({
@@ -202,6 +243,7 @@ describe("GET /api/captain/check/{id}", () => {
       players: [],
       scores: [],
       tie: { ok: true, home: 2, away: 2, undecided: 0, problem: null },
+      awayOrder: { status: "ok", problem: null },
     };
     h.fixture = { teamId: "t1", official: { checkJson: JSON.stringify(stocke) } };
     const { report } = await (await GET(req(), ctx())).json();

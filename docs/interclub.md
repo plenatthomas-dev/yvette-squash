@@ -586,6 +586,31 @@ bruit que chacun ignore.
 (chez la fédération) lui est réservé, et à sa seule équipe. Voir « Autorisations › La seule
 exception » en tête de ce document — c'est là qu'est écrit pourquoi.
 
+### L'ordre des simples ADVERSES
+
+La règle du classement (le mieux classé joue le simple n° 1) vaut pour les deux équipes.
+L'appli la fait respecter à notre composition depuis toujours — `lineupOrderConflict` refuse la
+saisie. L'espace capitaine l'applique désormais **en face**, sur les mêmes lignes de code :
+`checkAwayOrder` (`captain-check.ts`) trie les adversaires rapprochés et délègue le verdict à
+`lineupOrderConflict`. Deux copies de cette règle finiraient par diverger, et l'appli refuserait
+chez nous ce qu'elle tolère en face.
+
+**Trois états, et le troisième n'est pas une faute** (`OrderStatus`) :
+
+| État | Quand | Ce que l'écran en fait |
+|---|---|---|
+| `ok` | tous rapprochés, ordre conforme | **rien** — un ordre correct n'apprend rien |
+| `violation` | tous rapprochés, ordre rompu | signalé en rouge, formulé « À vérifier sur la feuille de match » |
+| `unverifiable` | un seul adversaire non rapproché | note grise, aucun jugement |
+
+⚠️ **Pourquoi `unverifiable` existe.** Le classement des adversaires ne nous est pas donné : il
+vient de NOTRE rapprochement, sur un nom recopié à la main sur une feuille de match. Conclure
+« leur composition est irrégulière » sur une base incomplète enverrait un capitaine contester
+une composition parfaitement régulière — un coût sans commune mesure avec celui de se taire. Un
+seul adversaire manquant suffit donc à ne rien conclure, **même si l'écart est visible entre les
+autres**. Et un `unverifiable` ne compte pas dans les « points à régler » : le joueur non
+rapproché qui en est la cause y est déjà compté.
+
 Le serveur **refuse un capitaine qui ne joue pas dans l'équipe** : c'est presque toujours une
 erreur de saisie, et le laisser passer donnerait un destinataire d'alertes qui ne se sent pas
 concerné, donc des alertes que personne ne traite.

@@ -50,6 +50,7 @@ const rapport = (over: Partial<CheckReport> = {}): CheckReport => ({
       verdict: "found",
       fedName: "DUPONT JEAN",
       clt: "5A",
+      rangM: 120,
       licence: "0124215",
       club: "Squash de l yvette",
       hint: null,
@@ -61,15 +62,29 @@ const rapport = (over: Partial<CheckReport> = {}): CheckReport => ({
       verdict: "found",
       fedName: "MARTIN PAUL",
       clt: "4C",
+      rangM: 80,
       licence: "0999999",
       club: "Squash Club de Rennes",
       hint: null,
     },
   ],
   scores: [
-    { order: 1, ok: true, problem: null, gamesHome: 3, gamesAway: 0, winner: "home" },
+    {
+      order: 1,
+      ok: true,
+      problem: null,
+      gamesHome: 3,
+      gamesAway: 0,
+      winner: "home",
+      games: [
+        { home: 11, away: 9 },
+        { home: 11, away: 6 },
+        { home: 12, away: 10 },
+      ],
+    },
   ],
   tie: { ok: true, home: 1, away: 0, undecided: 0, problem: null },
+  awayOrder: { status: "ok", problem: null },
   ...over,
 });
 
@@ -84,6 +99,7 @@ const introuvable = (): CheckReport =>
         verdict: "unknown",
         fedName: null,
         clt: null,
+        rangM: null,
         licence: null,
         club: null,
         hint: "Introuvable chez la fédération. Le plus souvent : l'orthographe diffère.",
@@ -151,6 +167,35 @@ describe("Captain — le détail", () => {
     expect(screen.getByText("Pas encore vérifiée.")).toBeTruthy();
   });
 
+  // DIX SECONDES SANS RIEN À L'ÉCRAN SE LISENT « C'EST PLANTÉ ». La roue dit que ça travaille,
+  // le texte dit combien de temps et pourquoi — la roue seule ne répond ni à l'un ni à l'autre.
+  it("montre une roue ET une explication pendant l'attente, puis les retire", async () => {
+    // Une vérification qu'on tient ouverte, pour observer l'état intermédiaire.
+    let debloque!: (r: Response) => void;
+    monte([fixture()]);
+    await souffle();
+    await ouvrir();
+    fetchMock.mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (debloque = resolve)),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Vérifier la rencontre/ }));
+    await souffle();
+    expect(document.querySelector(".cap-spinner")).not.toBeNull();
+    // `role="status"` : l'attente est ANNONCÉE, là où une roue `aria-hidden` n'apprend rien à
+    // un lecteur d'écran.
+    expect(within(screen.getByRole("status")).getByText(/dizaine de secondes/)).toBeTruthy();
+    // Et le bouton est inerte : deux vérifications en vol, c'est seize appels à la fédération.
+    expect((screen.getByRole("button", { name: /Vérification…/ }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    debloque(reponse({ report: rapport() }));
+    await souffle();
+    expect(document.querySelector(".cap-spinner")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("le bouton lance la vérification et affiche le verdict", async () => {
     monte([fixture()]);
     await souffle();
@@ -161,19 +206,36 @@ describe("Captain — le détail", () => {
     expect(toast).toHaveBeenCalledWith("ok", expect.stringContaining("Rien à signaler"));
   });
 
-  // PARTI PRIS N°2. Une checklist où tout crie ne se lit plus : le simple réglé reste fermé…
-  it("un simple sans souci se replie", async () => {
+  // PARTI PRIS N°2. L'écran est AUSSI la feuille de match : on le garde ouvert à côté du
+  // formulaire fédéral et on recopie. Tout ce qui se recopie est donc toujours visible — replier
+  // un simple propre obligerait à le rouvrir pour saisir, soit le geste qu'on veut éviter.
+  it("le récapitulatif est TOUJOURS visible, y compris sur un simple sans souci", async () => {
     monte([fixture()]);
     await souffle();
     await ouvrir();
     fireEvent.click(screen.getByRole("button", { name: /Vérifier la rencontre/ }));
     await souffle();
-    // Rien à signaler : les noms des joueurs ne sont pas dépliés.
-    expect(screen.queryByText(/Jean Dupont/)).toBeNull();
+    expect(screen.getByText(/Jean Dupont/)).toBeTruthy();
+    // Le nom FÉDÉRAL, celui qu'attend le formulaire — et il ne s'écrit pas comme le nôtre.
+    expect(screen.getByText(/DUPONT JEAN/)).toBeTruthy();
+    expect(screen.getByText(/MARTIN PAUL/)).toBeTruthy();
   });
 
-  // …et celui qui coince s'ouvre SANS qu'on le touche : c'est la moitié qui compte.
-  it("un simple à problème s'ouvre de lui-même", async () => {
+  // LES POINTS, JEU PAR JEU — la ligne qu'on transcrit chez la ligue.
+  it("affiche le détail point par point de chaque simple", async () => {
+    monte([fixture()]);
+    await souffle();
+    await ouvrir();
+    fireEvent.click(screen.getByRole("button", { name: /Vérifier la rencontre/ }));
+    await souffle();
+    expect(screen.getByText("11-9")).toBeTruthy();
+    expect(screen.getByText("11-6")).toBeTruthy();
+    expect(screen.getByText("12-10")).toBeTruthy();
+    // Et le total en jeux, qui reste le chiffre du simple.
+    expect(screen.getByText("3 – 0")).toBeTruthy();
+  });
+
+  it("un simple à problème montre son remède à côté du récapitulatif", async () => {
     monte([fixture()], introuvable());
     await souffle();
     await ouvrir(); // le rapport est déjà là, relu — aucun clic sur « Vérifier »
@@ -193,6 +255,7 @@ describe("Captain — le détail", () => {
           verdict: "unknown",
           fedName: null,
           clt: null,
+          rangM: null,
           licence: null,
           club: null,
           hint: "Introuvable dans le club adverse. Vérifie l'orthographe relevée sur la feuille.",
@@ -207,16 +270,40 @@ describe("Captain — le détail", () => {
     expect(screen.getByText(/Vérifie l'orthographe relevée sur la feuille/)).toBeTruthy();
   });
 
-  it("montre le NOM FÉDÉRAL d'un joueur trouvé — c'est celui à recopier", async () => {
+  // L'ORDRE DES SIMPLES D'EN FACE — le contrôle ne parle QUE s'il a quelque chose à dire.
+  it("se tait sur l'ordre adverse quand il est conforme", async () => {
     monte([fixture()]);
     await souffle();
     await ouvrir();
     fireEvent.click(screen.getByRole("button", { name: /Vérifier la rencontre/ }));
     await souffle();
-    // Le simple est replié (rien à signaler) : on le rouvre par sa pastille.
-    fireEvent.click(screen.getByRole("button", { name: /Détail du simple n°1/ }));
-    expect(screen.getByText(/DUPONT JEAN/)).toBeTruthy();
-    expect(screen.getByText(/MARTIN PAUL/)).toBeTruthy();
+    expect(document.querySelector(".cap-ordre")).toBeNull();
+  });
+
+  it("signale un ordre adverse rompu, sans accuser", async () => {
+    const rompu = rapport({
+      awayOrder: {
+        status: "violation",
+        problem: "À vérifier sur la feuille de match — MARTIN PAUL (4C) est mieux classé…",
+      },
+    });
+    monte([fixture()], rompu);
+    await souffle();
+    await ouvrir();
+    expect(screen.getByText(/À vérifier sur la feuille de match/)).toBeTruthy();
+    expect(document.querySelector(".cap-ordre-ko")).not.toBeNull();
+  });
+
+  // « On n'a pas pu vérifier » n'est pas « ils ont mal composé » : pas de rouge, pas d'accusation.
+  it("un ordre non vérifiable reste une note, pas une alerte", async () => {
+    const flou = rapport({
+      awayOrder: { status: "unverifiable", problem: "Ordre des simples adverses non vérifié : 1 joueur…" },
+    });
+    monte([fixture()], flou);
+    await souffle();
+    await ouvrir();
+    expect(screen.getByText(/non vérifié/)).toBeTruthy();
+    expect(document.querySelector(".cap-ordre-ko")).toBeNull();
   });
 
   it("le compte de la rencontre est affiché avec son problème quand il y en a un", async () => {

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  checkAwayOrder,
   checkPlayer,
   checkScore,
   checkTie,
@@ -190,6 +191,7 @@ describe("countProblems", () => {
     players: [],
     scores: [],
     tie: { ok: true, home: 2, away: 2, undecided: 0, problem: null },
+    awayOrder: { status: "ok", problem: null },
     ...over,
   });
 
@@ -209,12 +211,77 @@ describe("countProblems", () => {
   });
 });
 
+describe("checkAwayOrder — la règle fédérale vaut aussi en face", () => {
+  /** Un adversaire rapproché, avec son classement et son rang. */
+  const eux = (order: number, clt: string, rangM: number | null) =>
+    checkPlayer(order, "away", `Joueur ${order}`, [row(`JOUEUR ${order}`, { clt, rangM: String(rangM ?? 0), club: "Rennes" })], "Rennes");
+
+  /** Un adversaire que la fédération n'a pas confirmé. */
+  const inconnu = (order: number) => checkPlayer(order, "away", `Fantôme ${order}`, [], "Rennes");
+
+  it("ordre conforme (du mieux classé au moins bon) → ok, sans un mot", () => {
+    const r = checkAwayOrder([eux(1, "4A", 100), eux(2, "5A", 900)]);
+    expect(r).toEqual({ status: "ok", problem: null });
+  });
+
+  // LE contrôle demandé : le mieux classé doit jouer le simple n° 1.
+  it("un mieux classé sur un simple TARDIF → violation", () => {
+    const r = checkAwayOrder([eux(1, "5A", 900), eux(2, "4A", 100)]);
+    expect(r.status).toBe("violation");
+    expect(r.problem).toMatch(/mieux classé/);
+  });
+
+  it("à classement égal, c'est le rang mixte qui départage", () => {
+    expect(checkAwayOrder([eux(1, "5A", 100), eux(2, "5A", 900)]).status).toBe("ok");
+    expect(checkAwayOrder([eux(1, "5A", 900), eux(2, "5A", 100)]).status).toBe("violation");
+  });
+
+  // ⚠️ LE POINT DÉLICAT. Notre lecture de leurs classements passe par un rapprochement de noms
+  // recopiés à la main : accuser sur une base incomplète enverrait contester une composition
+  // parfaitement régulière.
+  it("un seul adversaire non rapproché suffit à NE PAS conclure", () => {
+    const r = checkAwayOrder([eux(1, "5A", 900), eux(2, "4A", 100), inconnu(3)]);
+    // L'ordre est pourtant rompu entre les deux premiers — on se tait quand même.
+    expect(r.status).toBe("unverifiable");
+    expect(r.problem).toMatch(/non vérifié/);
+  });
+
+  it("hors NC, un rang manquant empêche aussi de conclure", () => {
+    const sansRang = checkPlayer(2, "away", "Sans Rang", [row("SANS RANG", { clt: "5A", rangM: "0", club: "Rennes" })], "Rennes");
+    expect(checkAwayOrder([eux(1, "5A", 100), sansRang]).status).toBe("unverifiable");
+  });
+
+  it("les NC sont équivalents entre eux, et n'exigent aucun rang", () => {
+    const nc = (order: number) =>
+      checkPlayer(order, "away", `NC ${order}`, [row(`NC ${order}`, { clt: "NC", rangM: "0", club: "Rennes" })], "Rennes");
+    expect(checkAwayOrder([nc(1), nc(2)]).status).toBe("ok");
+  });
+
+  it("moins de deux adversaires → rien à ordonner", () => {
+    expect(checkAwayOrder([eux(1, "5A", 100)]).status).toBe("ok");
+    expect(checkAwayOrder([]).status).toBe("ok");
+  });
+
+  // La règle porte sur la composition d'EN FACE : la nôtre est déjà refusée à la saisie
+  // (`lineupOrderConflict`), et la revérifier ici doublerait un message qu'on a déjà eu.
+  it("ignore nos propres joueurs", () => {
+    const nous = checkPlayer(1, "home", "Jean Dupont", [row("DUPONT JEAN")], YVETTE_CLUB);
+    expect(checkAwayOrder([nous]).status).toBe("ok");
+  });
+
+  it("n'accuse jamais : le message invite à vérifier la feuille de match", () => {
+    const r = checkAwayOrder([eux(1, "5A", 900), eux(2, "4A", 100)]);
+    expect(r.problem).toMatch(/À vérifier sur la feuille de match/);
+  });
+});
+
 describe("estRapportValide / lireRapport", () => {
   const bon = JSON.stringify({
     checkedAt: "2026-09-10T10:00:00.000Z",
     players: [],
     scores: [],
     tie: { ok: true, home: 2, away: 2, undecided: 0, problem: null },
+    awayOrder: { status: "ok", problem: null },
   });
 
   it("relit un rapport bien formé", () => {
@@ -226,6 +293,9 @@ describe("estRapportValide / lireRapport", () => {
   it("refuse un JSON valide mais d'un autre format, plutôt que de le laisser lever au rendu", () => {
     for (const mauvais of [
       "{}",
+      // Un rapport d'AVANT le contrôle d'ordre : valide hier, illisible aujourd'hui. C'est
+      // exactement ce que la garde existe pour attraper — l'écran lit `awayOrder.status`.
+      '{"checkedAt":"x","players":[],"scores":[],"tie":{"ok":true,"home":2,"away":2}}',
       '{"checkedAt":"x","players":[],"scores":[]}', // pas de `tie`
       '{"checkedAt":"x","players":[],"scores":[],"tie":{"home":2}}', // `tie` incomplet
       '{"checkedAt":1,"players":[],"scores":[],"tie":{"ok":true,"home":2,"away":2}}',

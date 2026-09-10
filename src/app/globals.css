@@ -4132,6 +4132,7 @@ body[data-bottombar] .install-banner {
   .skel-cell,
   .refresh.spin svg,
   .app-spinner,
+  .cap-spinner,
   .announce-marquee {
     animation: none !important;
     transform: none !important;
@@ -7135,6 +7136,71 @@ button.cap-pastille {
   margin: 6px 0 0;
   font-size: 0.85rem;
   color: var(--bad-edge);
+}
+
+/* Le bouton de vérification pendant les ~10 s d'interrogation de la fédération.
+   La roue réutilise `@keyframes spin`, déjà définie pour `.app-spinner` et la
+   roue de rafraîchissement — une seule animation dans la feuille, donc une seule
+   à neutraliser sous « réduire les animations » (cf. plus bas). */
+.cap-verifier {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.cap-spinner {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  /* La moitié haute transparente : c'est ce qui donne la roue. `currentColor`
+     suit l'encre du bouton, donc les trois thèmes sans une ligne de plus. */
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.cap-attente {
+  margin: 6px 0 0;
+}
+
+/* LES POINTS, JEU PAR JEU — « 11-9 8-11 11-6 ». C'est la ligne qu'on recopie chez
+   la fédération, donc elle doit se lire sans effort et se retrouver d'un simple à
+   l'autre : chiffres tabulaires, et des jeux séparés visuellement plutôt que par
+   des virgules, qui se confondent avec les tirets à cette taille. */
+.cap-points {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 6px 0 0;
+}
+.cap-jeu {
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+/* Le total en jeux : plus gros que le détail, parce que c'est LE chiffre du simple. */
+.cap-jeux {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* L'ordre des simples adverses. Deux tons, et la distinction compte : un écart
+   CONSTATÉ se signale (bad-edge), un ordre qu'on n'a pas pu vérifier n'accuse
+   personne et reste une note. Voir `OrderStatus` — notre lecture de leurs
+   classements passe par un rapprochement de noms qui peut se tromper. */
+.cap-ordre {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+}
+.cap-ordre-ko {
+  border-left: 3px solid var(--bad-edge);
+  color: var(--pico-contrast);
 }
 
 /* Une ligne de joueur : la marque, puis le nom et ce qu'on en sait. */

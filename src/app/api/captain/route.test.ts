@@ -42,6 +42,7 @@ const rapportOk = JSON.stringify({
   players: [],
   scores: [],
   tie: { ok: true, home: 2, away: 2, undecided: 0, problem: null },
+  awayOrder: { status: "ok", problem: null },
 });
 
 function fixture(over: Record<string, unknown> = {}) {
@@ -123,6 +124,7 @@ describe("GET /api/captain", () => {
       players: [{ order: 1, side: "home", name: "X", verdict: "unknown", hint: "…" }],
       scores: [{ order: 1, ok: false, problem: "…", gamesHome: 1, gamesAway: 0, winner: null }],
       tie: { ok: false, home: 1, away: 0, undecided: 1, problem: "…" },
+      awayOrder: { status: "ok", problem: null },
     });
     h.fixtures = [fixture({ official: { checkedAt: new Date(), checkJson: avecSoucis } })];
     const { fixtures } = await (await GET(req())).json();
