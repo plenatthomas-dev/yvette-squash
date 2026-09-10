@@ -884,12 +884,42 @@ model Interclub {
   createdAt              DateTime                @default(now())
   matches                InterclubMatch[]
   availability           InterclubAvailability[]
+  official               InterclubOfficial?
 
   // Une journée fédérale ne peut exister qu'une fois par équipe : c'est ce qui permet de
   // ré-importer le calendrier autant de fois qu'on veut sans jamais dupliquer une rencontre.
   @@unique([teamId, snMatchKey])
   @@index([date])
   @@index([teamId, date])
+}
+
+/// CE QUE LE CAPITAINE A VÉRIFIÉ AVANT D'ALLER SAISIR CHEZ LA FÉDÉRATION.
+///
+/// Le score officiel ne se publie pas : un capitaine le SAISIT sur squashnet, l'autre le VALIDE.
+/// Les deux gestes se font des jours après la rencontre, sur un site qui exige les noms tels que
+/// la fédération les orthographie — et l'orthographe est précisément ce qui diverge (cf.
+/// `User.squashnetGivenName`). D'où cet écran : savoir quels noms vont coincer AVANT d'ouvrir
+/// squashnet, plutôt que de le découvrir devant un formulaire qui refuse.
+///
+/// UNE LIGNE PAR RENCONTRE, ET C'EST UN CACHE. Vérifier coûte huit recherches chez la fédération
+/// (quatre simples, deux joueurs) : les refaire à chaque ouverture d'écran ferait payer à
+/// squashnet la curiosité de quelqu'un qui relit son rapport. `checkedAt` est ce qui distingue
+/// « rien à signaler » de « pas encore regardé » — sans lui, les deux s'affichent pareil.
+///
+/// ⚠️ AUCUNE COLONNE D'AVANCE. La saisie et la validation viendront avec leurs propres colonnes
+/// quand elles existeront : le dépôt porte déjà une colonne morte (`Interclub.division`) et sait
+/// ce qu'elle coûte — un champ que rien n'écrit et que personne n'ose supprimer.
+model InterclubOfficial {
+  id          String    @id @default(cuid())
+  interclub   Interclub @relation(fields: [interclubId], references: [id], onDelete: Cascade)
+  interclubId String    @unique
+  /// Dernière vérification. NULL est impossible en pratique (la ligne naît d'une vérification),
+  /// mais reste nullable pour que l'ajout d'un autre chemin d'écriture n'ait pas à mentir.
+  checkedAt   DateTime?
+  /// Le rapport, sérialisé (patron de `InterclubTeam.snStandingsJson`). Relu par un écran qui
+  /// n'a pas d'error boundary : sa forme est VÉRIFIÉE à la lecture (`estRapportValide`), parce
+  /// qu'un JSON d'un format antérieur passe `JSON.parse` puis lève au rendu.
+  checkJson   String?
 }
 
 // Un simple de la rencontre. Côté asso : un MEMBRE (homeUserId) ou un remplaçant hors appli

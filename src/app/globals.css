@@ -7039,3 +7039,127 @@ body[data-bottombar] .install-banner {
 .rankhist-indice {
   margin: 0 0 10px;
 }
+
+/* ============================================================================
+   ESPACE CAPITAINE (Captain.tsx) — la vérification avant saisie officielle.
+
+   Il emprunte la liste de l'interclub (.ic-list / .ic-row / .ic-row-head) plutôt
+   que d'ouvrir un second vocabulaire : ce sont les mêmes rencontres, vues sous un
+   autre angle, et deux styles de ligne pour un même objet se mettraient à dériver.
+   Ne restent ici que les éléments qui n'existent nulle part ailleurs.
+   ============================================================================ */
+
+.cap-titre {
+  margin: 0 0 4px;
+}
+.cap-retour {
+  margin: 0 0 12px;
+}
+.cap-aide {
+  margin: 4px 0 12px;
+}
+
+/* Le verdict global. C'est la première chose qu'on lit en revenant sur l'écran :
+   il porte l'issue (--good-edge / --bad-edge via .notice info|error) et la DATE,
+   parce qu'un rapport de la semaine dernière ne vaut pas un rapport de ce matin. */
+.cap-verdict {
+  margin: 12px 0;
+}
+.cap-quand {
+  display: block;
+  margin-top: 2px;
+}
+
+/* Le compte de la rencontre — le chiffre que la fédération attend. */
+.cap-tie {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  background: var(--sunken);
+  border-radius: var(--radius-sm);
+}
+.cap-tie strong {
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.cap-simples {
+  margin-bottom: 12px;
+}
+
+/* CE QUI VA BIEN SE TAIT, ce qui coince se voit : un filet d'issue à gauche,
+   emprunté aux paires déjà réglées dans les trois thèmes. Pas d'aplat — la ligne
+   porte déjà un fond de carte, et un second aplat par-dessus ne séparerait rien
+   (Règle du Fond Toujours Plus Sombre). */
+.cap-simple.cap-ko {
+  border-left: 3px solid var(--bad-edge);
+}
+.cap-simple.cap-ok {
+  border-left: 3px solid var(--good-edge);
+}
+
+/* Pastille d'état. Sur un simple réglé c'est un BOUTON (on peut rouvrir pour
+   relire), ailleurs un simple témoin — d'où le reset de l'apparence bouton. */
+.cap-pastille {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--grid-line);
+  background: none;
+  color: var(--pico-muted-color);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+button.cap-pastille {
+  /* 24 px de haut : sous les 44 px de la cible tactile principale, et c'est assumé —
+     c'est un dépliage de confort, jamais le seul chemin vers l'information (la ligne
+     entière s'ouvre déjà quand il y a quelque chose à voir). */
+  cursor: pointer;
+  min-height: 24px;
+}
+.cap-pastille-ok {
+  color: var(--good-edge);
+  border-color: var(--good-edge);
+}
+.cap-pastille-ko {
+  color: var(--bad-edge);
+  border-color: var(--bad-edge);
+}
+
+.cap-probleme {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+  color: var(--bad-edge);
+}
+
+/* Une ligne de joueur : la marque, puis le nom et ce qu'on en sait. */
+.cap-joueur {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+}
+.cap-marque {
+  flex: 0 0 auto;
+  line-height: 1.4;
+}
+.cap-joueur-corps {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+.cap-joueur-nom {
+  font-size: 0.9rem;
+}
+/* Le remède. Il est écrit pour être LU — pas de troncature, pas d'info-bulle :
+   l'appli s'utilise au doigt, et `title` ne se déclenche jamais au tactile. */
+.cap-hint {
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+}

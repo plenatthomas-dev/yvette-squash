@@ -59,6 +59,37 @@ Le contrôle d'accès vit dans **`src/lib/interclub-access.ts`**
 le flag. ⚠️ À ne pas confondre avec `interclub-gate.ts`, qui ne parle pas de droits du tout :
 c'est le cache du direct.
 
+### La seule exception : le capitaine, et seulement pour l'officiel
+
+Depuis l'**espace capitaine** (`src/lib/captain-access.ts`), il existe **un second rôle** — et
+c'est un renversement assumé de tout ce qui précède, borné à un seul endroit.
+
+**Ce qui ne change pas.** Composer une équipe, prendre le marquage, saisir et corriger un score
+**interne** restent ouverts à tout membre connecté. La règle du soir de match est intacte : rien
+ne se bloque parce que le capitaine joue.
+
+**Ce qui change, et pourquoi.** Le score **officiel** ne vit pas dans l'appli. Un capitaine le
+saisit chez la fédération, le capitaine adverse le valide ; ces gestes-là ne se corrigent pas
+d'un tap, ils sont visibles de tous les clubs de la poule, et ils engagent celui qui les pose
+devant sa ligue. La doctrine ci-dessus réserve déjà ses restrictions à ce qui « protège
+quelqu'un d'un **écrasement** » — on y reste, à ceci près que ce qu'on protège est **dehors**.
+
+| Garde | Ce qu'elle empêche |
+|---|---|
+| `requireCaptain` — capitaine d'au moins une équipe | Qu'un membre découvre un écran dont toutes les routes lui répondraient 403 |
+| `requireCaptainOf(teamId)` — capitaine de **cette** équipe | Que le capitaine de l'Équipe 1 agisse sur une rencontre de l'Équipe 2 |
+
+**La portée est l'ÉQUIPE, jamais le club**, et ce n'est pas de la méfiance : l'accès fédéral
+d'un capitaine ne couvre que la sienne. Une portée plus large dans l'appli que chez la
+fédération promettrait un geste qui échouerait au bout du chemin.
+
+**Les admins passent**, comme partout ailleurs (`isAdminEmail`) : c'est le filet du soir où le
+capitaine est injoignable et où la ligue attend un score.
+
+L'onglet « Capitaine » est **absent** pour les autres — pas grisé. Les autres entrées se grisent
+quand leur fonction est coupée, ce qui est une information utile (« ça arrive ») ; ici ce serait
+l'inverse : annoncer à trente membres une porte que deux personnes peuvent ouvrir.
+
 ---
 
 ## Modèle de données
@@ -542,14 +573,18 @@ avant.
 téléphone. Les averages qui départagent — matchs, jeux, points — sont donnés **en toutes
 lettres sous le tableau, pour notre équipe seulement**, là où ils se lisent.
 
-### Le capitaine — une désignation, pas un droit
+### Le capitaine — une désignation, et depuis peu un droit (mais un seul)
 
-Nommé par un admin (`set_captain`), affiché sur son équipe et sur chaque rencontre. Il **ne
-peut rien de plus** que les autres : composer reste ouvert à tout membre, et verrouiller
-créerait un point de blocage le soir où le capitaine n'est pas là. Ce qu'il apporte est
-ailleurs — l'équipe sait à qui parler, et **lui seul** reçoit le récapitulatif des
+Nommé par un admin (`set_captain`), affiché sur son équipe et sur chaque rencontre. Il **ne peut
+rien de plus** que les autres **sur le jeu** : composer reste ouvert à tout membre, et
+verrouiller créerait un point de blocage le soir où le capitaine n'est pas là. Ce qu'il apporte
+est ailleurs — l'équipe sait à qui parler, et **lui seul** reçoit le récapitulatif des
 disponibilités et les alertes de calendrier. Diffusées à tous, ces deux-là deviendraient un
 bruit que chacun ignore.
+
+⚠️ **Une exception, arrivée avec l'espace capitaine** : ce qui touche au score **officiel**
+(chez la fédération) lui est réservé, et à sa seule équipe. Voir « Autorisations › La seule
+exception » en tête de ce document — c'est là qu'est écrit pourquoi.
 
 Le serveur **refuse un capitaine qui ne joue pas dans l'équipe** : c'est presque toujours une
 erreur de saisie, et le laisser passer donnerait un destinataire d'alertes qui ne se sent pas
@@ -801,6 +836,9 @@ inventerait des écarts.
 | `POST /api/admin/interclub-teams` (actions `set_captain`, `set_squashnet_event`) | Capitaine de l'équipe · ancrage fédéral — **épreuve, poule ET équipe**, les trois ensemble ou aucun (**admin**) |
 | `POST /api/admin/interclub-calendar` | Import du calendrier : `preview` puis `apply` (**admin**) |
 | `GET /api/cron/interclub-availability` | Appel J-10, relance J-3, récap au capitaine |
+| `GET /api/captain` | Les rencontres dont ce capitaine répond, et où en est leur vérification |
+| `GET /api/captain/check/{id}` | Relit le dernier rapport — sans toucher à squashnet |
+| `POST /api/captain/check/{id}` | REFAIT la vérification (jusqu'à 8 recherches fédérales) |
 | `GET /api/cron/interclub-calendar` | Contrôle hebdomadaire de dérive — alerte, n'écrit rien |
 | `POST /api/admin/members` (action `set_clt_override`) | Correction admin du classement ET du rang mixte d'un membre (**admin**) |
 | `POST /api/admin/members` (action `set_squashnet_name`) | Nom sous lequel chercher un membre sur squashnet, puis rapprochement immédiat (**admin**) |
