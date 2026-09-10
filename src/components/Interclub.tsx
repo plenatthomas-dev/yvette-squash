@@ -2072,9 +2072,10 @@ function MatchEditor({
                 // que `takenBy` et `orderProblem` sur le sélecteur juste au-dessus.
                 //
                 // `awayLineupConflict` se tait dès qu'un des désignés nous est inconnu : rien
-                // n'est donc grisé tant que la composition d'en face n'est pas entièrement
-                // faite de joueurs déjà rencontrés ET vérifiés. C'est voulu — on ne refuse que
-                // ce qu'on sait.
+                // n'est donc grisé tant que la composition d'en face n'est pas entièrement faite
+                // de joueurs classés. C'est voulu — on ne refuse que ce qu'on sait. Depuis que
+                // le ROSTER fédéral alimente cette liste, ce cas est devenu l'exception plutôt
+                // que la règle : il ne reste que les joueurs qu'aucune inscription ne couvre.
                 const conflit = awayLineupConflict(
                   awayLines.map((l) =>
                     l.order === match.order ? { order: match.order, awayName: o.name } : l,
@@ -2085,8 +2086,9 @@ function MatchEditor({
                   <option key={`${o.team}|${o.name}`} value={o.name} disabled={!!conflit}>
                     {o.name}
                     {/* Classement et rang mixte, notés comme pour nous (« 5A #1200 ») : ce sont
-                        les deux critères qui décident de l'ordre. Absents tant qu'aucune
-                        vérification de capitaine n'a rapproché ce joueur de la fédération. */}
+                        les deux critères qui décident de l'ordre. Ils viennent du ROSTER publié
+                        par la ligue quand on l'a, sinon d'une vérification de capitaine ; à
+                        défaut des deux, le joueur reste proposable mais son ordre incontrôlable. */}
                     {o.clt ? ` (${o.clt}${o.rangM != null && !isNC(o.clt) ? ` #${o.rangM}` : ""})` : ""}
                     {conflit ? " — hors ordre de classement" : ""}
                   </option>
@@ -2100,14 +2102,14 @@ function MatchEditor({
       </label>
       {awayLibre && clubOpponents.length > 0 && (
         <button className="ic-linkish" onClick={() => { setAwayLibre(false); setAwayName(""); }}>
-          Revenir aux joueurs déjà rencontrés à {opponentTeamName}
+          Revenir aux joueurs connus à {opponentTeamName}
         </button>
       )}
       {!awayLibre && clubOpponents.length > 0 && (
         <p className="tiny muted">
-          Les joueurs de {opponentTeamName} déjà rencontrés. Un classement n&apos;apparaît
-          qu&apos;une fois le joueur rapproché de la fédération, par une vérification de
-          capitaine — sans lui, l&apos;ordre des simples d&apos;en face ne peut pas être contrôlé.
+          Les joueurs inscrits à {opponentTeamName} chez la ligue, et ceux qu&apos;on a déjà
+          rencontrés. Sans classement affiché, le joueur reste proposable, mais l&apos;ordre des
+          simples d&apos;en face ne peut pas être contrôlé sur lui.
         </p>
       )}
 

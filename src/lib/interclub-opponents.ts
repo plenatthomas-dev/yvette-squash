@@ -1,6 +1,7 @@
 import { UNSET_PLAYER } from "./interclub";
 import { isNC, lineupOrderConflict } from "./interclub-order";
 import { normalize } from "./squashnet/match";
+import { nameKey, type TeamRoster } from "./squashnet/roster";
 import { lireRapport } from "./captain-check";
 
 // ============================================================================
@@ -18,18 +19,24 @@ import { lireRapport } from "./captain-check";
 //  accents et les espaces — rien de plus. C'est le MENU qui traite la faute de
 //  frappe, en la rendant inutile : on ne retape plus un nom déjà connu.
 //
-//  CE MODULE NE TÉLÉCHARGE RIEN. Tout ce qu'il rend est déjà en base, et vient
-//  de deux endroits qu'on avait sans le savoir :
+//  CE MODULE NE TÉLÉCHARGE RIEN LUI-MÊME. Tout ce qu'il fusionne lui est
+//  DONNÉ, et vient de trois endroits, du plus sûr au plus approximatif :
 //
-//   * `InterclubMatch.awayName` — tous les adversaires jamais alignés contre
-//     nous, saisis rencontre après rencontre ;
+//   * LE ROSTER FÉDÉRAL (`SquashnetTeamRoster`, lu sur `ic_a=393480`) — les
+//     joueurs que le club adverse a INSCRITS dans cette équipe, avec leur
+//     licence, leur classement et leur rang mixte. La fédération les donne :
+//     il n'y a rien à rapprocher, donc rien qui puisse se tromper d'homonyme ;
 //   * `InterclubOfficial.checkJson` — le rapport de vérification du capitaine,
-//     qui porte pour chacun son NOM FÉDÉRAL, son classement, son rang et sa
-//     licence, une fois que la fédération les a confirmés.
+//     qui porte la même identité, mais RAPPROCHÉE par le nom. Sûre à une
+//     orthographe près ;
+//   * `InterclubMatch.awayName` — tous les adversaires jamais alignés contre
+//     nous. Un nom, rien de plus.
 //
-//  Le second ENRICHIT le premier. Un adversaire croisé puis vérifié devient
-//  ainsi une entrée sûre, proposée dans un menu, qu'on n'a plus jamais à
-//  retaper — et dont on connaît le classement, donc l'ordre qu'il doit tenir.
+//  Chacun enrichit le suivant, et le roster prime : un adversaire connu de la
+//  ligue est une entrée sûre, proposée dans un menu, qu'on n'a jamais à taper —
+//  et dont on connaît le classement, donc l'ordre qu'il doit tenir. C'est ce
+//  qui rend le menu utile DÈS LA PREMIÈRE RENCONTRE contre un club, là où les
+//  deux autres sources demandaient de l'avoir déjà affronté.
 //
 //  CE MODULE EST PUR — aucun import de prisma ni de next/server, comme
 //  `interclub-order.ts`. C'est ce qui permet à l'ÉCRAN d'employer exactement la
@@ -37,12 +44,13 @@ import { lireRapport } from "./captain-check";
 //  route refuserait, au lieu de laisser composer pour se faire refuser ensuite.
 //  Les lectures en base vivent à côté, dans `interclub-opponents-db.ts`.
 //
-//  ⚠️ CE N'EST PAS LE ROSTER DE L'ÉQUIPE ADVERSE. C'est la liste de ceux qu'on
-//  a DÉJÀ RENCONTRÉS. Un joueur qu'on croise pour la première fois n'y est pas,
-//  et la saisie libre reste donc possible — la retirer rendrait impossible
-//  d'enregistrer la moitié d'une première rencontre. Le vrai roster viendra de
-//  la fiche d'équipe fédérale (`ic_a=393480`, cf. docs/squashnet.md), le jour
-//  où son rendu aura pu être capté.
+//  ⚠️ LE ROSTER EST CELUI DES INSCRITS, PAS DES ALIGNÉS. Un club inscrit son
+//  effectif en début de saison ; qui joue tel soir n'en dépend pas. Un joueur
+//  aligné contre nous et absent de la liste EXISTE (mutation tardive,
+//  inscription oubliée) — et une rencontre dont l'import n'a pas posé le
+//  `snOpponentTeamId` n'a aucun roster du tout. La SAISIE LIBRE reste donc
+//  atteignable : la retirer rendrait impossible d'enregistrer la moitié d'une
+//  première rencontre.
 // ============================================================================
 
 /** Un adversaire déjà rencontré, et ce qu'on a fini par apprendre de lui. */
@@ -59,8 +67,24 @@ export interface KnownOpponent {
   clt: string | null;
   rangM: number | null;
   licence: string | null;
-  /** Nombre de rencontres où on l'a croisé — les habitués remontent en tête du menu. */
+  /**
+   * Nombre de rencontres où on l'a croisé — les habitués remontent en tête du menu. ZÉRO pour
+   * un joueur qu'on connaît par le ROSTER sans l'avoir jamais rencontré : il est proposable,
+   * et son classement est sûr, mais il n'est pas un habitué.
+   */
   seen: number;
+  /**
+   * D'où vient ce qu'on sait de son CLASSEMENT — la question qu'un capitaine finit toujours
+   * par poser devant un grisage qu'il ne comprend pas.
+   *
+   *  * `roster` — la fédération l'a inscrit dans cette équipe et publie sa licence, son
+   *    classement et son rang mixte. Rien n'a été deviné ;
+   *  * `check`  — une vérification de rencontre a RAPPROCHÉ son nom au classement fédéral. Sûr
+   *    à une orthographe près, et daté de cette vérification ;
+   *  * `sheet`  — un nom lu sur une feuille de match, rien de plus. Aucun classement, donc
+   *    aucun ordre des simples vérifiable sur lui.
+   */
+  source: "roster" | "check" | "sheet";
 }
 
 /** Une rencontre passée, réduite à ce que ce module lit. */
@@ -68,6 +92,11 @@ export interface OpponentSource {
   opponent: string;
   matches: { awayName: string }[];
   checkJson: string | null;
+  /**
+   * `teamid` fédéral de l'adversaire, quand l'import du calendrier l'a posé. C'est la clé du
+   * roster : sans lui, on retombe sur ce qu'on savait déjà — nos propres feuilles de match.
+   */
+  snOpponentTeamId?: string | null;
 }
 
 /**
@@ -86,60 +115,120 @@ export function estDesigne(name: string | null | undefined): boolean {
 /**
  * Fusionne les rencontres passées en une liste d'adversaires connus. PURE et testée.
  *
- * DEUX DÉCISIONS DE FUSION, et elles se voient à l'usage :
+ * TROIS DÉCISIONS DE FUSION, et elles se voient toutes à l'usage :
  *
- *  1. LA CLÉ EST LE NOM NORMALISÉ, PAR ÉQUIPE. « Détry » et « detry » sont le même joueur, et
- *     les proposer deux fois dans le menu ramènerait exactement le problème qu'il résout. La
- *     normalisation est celle du rapprochement fédéral (`normalize`) : accents pliés, casse et
- *     ponctuation neutralisées — donc la même notion d'identité que partout ailleurs.
- *  2. LE NOM RETENU EST LE PLUS RÉCENT, et l'identité fédérale la plus RICHE. Le plus récent
- *     parce qu'il reflète la dernière correction faite à la main ; la plus riche parce qu'une
- *     vérification qui a abouti une fois vaut mieux que trois qui n'ont rien conclu — une seule
- *     suffit à connaître le classement, donc à faire respecter l'ordre des simples.
+ *  1. LA CLÉ EST LE NOM, PAR ÉQUIPE, INSENSIBLE À L'ORDRE DES MOTS (`nameKey`). « Détry » et
+ *     « detry » sont le même joueur, et les proposer deux fois ramènerait exactement le
+ *     problème que le menu résout. L'ordre des mots compte pour la même raison, et elle est
+ *     nouvelle : la fédération écrit « DETRY XAVIER », une feuille de match « Xavier Détry ».
+ *     Sans cette clé, le roster n'enrichirait JAMAIS un nom déjà saisi — on afficherait le même
+ *     joueur deux fois, l'un classé et l'autre pas.
+ *  2. LE NOM RETENU EST LE PLUS RÉCEMMENT SAISI, et l'identité fédérale la plus SÛRE. Le plus
+ *     récent parce qu'il reflète la dernière correction faite à la main, et parce qu'un nom qui
+ *     change sous les doigts du capitaine au milieu d'une saison rendrait le menu déroutant.
+ *  3. LE ROSTER PRIME SUR LA VÉRIFICATION, qui prime sur rien. Une inscription fédérale ne se
+ *     trompe pas d'homonyme ; un rapprochement par le nom, si. Et une vérification qui a abouti
+ *     une fois vaut mieux que trois qui n'ont rien conclu — une seule suffit à connaître le
+ *     classement, donc à faire respecter l'ordre des simples.
  *
  * L'ordre d'entrée compte : les rencontres doivent arriver de la PLUS ANCIENNE à la plus
  * récente, pour que « le plus récent » veuille dire quelque chose.
+ *
+ * `rosters` est indexé par `snTeamId` — l'identifiant, jamais le nom : le nom d'équipe porte un
+ * numéro (« Verrieres 2 »), change de casse d'une saison à l'autre, et deux clubs d'un même
+ * réseau ne diffèrent que par un chiffre. Absent, ce paramètre ne retire rien : on retombe
+ * exactement sur ce que le module savait avant lui.
  */
-export function mergeOpponents(sources: OpponentSource[]): KnownOpponent[] {
+export function mergeOpponents(
+  sources: OpponentSource[],
+  rosters: ReadonlyMap<string, TeamRoster> = new Map(),
+): KnownOpponent[] {
   const parCle = new Map<string, KnownOpponent>();
+  const cleDe = (equipe: string, nom: string) => `${normalize(equipe)}|${nameKey(nom)}`;
 
+  // ---- 1. LE ROSTER FÉDÉRAL, quand on l'a --------------------------------
+  //
+  // POSÉ EN PREMIER, et c'est ce qui rend le menu utile dès la première rencontre : ces joueurs
+  // n'ont pas eu à être croisés pour être connus. Une équipe jamais affrontée cesse d'ouvrir un
+  // champ vide, et son ordre des simples devient vérifiable le soir même.
+  //
+  // Une seule ligne de roster par ÉQUIPE, même si cinq rencontres la désignent : on itère donc
+  // sur les équipes distinctes, pas sur les rencontres.
+  const rosterParEquipe = new Map<string, TeamRoster>();
+  for (const src of sources) {
+    const r = src.snOpponentTeamId ? rosters.get(src.snOpponentTeamId) : undefined;
+    // Le PREMIER l'emporte, comme pour le nom d'équipe : deux rencontres contre le même club
+    // portent le même identifiant, donc le même roster.
+    if (r && !rosterParEquipe.has(normalize(src.opponent))) {
+      rosterParEquipe.set(normalize(src.opponent), r);
+    }
+  }
+  for (const src of sources) {
+    const roster = rosterParEquipe.get(normalize(src.opponent));
+    if (!roster) continue;
+    for (const p of roster.players) {
+      const cle = cleDe(src.opponent, p.name);
+      if (parCle.has(cle)) continue; // déjà posé par une autre rencontre contre cette équipe
+      parCle.set(cle, {
+        // Le nom FÉDÉRAL : c'est exactement ce qu'un capitaine devra recopier sur le formulaire
+        // de la ligue. Un nom jamais saisi chez nous n'a pas d'autre orthographe à respecter.
+        name: p.name,
+        team: src.opponent,
+        fedName: p.name,
+        clt: p.clt,
+        rangM: p.rangM,
+        licence: p.licence,
+        seen: 0,
+        source: "roster",
+      });
+    }
+  }
+
+  // ---- 2. NOS PROPRES FEUILLES DE MATCH -----------------------------------
   for (const src of sources) {
     const rapport = lireRapport(src.checkJson);
-    // Le rapport indexe ses joueurs par nom normalisé : c'est ainsi qu'on raccroche une
-    // identité fédérale à un nom saisi, sans dépendre de l'ordre des simples (qui peut avoir
-    // changé entre la vérification et aujourd'hui).
+    // Le rapport indexe ses joueurs par clé de nom : c'est ainsi qu'on raccroche une identité
+    // fédérale à un nom saisi, sans dépendre de l'ordre des simples (qui peut avoir changé
+    // entre la vérification et aujourd'hui).
     const fede = new Map(
       (rapport?.players ?? [])
         .filter((p) => p.side === "away" && p.verdict === "found")
-        .map((p) => [normalize(p.name), p]),
+        .map((p) => [nameKey(p.name), p]),
     );
 
     for (const m of src.matches) {
       const nom = m.awayName?.trim() ?? "";
       // Un nom vide ou un simple non composé n'est pas un joueur.
       if (!estDesigne(nom)) continue;
-      const norme = normalize(nom);
 
-      const cle = `${normalize(src.opponent)}|${norme}`;
+      const cle = cleDe(src.opponent, nom);
       const avant = parCle.get(cle);
-      const confirme = fede.get(norme);
+      const confirme = fede.get(nameKey(nom));
+      // Le roster prime sur tout : la fédération nous a DONNÉ ce joueur, là où une vérification
+      // a dû le rapprocher. Un rapprochement se trompe sur un homonyme ; une inscription, non.
+      const duRoster = avant?.source === "roster";
 
       parCle.set(cle, {
-        // Le plus RÉCENT : les sources arrivent dans l'ordre chronologique, donc écraser suffit.
+        // Le nom retenu est le plus RÉCEMMENT SAISI — les sources arrivent dans l'ordre
+        // chronologique, donc écraser suffit. Il l'emporte même sur le nom fédéral : c'est
+        // celui qu'on réécrira dans le champ, et le faire changer sous les doigts du capitaine
+        // au milieu d'une saison rendrait le menu déroutant. L'orthographe de la ligue reste
+        // lisible à côté, dans `fedName`.
         name: nom,
         team: src.opponent,
         // La plus RICHE : une identité déjà connue ne se perd pas parce qu'une vérification
         // ultérieure n'a rien conclu (squashnet muet, joueur momentanément introuvable…).
-        fedName: confirme?.fedName ?? avant?.fedName ?? null,
-        clt: confirme?.clt ?? avant?.clt ?? null,
-        rangM: confirme?.rangM ?? avant?.rangM ?? null,
-        licence: confirme?.licence ?? avant?.licence ?? null,
+        fedName: (duRoster ? avant.fedName : null) ?? confirme?.fedName ?? avant?.fedName ?? null,
+        clt: (duRoster ? avant.clt : null) ?? confirme?.clt ?? avant?.clt ?? null,
+        rangM: (duRoster ? avant.rangM : null) ?? confirme?.rangM ?? avant?.rangM ?? null,
+        licence: (duRoster ? avant.licence : null) ?? confirme?.licence ?? avant?.licence ?? null,
         seen: (avant?.seen ?? 0) + 1,
+        source: duRoster ? "roster" : confirme || avant?.source === "check" ? "check" : "sheet",
       });
     }
   }
 
-  // Les CONFIRMÉS d'abord — ce sont les seuls sur lesquels l'ordre des simples peut être
+  // Les CLASSÉS d'abord — ce sont les seuls sur lesquels l'ordre des simples peut être
   // vérifié —, puis les plus souvent croisés, puis l'alphabet pour que la liste ne bouge pas
   // d'un chargement à l'autre.
   return [...parCle.values()].sort(
@@ -197,7 +286,11 @@ export function awayLineupConflict(
   lines: readonly { order: number; awayName: string }[],
   known: readonly KnownOpponent[],
 ): string | null {
-  const parNom = new Map(known.map((k) => [normalize(k.name), k]));
+  // La clé est INSENSIBLE À L'ORDRE DES MOTS (`nameKey`) : le roster fédéral écrit « POPULU
+  // AXEL », la feuille de match « Axel Populu ». Avec `normalize` seule, un capitaine qui
+  // choisit un joueur au menu du roster puis en retape un autre à la main verrait la garde
+  // renoncer — « on ne conclut rien » — sur un joueur pourtant parfaitement connu.
+  const parNom = new Map(known.map((k) => [nameKey(k.name), k]));
 
   const designes = lines.filter((l) => estDesigne(l.awayName));
   // Un seul adversaire désigné ne peut violer aucun ordre : il n'y a personne à comparer.
@@ -205,7 +298,7 @@ export function awayLineupConflict(
 
   const slots = [];
   for (const l of designes) {
-    const k = parNom.get(normalize(l.awayName));
+    const k = parNom.get(nameKey(l.awayName));
     // Jamais rencontré, ou rencontré sans que la fédération l'ait confirmé : on ne sait pas où
     // il se situe, donc on ne refuse rien — ni pour lui, ni pour les autres.
     if (!k || !k.clt) return null;

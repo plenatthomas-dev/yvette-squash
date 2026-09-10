@@ -3,6 +3,7 @@ import { requireInterclubMember } from "@/lib/interclub-access";
 import { prisma } from "@/lib/db";
 import { mergeOpponents, opponentTeams } from "@/lib/interclub-opponents";
 import { MAX_RENCONTRES } from "@/lib/interclub-opponents-db";
+import { loadRosters } from "@/lib/interclub-roster-db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,6 +40,7 @@ export async function GET(req: NextRequest) {
     take: MAX_RENCONTRES,
     select: {
       opponent: true,
+      snOpponentTeamId: true,
       matches: { select: { awayName: true } },
       official: { select: { checkJson: true } },
     },
@@ -46,12 +48,20 @@ export async function GET(req: NextRequest) {
 
   const sources = rencontres.map((r) => ({
     opponent: r.opponent,
+    snOpponentTeamId: r.snOpponentTeamId,
     matches: r.matches,
     checkJson: r.official?.checkJson ?? null,
   }));
 
+  // LU, JAMAIS TÉLÉCHARGÉ ICI. Cette route s'ouvre à chaque composition : y glisser une requête
+  // fédérale ferait payer à squashnet le fait qu'un capitaine ouvre un menu. Le
+  // rafraîchissement est un geste explicite, ailleurs (`POST /api/interclub/opponents/refresh`).
+  const rosters = await loadRosters(
+    sources.map((s) => s.snOpponentTeamId).filter((v): v is string => !!v),
+  );
+
   return NextResponse.json({
     teams: opponentTeams(sources),
-    players: mergeOpponents(sources),
+    players: mergeOpponents(sources, rosters),
   });
 }

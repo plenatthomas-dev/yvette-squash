@@ -13,9 +13,10 @@ import {
   mergeOpponents,
   type KnownOpponent,
 } from "./interclub-opponents";
+import { loadRosters } from "./interclub-roster-db";
 
 /** Client minimal — le client global à la création, la transaction quand une écriture en dépend. */
-type Db = Pick<Prisma.TransactionClient, "interclub">;
+type Db = Pick<Prisma.TransactionClient, "interclub" | "squashnetTeamRoster">;
 
 /** Client minimal pour relire les autres simples d'une rencontre. */
 type MatchDb = Pick<Prisma.TransactionClient, "interclubMatch">;
@@ -42,16 +43,26 @@ export async function loadKnownOpponents(teamId: string, db: Db = prisma): Promi
     take: MAX_RENCONTRES,
     select: {
       opponent: true,
+      snOpponentTeamId: true,
       matches: { select: { awayName: true } },
       official: { select: { checkJson: true } },
     },
   });
+  // Les rosters sont LUS, jamais téléchargés ici : cette fonction sert la garde de composition,
+  // c'est-à-dire un chemin où quelqu'un attend devant son écran. Le rafraîchissement est un
+  // geste à part (`refreshRosters`), lent et explicite.
+  const rosters = await loadRosters(
+    rencontres.map((r) => r.snOpponentTeamId).filter((v): v is string => !!v),
+    db,
+  );
   return mergeOpponents(
     rencontres.map((r) => ({
       opponent: r.opponent,
+      snOpponentTeamId: r.snOpponentTeamId,
       matches: r.matches,
       checkJson: r.official?.checkJson ?? null,
     })),
+    rosters,
   );
 }
 

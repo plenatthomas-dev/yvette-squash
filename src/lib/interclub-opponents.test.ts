@@ -7,6 +7,7 @@ import {
   type KnownOpponent,
   type OpponentSource,
 } from "./interclub-opponents";
+import type { TeamRoster } from "./squashnet/roster";
 
 /** Un rapport de vérification capitaine, réduit à ce que la fusion y lit. */
 function rapport(
@@ -186,6 +187,7 @@ describe("awayLineupConflict", () => {
     rangM,
     licence: "0121214",
     seen: 1,
+    source: "check",
   });
 
   const ligne = (order: number, awayName: string) => ({ order, awayName });
@@ -287,5 +289,188 @@ describe("awayLineupConflict", () => {
         [connu("Paul Martin", "5A", 2000), connu("Luc Bernard", "4A", 100)],
       ),
     ).toMatch(/^Ordre des simples adverses — /);
+  });
+});
+
+// ============================================================================
+//  LE ROSTER FÉDÉRAL — la troisième source, et la seule qui n'ait rien à
+//  rapprocher. Ce que la ligue INSCRIT, contre ce que nos feuilles de match
+//  racontent.
+// ============================================================================
+
+/** Un roster d'équipe, réduit à ce que la fusion y lit. */
+function roster(
+  snTeamId: string,
+  players: { name: string; clt?: string; rangM?: number | null; licence?: string }[],
+): TeamRoster {
+  return {
+    snTeamId,
+    teamName: "Chaville 4",
+    code: "CHAV4",
+    club: "Chaville",
+    captain: null,
+    players: players.map((p) => ({
+      name: p.name,
+      gender: "Mr.",
+      licence: p.licence ?? "0100000",
+      clt: p.clt ?? "5A",
+      rang: 2000,
+      rangM: p.rangM === undefined ? 2000 : p.rangM,
+      registeredAt: "2025-09-22",
+    })),
+  };
+}
+
+const rosters = (...entries: TeamRoster[]) => new Map(entries.map((r) => [r.snTeamId, r]));
+
+describe("mergeOpponents — avec le roster de l'équipe", () => {
+  it("propose des joueurs JAMAIS RENCONTRÉS — c'est tout l'intérêt", () => {
+    // Sans roster, une première rencontre contre un club ouvre un champ vide : le menu ne
+    // connaît que ceux qu'on a déjà affrontés. C'est précisément en début de saison qu'on en
+    // a besoin, et précisément là qu'il ne servait à rien.
+    const known = mergeOpponents(
+      [src({ snOpponentTeamId: "161095", matches: [{ awayName: "À désigner" }] })],
+      rosters(roster("161095", [{ name: "DETRY XAVIER" }, { name: "POPULU AXEL" }])),
+    );
+    expect(known.map((k) => k.name)).toEqual(["DETRY XAVIER", "POPULU AXEL"]);
+    expect(known.every((k) => k.source === "roster")).toBe(true);
+    expect(known.every((k) => k.seen === 0)).toBe(true);
+  });
+
+  it("ne propose PAS deux fois le joueur que la ligue et notre feuille écrivent à l'envers", () => {
+    // « DETRY XAVIER » chez la fédération, « Xavier Détry » sur la feuille : un seul joueur.
+    // C'est ce que `nameKey` répare, et le défaut qu'il évite est visible — deux entrées, l'une
+    // classée, l'autre pas, dans un menu censé lever l'ambiguïté.
+    const known = mergeOpponents(
+      [src({ snOpponentTeamId: "161095", matches: [{ awayName: "Xavier Détry" }] })],
+      rosters(roster("161095", [{ name: "DETRY XAVIER", clt: "5B", rangM: 3464 }])),
+    );
+    expect(known).toHaveLength(1);
+    // Le nom SAISI est celui qu'on réécrira dans le champ ; l'orthographe fédérale reste
+    // lisible à côté, pour le formulaire de la ligue.
+    expect(known[0].name).toBe("Xavier Détry");
+    expect(known[0].fedName).toBe("DETRY XAVIER");
+    expect(known[0].clt).toBe("5B");
+    expect(known[0].rangM).toBe(3464);
+    expect(known[0].seen).toBe(1);
+  });
+
+  it("préfère le roster à une vérification qui a rapproché autre chose", () => {
+    // Le rapprochement se fait par le NOM et peut tomber sur un homonyme ; une inscription
+    // fédérale, non. Quand les deux parlent, c'est la ligue qui a raison.
+    const known = mergeOpponents(
+      [
+        src({
+          snOpponentTeamId: "161095",
+          matches: [{ awayName: "Xavier Detry" }],
+          checkJson: rapport([{ name: "Xavier Detry", clt: "4A", rangM: 999, licence: "9999999" }]),
+        }),
+      ],
+      rosters(
+        roster("161095", [
+          { name: "DETRY XAVIER", clt: "5B", rangM: 3464, licence: "1404133H" },
+        ]),
+      ),
+    );
+    expect(known[0].clt).toBe("5B");
+    expect(known[0].licence).toBe("1404133H");
+    expect(known[0].source).toBe("roster");
+  });
+
+  it("garde le joueur ALIGNÉ que la ligue n'a pas inscrit", () => {
+    // Mutation tardive, inscription oubliée : il a joué, il existe. L'effacer du menu ferait
+    // retaper son nom à chaque fois — et le refuser empêcherait d'enregistrer la rencontre.
+    const known = mergeOpponents(
+      [src({ snOpponentTeamId: "161095", matches: [{ awayName: "Jean Nouveau" }] })],
+      rosters(roster("161095", [{ name: "DETRY XAVIER" }])),
+    );
+    expect(known.map((k) => k.name).sort()).toEqual(["DETRY XAVIER", "Jean Nouveau"]);
+    expect(known.find((k) => k.name === "Jean Nouveau")?.source).toBe("sheet");
+    expect(known.find((k) => k.name === "Jean Nouveau")?.clt).toBeNull();
+  });
+
+  it("ne mélange pas les rosters de deux équipes", () => {
+    const known = mergeOpponents(
+      [
+        src({ opponent: "Chaville 4", snOpponentTeamId: "161095", matches: [] }),
+        src({ opponent: "Verrieres 2", snOpponentTeamId: "161099", matches: [] }),
+      ],
+      rosters(
+        roster("161095", [{ name: "DETRY XAVIER" }]),
+        roster("161099", [{ name: "POPULU AXEL" }]),
+      ),
+    );
+    expect(known.find((k) => k.name === "DETRY XAVIER")?.team).toBe("Chaville 4");
+    expect(known.find((k) => k.name === "POPULU AXEL")?.team).toBe("Verrieres 2");
+  });
+
+  it("ne compte pas deux fois un joueur vu dans deux rencontres contre la même équipe", () => {
+    const known = mergeOpponents(
+      [
+        src({ snOpponentTeamId: "161095", matches: [{ awayName: "Xavier Detry" }] }),
+        src({ snOpponentTeamId: "161095", matches: [{ awayName: "Xavier Detry" }] }),
+      ],
+      rosters(roster("161095", [{ name: "DETRY XAVIER" }])),
+    );
+    expect(known).toHaveLength(1);
+    expect(known[0].seen).toBe(2);
+  });
+
+  it("ignore un roster que la rencontre ne désigne pas", () => {
+    // Rencontre saisie à la main, ou importée avant que la colonne n'existe : pas
+    // d'identifiant, donc pas de roster. On retombe sur ce qu'on savait avant — jamais sur le
+    // roster d'une autre équipe.
+    const known = mergeOpponents(
+      [src({ snOpponentTeamId: null, matches: [{ awayName: "Paul Martin" }] })],
+      rosters(roster("161095", [{ name: "DETRY XAVIER" }])),
+    );
+    expect(known.map((k) => k.name)).toEqual(["Paul Martin"]);
+    expect(known[0].source).toBe("sheet");
+  });
+
+  it("rend exactement ce qu'il rendait quand aucun roster n'est fourni", () => {
+    const known = mergeOpponents([src({ matches: [{ awayName: "Paul Martin" }] })]);
+    expect(known.map((k) => k.name)).toEqual(["Paul Martin"]);
+  });
+});
+
+describe("awayLineupConflict — sur un roster, dès la première rencontre", () => {
+  const known = () =>
+    mergeOpponents(
+      [src({ snOpponentTeamId: "161095", matches: [] })],
+      rosters(
+        roster("161095", [
+          { name: "POPULU AXEL", clt: "4B", rangM: 1415 },
+          { name: "MARTIN OLIVIER", clt: "NC", rangM: 9389 },
+        ]),
+      ),
+    );
+
+  it("refuse un ordre rompu contre un club JAMAIS AFFRONTÉ", () => {
+    // Le cas que la branche laissait en « on ne conclut rien » : sans roster, aucun de ces deux
+    // joueurs n'a de classement, donc aucun refus n'est possible le soir de la J1.
+    expect(
+      awayLineupConflict(
+        [
+          { order: 1, awayName: "MARTIN OLIVIER" },
+          { order: 2, awayName: "POPULU AXEL" },
+        ],
+        known(),
+      ),
+    ).toMatch(/Ordre des simples adverses/);
+  });
+
+  it("accepte le même ordre remis à l'endroit, saisi à l'envers des mots", () => {
+    // Le capitaine tape « Axel Populu » ; la ligue écrit « POPULU AXEL ». La garde doit
+    // reconnaître le joueur, sans quoi elle renoncerait à conclure sur un joueur connu.
+    expect(
+      awayLineupConflict(
+        [
+          { order: 1, awayName: "Axel Populu" },
+          { order: 2, awayName: "Olivier Martin" },
+        ],
+        known(),
+      ),
+    ).toBeNull();
   });
 });
