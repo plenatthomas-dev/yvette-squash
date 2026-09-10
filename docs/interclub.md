@@ -45,6 +45,7 @@ Les seules restrictions protègent quelqu'un d'un **écrasement**, jamais d'un a
 | `knownGameCount` + `knownGames` : l'écriture doit se fonder sur le même ÉTAT que la base — même nombre de jeux **et mêmes scores**. Ce sont les jeux OUVERTS dans l'écran qu'on compare, jamais ceux qu'on envoie : sans quoi corriger un 11-5 en 11-7 se refuserait lui-même. | `PATCH …/matches/{mid}`, `PUT …/live` (règle unique, `staleGamesReason`) | Un écran ouvert dix minutes plus tôt qui efface ce qui a été joué, ou qui rejoue un score corrigé depuis |
 | Un simple **« à désigner »** ne peut ni commencer le marquage en direct ni recevoir un score saisi a posteriori | `POST …/claim`, `PUT …/live`, `PATCH …/matches/{mid}` (règle unique, `lineupComplete`) | Une notification qui annoncerait le placeholder comme un vrai nom de joueur |
 | Une composition qui romprait l'**ordre des simples** (le mieux classé des joueurs présents doit jouer le simple n° 1 ; à classement égal, le meilleur rang mixte passe devant) est refusée | `POST /api/interclub`, `PATCH …/matches/{mid}` (règle unique, `lineupOrderConflict`) | Une rencontre disputée dans le mauvais ordre, sanctionnable par la fédération |
+| Le même refus s'applique à la composition **adverse** — mais seulement quand tous les adversaires désignés nous sont connus | les deux mêmes routes (`awayLineupConflict`) | La sanction vaut des deux côtés ; refuser sur une base incomplète empêcherait d'inscrire une première rencontre contre un club jamais croisé (cf. « L'ordre des simples ADVERSES ») |
 
 Deux choses échappent toutefois au membre, et sont réservées à l'**admin** :
 
@@ -611,6 +612,60 @@ seul adversaire manquant suffit donc à ne rien conclure, **même si l'écart es
 autres**. Et un `unverifiable` ne compte pas dans les « points à régler » : le joueur non
 rapproché qui en est la cause y est déjà compté.
 
+#### Le blocage se fait à la DÉSIGNATION, pas à la vérification
+
+`checkAwayOrder` constate, la veille de la feuille de match. La rencontre est alors jouée : il
+n'y a plus rien à corriger, seulement une sanction à contester. Le refus tombe donc désormais
+**au moment où on désigne l'adversaire** — `awayLineupConflict`
+(`src/lib/interclub-opponents.ts`), sur `POST /api/interclub` comme sur `PATCH …/matches/{mid}`,
+et l'écran grise d'avance ce que la route refuserait. La règle n'est pas réécrite : elle délègue
+à `lineupOrderConflict`, celle-là même qui refuse notre propre composition.
+
+⚠️ **On ne refuse que ce qu'on CONNAÎT**, et c'est la différence irréductible avec notre camp.
+`lineupOrderConflict` refuse un joueur sans classement — juste chez nous, où un admin peut le
+renseigner ; absurde en face, où personne ne le peut. Ce serait rendre impossible d'inscrire une
+première rencontre contre un club jamais croisé, c'est-à-dire le cas le plus banal d'un début de
+saison. Dès qu'**un seul** adversaire désigné nous est inconnu, on ne conclut rien.
+
+#### D'où vient ce qu'on sait d'eux
+
+**D'aucune requête fédérale.** Deux sources déjà en base, fusionnées par `mergeOpponents` :
+
+| Source | Ce qu'elle donne |
+|---|---|
+| `InterclubMatch.awayName` | tous les adversaires jamais alignés contre nous — le nom, rien de plus |
+| `InterclubOfficial.checkJson` | pour ceux qu'une vérification de capitaine a rapprochés : nom fédéral, classement, rang mixte, licence |
+
+Le second enrichit le premier. Un adversaire croisé puis vérifié devient une entrée sûre,
+proposée dans un menu, qu'on ne retape plus — et dont on connaît le classement, donc l'ordre
+qu'il doit tenir. La liste s'enrichit d'elle-même, rencontre après rencontre.
+
+Ce n'est **pas le roster de l'équipe adverse** : un joueur croisé pour la première fois n'y est
+pas, et la saisie libre reste donc atteignable dans les deux menus. Le vrai roster viendra de la
+fiche d'équipe fédérale (`ic_a=393480`, cf. `docs/squashnet.md`), le jour où son rendu aura pu
+être capté.
+
+#### Deux menus, et pourquoi ils existent
+
+Le nom d'un adversaire était un champ de texte, recopié à la main un soir de rencontre sur un
+téléphone. « Détry » un mois, « detry » le suivant : le rapprochement fédéral échouait sur un
+accent, et le rapport du capitaine déclarait « introuvable » un joueur parfaitement réel. Deux
+menus (`GET /api/interclub/opponents`) suppriment la ressaisie : **le club adverse** à la
+création d'une rencontre, **ses joueurs** à la composition d'un simple.
+
+La fusion replie la casse, les accents et les espaces — **pas les fautes de frappe** : « Detri »
+reste un autre joueur que « Detry ». C'est le menu qui traite la faute de frappe, en rendant la
+ressaisie inutile.
+
+Deux règles de fusion qui se voient à l'usage :
+
+- pour un **joueur**, c'est le nom **le plus récent** qui est retenu — il reflète la dernière
+  correction faite à la main — et l'identité fédérale **la plus riche** : une vérification qui a
+  abouti une fois vaut mieux que trois qui n'ont rien conclu ;
+- pour une **équipe**, c'est le **premier** — un nom d'équipe n'est jamais corrigé à la main, il
+  est estampillé par l'import du calendrier fédéral, et une variante saisie plus tard (« chaville
+  4 ») dégrade l'orthographe officielle au lieu de la corriger.
+
 Le serveur **refuse un capitaine qui ne joue pas dans l'équipe** : c'est presque toujours une
 erreur de saisie, et le laisser passer donnerait un destinataire d'alertes qui ne se sent pas
 concerné, donc des alertes que personne ne traite.
@@ -821,6 +876,10 @@ inventerait des écarts.
   `classementPower`, `isNC`, `lineupOrderConflict`, `parseClassementInput`, `parseRangMInput`.
   Cf. « Ordre des simples : classement, puis rang mixte »
   ci-dessus.
+- `src/lib/interclub-opponents.ts` — ce qu'on sait des joueurs **d'en face** : `mergeOpponents`,
+  `opponentTeams`, `estDesigne`, et `awayLineupConflict` — l'ordre des simples ADVERSES, qui
+  délègue à `lineupOrderConflict` plutôt que de la recopier. Pur, donc employé **par l'écran**
+  autant que par les routes : ce que le menu grise, le serveur le refuse, et réciproquement
 
 **Côté base**
 - `src/lib/interclub-db.ts` — sérialisation, score de rencontre, statut déduit, péremption de la
@@ -828,6 +887,9 @@ inventerait des écarts.
   appliquée par les deux routes d'écriture. Elle a vécu en double, et les deux copies avaient
   divergé — le `PATCH` n'appliquait qu'une moitié de ce que ce document décrivait. Deux
   exemplaires d'une règle finissent toujours par ne plus dire la même chose.
+- `src/lib/interclub-opponents-db.ts` — les lectures qu'attend le module pur ci-dessus :
+  `loadKnownOpponents` (les adversaires connus d'une équipe) et `findAwayOrderConflict` (le
+  pendant de `findOrderConflict` pour le camp adverse, lu dans la transaction qui écrit)
 - `src/lib/interclub-roster.ts` — **qui peut être aligné** (`teamRoster`, `resolveHomePick`, `findAlignmentClash`, `rankingRefusal`), l'effectif de TOUTES les équipes pour l'écran d'admin (`allTeamMembers`, `allTeamGuests`) et, depuis l'ordre par classement, `findOrderConflict`
 - `src/lib/squashnet/refresh.ts` — le **rapprochement fédéral** des DEUX populations en une passe (`refreshRankings`), et à la demande d'un joueur sans compte (`matchGuestRanking`) ou d'un membre dont on vient de corriger le nom de recherche (`refreshMemberRanking`)
 - `src/lib/interclub-gate.ts` — le **cache** du direct

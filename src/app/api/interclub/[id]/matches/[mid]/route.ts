@@ -19,6 +19,7 @@ import {
   MAX_PLAYER_NAME_LEN,
 } from "@/lib/interclub-db";
 import { findAlignmentClash, findOrderConflict, resolveHomePick } from "@/lib/interclub-roster";
+import { findAwayOrderConflict, loadKnownOpponents } from "@/lib/interclub-opponents-db";
 import { interclubChanged } from "@/lib/interclub-gate";
 import {
   notifyFixtureDone,
@@ -264,7 +265,27 @@ export async function PATCH(
         data.homeDisplayName = p.homeDisplayName;
       }
       if (typeof awayName === "string" && awayName.trim()) {
-        data.awayName = awayName.trim().slice(0, MAX_PLAYER_NAME_LEN);
+        const propose = awayName.trim().slice(0, MAX_PLAYER_NAME_LEN);
+        // L'ORDRE DES SIMPLES VAUT AUSSI EN FACE, et se contrôle DÈS LA DÉSIGNATION — pas à la
+        // vérification du capitaine, la veille de la feuille de match, quand la rencontre est
+        // jouée et qu'il n'y a plus rien à corriger.
+        //
+        // ⚠️ On ne refuse que ce qu'on CONNAÎT : le classement d'un adversaire ne nous est pas
+        // donné, il vient de nos rencontres passées une fois qu'un capitaine les a vérifiées.
+        // `findAwayOrderConflict` se tait donc dès qu'un des désignés nous est inconnu — sans
+        // quoi une première rencontre contre un club jamais croisé serait impossible à composer.
+        //
+        // Lu avec `tx`, comme la garde du même ordre côté maison : la vérification doit voir
+        // l'état que l'écriture qu'elle autorise va modifier.
+        const awayProblem = await findAwayOrderConflict(
+          tx,
+          m.interclubId,
+          mid,
+          { order: m.order, awayName: propose },
+          () => loadKnownOpponents(m.interclub.teamId, tx),
+        );
+        if (awayProblem) throw new HttpError(400, awayProblem);
+        data.awayName = propose;
       }
       if (homeColor !== undefined) data.homeColor = normalizeColor(homeColor);
       if (awayColor !== undefined) data.awayColor = normalizeColor(awayColor);

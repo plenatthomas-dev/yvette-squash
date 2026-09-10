@@ -2584,6 +2584,21 @@ td.cell.past {
 .ic-team-count {
   font-size: 0.72rem;
 }
+/* Une échappatoire discrète — « revenir à la liste », « saisir un autre nom ». Un vrai bouton
+   (donc atteignable au clavier et annoncé comme tel), mais qui ne réclame pas la place ni le
+   poids visuel d'une action de formulaire : ce n'est pas ce qu'on vient faire sur cet écran. */
+.ic-linkish {
+  align-self: flex-start;
+  margin: 0 0 14px;
+  padding: 0;
+  border: none;
+  background: none;
+  width: auto;
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+  text-decoration: underline;
+}
+
 .ic-roster-empty {
   margin: 6px 0 0;
 }
