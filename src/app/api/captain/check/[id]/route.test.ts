@@ -149,6 +149,19 @@ describe("POST /api/captain/check/{id}", () => {
     expect(h.searchRanking).toHaveBeenCalledTimes(2);
   });
 
+  // LE BOGUE DES ÉQUIPES NUMÉROTÉES. « Chaville 4 » est une ÉQUIPE ; le classement range ses
+  // joueurs sous le CLUB « Chaville ». Sans la coupe, aucun adversaire d'une équipe numérotée
+  // n'était jamais trouvé — et le remède affiché envoyait corriger une orthographe correcte.
+  it("cherche l'adversaire sous son CLUB, pas sous le nom numéroté de son équipe", async () => {
+    h.fixture = rencontre({ opponent: "Chaville 4" });
+    h.searchRanking.mockImplementation(async (q: string) =>
+      q === "Dupont" ? [ligne("DUPONT JEAN")] : [ligne("MARTIN PAUL", "Chaville")],
+    );
+    const { report } = await (await POST(req(), ctx())).json();
+    const eux = report.players.find((p: { side: string }) => p.side === "away");
+    expect(eux).toMatchObject({ verdict: "found", fedName: "MARTIN PAUL" });
+  });
+
   it("squashnet sans période → 502, et AUCUN rapport écrit", async () => {
     h.month = null;
     expect((await POST(req(), ctx())).status).toBe(502);

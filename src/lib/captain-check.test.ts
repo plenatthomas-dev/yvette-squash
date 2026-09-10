@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   checkAwayOrder,
   checkPlayer,
+  clubOfTeam,
   checkScore,
   checkTie,
   countProblems,
@@ -53,6 +54,33 @@ describe("queryOf / identityOf", () => {
     expect(queryOf("Jean Dupont")).toBe("Dupont");
     expect(queryOf("  Jean-Luc  De La Tour  ")).toBe("Tour");
     expect(identityOf(" Jean Dupont ")).toEqual({ givenName: "", familyName: "Jean Dupont" });
+  });
+});
+
+// LE BOGUE QUI RENDAIT TOUS LES ADVERSAIRES INTROUVABLES sur une équipe numérotée. Le
+// calendrier fédéral donne un nom d'ÉQUIPE (« Chaville 4 »), le classement range sous le CLUB
+// (« Chaville ») : comparés tels quels, ils ne coïncident jamais. Et le remède affiché envoyait
+// corriger une orthographe parfaitement juste.
+describe("clubOfTeam", () => {
+  it("retire le numéro d'équipe, et lui seul", () => {
+    expect(clubOfTeam("Chaville 4")).toBe("Chaville");
+    expect(clubOfTeam("UCPA Meudon 2")).toBe("UCPA Meudon");
+    expect(clubOfTeam("Liberty Country Club 3")).toBe("Liberty Country Club");
+  });
+
+  it("laisse intact un club sans numéro", () => {
+    expect(clubOfTeam("Squash de l'Yvette")).toBe("Squash de l'Yvette");
+    expect(clubOfTeam("  Squash de l'Yvette  ")).toBe("Squash de l'Yvette");
+  });
+
+  it("ne rend jamais une chaîne vide, même sur un libellé qui n'est qu'un nombre", () => {
+    // « 4 » n'est un nom de club chez personne, mais rendre « » ferait comparer au vide —
+    // et le vide, normalisé, coïncide avec tout ce qui est vide.
+    expect(clubOfTeam("4")).toBe("4");
+  });
+
+  it("un nombre AU MILIEU du nom n'est pas un numéro d'équipe", () => {
+    expect(clubOfTeam("Squash 2000 Paris")).toBe("Squash 2000 Paris");
   });
 });
 

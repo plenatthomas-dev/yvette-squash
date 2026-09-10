@@ -167,6 +167,29 @@ export function identityOf(name: string): MemberIdentity {
   return { givenName: "", familyName: name.trim() };
 }
 
+/**
+ * Le CLUB derrière un nom d'ÉQUIPE — « Chaville 4 » → « Chaville ».
+ *
+ * ⚠️ CE N'EST PAS UN DÉTAIL DE PRÉSENTATION, c'est ce qui décide si un adversaire est trouvé.
+ * La fédération numérote les équipes d'un même club (mesuré sur notre poule : « Chaville 4 »,
+ * « UCPA Meudon 2 », « Liberty Country Club 3 »), et c'est ce libellé-là que le calendrier nous
+ * donne. Mais le CLASSEMENT, lui, range les joueurs sous le CLUB, sans numéro.
+ *
+ * Comparer les deux tels quels ne peut jamais coïncider : « Chaville 4 » ≠ « Chaville ». TOUS
+ * les adversaires d'une équipe numérotée ressortaient donc « introuvable », avec un remède qui
+ * envoyait corriger une orthographe parfaitement juste — et l'écran n'avait aucun moyen de dire
+ * que la faute était la sienne. Les équipes sans numéro (« Squash de l'Yvette ») passaient, ce
+ * qui rendait la panne d'autant plus déroutante : elle ne frappait qu'un adversaire sur deux.
+ *
+ * On ne retire QUE des chiffres en fin de libellé, et seulement s'il reste quelque chose devant :
+ * un club dont le nom finirait par un nombre significatif est autrement plus rare qu'une équipe
+ * numérotée, et « 4 » seul ne serait un nom de club chez personne.
+ */
+export function clubOfTeam(teamName: string): string {
+  const coupe = teamName.trim().replace(/\s+\d+$/, "").trim();
+  return coupe || teamName.trim();
+}
+
 /** Le terme envoyé à squashnet : le dernier mot, le plus discriminant en général. */
 export function queryOf(name: string): string {
   const tokens = name.trim().split(/\s+/);

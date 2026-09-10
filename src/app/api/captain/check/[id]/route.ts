@@ -6,6 +6,7 @@ import { YVETTE_CLUB } from "@/lib/squashnet/match";
 import {
   checkAwayOrder,
   checkPlayer,
+  clubOfTeam,
   checkScore,
   checkTie,
   lireRapport,
@@ -40,9 +41,15 @@ const DELAI_MS = 600;
 
 const dodo = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Le club attendu pour ce joueur : le nôtre, ou celui d'en face. */
+/**
+ * Le club attendu pour ce joueur : le nôtre, ou celui d'en face.
+ *
+ * `Interclub.opponent` porte un nom d'ÉQUIPE (« Chaville 4 »), le classement range sous le CLUB
+ * (« Chaville ») : d'où `clubOfTeam`, sans quoi aucun adversaire d'une équipe numérotée n'est
+ * jamais trouvé.
+ */
 const clubAttendu = (side: "home" | "away", opponent: string) =>
-  side === "home" ? YVETTE_CLUB : opponent;
+  side === "home" ? YVETTE_CLUB : clubOfTeam(opponent);
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
