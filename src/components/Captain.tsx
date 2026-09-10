@@ -254,19 +254,34 @@ export default function Captain({
                               {p.verdict === "found" ? "✅" : p.verdict === "other-club" ? "ℹ️" : "⚠️"}
                             </span>
                             <span className="cap-joueur-corps">
-                              <span className="cap-joueur-nom">
-                                {p.name} <span className="muted tiny">({camp(p)})</span>
-                              </span>
                               {p.verdict === "found" ? (
-                                <span className="muted tiny">
-                                  {/* Le nom FÉDÉRAL, parce que c'est celui à recopier — et il
-                                      ne s'écrit pas toujours comme le nôtre. */}
-                                  {p.fedName}
-                                  {p.clt ? ` · ${p.clt}` : ""}
-                                  {p.licence ? ` · licence ${p.licence}` : ""}
-                                </span>
+                                <>
+                                  {/* UNE SEULE IDENTITÉ, LA FÉDÉRALE. On affichait les deux — le
+                                      nom saisi chez nous PUIS celui de la fédération — et c'était
+                                      redondant : ce sont la même personne, et seul le second se
+                                      recopie. Le club prend la place ainsi libérée, et dit du même
+                                      coup de quel camp est le joueur (plus besoin d'un « nous »
+                                      ou d'un « eux » à côté du nom). */}
+                                  <span className="cap-joueur-nom">
+                                    {p.fedName}
+                                    {p.club && <span className="cap-club"> — {p.club}</span>}
+                                  </span>
+                                  <span className="muted tiny cap-fiche">
+                                    {[p.clt, p.rangM != null ? `#${p.rangM}` : null]
+                                      .filter(Boolean)
+                                      .join(" ")}
+                                    {p.licence ? ` · ${p.licence}` : ""}
+                                  </span>
+                                </>
                               ) : (
-                                <span className="cap-hint">{p.hint}</span>
+                                <>
+                                  {/* Pas rapproché : le nom SAISI est tout ce qu'on a, et le camp
+                                      ne se déduit plus d'un club qu'on n'a pas trouvé. */}
+                                  <span className="cap-joueur-nom">
+                                    {p.name} <span className="muted tiny">({camp(p)})</span>
+                                  </span>
+                                  <span className="cap-hint">{p.hint}</span>
+                                </>
                               )}
                             </span>
                           </div>

@@ -215,10 +215,17 @@ describe("Captain — le détail", () => {
     await ouvrir();
     fireEvent.click(screen.getByRole("button", { name: /Vérifier la rencontre/ }));
     await souffle();
-    expect(screen.getByText(/Jean Dupont/)).toBeTruthy();
-    // Le nom FÉDÉRAL, celui qu'attend le formulaire — et il ne s'écrit pas comme le nôtre.
+    // UNE SEULE identité par joueur : la FÉDÉRALE, celle qu'attend le formulaire. Le nom saisi
+    // chez nous ne s'affiche plus — c'est la même personne, et lui seul se recopie.
     expect(screen.getByText(/DUPONT JEAN/)).toBeTruthy();
     expect(screen.getByText(/MARTIN PAUL/)).toBeTruthy();
+    expect(screen.queryByText(/Jean Dupont/)).toBeNull();
+    // Le club prend la place libérée, et dit le camp sans qu'on écrive « nous » / « eux ».
+    expect(screen.getByText(/Squash de l yvette/)).toBeTruthy();
+    expect(screen.getByText(/Squash Club de Rennes/, { selector: ".cap-club" })).toBeTruthy();
+    // Classement, rang mixte et licence sur une ligne — sans le mot « licence », qui n'apporte
+    // rien à côté d'un numéro qu'on reconnaît.
+    expect(screen.getByText(/5A #120 · 0124215/)).toBeTruthy();
   });
 
   // LES POINTS, JEU PAR JEU — la ligne qu'on transcrit chez la ligue.

@@ -7223,6 +7223,18 @@ button.cap-pastille {
 .cap-joueur-nom {
   font-size: 0.9rem;
 }
+/* Le club, sur la même ligne que le nom fédéral : c'est lui qui dit le camp depuis qu'on
+   n'écrit plus « (nous) » / « (eux) » à côté de chaque joueur rapproché. Discret — le nom
+   reste ce qu'on lit, le club ce qu'on vérifie d'un coup d'œil. */
+.cap-club {
+  color: var(--pico-muted-color);
+  font-weight: 400;
+}
+/* Classement, rang mixte et licence : la ligne d'identité fédérale, celle qu'on recopie.
+   Chiffres tabulaires pour que les licences s'alignent d'un simple à l'autre. */
+.cap-fiche {
+  font-variant-numeric: tabular-nums;
+}
 /* Le remède. Il est écrit pour être LU — pas de troncature, pas d'info-bulle :
    l'appli s'utilise au doigt, et `title` ne se déclenche jamais au tactile. */
 .cap-hint {
