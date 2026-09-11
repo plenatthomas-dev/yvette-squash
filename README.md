@@ -32,7 +32,10 @@ Next.js API routes  ──►  Adaptateur ResaMania (src/lib/resamania/client.ts
 - **Frontend + backend** : Next.js (App Router, TypeScript) — un seul projet, un seul déploiement.
 - **Proxy obligatoire** : le navigateur ne peut pas appeler ResaMania directement (CORS) ;
   tout passe par les API routes côté serveur.
-- **Base** : Prisma. SQLite en dev, **Postgres Neon** (gratuit) en prod.
+- **Base** : Prisma + **Postgres** partout — Neon (plan gratuit) en production comme en preview,
+  un conteneur jetable en local. `schema.prisma` déclare `provider = "postgresql"` : SQLite
+  n'est pas une option, et ne l'a pas été depuis longtemps. Une base de développement d'un
+  autre moteur que celui de production ne prouverait de toute façon rien des migrations.
 - **Secrets** : les mots de passe ResaMania sont chiffrés en **AES-256-GCM** (`src/lib/crypto.ts`),
   jamais stockés en clair. Deux modes possibles (voir Roadmap) :
   - _sur l'appareil_ : rien côté serveur, réservation à la demande seulement ;
@@ -49,9 +52,17 @@ ont réservé » ne peut donc venir **que** des réservations faites **via cette
 ```bash
 npm install
 cp .env.example .env        # puis générer la clé : openssl rand -base64 32  -> CREDENTIALS_SECRET
-npm run db:push             # crée la base SQLite locale
+
+# Une base Postgres jetable, la même recette que les tests (cf. src/lib/pg-harness.ts) :
+docker run --rm -d --name pg-dev -e POSTGRES_PASSWORD=dev -p 55432:5432 postgres:16
+# → dans .env : DATABASE_URL et DIRECT_URL = postgresql://postgres:dev@localhost:55432/postgres
+
+npm run db:migrate          # applique les migrations sur cette base
 npm run dev                 # http://localhost:3000
 ```
+
+⚠️ **`.env` peut viser la production.** C'est le cas sur le poste principal — d'où la base
+jetable ci-dessus, et la prudence avec toute commande `prisma` lancée à la main.
 
 Tant que `RESA_USE_MOCK="1"`, le planning affiché est **factice** : l'UI est pleinement
 fonctionnelle pour le développement, sans toucher à ResaMania.
@@ -94,11 +105,16 @@ créneau redevient réservable, puis désactive l'alerte. L'abonnement de l'appa
    `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (mailto).
    Sans ces clés, la fonctionnalité se **désactive proprement** (pas de cloche, pas d'erreur).
 2. **Secret du cron** : `CRON_SECRET` (`openssl rand -hex 24`), pour protéger l'endpoint.
-3. **Planifier le cron** — `vercel.json` déclare `/api/cron/check-alerts` toutes les 5 min.
-   > ⚠️ Les crons Vercel **Hobby** sont limités à ~1×/jour. Pour un vrai « toutes les 5 min »,
-   > il faut le plan **Pro**, **ou** un cron externe gratuit (ex. cron-job.org) appelant
-   > `https://<app>/api/cron/check-alerts?token=$CRON_SECRET`.
-4. `npm run db:push` (ou le build) crée les tables `PushSubscription` / `SlotAlert`.
+3. **Planifier le cron** — `vercel.json` déclare `/api/cron/check-alerts` à **`0 7 * * *`**,
+   soit une fois par jour.
+   > ⚠️ Le plan **Hobby** limite les crons à 1×/jour : une expression sub-quotidienne fait
+   > **échouer le déploiement**. C'est pourquoi les six crons de `vercel.json` sont tous
+   > quotidiens ou mensuels. Pour une vraie fréquence courte, il faut le plan **Pro** ou un
+   > cron externe gratuit (ex. cron-job.org) appelant
+   > `https://<app>/api/cron/check-alerts?token=$CRON_SECRET` — c'est déjà la solution retenue
+   > pour le keep-alive Neon (cf. `docs/neon-keep-alive.md`).
+4. Le **build** crée les tables `PushSubscription` / `SlotAlert` : il joue les migrations
+   lui-même (cf. « Migrations » ci-dessous).
 
 ---
 
@@ -127,6 +143,28 @@ Le flux `feature/* → main → Recette`, les environnements Vercel et la promot
 feature flags sont décrits dans **[docs/flux-branches.md](docs/flux-branches.md)**.
 Le backlog des idées vit dans [docs/idees-developpement.md](docs/idees-developpement.md).
 
+### Migrations : le build les joue lui-même
+
+⚠️ **`npm run build` applique les migrations avant de compiler**, en production comme en
+preview :
+
+```
+build
+ └─ prisma generate
+ └─ db:deploy:retry ──▶ db:renumerote  +  prisma migrate deploy
+ └─ next build
+```
+
+Conséquence à connaître avant de fusionner : **déployer, c'est migrer**. Aucune étape manuelle
+n'est à prévoir, et il ne faut pas non plus en jouer une « au cas où ».
+
+Chaque périmètre Vercel a sa propre `DATABASE_URL` : la **Production** vise sa branche Neon,
+et **toutes les previews partagent la branche `dev`** — `Recette` comme les branches de
+fonctionnalité, qui n'ont pas de surcharge. Deux branches aux migrations divergentes
+déployées en même temps écrivent donc dans la même base. Le détail est dans
+[docs/flux-branches.md](docs/flux-branches.md), les pièges de nommage dans
+[prisma/migrations/README.md](prisma/migrations/README.md).
+
 ---
 
 ## Sécurité — règles
@@ -134,4 +172,6 @@ Le backlog des idées vit dans [docs/idees-developpement.md](docs/idees-developp
 - Jamais de mot de passe en clair (chiffrement AES-256-GCM, clé hors du dépôt).
 - `.env` et `*.har` sont **gitignorés**. Ne jamais committer de secret.
 - En prod, `CREDENTIALS_SECRET` et `DATABASE_URL` vivent dans les variables d'environnement de l'hébergeur.
-- Le token ResaMania n'est pas renvoyé au navigateur : cookie `httpOnly` côté serveur (à venir).
+- Le token ResaMania n'est **pas** renvoyé au navigateur : il reste en base, chiffré, derrière un
+  cookie de session `sid` posé `httpOnly` + `sameSite: lax` + `secure` en production
+  (`api/auth/login`). **Fait**, et non « à venir » comme l'annonçait cette ligne.
