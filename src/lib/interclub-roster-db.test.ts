@@ -29,6 +29,8 @@ const { loadRosters, refreshRosters, ROSTER_FRAIS_JOURS } = await import("./inte
 
 const roster = (snTeamId: string, noms: string[]): TeamRoster => ({
   snTeamId,
+  // Aucune rencontre : ces bancs d'essai portent sur les JOUEURS, pas sur le calendrier.
+  ties: [],
   teamName: "Verrieres 2",
   code: "VERR2",
   club: "Squash club verrieres le buisson",

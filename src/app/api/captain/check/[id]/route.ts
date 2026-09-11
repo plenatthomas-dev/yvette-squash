@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCaptain, requireCaptainOf } from "@/lib/captain-access";
 import { prisma } from "@/lib/db";
 import { loadRosters, refreshRosters } from "@/lib/interclub-roster-db";
+import { readTieSheet, refreshOwnTieIds, teamCode } from "@/lib/interclub-tie-db";
+import {
+  compareOfficial,
+  officialAbsent,
+  ourSide,
+  type OfficialCheck,
+  type OurLine,
+} from "@/lib/captain-official";
 import { getLatestMonth, searchRanking, type RankingRow } from "@/lib/squashnet/client";
 import { YVETTE_CLUB } from "@/lib/squashnet/match";
 import {
@@ -59,6 +67,56 @@ const dodo = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const clubAttendu = (side: "home" | "away", opponent: string, clubRoster: string | null) =>
   side === "home" ? YVETTE_CLUB : (clubRoster ?? clubOfTeam(opponent));
 
+/**
+ * Ce que la ligue publie de cette rencontre, confronté à notre relevé.
+ *
+ * TROIS ÉTAPES, ET CHACUNE PEUT S'ARRÊTER SANS RIEN CASSER :
+ *
+ *  1. l'identifiant fédéral de la rencontre (`snTieId`). Il n'est pas dans le calendrier : on va
+ *     le chercher sur la fiche de notre équipe, une fois pour toute la saison ;
+ *  2. la feuille elle-même ;
+ *  3. NOTRE CÔTÉ sur cette feuille. La ligue nomme les deux camps « A » et « B » sans dire lequel
+ *     reçoit : se tromper afficherait un 4-1 gagné sur une rencontre perdue. On donne à
+ *     `ourSide` les trois témoins qu'on a — notre sigle, celui d'en face, et nos alignés — et
+ *     s'il ne tranche pas, on ne compare rien.
+ */
+async function lireFeuilleOfficielle(
+  id: string,
+  fixture: {
+    teamId: string;
+    snTieId: string | null;
+    snOpponentTeamId: string | null;
+    matchCount: number;
+    team: { snTeamId: string | null };
+  },
+  nôtres: readonly OurLine[],
+): Promise<OfficialCheck> {
+  let snTieId = fixture.snTieId;
+  if (!snTieId) {
+    // La fiche d'équipe n'est lue QUE si l'identifiant manque, et elle est mise en cache une
+    // semaine : une saison entière coûte une requête.
+    try {
+      await refreshOwnTieIds(fixture.teamId);
+      snTieId =
+        (await prisma.interclub.findUnique({ where: { id }, select: { snTieId: true } }))
+          ?.snTieId ?? null;
+    } catch {
+      // Best-effort : l'absence d'identifiant se dit, elle n'interrompt rien.
+    }
+  }
+  if (!snTieId) return officialAbsent(nôtres);
+
+  const { sheet } = await readTieSheet(snTieId);
+  if (!sheet) return compareOfficial(nôtres, null, null, fixture.matchCount);
+
+  const côté = ourSide(sheet, {
+    ourCode: await teamCode(fixture.team.snTeamId),
+    opponentCode: await teamCode(fixture.snOpponentTeamId),
+    ourNames: nôtres.map((l) => l.homeDisplayName),
+  });
+  return compareOfficial(nôtres, sheet, côté, fixture.matchCount);
+}
+
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   // ⚠️ LA GARDE D'ABORD, LA BASE ENSUITE. On lisait la rencontre AVANT tout contrôle, pour en
@@ -108,8 +166,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       teamId: true,
       opponent: true,
       snOpponentTeamId: true,
+      snTieId: true,
       matchCount: true,
       bestOf: true,
+      team: { select: { snTeamId: true } },
       matches: {
         orderBy: { order: "asc" },
         select: {
@@ -281,6 +341,35 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     }
   }
 
+  // --- LA FEUILLE OFFICIELLE : ce que la LIGUE publie de cette rencontre ----
+  //
+  // C'est la seule partie du rapport qui ne parle pas de nous. Tout le reste vérifie NOTRE
+  // relevé (des scores cohérents, des joueurs qui existent, un ordre régulier) ; ceci le
+  // confronte au document qui fera le classement de fin de saison.
+  //
+  // POURQUOI ÇA COMPTE. Une erreur de saisie fédérale ne produit ni message ni alerte : elle
+  // produit un classement. La repérer demande aujourd'hui d'aller relire la page de la ligue
+  // simple par simple, ce que personne ne fait — alors que l'appli a le relevé exact, marqué en
+  // direct pendant la rencontre.
+  //
+  // BEST-EFFORT DE BOUT EN BOUT. Rien ici ne peut faire échouer la vérification : ni l'absence
+  // d'identifiant fédéral, ni le silence de squashnet, ni un rendu qu'on ne sait plus lire. Le
+  // reste du rapport ne dépend pas de la ligue, et priver un capitaine de ses scores parce
+  // qu'une lecture d'appoint a échoué serait un mauvais échange.
+  //
+  // NOTRE RELEVÉ, RÉDUIT À CE QUI SE CONFRONTE : qui a joué, et combien de jeux. Les scores
+  // viennent de `checkScore`, donc du même comptage que le reste du rapport — un second
+  // comptage ici pourrait diverger du premier, et l'écran afficherait deux vérités.
+  const nôtres: OurLine[] = entrees.map((m, i) => ({
+    order: m.order,
+    homeDisplayName: m.homeDisplayName,
+    awayName: m.awayName,
+    gamesHome: scores[i].gamesHome,
+    gamesAway: scores[i].gamesAway,
+    winner: scores[i].winner,
+  }));
+  const official = await lireFeuilleOfficielle(id, fixture, nôtres);
+
   const report: CheckReport = {
     checkedAt: new Date().toISOString(),
     players,
@@ -288,6 +377,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     tie,
     // L'ordre d'en face se déduit des joueurs qu'on vient de rapprocher — aucun appel de plus.
     awayOrder: checkAwayOrder(players),
+    official,
   };
 
   // Une rencontre, un rapport : relancer CORRIGE au lieu d'empiler. L'écran n'a donc jamais à

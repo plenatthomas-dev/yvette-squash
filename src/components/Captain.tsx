@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { readOk } from "@/lib/apiFetch";
 import { countProblems, type CheckReport, type PlayerCheck } from "@/lib/captain-check";
+// La PHRASE vient du module de règle, elle n'est pas réécrite ici : l'écran doit dire exactement
+// ce que le serveur a conclu. Deux formulations finiraient par diverger, et c'est l'écran qu'on
+// croirait.
+import { describeOfficial } from "@/lib/captain-official";
 
 // ============================================================================
 //  L'ESPACE CAPITAINE — vérifier une rencontre avant de la saisir chez la ligue.
@@ -174,7 +178,14 @@ export default function Captain({
           Interroge la fédération pour NOS joueurs et contrôle les scores. Ceux d&apos;en face
           sont lus dans la liste des inscrits de leur équipe quand on l&apos;a — c&apos;est plus
           sûr qu&apos;une recherche par le nom, qui peut tomber sur un homonyme d&apos;un autre
-          club. Aucune donnée n&apos;est envoyée&nbsp;: on regarde, on ne saisit rien.
+          club. Relit aussi la feuille de match publiée par la ligue, pour la confronter à notre
+          relevé.{" "}
+          {/* ⚠️ LA PHRASE EXACTE COMPTE. Elle disait « aucune donnée n'est envoyée », ce qui
+              était faux : chercher un joueur consiste précisément à envoyer son nom à squashnet.
+              Ce qu'on veut promettre est autre chose, et c'est tenu — cet écran ne PUBLIE rien
+              chez la fédération : il ne saisit aucun score, ne valide aucune feuille. */}
+          Rien n&apos;est saisi ni publié chez la fédération&nbsp;: cet écran lit, il n&apos;écrit
+          pas.
         </p>
 
         {rapport === null ? (
@@ -202,6 +213,60 @@ export default function Captain({
                 {rapport.tie.problem ?? `sur ${ouverte.matchCount} simples`}
               </span>
             </div>
+
+            {/* CE QUE LA LIGUE PUBLIE, juste sous notre propre compte — c'est là que la
+                comparaison se fait d'un coup d'œil, sans rien à rapprocher de tête.
+
+                RIEN N'EST AFFICHÉ QUAND IL N'Y A RIEN À DIRE. « Pas d'identifiant fédéral » est
+                le sort de toute rencontre saisie à la main : l'annoncer à chaque fois ferait
+                passer pour une anomalie ce qui est un mode de saisie normal. Le silence de la
+                ligue avant la saisie, lui, se dit — mais discrètement, parce que c'est l'état
+                attendu quand on vérifie AVANT d'aller saisir. */}
+            {rapport.official && rapport.official.status !== "absent" && (
+              <div
+                className={
+                  "cap-officiel" +
+                  (rapport.official.status === "diverges" ? " cap-officiel-ko" : "") +
+                  (rapport.official.status === "match" ? " cap-officiel-ok" : "")
+                }
+              >
+                <p className="cap-officiel-tete">
+                  {rapport.official.status === "match"
+                    ? "✅ "
+                    : rapport.official.status === "diverges"
+                      ? "⚠️ "
+                      : "ℹ️ "}
+                  {describeOfficial(rapport.official)}
+                  {/* LE LIEN VERS LA FEUILLE, systématiquement. C'est le document qui fait foi :
+                      quand quelque chose ne concorde pas, la première chose à faire est d'aller
+                      le voir de ses yeux — et le retrouver à la main sur squashnet demande de
+                      redescendre l'épreuve, la poule, puis la journée. */}
+                  {rapport.official.url && (
+                    <>
+                      {" "}
+                      <a
+                        href={rapport.official.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="cap-officiel-lien"
+                      >
+                        voir la feuille
+                      </a>
+                    </>
+                  )}
+                </p>
+                {/* LES ÉCARTS, UN PAR LIGNE. Formulés en constats (« la ligue publie X, notre
+                    relevé dit Y ») : l'un des deux documents est faux et rien ne dit lequel —
+                    c'est peut-être notre marquage qui a dérapé. */}
+                {rapport.official.problems.length > 0 && (
+                  <ul className="cap-officiel-ecarts">
+                    {rapport.official.problems.map((p, i) => (
+                      <li key={i}>{p}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
 
             {/* L'ORDRE DES SIMPLES D'EN FACE. Il n'apparaît que s'il y a quelque chose à en
                 dire : conforme, il n'apprend rien et occuperait la place de ce qui compte. */}

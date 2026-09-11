@@ -270,14 +270,46 @@ Si Preview et prod partagent la même base Neon, c'est déjà fait côté prod.
 
 ## 12. Ce qui reste à faire
 
-### Lot 2 — lire l'état fédéral d'une rencontre
+### Lot 2 — lire l'état fédéral d'une rencontre ✅ **fait**
 
-« L'adversaire a saisi, à toi de valider ». Section « Résultats » d'une épreuve
-(`ic_a=394243`, cf. `docs/squashnet.md`).
+L'écran Capitaine confronte désormais notre relevé à **la feuille de match que la ligue
+publie** : « la ligue publie 4-1, ton relevé dit 4-1 » — ou la liste des écarts, jeu par jeu,
+avec le lien vers la feuille.
 
-**Bloqué sur une capture HTML.** L'endpoint est connu, son **rendu** ne l'est pas. Écrire un
-parsing sur du HTML supposé serait pire qu'un parsing absent — c'est la doctrine du dépôt, et
-les fixtures existantes viennent toutes de HTML réel.
+⚠️ **La promesse d'origine était fausse, et elle est corrigée ici.** Elle disait
+« l'adversaire a saisi, **à toi de valider** ». Cet état n'est **pas public** : rien dans ce que
+la fédération publie ne dit qu'une feuille attend une validation (le seul jeton `validate`
+trouvé sur ces pages est l'attribut `novalidate` d'un formulaire). Ce qu'on sait dire, et qui
+suffit à l'usage :
+
+| On sait dire | On ne sait PAS dire |
+|---|---|
+| la ligue n'a rien saisi | c'est à toi de valider |
+| elle a saisi une partie des simples | qui des deux capitaines a saisi |
+| elle publie X-Y, et ça concorde | la feuille est-elle définitive |
+| elle publie X-Y, et voici les écarts | |
+
+**Ce que ça a demandé, et qui n'était pas prévu.** Le `tieid` — l'identifiant de la feuille —
+n'est **dans aucun calendrier**. Ni celui de l'épreuve (`ic_a=393986`), d'où viennent pourtant
+toutes nos rencontres importées, ni ailleurs : il n'existe que sur la **fiche d'équipe**
+(`ic_a=393480`), ligne par ligne. Lire une feuille commence donc par lire la fiche de sa propre
+équipe — une requête, mise en cache une semaine, pour toute la saison.
+
+**Deux pièges mesurés, tous deux silencieux si on les rate :**
+
+1. **le rapprochement se fait sur la DATE**, jamais sur le tour ni sur l'adversaire. Une équipe
+   joue **deux phases** (« Poule A » puis « Poule IVC »), chacune renumérotée depuis 1 : il y a
+   deux « Tour 1 » à huit mois d'écart. Les tours ne suivent même pas l'ordre des dates (le 15
+   se joue avant le 13), et le même adversaire revient à l'aller et au retour. Quand une date en
+   désigne deux (les journées d'exemption), **on ne pose rien** ;
+2. **« A » et « B » ne sont pas « nous » et « eux »**. La ligue nomme les deux camps sans dire
+   lequel reçoit, et les colonnes portent le **sigle** de chaque équipe dans leur `data-label`
+   (`A:VERR2`, `B:VERR3`) — une donnée, pas un vocabulaire. Se tromper de côté afficherait un
+   4-1 **gagné** sur une rencontre perdue. On reconnaît notre côté par le sigle, à défaut par
+   nos alignés, et **à défaut on ne compare rien**.
+
+Code : `squashnet/tie.ts` (parsing) · `captain-official.ts` (confrontation, pur) ·
+`interclub-tie-db.ts` (base et réseau) · colonne `Interclub.snTieId` (migration 53).
 
 ### Lot 3 — poser les deux gestes (saisir, valider)
 
@@ -294,10 +326,12 @@ lisible **par son seul propriétaire**, pas même par un admin · suppression en
 ⚠️ Note technique : `postAjax` (`src/lib/squashnet/client.ts`) **ne gère aucun cookie**. Un
 chemin authentifié demande un client distinct, avec un magasin de cookies par requête.
 
-### Le vrai roster adverse
+### Le vrai roster adverse ✅ **fait**
 
-`ic_a=393480` (fiche d'équipe fédérale) donnerait la composition **complète** d'une équipe, au
-lieu de « ceux qu'on a déjà rencontrés ». Même blocage : **capture à faire**.
+`ic_a=393480` (fiche d'équipe fédérale) donne la composition **complète** d'une équipe — licence,
+classement, rang mixte —, au lieu de « ceux qu'on a déjà rencontrés ». Le blocage annoncé
+(« capture à faire ») n'en était pas un : la section répond au **seul** `teamid`, sans `eventid`,
+`drawid` ni `roundid`. C'est l'exception au piège des quatre identifiants.
 
 ---
 

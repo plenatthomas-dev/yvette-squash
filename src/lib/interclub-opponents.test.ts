@@ -318,6 +318,8 @@ function roster(
   return {
     snTeamId,
     teamName: "Chaville 4",
+    // Aucune rencontre : ces bancs d'essai portent sur les JOUEURS, pas sur le calendrier.
+    ties: [],
     code: "CHAV4",
     club: "Chaville",
     captain: null,

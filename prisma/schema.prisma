@@ -865,6 +865,22 @@ model Interclub {
   /// colonne n'existe. Le roster est alors simplement indisponible — jamais faux : c'est la
   /// distinction que `RosterUnreadableError` tient côté parsing.
   snOpponentTeamId       String?
+  /// `tieid` fédéral de CETTE rencontre — la clé de la feuille de match officielle
+  /// (`ic_a=394248`), celle que la ligue publie et sur laquelle se fait le classement.
+  ///
+  /// ⚠️ IL N'EST PAS DANS LE CALENDRIER. Ni celui de l'épreuve (`ic_a=393986`, d'où viennent nos
+  /// rencontres importées), ni nulle part ailleurs : il n'existe que sur la FICHE D'ÉQUIPE
+  /// (`ic_a=393480`), ligne par ligne. Le poser demande donc une requête de plus, faite une fois
+  /// pour toutes les rencontres d'une équipe (`refreshOwnTieIds`).
+  ///
+  /// LE RAPPROCHEMENT SE FAIT SUR LA DATE, jamais sur le tour ni sur l'adversaire : une équipe
+  /// joue deux phases renumérotées chacune depuis 1 (deux « Tour 1 » à huit mois d'écart), les
+  /// tours ne suivent pas l'ordre des dates, et le même adversaire revient à l'aller et au
+  /// retour. Mesuré sur la fiche de référence, cf. `squashnet/roster.ts`.
+  ///
+  /// NULL = rencontre saisie à la main, ou fiche d'équipe jamais lue. L'absence se dit, et ne se
+  /// confond pas avec un silence de la ligue.
+  snTieId                String?
   home                   Boolean                 @default(true) // true = on reçoit
   matchCount             Int                     @default(4) // nombre de simples de la rencontre
   bestOf                 Int                     @default(5) // 3 => 2 jeux gagnants ; 5 => 3 jeux gagnants

@@ -48,7 +48,12 @@ function lireRoster(json: string | null): TeamRoster | null {
     // La garde de FORME, et non le seul `JSON.parse` : un roster d'un format antérieur passe
     // l'analyse syntaxique, puis lève au rendu — où il n'y a pas d'error boundary. C'est la
     // doctrine de `lireRapport` et d'`estLigneClassement`, appliquée à la même sorte de colonne.
-    return estRoster(v) ? v : null;
+    if (!estRoster(v)) return null;
+    // `ties` COMBLÉ PAR UNE LISTE VIDE, jamais laissé absent. Les rosters rangés avant que le
+    // champ n'existe n'en portent pas : le type promet un tableau, le JSON rend `undefined`, et
+    // le premier `.map` lèverait au rendu — là où il n'y a pas d'error boundary. La liste vide
+    // dit la vérité : on n'a pas ces rencontres. Un rafraîchissement les apportera.
+    return v.ties ? v : { ...v, ties: [] };
   } catch {
     return null;
   }

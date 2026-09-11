@@ -97,6 +97,105 @@ describe("parseTeamRoster — le roster réel de Verrieres 2", () => {
   });
 });
 
+describe("parseTeamRoster — les rencontres, et leur `tieid`", () => {
+  const { ties } = parseTeamRoster(html, "161095");
+
+  it("lit les DEUX phases, pas seulement la première", () => {
+    // La fiche porte « Hommes 4 - Poule A » (18 rencontres) ET « Hommes 4 - Poule IVC » (6).
+    // S'arrêter au premier tableau `round_*` perdrait toute la phase finale — en silence, avec
+    // un calendrier d'apparence complète.
+    expect(ties).toHaveLength(24);
+    expect(ties.map((t) => t.snTieId)).toContain("1643001"); // poule A
+    expect(ties.map((t) => t.snTieId)).toContain("1809921"); // poule IVC
+  });
+
+  it("donne le `tieid`, qui n'existe NULLE PART AILLEURS", () => {
+    // Le calendrier de l'épreuve (`ic_a=393986`) ne le publie pas : cette fiche est la seule
+    // porte d'entrée vers une feuille de match.
+    expect(ties[0]).toEqual({
+      snTieId: "1643001",
+      date: "2025-10-09",
+      time: "20:00",
+      round: "1",
+      opponentTeamId: "161096",
+      opponentName: "Verrieres 3",
+      venue: "SQUASH CLUB DE VERRIERES LE BUISSON",
+      result: "won",
+      scoreFor: 4,
+      scoreAgainst: 1,
+    });
+  });
+
+  it("dit le score DU POINT DE VUE DE L'ÉQUIPE DEMANDÉE", () => {
+    // « Perdu 2 / 3 » : le 2 est à nous. La feuille de match, elle, parle en A et B sans
+    // privilégier personne — les deux lectures ne sont pas interchangeables.
+    const perdue = ties.find((t) => t.snTieId === "1643035");
+    expect(perdue).toMatchObject({ result: "lost", scoreFor: 2, scoreAgainst: 3 });
+  });
+
+  it("⚠️ ne lit PAS le « 0 / 0 » d'une rencontre non jouée comme un score", () => {
+    // La fédération publie 0 / 0 sur toutes les journées à venir. Le garder ferait annoncer un
+    // résultat nul sur une rencontre qui n'a pas eu lieu — et à quatre simples, ce nul est
+    // parfaitement crédible : personne ne le démentirait.
+    const avenir = ties.filter((t) => t.result === "notPlayed");
+    expect(avenir.length).toBeGreaterThan(0);
+    for (const t of avenir) {
+      expect(t.scoreFor).toBeNull();
+      expect(t.scoreAgainst).toBeNull();
+    }
+  });
+
+  it("⚠️ le TOUR ne peut pas servir de clé — il se répète et ne suit pas les dates", () => {
+    // C'est la mesure qui impose de rapprocher sur la DATE. Deux « Tour 1 » à huit mois d'écart
+    // (un par phase), et le tour 15 joué avant le 13. Un rapprochement par tour irait chercher
+    // la feuille de match d'une autre rencontre, et l'afficherait comme si elle était la bonne.
+    const tours1 = ties.filter((t) => t.round === "1");
+    expect(tours1).toHaveLength(2);
+    expect(new Set(tours1.map((t) => t.date)).size).toBe(2);
+
+    const dates = ties.map((t) => t.date);
+    expect([...dates].sort()).not.toEqual(dates);
+  });
+
+  it("⚠️ l'ADVERSAIRE non plus — on le rencontre deux fois", () => {
+    const verrieres3 = ties.filter((t) => t.opponentTeamId === "161096");
+    expect(verrieres3).toHaveLength(2);
+    expect(verrieres3.map((t) => t.result)).toEqual(["won", "lost"]);
+  });
+
+  it("les dates, elles, distinguent chaque rencontre RÉELLE", () => {
+    // Les deux seules collisions sont les journées d'exemption (l'adversaire « Non Joue »), qui
+    // ne correspondent à aucune de nos rencontres puisqu'il ne s'en joue pas.
+    const jouables = ties.filter((t) => t.result !== "notPlayed");
+    expect(new Set(jouables.map((t) => t.date)).size).toBe(jouables.length);
+  });
+
+  it("garde le lieu vide comme vide, sans inventer", () => {
+    const sansLieu = ties.find((t) => t.snTieId === "1809921");
+    expect(sansLieu?.venue).toBeNull();
+  });
+
+  it("rend une liste vide, sans jeter, quand la fiche n'a aucun calendrier", () => {
+    const r = parseTeamRoster(
+      '<table id="players_42"><tr><td data-label="Nom Prénom">A B</td></tr></table>',
+      "42",
+    );
+    expect(r.ties).toEqual([]);
+  });
+
+  it("écarte une ligne SANS `tieid` au lieu d'en faire une rencontre sans clé", () => {
+    // Une rencontre sans feuille n'est bonne à rien ici, et la garder ferait croire à un
+    // rapprochement possible.
+    const sansLien = `
+      <table id="round_1"><tr>
+        <td data-label="Date" data-order="2025-10-09 20:00:00">09-10-2025</td>
+        <td data-label="Score">4 / 1</td>
+      </tr></table>
+      <table id="players_42"><tr><td data-label="Nom Prénom">A B</td></tr></table>`;
+    expect(parseTeamRoster(sansLien, "42").ties).toEqual([]);
+  });
+});
+
 describe("parseTeamRoster — refuse de deviner", () => {
   it("jette si le tableau de CETTE équipe manque, au lieu de rendre une liste vide", () => {
     // La panne muette qu'on veut rendre impossible : la fédération ignore un identifiant

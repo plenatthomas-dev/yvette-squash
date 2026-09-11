@@ -327,6 +327,95 @@ describe("Captain — le détail", () => {
     expect(within(tie).getByText(/sans vainqueur/)).toBeTruthy();
   });
 
+  it("⚠️ se tait sur la feuille fédérale quand il n'y a rien à en dire", async () => {
+    // « Pas d'identifiant fédéral » est le sort de toute rencontre saisie à la main. L'annoncer
+    // ferait passer pour une anomalie ce qui est un mode de saisie normal.
+    monte([fixture()], rapport({ official: undefined }));
+    await souffle();
+    await ouvrir();
+    // Visé sur le BLOC, pas sur le mot : le texte d'aide de l'écran parle lui aussi de la
+    // feuille de match, et un `queryByText` le confondrait avec un constat affiché.
+    expect(document.querySelector(".cap-officiel")).toBeNull();
+  });
+
+  it("annonce la concordance avec la ligue, et le lien pour aller voir", async () => {
+    monte(
+      [fixture()],
+      rapport({
+        official: {
+          status: "match",
+          home: 4,
+          away: 1,
+          oursHome: 4,
+          oursAway: 1,
+          problems: [],
+          side: "A",
+          url: "https://www.squashnet.fr/x?tieid=1",
+        },
+      }),
+    );
+    await souffle();
+    await ouvrir();
+    expect(screen.getByText(/La ligue publie 4-1, comme notre relevé/)).toBeTruthy();
+    const lien = screen.getByRole("link", { name: /voir la feuille/ });
+    expect(lien.getAttribute("href")).toBe("https://www.squashnet.fr/x?tieid=1");
+    // Une feuille fédérale s'ouvre À CÔTÉ : la revenir en arrière perdrait le rapport.
+    expect(lien.getAttribute("target")).toBe("_blank");
+    expect(lien.getAttribute("rel")).toContain("noopener");
+  });
+
+  it("énumère les écarts, un par ligne, en CONSTATS", async () => {
+    const ecarts = [
+      "La ligue publie 4-1 ; notre relevé dit 3-2.",
+      "Simple n° 3 : la ligue publie 3-1 en jeux, notre relevé dit 1-3.",
+    ];
+    monte(
+      [fixture()],
+      rapport({
+        official: {
+          status: "diverges",
+          home: 4,
+          away: 1,
+          oursHome: 3,
+          oursAway: 2,
+          problems: ecarts,
+          side: "A",
+          url: "https://www.squashnet.fr/x?tieid=1",
+        },
+      }),
+    );
+    await souffle();
+    await ouvrir();
+    for (const e of ecarts) expect(screen.getByText(e)).toBeTruthy();
+    // ⚠️ UNE divergence compte pour UN point, pas un par écart : trois lignes qui divergent sont
+    // presque toujours la même faute de saisie vue trois fois.
+    expect(screen.getByText(/1 point à régler/)).toBeTruthy();
+  });
+
+  it("« la ligue n'a rien saisi » n'est PAS un point à régler", async () => {
+    // C'est l'état normal quand on vérifie AVANT d'aller saisir — donc le cas d'usage principal
+    // de cet écran. Le compter afficherait « 1 point à régler » sur toute rencontre en règle.
+    monte(
+      [fixture()],
+      rapport({
+        official: {
+          status: "empty",
+          home: null,
+          away: null,
+          oursHome: 1,
+          oursAway: 0,
+          problems: [],
+          side: null,
+          url: "https://www.squashnet.fr/x?tieid=1",
+        },
+      }),
+    );
+    await souffle();
+    await ouvrir();
+    expect(screen.getByText(/n'a encore enregistré aucun simple/)).toBeTruthy();
+    expect(screen.getByText(/Rien à signaler/)).toBeTruthy();
+  });
+
   it("une erreur serveur passe par le toast, sans casser l'écran", async () => {
     monte([fixture()]);
     await souffle();

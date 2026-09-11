@@ -44,7 +44,7 @@ clair (`<a id="players" data-ic_a="393475" …>`).
 | `394243` | **Résultats d'une épreuve** | `eventid` (+ `drawid`/`roundid` ?) | ⬜ non lu — voir « résultats » |
 | `393479` | Équipes d'une épreuve       | `eventid` (+ `teamid`)            | ⬜ non lu — porte le même roster |
 | `393477` | **Fiche d'un JOUEUR**       | `regiid`                          | ⬜ non lu — voir point 4     |
-| `394248` | Détail d'une rencontre      | `tieid`                           | ⬜ non lu                   |
+| `394248` | **Feuille de match**        | `tieid` **seul**                  | ✅ lu (`tie.ts`)            |
 | `393217` | Informations d'une épreuve  | `eventid`                         | ⬜ non lu                   |
 | `393729` | Impression (PDF)            | `eventid`, `drawid`               | — sans intérêt ici          |
 
@@ -113,14 +113,56 @@ calendrier ; les rencontres importées avant la migration 52 le portent à NULL,
 **ré-import** (Admin › Interclub › Calendrier › Appliquer) peut le remplir — il est dans le HTML
 de la ligue, pas dans nos données. Le cron ne l'écrit pas : il alerte, il n'applique jamais.
 
-### 2. « Contre qui on a joué » — `ic_a=394243`
+### 2. La feuille de match officielle — `ic_a=394248` ✅ fait
 
-Moitié déjà là : l'appli **enregistre** l'adversaire de chaque simple qu'elle a servi à
-marquer (`InterclubMatch.awayName`, `homeDisplayName`, jeu par jeu). Ce qui manque, ce sont
-les rencontres jouées **hors de l'appli**, et la version officielle des scores.
+Voir `src/lib/squashnet/tie.ts` (parsing), `src/lib/captain-official.ts` (la confrontation, pure)
+et `src/lib/interclub-tie-db.ts` (base et réseau). Colonne `Interclub.snTieId`, migration
+`53_fixture_tie_id`. Fixture : `rencontre-2026-1643001-feuille.html`.
 
-C'est la section « Résultats » (`394243`). Même besoin qu'au-dessus : une capture, puis un
-parsing. Le rapprochement avec nos rencontres existe déjà (`snMatchKey = <eventid>:<round>`).
+La feuille donne, simple par simple : les **deux joueurs** avec leur classement **du soir**, le
+score **jeu par jeu**, le vainqueur, et les comptes de jeux et de points — puis le **total de la
+rencontre**, celui qui fera le classement de fin de saison. L'écran Capitaine le confronte à
+notre relevé : « la ligue publie 4-1, ton relevé dit 4-1 », ou la liste des écarts.
+
+**OÙ TROUVER LE `tieid`.** Nulle part dans un calendrier. Ni `393986` (l'épreuve), d'où viennent
+pourtant nos rencontres importées, ni ailleurs : **seule la fiche d'équipe (`393480`) le
+publie**, sur chaque ligne de son calendrier (`data-tieid`). Lire une feuille commence donc par
+lire la fiche de **sa propre** équipe — une requête, cachée une semaine, pour toute la saison.
+
+⚠️ **Une fiche d'équipe porte PLUSIEURS calendriers.** La fixture de référence en a deux :
+`round_338671` (« Hommes 4 - Poule A », 18 rencontres) et `round_370137` (« Hommes 4 - Poule
+IVC », 6 de plus). S'arrêter au premier tableau perdrait toute la phase finale, en silence.
+
+⚠️ **Le rapprochement se fait sur la DATE.** Mesuré, pas choisi : les deux phases renumérotent
+leurs tours depuis 1 (deux « Tour 1 » à huit mois d'écart), les tours ne suivent pas l'ordre des
+dates (le 15 se joue avant le 13), et le même adversaire revient à l'aller et au retour. Quand
+une date en désigne deux — les journées d'**exemption**, adversaire « Non Joue » —, on ne pose
+rien plutôt que de choisir.
+
+⚠️ **« 0 / 0 » N'EST PAS UN SCORE.** La fédération le publie sur toutes les journées à venir,
+avec le libellé « Non joué ». Le lire comme un résultat annoncerait un nul sur une rencontre qui
+n'a pas eu lieu — et à quatre simples, ce nul est crédible.
+
+⚠️ **« A » et « B » ne sont pas « nous » et « eux ».** Les colonnes de joueurs portent le
+**sigle** de chaque équipe dans leur `data-label` : `A:VERR2`, `B:VERR3`. C'est une **donnée**,
+pas un vocabulaire — impossible à coder en dur, et rien ne dit que « A » soit le receveur. On
+reconnaît notre côté par le sigle (le nôtre, ou celui d'en face), à défaut par nos alignés, et à
+défaut **on ne compare rien** : se tromper afficherait un 4-1 *gagné* sur une rencontre perdue.
+
+⚠️ **Ce que la ligue ne publie PAS : « à toi de valider ».** Cet état n'existe nulle part dans le
+HTML public (le seul jeton `validate` rencontré est le `novalidate` d'un formulaire). On sait
+dire « rien de saisi », « saisi en partie », « saisi et conforme », « saisi et divergent » —
+jamais « qui doit valider ».
+
+**La ligne de total se reconnaît à son intitulé VIDE**, pas à sa position : elle a exactement la
+forme d'un simple, et la prendre pour tel ajouterait un match fantôme à la feuille.
+
+### 2 bis. « Contre qui on a joué » — `ic_a=394243`
+
+Reste ouvert, et n'est plus urgent : les scores officiels viennent désormais des feuilles de
+match (ci-dessus), rencontre par rencontre. `394243` n'apporterait que les rencontres jouées
+**hors de l'appli**, en une seule requête au lieu d'une par rencontre. Même besoin qu'avant :
+une capture, puis un parsing.
 
 ### 3. Historique des classements ✅ fait
 

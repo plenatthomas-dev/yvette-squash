@@ -10,6 +10,7 @@ import { isNC, lineupOrderConflict } from "./interclub-order";
 import { classifyRanking, normalize, type MemberIdentity } from "./squashnet/match";
 import type { RankingRow } from "./squashnet/client";
 import { nameKey, type TeamRoster } from "./squashnet/roster";
+import type { OfficialCheck } from "./captain-official";
 
 // ============================================================================
 //  LA VÉRIFICATION D'UNE RENCONTRE, AVANT SAISIE OFFICIELLE — PURE et testée.
@@ -140,6 +141,16 @@ export interface CheckReport {
   tie: TieCheck;
   /** L'ordre des simples d'en face (cf. `OrderStatus`). */
   awayOrder: OrderCheck;
+  /**
+   * CE QUE LA LIGUE PUBLIE de cette rencontre, confronté à notre relevé (cf.
+   * `captain-official.ts`).
+   *
+   * ⚠️ FACULTATIF, et il doit le rester. Les rapports enregistrés avant que cette lecture
+   * n'existe n'en portent pas : l'exiger dans `estRapportValide` les déclarerait tous illisibles
+   * d'un coup, et chaque capitaine relirait « pas encore vérifiée » sur une rencontre qu'il a
+   * pourtant vérifiée. C'est la leçon d'`awayOrder`, arrivé de la même façon.
+   */
+  official?: OfficialCheck;
 }
 
 /** Ce qu'un simple apporte à la vérification. Volontairement minimal. */
@@ -491,7 +502,17 @@ export function countProblems(r: CheckReport): number {
     (r.tie.ok ? 0 : 1) +
     // « Non vérifiable » ne compte PAS : le joueur non rapproché qui en est la cause est déjà
     // compté juste au-dessus, et le montrer deux fois gonflerait le chiffre sans rien ajouter.
-    (r.awayOrder.status === "violation" ? 1 : 0)
+    (r.awayOrder.status === "violation" ? 1 : 0) +
+    // ⚠️ SEULE LA DIVERGENCE COMPTE, et pour UN point quel que soit le nombre d'écarts. Les
+    // autres états de la lecture fédérale ne sont pas des fautes : « la ligue n'a rien saisi »
+    // est l'état NORMAL d'une rencontre qu'on vérifie AVANT d'aller la saisir — c'est même le
+    // cas d'usage principal de cet écran. Le compter ferait afficher « 1 point à régler » sur
+    // toutes les rencontres vérifiées dans les règles, et le chiffre ne voudrait plus rien dire.
+    //
+    // Un point, et non un par écart : trois lignes qui divergent sont presque toujours la même
+    // faute de saisie vue trois fois, et un « 7 à régler » dramatiserait ce qui tient en une
+    // correction chez la ligue.
+    (r.official?.status === "diverges" ? 1 : 0)
   );
 }
 

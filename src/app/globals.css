@@ -7218,6 +7218,46 @@ button.cap-pastille {
   color: var(--pico-contrast);
 }
 
+/* CE QUE LA LIGUE PUBLIE. Même grammaire que `.cap-ordre` juste au-dessus, et
+   c'est voulu : ce sont deux constats sur un document qui n'est pas le nôtre, pas
+   des fautes de notre saisie. Trois tons, dans l'ordre de ce qu'ils coûtent au
+   lecteur — une note grise (la ligue n'a pas encore saisi, état NORMAL quand on
+   vérifie avant d'aller saisir), un liseré vert (tout concorde), un liseré rouge
+   (ça ne concorde pas). Le fond reste `sunken` dans les trois cas : c'est une
+   information, jamais une alarme, et l'un des deux documents en cause peut très
+   bien être le nôtre. */
+.cap-officiel {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+}
+.cap-officiel-ok {
+  border-left: 3px solid var(--good-edge);
+}
+.cap-officiel-ko {
+  border-left: 3px solid var(--bad-edge);
+  color: var(--pico-contrast);
+}
+.cap-officiel-tete {
+  margin: 0;
+}
+.cap-officiel-lien {
+  white-space: nowrap;
+}
+/* Les écarts, un par ligne. Retrait modeste : ils appartiennent à la phrase qui
+   les introduit, ils ne forment pas une seconde liste au même niveau que les
+   simples. */
+.cap-officiel-ecarts {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.cap-officiel-ecarts li {
+  margin-top: 2px;
+}
+
 /* Une ligne de joueur : la marque, puis le nom et ce qu'on en sait. */
 .cap-joueur {
   display: flex;

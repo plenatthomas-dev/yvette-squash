@@ -1,5 +1,17 @@
 import { postAjax } from "./client";
 import { normalize } from "./match";
+import {
+  TR,
+  attr,
+  cellule,
+  cellules,
+  dateIso,
+  heure,
+  rang,
+  texte,
+  txt,
+  valeur,
+} from "./html";
 
 // ============================================================================
 //  LE ROSTER D'UNE ÉQUIPE (squashnet.fr), source PUBLIQUE.
@@ -74,6 +86,44 @@ export interface RosterPlayer {
   registeredAt: string | null;
 }
 
+/** L'issue d'une rencontre, telle que la fédération la qualifie POUR L'ÉQUIPE DEMANDÉE. */
+export type TieResult = "won" | "lost" | "draw" | "notPlayed";
+
+/**
+ * Une rencontre du calendrier de l'équipe, telle que sa fiche la publie.
+ *
+ * ⚠️ TOUT EST DIT DU POINT DE VUE DE L'ÉQUIPE DEMANDÉE : « Gagné » veut dire qu'ELLE a gagné, et
+ * `scoreFor` est SON total. La feuille de match (`tie.ts`), elle, parle en « A » et « B » sans
+ * privilégier personne — c'est la raison d'être des deux lectures.
+ */
+export interface TeamTie {
+  /** `tieid` fédéral — la clé de la feuille de match (`ic_a=394248`). */
+  snTieId: string;
+  /** Date de la rencontre, « YYYY-MM-DD ». */
+  date: string | null;
+  /** Heure, « HH:MM », lue de `data-order` quand la fédération la publie. */
+  time: string | null;
+  /** Le TOUR tel qu'affiché (« 1 »), SANS le « J » de nos journées. */
+  round: string | null;
+  /** `teamid` fédéral de l'adversaire — la clé de son roster. */
+  opponentTeamId: string | null;
+  /** Nom publié de l'équipe adverse. */
+  opponentName: string | null;
+  /** Club hôte, tel que publié. Vide sur une rencontre non planifiée. */
+  venue: string | null;
+  result: TieResult | null;
+  /**
+   * Simples gagnés par l'équipe demandée, et par son adversaire.
+   *
+   * ⚠️ NULL, ET NON ZÉRO, SUR UNE RENCONTRE NON JOUÉE. La fédération publie « 0 / 0 » sur toutes
+   * les journées à venir : le lire comme un score ferait annoncer un 0-0 (donc, à quatre simples,
+   * un NUL parfaitement plausible) sur une rencontre qui n'a pas eu lieu. C'est la distinction
+   * « vide » / « illisible » du dépôt, appliquée à « pas encore joué ».
+   */
+  scoreFor: number | null;
+  scoreAgainst: number | null;
+}
+
 /** Une fiche d'équipe, réduite à ce qu'on en retient. */
 export interface TeamRoster {
   /** L'identifiant demandé — celui du tableau lu, donc jamais celui d'une autre équipe. */
@@ -87,6 +137,13 @@ export interface TeamRoster {
   /** Capitaine déclaré à la fédération. */
   captain: string | null;
   players: RosterPlayer[];
+  /**
+   * Le calendrier de l'équipe, TOUTES PHASES CONFONDUES, et surtout : avec le `tieid` de chaque
+   * rencontre. C'est le seul endroit public où il figure — le calendrier de l'épreuve
+   * (`ic_a=393986`, `calendar.ts`) ne le publie pas. Sans lui, aucune feuille de match n'est
+   * atteignable.
+   */
+  ties: TeamTie[];
 }
 
 /**
@@ -101,6 +158,12 @@ export function estRoster(v: unknown): v is TeamRoster {
   if (typeof v !== "object" || v === null) return false;
   const r = v as Record<string, unknown>;
   if (typeof r.snTeamId !== "string" || !Array.isArray(r.players)) return false;
+  // ⚠️ `ties` N'EST PAS EXIGÉ, et c'est délibéré. Tous les rosters rangés avant que ce champ
+  // n'existe en sont dépourvus : l'exiger déclarerait ILLISIBLES, du jour au lendemain, tous les
+  // rosters déjà en base — les menus d'adversaires se videraient d'un coup, et le seul remède
+  // serait un rafraîchissement manuel équipe par équipe. `lireRoster` comble le manque par une
+  // liste vide, ce qui est la vérité : on n'a pas ces rencontres, on ne les a pas lues.
+  if (r.ties !== undefined && !Array.isArray(r.ties)) return false;
   return r.players.every((p) => {
     if (typeof p !== "object" || p === null) return false;
     const j = p as Record<string, unknown>;
@@ -129,48 +192,6 @@ export function nameKey(s: string): string {
   return n ? n.split(" ").sort().join(" ") : "";
 }
 
-const TR = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-const TD = /<td[^>]*data-label=["']([^"']*)["'][^>]*>([\s\S]*?)<\/td>/gi;
-
-function texte(html: string): string {
-  return html
-    .replace(/<[^>]*>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/**
- * Un rang, ou null. Lecture STRICTE, reprise de `match.ts` : « NC » n'est pas 0, et un rang
- * commence à 1 — un zéro est une case vide déguisée, et le laisser passer placerait le joueur
- * EN TÊTE de l'ordre des simples, donc devant les mieux classés de son équipe.
- */
-function rang(raw: string | undefined): number | null {
-  const v = (raw ?? "").replace(/\s/g, "");
-  if (!/^\d+$/.test(v)) return null;
-  const n = Number.parseInt(v, 10);
-  return n > 0 ? n : null;
-}
-
-/** Une valeur de cellule, ou null si elle est vide (jamais la chaîne vide, qui se teste mal). */
-function txt(raw: string | undefined): string | null {
-  const v = (raw ?? "").trim();
-  return v || null;
-}
-
-/**
- * « 22-09-2025 » → « 2025-09-22 ». Null si ce n'est pas une date.
- *
- * Le format ISO est celui de tout le dépôt (`Interclub.date`, `SquashnetRankingPoint.month`) :
- * il se trie comme du texte. Garder le format fédéral ferait trier septembre après octobre.
- */
-function dateIso(raw: string | undefined): string | null {
-  const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec((raw ?? "").trim());
-  return m ? m[3] + "-" + m[2] + "-" + m[1] : null;
-}
-
 /** La table des joueurs porte l'identifiant de l'équipe : `<table id="players_161095">`. */
 function tableJoueurs(html: string, snTeamId: string): string | null {
   const re = new RegExp(
@@ -196,10 +217,9 @@ function identite(html: string): Pick<TeamRoster, "teamName" | "code" | "club" |
   const table = /<table[^>]*id=["']info["'][^>]*>[\s\S]*?<\/table>/i.exec(html)?.[0];
   if (!table) return vide;
 
-  const par = new Map<string, string>();
-  TD.lastIndex = 0;
-  let td: RegExpExecArray | null;
-  while ((td = TD.exec(table)) !== null) par.set(normalize(td[1].trim()), texte(td[2]));
+  // Intitulés NORMALISÉS : la fédération écrit « Nom » ici et « NOM » ailleurs, et un accent
+  // de plus ferait disparaître le club en silence.
+  const par = new Map(cellules(table).map((c) => [normalize(c.label), texte(c.html)]));
   if (par.size === 0) return vide;
 
   return {
@@ -211,6 +231,92 @@ function identite(html: string): Pick<TeamRoster, "teamName" | "code" | "club" |
     club: txt(par.get("association")),
     captain: txt(par.get("capitaine")),
   };
+}
+
+/**
+ * Les issues telles que la fédération les écrit, du point de vue de l'équipe consultée.
+ *
+ * Les quatre valeurs sont MESURÉES sur la fiche de référence (« Gagné » ×13, « Perdu » ×8, « Non
+ * joué » ×3) sauf « Nul », qui ne pouvait pas y figurer : à cinq simples, l'égalité est
+ * impossible. Elle le devient à quatre — ce que joue notre D4 depuis 2026-27. Le libellé est
+ * donc anticipé, et un libellé inconnu rend `null` plutôt que de se ranger dans la case voisine.
+ */
+const ISSUES: ReadonlyMap<string, TieResult> = new Map([
+  ["gagne", "won"],
+  ["perdu", "lost"],
+  ["nul", "draw"],
+  ["non joue", "notPlayed"],
+]);
+
+/** « 4 / 1 » → [4, 1]. Null si ce n'est pas un score (un lien vide, « - », un libellé). */
+function score(raw: string): [number, number] | null {
+  const m = /^(\d+)\s*\/\s*(\d+)$/.exec(raw.trim());
+  return m ? [Number.parseInt(m[1], 10), Number.parseInt(m[2], 10)] : null;
+}
+
+/**
+ * Les rencontres de l'équipe, lues dans TOUS les tableaux `round_*` de sa fiche.
+ *
+ * ⚠️ IL Y EN A PLUSIEURS, et les confondre serait une erreur de lecture. La fiche de référence en
+ * porte deux : « Hommes 4 - Poule A » (le championnat, 18 rencontres) et « Hommes 4 - Poule IVC »
+ * (la phase finale, 6 de plus). Une équipe joue donc bien les deux, et leurs TOURS SE RÉPÈTENT —
+ * il y a deux « Tour 1 », à huit mois d'écart.
+ *
+ * D'où la règle que tout le rapprochement en aval respecte : LA CLÉ EST LA DATE, jamais le tour
+ * ni l'adversaire. Le même adversaire revient (Verrieres 3 aux tours 1 et 10), les tours ne
+ * suivent même pas l'ordre des dates (le tour 15 se joue avant le 13), et deux phases les
+ * renumérotent chacune depuis 1. La date, elle, est ce que `Interclub.date` porte déjà.
+ */
+function parseTies(html: string): TeamTie[] {
+  const ties: TeamTie[] = [];
+  // Tous les tableaux de calendrier, dans l'ordre de la page. `[\s\S]*?` s'arrête au premier
+  // `</table>` : ces tableaux n'en contiennent pas d'imbriqué (vérifié sur la fiche de référence).
+  const TABLES = /<table[^>]*id=["']round_\d+["'][^>]*>[\s\S]*?<\/table>/gi;
+  let table: RegExpExecArray | null;
+  while ((table = TABLES.exec(html)) !== null) {
+    TR.lastIndex = 0;
+    let tr: RegExpExecArray | null;
+    while ((tr = TR.exec(table[0])) !== null) {
+      const c = cellules(tr[1]);
+      if (c.length === 0) continue; // l'en-tête, en <th>
+
+      const cellScore = cellule(c, "Score");
+      // LE `tieid` EST LA RAISON D'ÊTRE DE CETTE LECTURE : une ligne qui n'en porte pas ne mène
+      // à aucune feuille de match, donc n'a rien à apporter. On la laisse plutôt que d'en faire
+      // une entrée sans clé, qu'un rapprochement ultérieur prendrait pour une rencontre connue.
+      const snTieId = cellScore ? attr(cellScore.attrs + " " + cellScore.html, "data-tieid") : null;
+      if (!snTieId) continue;
+
+      const cellDate = cellule(c, "Date");
+      const cellAdv = cellule(c, "Adversaire");
+      const issue = ISSUES.get(normalize(valeur(c, "Résultat"))) ?? null;
+      // `data-order` porte « 2025-10-09 20:00:00 » — déjà triable, et SEULE source de l'heure :
+      // la cellule visible ne montre que le jour.
+      const ordre = cellDate ? attr(cellDate.attrs, "data-order") : null;
+      const brut = score(valeur(c, "Score"));
+
+      ties.push({
+        snTieId,
+        // `data-order` est déjà en ISO (« 2025-10-09 20:00:00 ») ; la cellule visible, elle,
+        // est au format fédéral et ne porte PAS l'heure. On prend l'attribut quand il est là.
+        date: /^\d{4}-\d{2}-\d{2}/.test(ordre ?? "")
+          ? (ordre as string).slice(0, 10)
+          : dateIso(valeur(c, "Date")),
+        time: heure(ordre),
+        round: txt(valeur(c, "Tour")),
+        opponentTeamId: cellAdv ? attr(cellAdv.html, "data-teamid") : null,
+        opponentName: txt(texte(cellAdv?.html ?? "")),
+        venue: txt(valeur(c, "Lieu")),
+        result: issue,
+        // ⚠️ LE « 0 / 0 » D'UNE RENCONTRE NON JOUÉE N'EST PAS UN SCORE. La fédération le publie
+        // sur toutes les journées à venir ; le garder ferait annoncer un résultat nul sur une
+        // rencontre qui n'a pas eu lieu — et, à quatre simples, ce nul serait crédible.
+        scoreFor: issue === "notPlayed" ? null : (brut?.[0] ?? null),
+        scoreAgainst: issue === "notPlayed" ? null : (brut?.[1] ?? null),
+      });
+    }
+  }
+  return ties;
 }
 
 /**
@@ -234,28 +340,25 @@ export function parseTeamRoster(html: string, snTeamId: string): TeamRoster {
   TR.lastIndex = 0;
   let tr: RegExpExecArray | null;
   while ((tr = TR.exec(table)) !== null) {
-    const cells = new Map<string, string>();
-    TD.lastIndex = 0;
-    let td: RegExpExecArray | null;
-    while ((td = TD.exec(tr[1])) !== null) cells.set(td[1].trim(), texte(td[2]));
-    if (cells.size === 0) continue; // l'en-tête, en <th>
+    const c = cellules(tr[1]);
+    if (c.length === 0) continue; // l'en-tête, en <th>
 
-    const name = (cells.get("Nom Prénom") ?? "").trim();
+    const name = valeur(c, "Nom Prénom");
     // Une ligne sans nom n'est pas un joueur partiel, c'est du bruit.
     if (!name) continue;
 
     players.push({
       name,
-      gender: txt(cells.get("Genre")),
-      licence: txt(cells.get("Licence")),
-      clt: txt(cells.get("Classement")),
-      rang: rang(cells.get("Rang")),
-      rangM: rang(cells.get("RangM")),
-      registeredAt: dateIso(cells.get("Date")),
+      gender: txt(valeur(c, "Genre")),
+      licence: txt(valeur(c, "Licence")),
+      clt: txt(valeur(c, "Classement")),
+      rang: rang(valeur(c, "Rang")),
+      rangM: rang(valeur(c, "RangM")),
+      registeredAt: dateIso(valeur(c, "Date")),
     });
   }
 
-  return { snTeamId, ...identite(html), players };
+  return { snTeamId, ...identite(html), players, ties: parseTies(html) };
 }
 
 /**

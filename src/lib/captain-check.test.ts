@@ -357,6 +357,8 @@ describe("estRapportValide / lireRapport", () => {
 
 const rosterVerrieres: TeamRoster = {
   snTeamId: "161095",
+  // Aucune rencontre : ces bancs d'essai portent sur les JOUEURS, pas sur le calendrier.
+  ties: [],
   teamName: "Verrieres 3",
   code: "VERR3",
   club: "Squash club verrieres le buisson",

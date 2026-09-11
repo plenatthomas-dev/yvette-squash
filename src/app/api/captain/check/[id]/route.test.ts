@@ -11,6 +11,9 @@ const h = vi.hoisted(() => ({
   upsert: vi.fn(),
   searchRanking: vi.fn(),
   getLatestMonth: vi.fn(),
+  refreshOwnTieIds: vi.fn(),
+  readTieSheet: vi.fn(),
+  teamCode: vi.fn(),
 }));
 
 vi.mock("@/lib/captain-access", () => ({
@@ -44,6 +47,14 @@ vi.mock("@/lib/squashnet/client", () => ({
   getLatestMonth: (...a: unknown[]) => h.getLatestMonth(...a),
   searchRanking: (...a: unknown[]) => h.searchRanking(...a),
 }));
+// LA LECTURE DE LA FEUILLE FÉDÉRALE est simulée ici, mais la CONFRONTATION ne l'est pas : c'est
+// le vrai `captain-official.ts` qui tourne. Ce qu'on vérifie est donc bien ce que la route
+// conclut, et non ce qu'un double aurait bien voulu lui faire dire.
+vi.mock("@/lib/interclub-tie-db", () => ({
+  refreshOwnTieIds: (...a: unknown[]) => h.refreshOwnTieIds(...a),
+  readTieSheet: (...a: unknown[]) => h.readTieSheet(...a),
+  teamCode: (...a: unknown[]) => h.teamCode(...a),
+}));
 
 import { GET, POST } from "./route";
 
@@ -69,6 +80,9 @@ function rencontre(over: Record<string, unknown> = {}) {
   return {
     teamId: "t1",
     opponent: "Squash Club de Rennes",
+    snOpponentTeamId: null,
+    snTieId: null,
+    team: { snTeamId: null },
     matchCount: 1,
     bestOf: 5,
     matches: [
@@ -95,6 +109,9 @@ beforeEach(() => {
   h.findUnique.mockReset().mockImplementation(async () => h.fixture);
   h.upsert.mockReset().mockResolvedValue({});
   h.getLatestMonth.mockReset().mockImplementation(async () => h.month);
+  h.refreshOwnTieIds.mockReset().mockResolvedValue({ status: "noTeamId", posed: 0, missing: 0 });
+  h.readTieSheet.mockReset().mockResolvedValue({ sheet: null, error: "failed" });
+  h.teamCode.mockReset().mockResolvedValue(null);
   h.searchRanking.mockReset().mockImplementation(async (q: string) => {
     if (h.searchThrows) throw new Error("squashnet muet");
     return q === "Dupont"
@@ -331,5 +348,154 @@ describe("GET /api/captain/check/{id}", () => {
   it("relaie le refus du contrôle d'accès", async () => {
     h.access = { ok: false, status: 403 };
     expect((await GET(req(), ctx())).status).toBe(403);
+  });
+});
+
+// ============================================================================
+//  LA FEUILLE OFFICIELLE, LUE CHEZ LA LIGUE.
+//
+//  C'est la seule partie du rapport qui ne parle pas de nous : elle confronte
+//  notre relevé au document qui fera le classement. Ce qui compte ici n'est pas
+//  qu'elle réussisse — c'est qu'elle ne puisse JAMAIS faire échouer le reste.
+// ============================================================================
+
+/** La feuille fédérale d'une rencontre à un simple, gagnée 1-0 par le côté A. */
+const feuille = (over: Record<string, unknown> = {}) => ({
+  snTieId: "999",
+  codeA: "YVET1",
+  codeB: "RENN1",
+  division: "Hommes 4",
+  group: "Poule A",
+  round: "J1",
+  venue: "Yvette",
+  date: "2026-09-04",
+  time: "20:00",
+  lines: [
+    {
+      label: "Homme 1",
+      a: { name: "DUPONT JEAN", regiid: "1", clt: "5A", rang: 42, rangM: 30 },
+      b: { name: "MARTIN PAUL", regiid: "2", clt: "4C", rang: 20, rangM: 15 },
+      score: "11-5 11-6 11-7",
+      winner: "A",
+      gamesA: 3,
+      gamesB: 0,
+      pointsA: 33,
+      pointsB: 18,
+    },
+  ],
+  totals: { matchesA: 1, matchesB: 0, gamesA: 3, gamesB: 0, pointsA: 33, pointsB: 18 },
+  ...over,
+});
+
+describe("POST /api/captain/check/{id} — la feuille officielle", () => {
+  it("dit « pas d'identifiant fédéral » sans rien aller chercher", async () => {
+    // Une rencontre saisie à la main n'a pas de feuille chez la ligue. C'est un fait, pas une
+    // panne — et surtout, ça ne justifie aucune requête.
+    const { report } = await (await POST(req(), ctx())).json();
+    expect(report.official.status).toBe("absent");
+    expect(h.readTieSheet).not.toHaveBeenCalled();
+  });
+
+  it("va chercher l'identifiant sur la fiche d'équipe quand il manque", async () => {
+    // Le `tieid` n'est PAS dans le calendrier : il n'existe que sur la fiche de notre équipe.
+    // Une rencontre importée avant cette lecture n'en porte donc pas, et doit pouvoir le
+    // rattraper toute seule.
+    h.fixture = rencontre({ snTieId: null });
+    h.refreshOwnTieIds.mockImplementation(async () => {
+      // La passe pose l'identifiant ; la route le relit ensuite.
+      h.findUnique.mockImplementation(async () => ({ ...rencontre(), snTieId: "999" }));
+      return { status: "posed", posed: 1, missing: 0 };
+    });
+    h.readTieSheet.mockResolvedValue({ sheet: feuille(), error: null });
+    h.teamCode.mockResolvedValue("YVET1");
+
+    const { report } = await (await POST(req(), ctx())).json();
+    expect(h.refreshOwnTieIds).toHaveBeenCalledWith("t1");
+    expect(report.official).toMatchObject({ status: "match", home: 1, away: 0 });
+  });
+
+  it("confronte notre relevé à la feuille, et annonce la concordance", async () => {
+    h.fixture = rencontre({ snTieId: "999", team: { snTeamId: "42" } });
+    h.readTieSheet.mockResolvedValue({ sheet: feuille(), error: null });
+    h.teamCode.mockResolvedValue("YVET1");
+
+    const { report } = await (await POST(req(), ctx())).json();
+    expect(report.official).toMatchObject({
+      status: "match",
+      home: 1,
+      away: 0,
+      oursHome: 1,
+      oursAway: 0,
+      side: "A",
+    });
+    expect(report.official.problems).toEqual([]);
+    // La feuille est atteinte par l'identifiant de LA RENCONTRE, pas par autre chose.
+    expect(h.readTieSheet).toHaveBeenCalledWith("999");
+  });
+
+  it("relève l'écart quand la ligue publie autre chose", async () => {
+    h.fixture = rencontre({ snTieId: "999" });
+    h.readTieSheet.mockResolvedValue({
+      sheet: feuille({
+        lines: [{ ...feuille().lines[0], gamesA: 3, gamesB: 2, winner: "A" }],
+      }),
+      error: null,
+    });
+    h.teamCode.mockResolvedValue("YVET1");
+
+    const { report } = await (await POST(req(), ctx())).json();
+    expect(report.official.status).toBe("diverges");
+    expect(report.official.problems).toContain(
+      "Simple n° 1 : la ligue publie 3-2 en jeux, notre relevé dit 3-0.",
+    );
+  });
+
+  it("⚠️ NE FAIT PAS ÉCHOUER la vérification quand la ligue est muette", async () => {
+    // Le reste du rapport — nos scores, nos joueurs, l'ordre des simples — ne dépend pas de la
+    // ligue. En priver un capitaine parce qu'une lecture d'appoint a échoué serait un mauvais
+    // échange, et il n'aurait aucun moyen de le contourner.
+    h.fixture = rencontre({ snTieId: "999" });
+    h.readTieSheet.mockResolvedValue({ sheet: null, error: "failed" });
+
+    const res = await POST(req(), ctx());
+    expect(res.status).toBe(200);
+    const { report } = await res.json();
+    expect(report.official.status).toBe("unread");
+    expect(report.scores[0]).toMatchObject({ ok: true, gamesHome: 3 });
+    expect(report.tie).toMatchObject({ home: 1, away: 0 });
+  });
+
+  it("⚠️ ne survit pas non plus à un échec de la pose d'identifiant", async () => {
+    // `refreshOwnTieIds` touche la base et le réseau : elle peut jeter. La vérification, elle,
+    // doit aboutir sur ce qu'on a.
+    h.refreshOwnTieIds.mockRejectedValue(new Error("Neon indisponible"));
+    const res = await POST(req(), ctx());
+    expect(res.status).toBe(200);
+    expect((await res.json()).report.official.status).toBe("absent");
+  });
+
+  it("⚠️ NE COMPARE RIEN quand notre côté ne se reconnaît pas", async () => {
+    // La ligue nomme les deux camps « A » et « B » sans dire lequel reçoit. Aucun sigle connu,
+    // aucun de nos noms sur la feuille : deviner aurait une chance sur deux d'inverser le score.
+    h.fixture = rencontre({ snTieId: "999" });
+    h.readTieSheet.mockResolvedValue({
+      sheet: feuille({
+        codeA: "AAAA",
+        codeB: "BBBB",
+        lines: [
+          {
+            ...feuille().lines[0],
+            a: { name: "INCONNU UN", regiid: "1", clt: "5A", rang: 1, rangM: 1 },
+            b: { name: "INCONNU DEUX", regiid: "2", clt: "5A", rang: 2, rangM: 2 },
+          },
+        ],
+      }),
+      error: null,
+    });
+
+    const { report } = await (await POST(req(), ctx())).json();
+    expect(report.official.status).toBe("unread");
+    expect(report.official.home).toBeNull();
+    expect(report.official.problems[0]).toMatch(/impossible de reconnaître notre équipe/);
   });
 });
