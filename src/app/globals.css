@@ -7091,8 +7091,8 @@ body[data-bottombar] .install-banner {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  margin: 0 0 12px;
-  padding: 10px 14px;
+  margin: 0 0 8px;
+  padding: 7px 12px;
   background: var(--sunken);
   border-radius: var(--radius-sm);
 }
@@ -7101,8 +7101,61 @@ body[data-bottombar] .install-banner {
   font-variant-numeric: tabular-nums;
 }
 
+/* ⚠️ CET ÉCRAN SE PREND EN PHOTO. Un capitaine le montre à son équipe, ou le garde
+   pour saisir plus tard : il faut que « 4-0 sur 4 simples » et les QUATRE vignettes,
+   jusqu'au second joueur du dernier simple, tiennent dans UNE capture d'écran de
+   téléphone. Mesuré avant de toucher quoi que ce soit, à 390 px de large :
+
+     .cap-tie ................  62 px        une vignette .......... 211 px
+     4 vignettes + interlignes ............. 875 px
+     TOTAL « 4-0 » → fin du simple 4 ....... 937 px   (pour ~640 px visibles)
+
+   Il fallait donc en retirer 300, ce que font quatre gestes, du plus rentable au
+   moins : le détail jeu par jeu remonté sur la ligne du titre (−29 px/vignette), le
+   `margin-top: 14px` que `.tiny` imposait à CHAQUE ligne d'identité (−28 px/vignette,
+   pur accident — un span devient bloc dans un conteneur flex, et le margin s'applique),
+   l'équipe au lieu du club sur la ligne du nom (−22 px/vignette dès que le nom de club
+   repliait), et un resserrage des interlignes.
+
+   NE PAS « RÉCUPÉRER DE L'AIR » ICI SANS REFAIRE LE CALCUL : c'est la quatrième
+   vignette qui tombe hors de l'écran, et elle tombe en silence. */
 .cap-simples {
+  gap: 6px;
   margin-bottom: 12px;
+}
+/* Interlignes serrés dans la vignette — 1.35 au lieu du 1.5 du corps de texte. On est
+   sur des noms et des chiffres qu'on lit d'un coup d'œil, pas sur de la prose. */
+.cap-simple {
+  gap: 3px;
+  padding: 9px 12px;
+  line-height: 1.35;
+}
+
+/* LA LIGNE DE TITRE porte désormais TOUT le score : « n°4 · 11-0 1-11 11-13 11-0 11-0
+   · 3-2 ». Le compte de largeur, à 390 px (332 px utiles dans la vignette) :
+
+     « n°4 » 32 · cinq jeux 5×41 + 4 écarts 205+16 · total 45 · deux écarts 16 = 314
+
+   Le mot « Simple » y tenait 85 px à lui seul, pour une information que la liste donne
+   déjà : il passe en `aria-label`, donc il reste dit à qui lit l'écran à la voix. C'est
+   la Règle du Micro Étiqueté appliquée à l'envers — la densité se gagne par
+   l'étiquetage, pas en supprimant l'information.
+
+   Ça se replie sur deux lignes sur un écran plus étroit, et c'est très bien : ces
+   chiffres sont ce qu'on recopie chez la fédération, ils ne se tronquent jamais. */
+.cap-tete {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 3px 8px;
+}
+.cap-numero {
+  flex: 0 0 auto;
+  font-size: 0.85rem;
+}
+/* Le total est poussé en bout de ligne : c'est LE chiffre du simple, et il doit se
+   retrouver à la même place d'une vignette à l'autre. */
+.cap-tete .cap-jeux {
+  margin-left: auto;
 }
 
 /* CE QUI VA BIEN SE TAIT, ce qui coince se voit : un filet d'issue à gauche,
@@ -7181,18 +7234,28 @@ button.cap-pastille {
    la fédération, donc elle doit se lire sans effort et se retrouver d'un simple à
    l'autre : chiffres tabulaires, et des jeux séparés visuellement plutôt que par
    des virgules, qui se confondent avec les tirets à cette taille. */
+/* SUR LA LIGNE DU TITRE depuis qu'il faut qu'une rencontre entière tienne dans une
+   capture d'écran (cf. `.cap-simples`) : c'était une ligne à part, elle coûtait 25 px
+   par vignette pour trois à cinq petits nombres. */
 .cap-points {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 8px;
-  margin: 6px 0 0;
+  align-items: baseline;
+  gap: 2px 5px;
+  margin: 0;
+  min-width: 0;
 }
+/* 0,75rem : un CRAN de la rampe (DESIGN.md › La rampe de fait), et non le 0,78 qui
+   traînait ici — un écart de deux centièmes ne se lit pas comme un système, il se lit
+   comme une inattention. Ce sont des chiffres, donc la Règle du Micro Étiqueté est
+   satisfaite d'office. */
 .cap-jeu {
-  padding: 0 6px;
+  padding: 0 4px;
   border-radius: var(--radius-sm);
   background: var(--sunken);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 /* Le total en jeux : plus gros que le détail, parce que c'est LE chiffre du simple. */
 .cap-jeux {
@@ -7261,22 +7324,28 @@ button.cap-pastille {
 /* Une ligne de joueur : la marque, puis le nom et ce qu'on en sait. */
 .cap-joueur {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-top: 8px;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 3px;
 }
 .cap-marque {
   flex: 0 0 auto;
-  line-height: 1.4;
+  font-size: 0.8rem;
 }
+/* EN LIGNE TANT QUE ÇA TIENT, replié sinon. Le nom fédéral et la ligne d'identité
+   (« 5A #2318 · 1463138W ») partagent une ligne quand la largeur le permet, et passent
+   à deux quand le nom est long — au lieu d'occuper deux lignes dans TOUS les cas. C'est
+   la dégradation qu'on veut : elle coûte une ligne au joueur qui la mérite, pas aux
+   sept autres. */
 .cap-joueur-corps {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: baseline;
   min-width: 0;
-  gap: 1px;
+  gap: 0 8px;
 }
 .cap-joueur-nom {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 /* Le club, sur la même ligne que le nom fédéral : c'est lui qui dit le camp depuis qu'on
    n'écrit plus « (nous) » / « (eux) » à côté de chaque joueur rapproché. Discret — le nom
@@ -7287,12 +7356,22 @@ button.cap-pastille {
 }
 /* Classement, rang mixte et licence : la ligne d'identité fédérale, celle qu'on recopie.
    Chiffres tabulaires pour que les licences s'alignent d'un simple à l'autre. */
+/* ⚠️ LE `margin-top` EST ANNULÉ, ET CE N'EST PAS COSMÉTIQUE. `.tiny` en porte 14 px
+   pour les paragraphes d'aide en bas d'écran. Ici, le span devient un ÉLÉMENT FLEX (donc
+   un bloc) et ce margin s'applique : 14 px × 2 joueurs × 4 simples = 112 px, soit un
+   tiers de ce qui manquait pour qu'une rencontre tienne dans une capture d'écran — pour
+   un espacement que personne n'avait demandé et que personne ne voyait. */
 .cap-fiche {
+  margin-top: 0;
   font-variant-numeric: tabular-nums;
 }
 /* Le remède. Il est écrit pour être LU — pas de troncature, pas d'info-bulle :
    l'appli s'utilise au doigt, et `title` ne se déclenche jamais au tactile. */
+/* `flex-basis: 100%` le met sur SA ligne : c'est une phrase, elle ne se met pas en
+   colonne à côté d'un nom. */
 .cap-hint {
+  flex: 1 0 100%;
+  margin-top: 0;
   font-size: 0.8rem;
   color: var(--pico-muted-color);
 }

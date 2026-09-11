@@ -69,6 +69,21 @@ const quand = (iso: string) =>
 /** Le camp d'une ligne de joueur, dit comme le capitaine le dirait. */
 const camp = (p: PlayerCheck) => (p.side === "home" ? "nous" : "eux");
 
+/**
+ * L'ÉQUIPE d'un joueur rapproché, en version courte.
+ *
+ * « Verrieres 3 », et non « Squash club verrieres le buisson » : le nom d'équipe tient sur la
+ * même ligne que le nom du joueur, là où le nom de club la faisait systématiquement passer à
+ * deux — soit 22 px par joueur, 176 px sur une rencontre à quatre simples. C'est à peu près ce
+ * qui manquait pour qu'une rencontre entière tienne dans une capture d'écran de téléphone.
+ *
+ * Le nom d'équipe adverse est celui de la rencontre (`opponent`) : il est déjà à l'écran, il est
+ * court, et il est le même pour les quatre adversaires — aucune raison d'aller le chercher
+ * joueur par joueur. De notre côté, « nous » dit tout : l'équipe est celle du titre.
+ */
+const equipeDe = (p: PlayerCheck, f: { opponent: string }) =>
+  p.side === "home" ? "nous" : f.opponent;
+
 export default function Captain({
   toast,
   onExpired,
@@ -290,27 +305,35 @@ export default function Captain({
                 return (
                   <li key={s.order}>
                     <div className={`ic-row cap-simple${soucis ? " cap-ko" : " cap-ok"}`}>
-                      <div className="ic-row-head">
-                        <span>
-                          <strong>Simple n°{s.order}</strong>
-                        </span>
+                      {/* TOUT LE SIMPLE SUR UNE LIGNE : son numéro, le détail JEU PAR JEU, et
+                          le total. Les points étaient sur une ligne à part, ce qui coûtait 25 px
+                          par simple — sur quatre simples, la moitié de ce qui manquait pour
+                          qu'une rencontre entière tienne dans une capture d'écran de téléphone.
+
+                          LE DÉTAIL RESTE TOUJOURS VISIBLE : c'est ce qu'on recopie chez la
+                          fédération, champ par champ, en gardant cet écran ouvert à côté. Il se
+                          replie sur une seconde ligne quand il ne tient pas (cinq jeux sur un
+                          écran étroit) — jamais il ne se tronque. */}
+                      <div className="ic-row-head cap-tete">
+                        {/* « n°4 » à l'écran, « Simple n° 4 » à la voix : le mot coûtait 85 px
+                            de largeur sur une ligne qui doit en tenir cinq jeux, pour une
+                            information que la liste donne déjà. */}
+                        <strong className="cap-numero" aria-label={`Simple n° ${s.order}`}>
+                          n°{s.order}
+                        </strong>
+                        {s.games.length > 0 && (
+                          <span className="cap-points">
+                            {s.games.map((g, i) => (
+                              <span key={i} className="cap-jeu">
+                                {g.home}-{g.away}
+                              </span>
+                            ))}
+                          </span>
+                        )}
                         <span className="cap-jeux">
                           {s.gamesHome} – {s.gamesAway}
                         </span>
                       </div>
-
-                      {/* LE DÉTAIL POINT PAR POINT — la ligne qu'on recopie chez la fédération.
-                          Toujours visible : c'est la raison d'être de l'écran, pas un détail
-                          qu'on déplie. `tabular-nums` aligne les colonnes d'un simple à l'autre. */}
-                      {s.games.length > 0 && (
-                        <p className="cap-points">
-                          {s.games.map((g, i) => (
-                            <span key={i} className="cap-jeu">
-                              {g.home}-{g.away}
-                            </span>
-                          ))}
-                        </p>
-                      )}
 
                       {!s.ok && s.problem && <p className="cap-probleme">{s.problem}</p>}
 
@@ -326,12 +349,21 @@ export default function Captain({
                                   {/* UNE SEULE IDENTITÉ, LA FÉDÉRALE. On affichait les deux — le
                                       nom saisi chez nous PUIS celui de la fédération — et c'était
                                       redondant : ce sont la même personne, et seul le second se
-                                      recopie. Le club prend la place ainsi libérée, et dit du même
-                                      coup de quel camp est le joueur (plus besoin d'un « nous »
-                                      ou d'un « eux » à côté du nom). */}
+                                      recopie.
+
+                                      ⚠️ LE CAMP, ET NON PLUS LE CLUB. On affichait ici le club
+                                      fédéral (« Squash club verrieres le buisson ») : deux lignes
+                                      de large pour une information qui, sur un joueur RAPPROCHÉ,
+                                      ne vérifie rien — `checkPlayer` ne rend `found` QUE si le
+                                      club correspond à celui qu'on attendait. Il ne restait donc
+                                      que son rôle secondaire, dire de quel camp est le joueur, et
+                                      le nom de l'ÉQUIPE le tient en trois fois moins de place.
+                                      (Un joueur trouvé AILLEURS n'est pas `found` : c'est
+                                      `other-club`, et son remède nomme le club en toutes
+                                      lettres.) */}
                                   <span className="cap-joueur-nom">
                                     {p.fedName}
-                                    {p.club && <span className="cap-club"> — {p.club}</span>}
+                                    <span className="cap-club"> · {equipeDe(p, ouverte)}</span>
                                   </span>
                                   <span className="muted tiny cap-fiche">
                                     {[p.clt, p.rangM != null ? `#${p.rangM}` : null]

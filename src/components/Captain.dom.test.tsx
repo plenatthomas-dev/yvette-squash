@@ -220,15 +220,20 @@ describe("Captain — le détail", () => {
     expect(screen.getByText(/DUPONT JEAN/)).toBeTruthy();
     expect(screen.getByText(/MARTIN PAUL/)).toBeTruthy();
     expect(screen.queryByText(/Jean Dupont/)).toBeNull();
-    // Le club prend la place libérée, et dit le camp sans qu'on écrive « nous » / « eux ».
-    expect(screen.getByText(/Squash de l yvette/)).toBeTruthy();
+    // ⚠️ LE CAMP, ET NON PLUS LE CLUB. Sur un joueur RAPPROCHÉ, le club fédéral ne vérifie
+    // rien — `checkPlayer` ne rend `found` que si le club correspond à celui qu'on attendait :
+    // il ne faisait que répéter la question. Il coûtait en revanche une ligne de plus par
+    // joueur sur un téléphone (« Squash club verrieres le buisson » ne tient pas à côté d'un
+    // nom), soit la quatrième vignette hors de l'écran. Le nom d'ÉQUIPE le remplace.
+    expect(screen.getByText(/nous/, { selector: ".cap-club" })).toBeTruthy();
     expect(screen.getByText(/Squash Club de Rennes/, { selector: ".cap-club" })).toBeTruthy();
+    expect(screen.queryByText(/Squash de l yvette/)).toBeNull();
     // Classement, rang mixte et licence sur une ligne — sans le mot « licence », qui n'apporte
     // rien à côté d'un numéro qu'on reconnaît.
     expect(screen.getByText(/5A #120 · 0124215/)).toBeTruthy();
   });
 
-  // LES POINTS, JEU PAR JEU — la ligne qu'on transcrit chez la ligue.
+  // LES POINTS, JEU PAR JEU — ce qu'on transcrit chez la ligue, sur la ligne du titre.
   it("affiche le détail point par point de chaque simple", async () => {
     monte([fixture()]);
     await souffle();
@@ -240,6 +245,13 @@ describe("Captain — le détail", () => {
     expect(screen.getByText("12-10")).toBeTruthy();
     // Et le total en jeux, qui reste le chiffre du simple.
     expect(screen.getByText("3 – 0")).toBeTruthy();
+    // ⚠️ TOUT SUR UNE SEULE LIGNE : numéro, jeu par jeu, total. Une ligne de points à part
+    // coûtait 25 px par vignette, et c'est la quatrième vignette qui tombait hors de l'écran
+    // au moment de prendre la rencontre en photo.
+    const tete = document.querySelector(".cap-tete");
+    expect(tete).not.toBeNull();
+    expect(tete?.querySelector(".cap-points")).not.toBeNull();
+    expect(tete?.querySelector(".cap-jeux")).not.toBeNull();
   });
 
   it("un simple à problème montre son remède à côté du récapitulatif", async () => {
