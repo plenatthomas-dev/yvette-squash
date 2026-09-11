@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   checkAwayOrder,
   checkPlayer,
+  playerFromRoster,
   clubOfTeam,
   checkScore,
   checkTie,
@@ -13,6 +14,7 @@ import {
   type CheckReport,
   type MatchInput,
 } from "./captain-check";
+import type { TeamRoster } from "./squashnet/roster";
 import { UNSET_PLAYER } from "./interclub";
 import { YVETTE_CLUB } from "./squashnet/match";
 import type { RankingRow } from "./squashnet/client";
@@ -338,5 +340,99 @@ describe("estRapportValide / lireRapport", () => {
   it("ne lève pas sur du texte qui n'est pas du JSON, ni sur l'absence de rapport", () => {
     expect(lireRapport("pas du json")).toBeNull();
     expect(lireRapport(null)).toBeNull();
+  });
+});
+
+// ============================================================================
+//  LE VERDICT LU DANS LE ROSTER — et le contresens qu'il fait disparaître.
+//
+//  Constaté en vrai sur Verrieres 3 : le rapprochement par le nom cherche au
+//  classement NATIONAL, tombe sur un homonyme d'un autre club et annonce
+//  « LOUVEAU FLORENT rattaché à l'Association sportive du squash club de
+//  Valence : vérifie le nom du club adverse ». Le nom du club adverse était
+//  juste, le joueur bien là, et le capitaine envoyé corriger ce qui n'avait
+//  rien. Quatre joueurs sur quatre, sur une rencontre déjà jouée.
+// ============================================================================
+
+const rosterVerrieres: TeamRoster = {
+  snTeamId: "161095",
+  teamName: "Verrieres 3",
+  code: "VERR3",
+  club: "Squash club verrieres le buisson",
+  captain: null,
+  players: [
+    {
+      name: "LOUVEAU FLORENT",
+      gender: "Mr.",
+      licence: "1404133H",
+      clt: "5C",
+      rang: 5822,
+      rangM: 5822,
+      registeredAt: "2025-09-22",
+    },
+    {
+      name: "FARRACHI VINCENT",
+      gender: "Mr.",
+      licence: "0113258",
+      clt: "5D",
+      rang: 7258,
+      rangM: 7258,
+      registeredAt: "2025-09-22",
+    },
+  ],
+};
+
+describe("playerFromRoster", () => {
+  it("confirme le joueur inscrit, avec sa licence, SANS aucune recherche", () => {
+    const p = playerFromRoster(1, "LOUVEAU FLORENT", rosterVerrieres);
+    expect(p).toEqual({
+      order: 1,
+      side: "away",
+      name: "LOUVEAU FLORENT",
+      verdict: "found",
+      fedName: "LOUVEAU FLORENT",
+      clt: "5C",
+      rangM: 5822,
+      licence: "1404133H",
+      club: "Squash club verrieres le buisson",
+      hint: null,
+    });
+  });
+
+  it("ne peut PAS confondre avec l'homonyme d'un autre club", () => {
+    // Le roster ne contient que les joueurs que CE club a inscrits dans CETTE équipe : il n'y a
+    // aucune sélection à faire, donc aucune mauvaise sélection possible. C'est toute la
+    // différence avec `checkPlayer`, qui doit choisir dans un classement national.
+    const p = playerFromRoster(1, "LOUVEAU FLORENT", rosterVerrieres);
+    expect(p?.verdict).toBe("found");
+    expect(p?.club).not.toContain("Valence");
+    expect(p?.hint).toBeNull();
+  });
+
+  it("apparie malgré la casse, les accents et l'ordre des mots", () => {
+    // La feuille de match porte « Florent Louveau », la ligue « LOUVEAU FLORENT ».
+    expect(playerFromRoster(1, "Florent Louveau", rosterVerrieres)?.licence).toBe("1404133H");
+    expect(playerFromRoster(1, "  vincent farrachi ", rosterVerrieres)?.licence).toBe("0113258");
+  });
+
+  it("rend le nom FÉDÉRAL, qui est celui à recopier chez la ligue", () => {
+    expect(playerFromRoster(1, "Florent Louveau", rosterVerrieres)?.fedName).toBe(
+      "LOUVEAU FLORENT",
+    );
+  });
+
+  it("rend null sur un joueur que la ligue n'a pas inscrit — la recherche prend le relais", () => {
+    // Mutation tardive, inscription oubliée : il a joué, il existe. On ne conclut rien ici,
+    // l'appelant retombe sur le rapprochement par le nom.
+    expect(playerFromRoster(1, "Jean Nouveau", rosterVerrieres)).toBeNull();
+  });
+
+  it("rend null sans roster, et sur un nom vide", () => {
+    expect(playerFromRoster(1, "LOUVEAU FLORENT", null)).toBeNull();
+    expect(playerFromRoster(1, "  ", rosterVerrieres)).toBeNull();
+  });
+
+  it("ne replie pas une vraie faute de frappe", () => {
+    expect(playerFromRoster(1, "LOUVAU FLORENT", rosterVerrieres)).toBeNull();
   });
 });

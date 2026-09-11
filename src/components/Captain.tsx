@@ -212,7 +212,7 @@ export default function Captain({
             (`aria-hidden`) n'apprendrait rien du tout. */}
         {busy && (
           <p className="muted tiny cap-attente" role="status">
-            Interrogation de la fédération, joueur par joueur — une dizaine de secondes.
+            Interrogation de la fédération, joueur par joueur — quelques secondes.
           </p>
         )}
         <button type="button" disabled={busy} onClick={majRosters} className="secondary">
@@ -225,8 +225,10 @@ export default function Captain({
           n&apos;a pas encore affronté. Une requête par équipe&nbsp;: quelques secondes.
         </p>
         <p className="muted tiny cap-aide">
-          Interroge la fédération pour chaque joueur — les nôtres et les leurs — et contrôle les
-          scores. Aucune donnée n&apos;est envoyée&nbsp;: on regarde, on ne saisit rien.
+          Interroge la fédération pour NOS joueurs et contrôle les scores. Ceux d&apos;en face
+          sont lus dans la liste des inscrits de leur équipe quand on l&apos;a — c&apos;est plus
+          sûr qu&apos;une recherche par le nom, qui peut tomber sur un homonyme d&apos;un autre
+          club. Aucune donnée n&apos;est envoyée&nbsp;: on regarde, on ne saisit rien.
         </p>
 
         {rapport === null ? (

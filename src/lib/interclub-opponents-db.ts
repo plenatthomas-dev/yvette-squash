@@ -8,6 +8,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import {
+  awayAlignmentClash,
   awayLineupConflict,
   estDesigne,
   mergeOpponents,
@@ -100,4 +101,37 @@ export async function findAwayOrderConflict(
   if (lines.filter((l) => estDesigne(l.awayName)).length < 2) return null;
 
   return awayLineupConflict(lines, await known());
+}
+
+/**
+ * Cet adversaire dispute-t-il DÉJÀ un autre simple de cette rencontre ? Rend le numéro de ce
+ * simple, ou `null`. Le pendant de `findAlignmentClash` (`interclub-roster.ts`) pour le camp
+ * d'en face.
+ *
+ * À appeler DANS la transaction qui écrit, comme ses deux sœurs : deux capitaines qui composent
+ * au même instant doivent voir le même état, sans quoi le doublon se glisse entre la lecture et
+ * l'écriture.
+ *
+ * Rend `null` sans rien lire si le candidat n'est pas désigné : effacer un nom ne peut créer
+ * aucun doublon, et le refuser empêcherait de corriger une composition fautive.
+ */
+export async function findAwayAlignmentClash(
+  db: MatchDb,
+  fixtureId: string,
+  exceptMatchId: string,
+  candidate: { order: number; awayName: string },
+): Promise<number | null> {
+  if (!estDesigne(candidate.awayName)) return null;
+
+  // ⚠️ LE FILTRAGE SE FAIT EN MÉMOIRE, PAS EN SQL, et c'est délibéré : la comparaison porte sur
+  // `nameKey` (casse, accents et ordre des mots repliés), que la base ne sait pas calculer. Un
+  // `where: { awayName }` littéral laisserait passer « Xavier Détry » à côté de « DETRY XAVIER »
+  // — exactement le doublon le plus probable, puisqu'il vient d'être tapé deux fois de deux
+  // façons. Une rencontre compte quatre à cinq simples : le coût est nul.
+  const siblings = await db.interclubMatch.findMany({
+    where: { interclubId: fixtureId, id: { not: exceptMatchId } },
+    select: { order: true, awayName: true },
+  });
+
+  return awayAlignmentClash(siblings, candidate);
 }

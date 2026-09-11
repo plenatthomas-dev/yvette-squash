@@ -19,7 +19,11 @@ import {
   MAX_PLAYER_NAME_LEN,
 } from "@/lib/interclub-db";
 import { findAlignmentClash, findOrderConflict, resolveHomePick } from "@/lib/interclub-roster";
-import { findAwayOrderConflict, loadKnownOpponents } from "@/lib/interclub-opponents-db";
+import {
+  findAwayAlignmentClash,
+  findAwayOrderConflict,
+  loadKnownOpponents,
+} from "@/lib/interclub-opponents-db";
 import { interclubChanged } from "@/lib/interclub-gate";
 import {
   notifyFixtureDone,
@@ -266,6 +270,25 @@ export async function PATCH(
       }
       if (typeof awayName === "string" && awayName.trim()) {
         const propose = awayName.trim().slice(0, MAX_PLAYER_NAME_LEN);
+        // UN ADVERSAIRE NE DISPUTE QU'UN SIMPLE, exactement comme chez nous quinze lignes plus
+        // haut : le règlement l'interdit des deux côtés du filet. Rien ne le vérifiait en face,
+        // et le même nom pouvait donc occuper les quatre simples — une feuille de match que la
+        // ligue refuserait, découverte au moment de la saisie officielle.
+        //
+        // Contrairement à notre camp, la comparaison porte sur le NOM : un adversaire n'a pas
+        // d'identifiant chez nous (`awayName` est un texte libre). `nameKey` replie la casse,
+        // les accents et l'ordre des mots, donc « DETRY XAVIER » choisi au menu et « Xavier
+        // Détry » retapé à la main sont bien le même joueur.
+        const clashAway = await findAwayAlignmentClash(tx, m.interclubId, mid, {
+          order: m.order,
+          awayName: propose,
+        });
+        if (clashAway !== null) {
+          throw new HttpError(
+            400,
+            `${propose} dispute déjà le match n° ${clashAway} de cette rencontre`,
+          );
+        }
         // L'ORDRE DES SIMPLES VAUT AUSSI EN FACE, et se contrôle DÈS LA DÉSIGNATION — pas à la
         // vérification du capitaine, la veille de la feuille de match, quand la rencontre est
         // jouée et qu'il n'y a plus rien à corriger.

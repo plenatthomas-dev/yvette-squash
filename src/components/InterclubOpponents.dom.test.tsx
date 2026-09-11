@@ -30,7 +30,16 @@ const adversaire = (
   clt: string | null = null,
   rangM: number | null = null,
   team = "Massy",
-) => ({ name, team, fedName: name.toUpperCase(), clt, rangM, licence: null, seen: 1 });
+) => ({
+  name,
+  team,
+  fedName: name.toUpperCase(),
+  clt,
+  rangM,
+  licence: null,
+  seen: 1,
+  source: clt ? ("roster" as const) : ("sheet" as const),
+});
 
 const simple = (order: number, awayName: string) => ({
   id: `m${order}`,
@@ -259,10 +268,54 @@ describe("Menu des joueurs adverses (composition d'un simple)", () => {
   // rendrait incomposable toute rencontre contre un club dont aucun capitaine n'a encore vérifié
   // les joueurs. On ne refuse que ce qu'on sait.
   it("ne grise personne tant qu'aucun classement adverse n'est connu", async () => {
+    // AUCUN adversaire n'est aligné : le seul motif de grisage possible serait le classement,
+    // et c'est bien ce que ce test isole. (La règle « un adversaire, un simple » a son propre
+    // test juste en dessous — mêler les deux masquerait celui qu'on croit vérifier.)
+    connus = { teams: ["Massy"], players: [adversaire("Paul Martin"), adversaire("Luc Bernard")] };
+    matches = [simple(1, "À désigner"), simple(2, "À désigner")];
+    const r = await ouvreSimple(2);
+    for (const o of options(champ(r, "Adversaire"))) expect(o.disabled).toBe(false);
+  });
+
+  // ⚠️ LA MÊME RÈGLE QUE POUR NOUS, et elle ne demande AUCUN classement : c'est la seule des
+  // deux qui vaille dès la première rencontre contre un club inconnu.
+  it("grise un adversaire qui dispute déjà un autre simple, et dit lequel", async () => {
     connus = { teams: ["Massy"], players: [adversaire("Paul Martin"), adversaire("Luc Bernard")] };
     matches = [simple(1, "Paul Martin"), simple(2, "À désigner")];
     const r = await ouvreSimple(2);
-    for (const o of options(champ(r, "Adversaire"))) expect(o.disabled).toBe(false);
+    const martin = options(champ(r, "Adversaire")).find((o) =>
+      (o.textContent ?? "").startsWith("Paul Martin"),
+    )!;
+    expect(martin.disabled).toBe(true);
+    expect(martin.textContent).toContain("joue déjà le match n° 1");
+    // L'autre reste choisissable : on ne grise que le doublon.
+    const bernard = options(champ(r, "Adversaire")).find((o) =>
+      (o.textContent ?? "").startsWith("Luc Bernard"),
+    )!;
+    expect(bernard.disabled).toBe(false);
+  });
+
+  it("laisse RE-choisir celui que CE simple retient déjà — sinon on ne peut plus revenir", async () => {
+    connus = { teams: ["Massy"], players: [adversaire("Paul Martin")] };
+    matches = [simple(1, "Paul Martin"), simple(2, "À désigner")];
+    const r = await ouvreSimple(1);
+    const martin = options(champ(r, "Adversaire")).find((o) =>
+      (o.textContent ?? "").startsWith("Paul Martin"),
+    )!;
+    expect(martin.disabled).toBe(false);
+  });
+
+  it("voit le doublon malgré l'ordre des mots — c'est la faute la plus probable", async () => {
+    // La ligue écrit « POPULU AXEL », le capitaine tape « Axel Populu ». Une comparaison
+    // littérale laisserait passer le doublon précisément là où il a le plus de chances de
+    // naître : un nom saisi deux fois, de deux façons.
+    connus = { teams: ["Massy"], players: [adversaire("POPULU AXEL")] };
+    matches = [simple(1, "Axel Populu"), simple(2, "À désigner")];
+    const r = await ouvreSimple(2);
+    const populu = options(champ(r, "Adversaire")).find((o) =>
+      (o.textContent ?? "").startsWith("POPULU AXEL"),
+    )!;
+    expect(populu.disabled).toBe(true);
   });
 
   it("reste un champ libre pour un club dont on ne connaît personne", async () => {

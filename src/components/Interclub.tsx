@@ -40,6 +40,7 @@ import {
 } from "@/lib/interclub";
 import { compareRosterOrder, isNC, lineupOrderConflict, type OrderedSlot } from "@/lib/interclub-order";
 import {
+  awayAlignmentClash,
   awayLineupConflict,
   estDesigne,
   type KnownOpponent,
@@ -2066,6 +2067,14 @@ function MatchEditor({
             >
               <option value="">— à désigner —</option>
               {clubOpponents.map((o) => {
+                // UN ADVERSAIRE NE DISPUTE QU'UN SIMPLE, exactement comme nos joueurs. Comparé
+                // au NUMÉRO du simple et non au choix courant : celui que ce simple-ci retient
+                // doit rester sélectionnable ici — sinon on ne pourrait plus revenir en arrière
+                // après avoir changé d'avis — mais nulle part ailleurs.
+                const dejaA = awayAlignmentClash(awayLines, {
+                  order: match.order,
+                  awayName: o.name,
+                });
                 // LA MÊME RÈGLE QUE POUR NOUS, appliquée aux joueurs d'en face : le mieux classé
                 // dispute le simple n° 1. On grise ici ce que le serveur refuserait, plutôt que
                 // de laisser composer pour se faire refuser à l'enregistrement — même logique
@@ -2076,21 +2085,35 @@ function MatchEditor({
                 // de joueurs classés. C'est voulu — on ne refuse que ce qu'on sait. Depuis que
                 // le ROSTER fédéral alimente cette liste, ce cas est devenu l'exception plutôt
                 // que la règle : il ne reste que les joueurs qu'aucune inscription ne couvre.
-                const conflit = awayLineupConflict(
-                  awayLines.map((l) =>
-                    l.order === match.order ? { order: match.order, awayName: o.name } : l,
-                  ),
-                  clubOpponents,
-                );
+                //
+                // Inutile de l'évaluer sur un joueur déjà grisé pour doublon : le motif est
+                // acquis, et le message d'ordre le recouvrirait d'une explication moins claire.
+                const conflit =
+                  dejaA !== null
+                    ? null
+                    : awayLineupConflict(
+                        awayLines.map((l) =>
+                          l.order === match.order ? { order: match.order, awayName: o.name } : l,
+                        ),
+                        clubOpponents,
+                      );
                 return (
-                  <option key={`${o.team}|${o.name}`} value={o.name} disabled={!!conflit}>
+                  <option
+                    key={`${o.team}|${o.name}`}
+                    value={o.name}
+                    disabled={dejaA !== null || !!conflit}
+                  >
                     {o.name}
                     {/* Classement et rang mixte, notés comme pour nous (« 5A #1200 ») : ce sont
                         les deux critères qui décident de l'ordre. Ils viennent du ROSTER publié
                         par la ligue quand on l'a, sinon d'une vérification de capitaine ; à
                         défaut des deux, le joueur reste proposable mais son ordre incontrôlable. */}
                     {o.clt ? ` (${o.clt}${o.rangM != null && !isNC(o.clt) ? ` #${o.rangM}` : ""})` : ""}
-                    {conflit ? " — hors ordre de classement" : ""}
+                    {dejaA !== null
+                      ? ` — joue déjà le match n° ${dejaA}`
+                      : conflit
+                        ? " — hors ordre de classement"
+                        : ""}
                   </option>
                 );
               })}

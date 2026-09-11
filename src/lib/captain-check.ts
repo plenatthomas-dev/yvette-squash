@@ -9,6 +9,7 @@ import {
 import { isNC, lineupOrderConflict } from "./interclub-order";
 import { classifyRanking, normalize, type MemberIdentity } from "./squashnet/match";
 import type { RankingRow } from "./squashnet/client";
+import { nameKey, type TeamRoster } from "./squashnet/roster";
 
 // ============================================================================
 //  LA VÉRIFICATION D'UNE RENCONTRE, AVANT SAISIE OFFICIELLE — PURE et testée.
@@ -463,4 +464,53 @@ export function lireRapport(json: string | null): CheckReport | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Le verdict d'un joueur ADVERSE, lu dans le roster de son équipe — sans aucune recherche.
+ *
+ * ⚠️ CE CHEMIN EXISTE PARCE QUE L'AUTRE SE TROMPE. Le rapprochement par le nom
+ * (`checkPlayer`) interroge le classement NATIONAL et retient une ligne si une seule colle au
+ * club attendu. Sur un nom un peu porté, il tombe sur un homonyme d'un autre club et rend
+ * `other-club` : « LOUVEAU FLORENT rattaché à l'Association sportive du squash club de
+ * Valence — vérifie le nom du club adverse ». Le nom du club adverse est pourtant juste, le
+ * joueur est bien là, et le capitaine est envoyé corriger ce qui n'a rien.
+ *
+ * Le roster ne peut pas commettre cette faute : il ne contient QUE les joueurs que ce club a
+ * inscrits dans CETTE équipe. Il n'y a pas de sélection à faire, donc pas de mauvaise sélection
+ * possible — et la licence vient avec, qui est précisément ce que le capitaine recopie.
+ *
+ * La clé est celle du reste du dépôt (`nameKey`) : casse, accents et ORDRE DES MOTS repliés. La
+ * ligue écrit « LOUVEAU FLORENT », la feuille de match « Florent Louveau ».
+ *
+ * Rend `null` quand le joueur n'est pas inscrit — mutation tardive, inscription oubliée, ou
+ * simplement pas de roster pour cette équipe. L'appelant retombe alors sur la recherche par
+ * nom, qui reste le seul chemin possible dans ces cas-là.
+ */
+export function playerFromRoster(
+  order: number,
+  name: string,
+  roster: TeamRoster | null | undefined,
+): PlayerCheck | null {
+  if (!roster) return null;
+  const cle = nameKey(name);
+  if (!cle) return null;
+
+  const p = roster.players.find((j) => nameKey(j.name) === cle);
+  if (!p) return null;
+
+  return {
+    order,
+    side: "away",
+    name,
+    verdict: "found",
+    fedName: p.name,
+    clt: p.clt,
+    rangM: p.rangM,
+    licence: p.licence,
+    // Le CLUB, pas l'équipe : c'est sous lui que la fédération range ses joueurs, et elle nous
+    // le donne ici au lieu de nous le faire déduire d'un nom d'équipe numéroté (`clubOfTeam`).
+    club: roster.club,
+    hint: null,
+  };
 }

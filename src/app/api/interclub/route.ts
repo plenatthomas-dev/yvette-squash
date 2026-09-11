@@ -17,7 +17,11 @@ import {
 import { estLigneClassement } from "@/lib/squashnet/standings";
 import { resolveHomePicks, type HomePick, type ResolvedPick } from "@/lib/interclub-roster";
 import { lineupOrderConflict, type OrderedSlot } from "@/lib/interclub-order";
-import { awayLineupConflict, estDesigne } from "@/lib/interclub-opponents";
+import {
+  awayLineupConflict,
+  awayLineupDuplicate,
+  estDesigne,
+} from "@/lib/interclub-opponents";
 import { loadKnownOpponents } from "@/lib/interclub-opponents-db";
 
 export const runtime = "nodejs";
@@ -301,6 +305,19 @@ export async function POST(req: NextRequest) {
   // inscription de rencontre — le cas de loin le plus fréquent, composition vide — serait
   // gratuit.
   const awayLines = roster.map((r, i) => ({ order: i + 1, awayName: r.awayName }));
+
+  // UN ADVERSAIRE, UN SIMPLE. La même règle que pour nos joueurs, et elle se contrôle ici sans
+  // rien savoir d'eux : c'est la seule des deux qui ne demande AUCUN classement, donc la seule
+  // qui vaille dès la toute première rencontre contre un club inconnu.
+  //
+  // Posée AVANT le contrôle d'ordre, à dessein : un nom inscrit deux fois rend l'ordre des
+  // simples incohérent par construction, et le message de l'ordre (« X doit précéder Y »)
+  // n'aiderait personne à voir que X et Y sont la même personne.
+  const doublon = awayLineupDuplicate(awayLines);
+  if (doublon) {
+    return NextResponse.json({ error: doublon }, { status: 400 });
+  }
+
   if (awayLines.filter((l) => estDesigne(l.awayName)).length >= 2) {
     const awayProblem = awayLineupConflict(awayLines, await loadKnownOpponents(teamId));
     if (awayProblem) {

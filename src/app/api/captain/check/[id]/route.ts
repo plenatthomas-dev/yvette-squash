@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCaptainOf } from "@/lib/captain-access";
 import { prisma } from "@/lib/db";
+import { loadRosters } from "@/lib/interclub-roster-db";
 import { getLatestMonth, searchRanking, type RankingRow } from "@/lib/squashnet/client";
 import { YVETTE_CLUB } from "@/lib/squashnet/match";
 import {
@@ -10,6 +11,7 @@ import {
   checkScore,
   checkTie,
   lireRapport,
+  playerFromRoster,
   queryOf,
   type CheckReport,
   type MatchInput,
@@ -47,9 +49,15 @@ const dodo = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * `Interclub.opponent` porte un nom d'ÉQUIPE (« Chaville 4 »), le classement range sous le CLUB
  * (« Chaville ») : d'où `clubOfTeam`, sans quoi aucun adversaire d'une équipe numérotée n'est
  * jamais trouvé.
+ *
+ * `clubRoster` l'emporte quand on l'a : la fiche d'équipe fédérale PUBLIE le nom du club
+ * (« Squash club verrieres le buisson »), là où `clubOfTeam` ne peut que le déduire en retirant
+ * un numéro à un nom d'équipe. La déduction marche sur « Chaville 4 » → « Chaville » ; elle ne
+ * peut rien contre un libellé d'équipe qui n'est pas le début du nom de club, et rien ne nous
+ * avertirait — le joueur serait simplement déclaré « autre club ».
  */
-const clubAttendu = (side: "home" | "away", opponent: string) =>
-  side === "home" ? YVETTE_CLUB : clubOfTeam(opponent);
+const clubAttendu = (side: "home" | "away", opponent: string, clubRoster: string | null) =>
+  side === "home" ? YVETTE_CLUB : (clubRoster ?? clubOfTeam(opponent));
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -73,6 +81,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     select: {
       teamId: true,
       opponent: true,
+      snOpponentTeamId: true,
       matchCount: true,
       bestOf: true,
       matches: {
@@ -141,10 +150,41 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return rows;
   }
 
+  // LE ROSTER DE L'ÉQUIPE ADVERSE, LU EN BASE — aucune requête fédérale, et il répond pour la
+  // moitié des joueurs de la rencontre.
+  //
+  // ⚠️ IL PASSE AVANT LA RECHERCHE PAR NOM, ET C'EST UNE CORRECTION, pas une optimisation. Le
+  // rapprochement interroge le classement NATIONAL et retient une ligne si une seule colle au
+  // club attendu : sur un nom un peu porté il tombe sur un homonyme d'un autre club et rend
+  // `other-club` — « rattaché à l'Association sportive du squash club de Valence : vérifie le
+  // nom du club adverse ». Le nom du club était juste, le joueur bien là, et le capitaine
+  // envoyé corriger ce qui n'avait rien.
+  //
+  // Le roster ne peut pas se tromper ainsi : il ne contient QUE les joueurs que ce club a
+  // inscrits dans CETTE équipe. Pas de sélection à faire, donc pas de mauvaise sélection — et
+  // la licence vient avec, qui est ce que le capitaine recopie.
+  const rosters = fixture.snOpponentTeamId
+    ? await loadRosters([fixture.snOpponentTeamId])
+    : new Map();
+  const rosterAdverse = fixture.snOpponentTeamId
+    ? (rosters.get(fixture.snOpponentTeamId) ?? null)
+    : null;
+
   const players: PlayerCheck[] = [];
   for (const m of entrees) {
     for (const side of ["home", "away"] as const) {
       const name = side === "home" ? m.homeDisplayName : m.awayName;
+
+      // Inscrit dans l'équipe d'en face : la ligue l'a nommé elle-même, il n'y a rien à
+      // chercher — et une requête de moins à leur coûter.
+      if (side === "away") {
+        const duRoster = playerFromRoster(m.order, name, rosterAdverse);
+        if (duRoster) {
+          players.push(duRoster);
+          continue;
+        }
+      }
+
       const rows = await lignes(name);
       // squashnet muet sur CE nom : on ne conclut rien plutôt que d'annoncer « introuvable »,
       // qui enverrait corriger une orthographe parfaitement juste.
@@ -163,7 +203,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         });
         continue;
       }
-      players.push(checkPlayer(m.order, side, name, rows, clubAttendu(side, fixture.opponent)));
+      players.push(
+        checkPlayer(
+          m.order,
+          side,
+          name,
+          rows,
+          clubAttendu(side, fixture.opponent, rosterAdverse?.club ?? null),
+        ),
+      );
     }
   }
 

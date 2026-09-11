@@ -1,5 +1,5 @@
 import { UNSET_PLAYER } from "./interclub";
-import { isNC, lineupOrderConflict } from "./interclub-order";
+import { compareRosterOrder, isNC, lineupOrderConflict } from "./interclub-order";
 import { normalize } from "./squashnet/match";
 import { nameKey, type TeamRoster } from "./squashnet/roster";
 import { lireRapport } from "./captain-check";
@@ -68,9 +68,15 @@ export interface KnownOpponent {
   rangM: number | null;
   licence: string | null;
   /**
-   * Nombre de rencontres où on l'a croisé — les habitués remontent en tête du menu. ZÉRO pour
-   * un joueur qu'on connaît par le ROSTER sans l'avoir jamais rencontré : il est proposable,
-   * et son classement est sûr, mais il n'est pas un habitué.
+   * Nombre de rencontres où on l'a croisé. ZÉRO pour un joueur qu'on connaît par le ROSTER sans
+   * l'avoir jamais rencontré : il est proposable, et son classement est sûr, mais on ne l'a
+   * jamais vu jouer.
+   *
+   * ⚠️ NE TRIE PLUS LE MENU. Les habitués y remontaient, ce qui avait un sens quand la liste ne
+   * contenait que des joueurs déjà rencontrés et pour la plupart sans classement. Le menu suit
+   * désormais l'ORDRE DU CLASSEMENT, c'est-à-dire celui dans lequel ces joueurs devront
+   * disputer les simples. Ce compteur reste exposé — il dit à qui le lit si l'adversaire est
+   * une tête connue —, il ne décide plus de la place.
    */
   seen: number;
   /**
@@ -228,14 +234,29 @@ export function mergeOpponents(
     }
   }
 
-  // Les CLASSÉS d'abord — ce sont les seuls sur lesquels l'ordre des simples peut être
-  // vérifié —, puis les plus souvent croisés, puis l'alphabet pour que la liste ne bouge pas
-  // d'un chargement à l'autre.
+  // DANS L'ORDRE DU CLASSEMENT — le mieux classé en tête, comme le sélecteur de NOTRE
+  // composition. La liste se lit donc dans l'ordre où ces joueurs devront disputer les simples,
+  // ce qui est précisément la question qu'on se pose en composant : qui est leur n° 1 ?
+  //
+  // `compareRosterOrder` n'est PAS réécrit ici. C'est celui de notre propre roster, et ses deux
+  // paliers sont les critères mêmes de la règle fédérale (classement, puis rang mixte à
+  // classement égal). Deux comparateurs finiraient par diverger, et l'un des deux trierait un
+  // jour les adversaires autrement que les nôtres — sur une règle qui vaut pour les deux camps.
+  //
+  // LES NON-CLASSÉS TOMBENT EN FIN DE LISTE, palier que `compareRosterOrder` tient déjà : ce
+  // sont les seuls sur lesquels aucun ordre des simples ne peut être vérifié, donc les seuls
+  // qu'on ne peut pas situer parmi les autres.
+  //
+  // `seen` NE TRIE PLUS. Les habitués remontaient en tête, ce qui avait un sens quand la liste
+  // ne contenait que des joueurs déjà rencontrés et pour la plupart sans classement. Depuis que
+  // le roster fédéral l'alimente, la question n'est plus « qui revient souvent » mais « qui est
+  // devant qui » — et mêler les deux critères produirait un ordre que rien n'explique.
+  //
+  // L'alphabet reste le dernier recours, pour que la liste ne bouge pas d'un chargement à
+  // l'autre : `compareRosterOrder` rend 0 sur deux joueurs qu'il ne sait pas départager.
   return [...parCle.values()].sort(
     (a, b) =>
-      Number(!!b.clt) - Number(!!a.clt) ||
-      b.seen - a.seen ||
-      a.name.localeCompare(b.name, "fr", { sensitivity: "base" }),
+      compareRosterOrder(a, b) || a.name.localeCompare(b.name, "fr", { sensitivity: "base" }),
   );
 }
 
@@ -310,4 +331,78 @@ export function awayLineupConflict(
 
   const conflit = lineupOrderConflict(slots);
   return conflit === null ? null : `Ordre des simples adverses — ${conflit}`;
+}
+
+// --- Un adversaire, un simple ----------------------------------------------
+
+/**
+ * Cet adversaire dispute-t-il DÉJÀ un autre simple de la rencontre ? Rend le numéro de ce
+ * simple, ou `null`.
+ *
+ * LA MÊME RÈGLE QUE CHEZ NOUS, et ce n'est pas une symétrie décorative : le règlement interdit
+ * à un joueur de disputer deux simples d'une même rencontre, des deux côtés du filet. Notre
+ * camp la tient déjà (`findAlignmentClash`, `interclub-roster.ts`) ; en face, rien ne
+ * l'empêchait — le même nom pouvait être inscrit sur les quatre simples, et la feuille de match
+ * partait chez la ligue avec une composition qu'elle refuserait.
+ *
+ * ⚠️ LA COMPARAISON SE FAIT SUR LE NOM, faute de mieux : un adversaire n'a pas d'identifiant
+ * chez nous (`InterclubMatch.awayName` est un texte libre, cf. l'en-tête de ce module). C'est la
+ * différence irréductible avec notre camp, où le doublon se détecte sur `homeUserId` /
+ * `homeGuestId` — deux clés que rien ne peut confondre.
+ *
+ * La clé est celle de tout le module (`nameKey`) : casse, accents et ORDRE DES MOTS repliés.
+ * « DETRY XAVIER » choisi au menu du roster et « Xavier Détry » retapé à la main sont donc bien
+ * le même joueur, ce qu'une comparaison littérale aurait manqué — et c'est précisément la faute
+ * la plus probable, puisqu'elle vient d'avoir été tapée deux fois de deux façons.
+ *
+ * ⚠️ CE QU'ELLE NE SAIT PAS VOIR : une VRAIE faute de frappe. « Detri » et « Detry » restent
+ * deux joueurs, ici comme ailleurs. On ne devine pas — et le menu est là pour que la question ne
+ * se pose pas.
+ *
+ * « À désigner » ne bloque jamais rien : un simple non composé n'est pas un joueur, et le
+ * refuser rendrait impossible de créer une rencontre (les quatre simples y naissent vides).
+ */
+export function awayAlignmentClash(
+  siblings: readonly { order: number; awayName: string }[],
+  candidate: { order: number; awayName: string },
+): number | null {
+  if (!estDesigne(candidate.awayName)) return null;
+  const cle = nameKey(candidate.awayName);
+
+  for (const l of siblings) {
+    if (l.order === candidate.order) continue;
+    if (!estDesigne(l.awayName)) continue;
+    if (nameKey(l.awayName) === cle) return l.order;
+  }
+  return null;
+}
+
+/**
+ * Le premier doublon d'une composition ADVERSE entière, rendu comme un message de refus.
+ *
+ * Le pendant de `awayLineupConflict` pour la règle « un adversaire, un simple » : celui-ci
+ * contrôle la composition d'un coup (création d'une rencontre), là où `awayAlignmentClash`
+ * répond sur UN simple qu'on retouche.
+ */
+export function awayLineupDuplicate(
+  lines: readonly { order: number; awayName: string }[],
+): string | null {
+  const vus = new Map<string, { order: number; name: string }>();
+  // Les simples sont parcourus dans l'ordre des NUMÉROS, pas dans celui du tableau reçu : le
+  // message doit nommer les deux mêmes simples quel que soit l'ordre dans lequel le client les
+  // a envoyés, sans quoi deux capitaines verraient deux messages différents pour une seule
+  // faute.
+  for (const l of [...lines].sort((a, b) => a.order - b.order)) {
+    if (!estDesigne(l.awayName)) continue;
+    const cle = nameKey(l.awayName);
+    const avant = vus.get(cle);
+    if (avant) {
+      return (
+        `Composition adverse — ${l.awayName} dispute déjà le simple n° ${avant.order} : ` +
+        `un joueur ne peut pas disputer deux simples d'une même rencontre.`
+      );
+    }
+    vus.set(cle, { order: l.order, name: l.awayName });
+  }
+  return null;
 }

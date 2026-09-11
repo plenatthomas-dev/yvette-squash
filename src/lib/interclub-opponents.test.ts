@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
+  awayAlignmentClash,
   awayLineupConflict,
+  awayLineupDuplicate,
   estDesigne,
   mergeOpponents,
   opponentTeams,
@@ -471,6 +473,167 @@ describe("awayLineupConflict — sur un roster, dès la première rencontre", ()
         ],
         known(),
       ),
+    ).toBeNull();
+  });
+});
+
+// ============================================================================
+//  L'ORDRE DU MENU, ET LA RÈGLE « UN ADVERSAIRE, UN SIMPLE ».
+// ============================================================================
+
+describe("mergeOpponents — la liste se lit dans l'ordre du classement", () => {
+  it("met le mieux classé en tête, comme le sélecteur de NOTRE composition", () => {
+    // C'est la question qu'on se pose en composant : qui est leur n° 1 ? La liste y répond
+    // d'elle-même. 4B est meilleur que 5A, meilleur que 5D, meilleur que NC.
+    const known = mergeOpponents(
+      [src({ snOpponentTeamId: "161095", matches: [] })],
+      rosters(
+        roster("161095", [
+          { name: "DOUSSERON PASCAL", clt: "5D", rangM: 8560 },
+          { name: "THUILLIER GUILLAUME", clt: "4C", rangM: 1898 },
+          { name: "MARTIN OLIVIER", clt: "NC", rangM: 9389 },
+          { name: "BABLON XAVIER", clt: "5B", rangM: 3915 },
+        ]),
+      ),
+    );
+    expect(known.map((k) => k.name)).toEqual([
+      "THUILLIER GUILLAUME",
+      "BABLON XAVIER",
+      "DOUSSERON PASCAL",
+      "MARTIN OLIVIER",
+    ]);
+  });
+
+  it("départage deux joueurs de même classement par le rang mixte", () => {
+    const known = mergeOpponents(
+      [src({ snOpponentTeamId: "161095", matches: [] })],
+      rosters(
+        roster("161095", [
+          { name: "SAMMUT JULIEN", clt: "5C", rangM: 5209 },
+          { name: "BEZELGA CHRISTOPHE", clt: "5C", rangM: 5232 },
+          { name: "AUBRY JULIEN", clt: "5C", rangM: 6143 },
+        ]),
+      ),
+    );
+    expect(known.map((k) => k.name)).toEqual([
+      "SAMMUT JULIEN",
+      "BEZELGA CHRISTOPHE",
+      "AUBRY JULIEN",
+    ]);
+  });
+
+  it("renvoie les SANS CLASSEMENT en fin de liste", () => {
+    // Ce sont les seuls sur lesquels aucun ordre des simples ne peut être vérifié : on ne sait
+    // pas les situer parmi les autres, donc on ne prétend pas le faire.
+    const known = mergeOpponents(
+      [
+        src({
+          snOpponentTeamId: "161095",
+          matches: [{ awayName: "Zoe Inconnue" }, { awayName: "Anna Inconnue" }],
+        }),
+      ],
+      rosters(roster("161095", [{ name: "MARTIN OLIVIER", clt: "NC", rangM: 9389 }])),
+    );
+    expect(known.map((k) => k.name)).toEqual([
+      "MARTIN OLIVIER",
+      "Anna Inconnue",
+      "Zoe Inconnue",
+    ]);
+  });
+
+  it("ne remonte plus les habitués — le classement décide seul", () => {
+    // `seen` triait autrefois, ce qui avait un sens quand presque personne n'avait de
+    // classement. Mêler les deux critères produirait aujourd'hui un ordre que rien n'explique.
+    const known = mergeOpponents(
+      [
+        src({
+          snOpponentTeamId: "161095",
+          matches: [{ awayName: "MARTIN OLIVIER" }, { awayName: "MARTIN OLIVIER" }],
+        }),
+      ],
+      rosters(
+        roster("161095", [
+          { name: "MARTIN OLIVIER", clt: "NC", rangM: 9389 },
+          { name: "THUILLIER GUILLAUME", clt: "4C", rangM: 1898 },
+        ]),
+      ),
+    );
+    expect(known[0].name).toBe("THUILLIER GUILLAUME");
+    expect(known[0].seen).toBe(0);
+    expect(known[1].seen).toBe(2);
+  });
+});
+
+describe("awayAlignmentClash — un adversaire, un simple", () => {
+  const lines = [
+    { order: 1, awayName: "Paul Martin" },
+    { order: 2, awayName: "À désigner" },
+    { order: 3, awayName: "Luc Bernard" },
+  ];
+
+  it("rend le numéro du simple qui retient déjà ce joueur", () => {
+    expect(awayAlignmentClash(lines, { order: 2, awayName: "Paul Martin" })).toBe(1);
+    expect(awayAlignmentClash(lines, { order: 2, awayName: "Luc Bernard" })).toBe(3);
+  });
+
+  it("laisse le simple courant RE-choisir celui qu'il retient déjà", () => {
+    // Sinon on ne pourrait plus revenir en arrière après avoir changé d'avis.
+    expect(awayAlignmentClash(lines, { order: 1, awayName: "Paul Martin" })).toBeNull();
+  });
+
+  it("voit le doublon malgré la casse, les accents et l'ORDRE DES MOTS", () => {
+    // La faute la plus probable : le même joueur saisi deux fois, de deux façons — au menu du
+    // roster (« POPULU AXEL ») puis à la main (« Axel Populu »).
+    const l = [{ order: 1, awayName: "POPULU AXEL" }];
+    expect(awayAlignmentClash(l, { order: 2, awayName: "Axel Populu" })).toBe(1);
+    expect(awayAlignmentClash(l, { order: 2, awayName: "populu  axel" })).toBe(1);
+  });
+
+  it("ne bloque jamais « à désigner » — les simples y naissent tous", () => {
+    const l = [{ order: 1, awayName: "À désigner" }];
+    expect(awayAlignmentClash(l, { order: 2, awayName: "À désigner" })).toBeNull();
+    expect(awayAlignmentClash(l, { order: 2, awayName: "" })).toBeNull();
+  });
+
+  it("ne replie pas une vraie faute de frappe — on ne devine pas", () => {
+    const l = [{ order: 1, awayName: "Detry Xavier" }];
+    expect(awayAlignmentClash(l, { order: 2, awayName: "Detri Xavier" })).toBeNull();
+  });
+});
+
+describe("awayLineupDuplicate — la composition entière", () => {
+  it("refuse un nom inscrit sur deux simples, et nomme le premier", () => {
+    const msg = awayLineupDuplicate([
+      { order: 1, awayName: "Paul Martin" },
+      { order: 2, awayName: "Luc Bernard" },
+      { order: 3, awayName: "paul  martin" },
+    ]);
+    expect(msg).toContain("simple n° 1");
+    expect(msg).toContain("deux simples");
+  });
+
+  it("nomme les mêmes simples quel que soit l'ordre d'arrivée", () => {
+    // Le message est construit sur les NUMÉROS, pas sur l'ordre du tableau reçu : deux
+    // capitaines doivent lire la même chose pour une seule et même faute.
+    const desordre = awayLineupDuplicate([
+      { order: 3, awayName: "Paul Martin" },
+      { order: 1, awayName: "Paul Martin" },
+    ]);
+    expect(desordre).toContain("simple n° 1");
+  });
+
+  it("accepte une composition sans doublon, et une composition vide", () => {
+    expect(
+      awayLineupDuplicate([
+        { order: 1, awayName: "Paul Martin" },
+        { order: 2, awayName: "Luc Bernard" },
+      ]),
+    ).toBeNull();
+    expect(
+      awayLineupDuplicate([
+        { order: 1, awayName: "À désigner" },
+        { order: 2, awayName: "À désigner" },
+      ]),
     ).toBeNull();
   });
 });

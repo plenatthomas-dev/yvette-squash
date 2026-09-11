@@ -184,7 +184,7 @@ describe("Captain — le détail", () => {
     expect(document.querySelector(".cap-spinner")).not.toBeNull();
     // `role="status"` : l'attente est ANNONCÉE, là où une roue `aria-hidden` n'apprend rien à
     // un lecteur d'écran.
-    expect(within(screen.getByRole("status")).getByText(/dizaine de secondes/)).toBeTruthy();
+    expect(within(screen.getByRole("status")).getByText(/quelques secondes/)).toBeTruthy();
     // Et le bouton est inerte : deux vérifications en vol, c'est seize appels à la fédération.
     expect((screen.getByRole("button", { name: /Vérification…/ }) as HTMLButtonElement).disabled).toBe(
       true,
