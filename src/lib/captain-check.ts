@@ -191,10 +191,84 @@ export function clubOfTeam(teamName: string): string {
   return coupe || teamName.trim();
 }
 
-/** Le terme envoyé à squashnet : le dernier mot, le plus discriminant en général. */
+/**
+ * Particules qui ne discriminent RIEN, et ne doivent jamais servir de terme de recherche.
+ *
+ * Mesuré : « DE » seul rend 99 résultats paginés, contre 1 pour « DE ABREU » et 2 pour
+ * « ABREU ». Un nom composé (« Le Marquis Xavier », « De Abreu Paulo ») commence donc par le
+ * mot le moins utile de tous, et c'est précisément celui qu'un choix naïf du PREMIER mot
+ * retiendrait.
+ */
+const PARTICULES = new Set([
+  "de", "du", "des", "d", "le", "la", "les", "l",
+  "van", "von", "der", "den", "di", "da", "dos", "del", "el", "saint-",
+]);
+
+/**
+ * Les termes à essayer chez squashnet, dans l'ordre — le plus prometteur d'abord.
+ *
+ * CE QUE LE MOTEUR ACCEPTE, MESURÉ sur le classement du 2026-09-01 :
+ *
+ *   « DETRY »        → 1 résultat, le bon        « DE ABREU » → 1 résultat, le bon
+ *   « XAVIER »       → 62 résultats, paginés     « ABREU »    → 2 résultats
+ *   « DETRY XAVIER » → 0 résultat                « DE »       → 99 résultats, paginés
+ *
+ * Trois enseignements, et chacun décide d'une ligne de code :
+ *
+ *  1. LE NOM COMPLET N'EST PAS ACCEPTÉ (« DETRY XAVIER » → 0). La recherche porte sur le nom de
+ *     famille OU sur le prénom, jamais à cheval sur les deux. Il faut donc choisir un mot ;
+ *     `searchQuery` (`squashnet/match.ts`) prend le nom de famille dès que le dépôt le connaît —
+ *     ici on n'a qu'une chaîne.
+ *  2. UNE PARTIE DU NOM SUFFIT (« ABREU » retrouve « DE ABREU »). On n'a donc pas besoin de
+ *     reconstituer un nom composé : un seul de ses mots significatifs le retrouve.
+ *  3. UNE PARTICULE NE SERT À RIEN (« DE » → 99). C'est ce qui rend un choix naïf du PREMIER mot
+ *     inutilisable sur « Le Marquis Xavier » : il retiendrait « Le ».
+ *
+ * ⚠️ ON NE SAIT PAS DE QUEL CÔTÉ EST LE NOM DE FAMILLE, et aucune heuristique ne le dira : la
+ * fédération écrit « DETRY XAVIER » (famille d'abord), une feuille de match « Xavier Detry »
+ * (prénom d'abord), et les deux coexistent dans la même rencontre depuis que le menu propose
+ * l'identité fédérale.
+ *
+ * D'où DEUX TERMES, particules écartées : le dernier mot significatif d'abord — l'ordre
+ * français, celui de `homeDisplayName` et de toute saisie à la main, donc le cas courant —, le
+ * premier ensuite, qui rattrape l'ordre fédéral. L'appelant s'arrête au premier qui RAPPROCHE :
+ * sur un nom en ordre français, le second appel n'a jamais lieu.
+ *
+ * Exemples, et c'est là que les particules se voient :
+ *
+ *   « Xavier Detry »      → [Detry, Xavier]      trouvé au 1er
+ *   « DETRY XAVIER »      → [XAVIER, DETRY]      trouvé au 2e
+ *   « Xavier Le Marquis » → [Marquis, Xavier]    trouvé au 1er
+ *   « Le Marquis Xavier » → [Xavier, Marquis]    trouvé au 2e
+ *   « De Abreu Paulo »    → [Paulo, Abreu]       trouvé au 1er
+ *
+ * Un nom qui n'a qu'un mot significatif n'en rend qu'un : l'essayer deux fois serait une
+ * requête offerte à squashnet pour une réponse déjà connue.
+ */
+export function queryTerms(name: string): string[] {
+  const tokens = name.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return [];
+
+  // Les particules sont écartées du CHOIX DU TERME, jamais du nom : le rapprochement
+  // (`nameMatches`) continue de comparer tous les jetons, particules comprises.
+  const utiles = tokens.filter((t) => !PARTICULES.has(normalize(t)));
+  // Un nom qui ne serait QUE des particules n'existe pas, mais un nom d'un seul mot court
+  // pourrait y ressembler : on retombe alors sur les jetons bruts plutôt que sur rien.
+  const base = utiles.length > 0 ? utiles : tokens;
+
+  const dernier = base[base.length - 1];
+  const premier = base[0];
+  return dernier === premier ? [dernier] : [dernier, premier];
+}
+
+/**
+ * Le terme le plus prometteur — le dernier mot significatif.
+ *
+ * Conservé pour les appelants qui n'en veulent qu'un. La vérification, elle, passe par
+ * `queryTerms` : un seul terme rendait « introuvable » tout nom écrit dans l'ordre fédéral.
+ */
 export function queryOf(name: string): string {
-  const tokens = name.trim().split(/\s+/);
-  return tokens[tokens.length - 1] ?? "";
+  return queryTerms(name)[0] ?? "";
 }
 
 /**

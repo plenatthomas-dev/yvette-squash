@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   checkAwayOrder,
   checkPlayer,
+  queryTerms,
   playerFromRoster,
   clubOfTeam,
   checkScore,
@@ -434,5 +435,71 @@ describe("playerFromRoster", () => {
 
   it("ne replie pas une vraie faute de frappe", () => {
     expect(playerFromRoster(1, "LOUVAU FLORENT", rosterVerrieres)).toBeNull();
+  });
+});
+
+// ============================================================================
+//  LE TERME DE RECHERCHE — et pourquoi il y en a deux.
+//
+//  Mesuré sur le classement du 2026-09-01 (squashnet, `ic_a=131079`) :
+//    « DETRY » → 1        « DE ABREU » → 1       « DETRY XAVIER » → 0
+//    « XAVIER » → 62      « ABREU »    → 2       « DE »           → 99
+//
+//  Le nom COMPLET n'est pas accepté : la recherche porte sur le nom de famille
+//  OU le prénom, jamais à cheval. Il faut donc choisir un mot — et on ne sait
+//  pas de quel côté est le nom de famille.
+// ============================================================================
+
+describe("queryTerms", () => {
+  it("essaie le dernier mot d'abord — l'ordre français est le cas courant", () => {
+    // `homeDisplayName` et toute saisie à la main sont en « Prénom Nom » : le second appel
+    // n'aura jamais lieu pour eux.
+    expect(queryTerms("Xavier Detry")).toEqual(["Detry", "Xavier"]);
+  });
+
+  it("rattrape l'ordre FÉDÉRAL par son second terme", () => {
+    // Depuis que le menu propose l'identité fédérale, « DETRY XAVIER » est une saisie naturelle.
+    // Avec le seul dernier mot, on cherchait « XAVIER » — 62 résultats paginés, et un verdict
+    // « introuvable » sur un nom parfaitement juste.
+    expect(queryTerms("DETRY XAVIER")).toEqual(["XAVIER", "DETRY"]);
+  });
+
+  // ⚠️ LE CAS QUI CASSAIT UN CHOIX NAÏF DU PREMIER MOT. « Le Marquis Xavier » commence par la
+  // particule, c'est-à-dire par le mot le moins discriminant de tous : « DE » seul rend 99
+  // résultats. On l'écarte du choix du terme.
+  it("écarte les particules d'un nom composé, dans les DEUX ordres", () => {
+    expect(queryTerms("Le Marquis Xavier")).toEqual(["Xavier", "Marquis"]);
+    expect(queryTerms("Xavier Le Marquis")).toEqual(["Marquis", "Xavier"]);
+    expect(queryTerms("De Abreu Paulo")).toEqual(["Paulo", "Abreu"]);
+    expect(queryTerms("Paulo De Abreu")).toEqual(["Abreu", "Paulo"]);
+  });
+
+  it("n'a pas besoin du nom composé ENTIER — une partie suffit chez eux", () => {
+    // Mesuré : « ABREU » retrouve « DE ABREU ». On ne reconstitue donc jamais « Le Marquis ».
+    expect(queryTerms("Van Der Berg Jean")).toEqual(["Jean", "Berg"]);
+  });
+
+  it("reconnaît les particules quelle que soit leur casse ou leurs accents", () => {
+    expect(queryTerms("LE MARQUIS XAVIER")).toEqual(["XAVIER", "MARQUIS"]);
+    expect(queryTerms("Da Silva Joao")).toEqual(["Joao", "Silva"]);
+  });
+
+  it("ne rend qu'UN terme sur un nom d'un seul mot significatif", () => {
+    // L'essayer deux fois serait une requête offerte à squashnet pour une réponse déjà connue.
+    expect(queryTerms("Detry")).toEqual(["Detry"]);
+    expect(queryTerms("Le Marquis")).toEqual(["Marquis"]);
+  });
+
+  it("retombe sur les jetons bruts plutôt que sur rien", () => {
+    // Un nom qui ne serait QUE des particules n'existe pas, mais rendre une liste vide
+    // signifierait « aucune recherche possible » — donc un « introuvable » muet.
+    expect(queryTerms("De La")).toEqual(["La", "De"]);
+    expect(queryTerms("   ")).toEqual([]);
+  });
+
+  it("queryOf reste le terme le plus prometteur", () => {
+    expect(queryOf("Xavier Detry")).toBe("Detry");
+    expect(queryOf("Le Marquis Xavier")).toBe("Xavier");
+    expect(queryOf("")).toBe("");
   });
 });

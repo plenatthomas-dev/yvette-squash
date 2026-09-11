@@ -12,7 +12,7 @@ import {
   checkTie,
   lireRapport,
   playerFromRoster,
-  queryOf,
+  queryTerms,
   type CheckReport,
   type MatchInput,
   type PlayerCheck,
@@ -157,9 +157,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const memo = new Map<string, RankingRow[] | null>();
   let premier = true;
-  /** Une recherche, mémoïsée par terme — l'échec l'est aussi (cf. `backfill.rechercher`). */
-  async function lignes(name: string): Promise<RankingRow[] | null> {
-    const query = queryOf(name);
+  /** Une recherche, mémoïsée par TERME — l'échec l'est aussi (cf. `backfill.rechercher`). */
+  async function lignes(query: string): Promise<RankingRow[] | null> {
     const cached = memo.get(query);
     if (cached !== undefined) return cached;
     // L'attente PRÉCÈDE l'appel plutôt qu'elle ne le suit : le dernier joueur du lot ne fait pas
@@ -228,10 +227,42 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         }
       }
 
-      const rows = await lignes(name);
-      // squashnet muet sur CE nom : on ne conclut rien plutôt que d'annoncer « introuvable »,
+      const club = clubAttendu(side, fixture.opponent, rosterAdverse?.club ?? null);
+
+      // DEUX TERMES POSSIBLES, ESSAYÉS DANS L'ORDRE (cf. `queryTerms`) : le nom de famille est
+      // le seul terme que squashnet exploite, et il est tantôt le dernier mot (ordre français,
+      // « Xavier Detry »), tantôt le premier (ordre fédéral, « DETRY XAVIER »). Rien dans la
+      // chaîne ne dit lequel.
+      //
+      // ON S'ARRÊTE AU PREMIER QUI RAPPROCHE : sur un nom en ordre français — le cas courant,
+      // et celui de tous nos joueurs — le second appel n'a jamais lieu. Il ne coûte donc que
+      // dans le cas qui, sans lui, rendait « introuvable » un nom parfaitement juste.
+      let issue: PlayerCheck | null = null;
+      let muet = false;
+      for (const terme of queryTerms(name)) {
+        const rows = await lignes(terme);
+        // squashnet muet sur CE terme : on retient le silence, mais on tente quand même l'autre
+        // — une panne sur une recherche n'est pas une panne sur l'autre.
+        if (rows === null) {
+          muet = true;
+          continue;
+        }
+        const essai = checkPlayer(m.order, side, name, rows, club);
+        // Le premier verdict est gardé faute de mieux ; un verdict CONCLUANT arrête tout.
+        issue = issue ?? essai;
+        // ⚠️ `other-club` EST CONCLUANT, au même titre que `found` : le joueur a été identifié
+        // par son nom, simplement ailleurs. Le rechercher sous l'autre terme ne peut rien
+        // apprendre de plus et ferait payer à squashnet une requête pour une réponse acquise.
+        // Seul `unknown` — personne de ce nom, ou homonymes ambigus — justifie le second essai.
+        if (essai.verdict !== "unknown") {
+          issue = essai;
+          break;
+        }
+      }
+
+      // Aucune réponse exploitable : on ne conclut rien plutôt que d'annoncer « introuvable »,
       // qui enverrait corriger une orthographe parfaitement juste.
-      if (rows === null) {
+      if (issue === null || (muet && issue.verdict !== "found")) {
         players.push({
           order: m.order,
           side,
@@ -246,15 +277,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         });
         continue;
       }
-      players.push(
-        checkPlayer(
-          m.order,
-          side,
-          name,
-          rows,
-          clubAttendu(side, fixture.opponent, rosterAdverse?.club ?? null),
-        ),
-      );
+      players.push(issue);
     }
   }
 

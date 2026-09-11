@@ -155,9 +155,45 @@ describe("POST /api/captain/check/{id}", () => {
         },
       ],
     });
+    // Les QUATRE joueurs doivent être rapprochés, sans quoi le second terme de `queryTerms`
+    // entrerait en jeu et ce test compterait des requêtes qui ne le regardent pas.
+    h.searchRanking.mockImplementation(async (q: string) =>
+      q === "Dupont"
+        ? [ligne("DUPONT JEAN"), ligne("DUPONT MARIE")]
+        : [ligne("MARTIN PAUL", "Chaville"), ligne("MARTIN LUC", "Chaville")],
+    );
     await POST(req(), ctx());
     // Quatre joueurs, mais seulement deux termes distincts (« Dupont », « Martin »).
     expect(h.searchRanking).toHaveBeenCalledTimes(2);
+  });
+
+  // ⚠️ LE SECOND TERME NE PART QUE SUR UN VRAI ÉCHEC. `queryTerms` en propose deux — le dernier
+  // mot puis le premier —, parce qu'on ne sait pas de quel côté est le nom de famille. Les
+  // essayer tous les deux systématiquement doublerait le trafic chez un site associatif.
+  it("n'essaie le SECOND terme que si le premier n'a rapproché personne", async () => {
+    h.searchRanking.mockImplementation(async (q: string) =>
+      q === "Dupont" ? [ligne("DUPONT JEAN")] : [ligne("MARTIN PAUL", "Chaville")],
+    );
+    await POST(req(), ctx());
+    // Deux joueurs trouvés du premier coup : « Jean » et « Paul » ne sont jamais demandés.
+    expect(h.searchRanking).toHaveBeenCalledTimes(2);
+    expect(h.searchRanking.mock.calls.map((c: unknown[]) => c[0])).toEqual(["Dupont", "Martin"]);
+  });
+
+  it("rattrape un nom écrit dans l'ORDRE FÉDÉRAL par son second terme", async () => {
+    // « DUPONT JEAN » est la forme que le menu propose depuis que le roster l'alimente. Le
+    // dernier mot est alors le PRÉNOM : mesuré chez eux, « XAVIER » rend 62 résultats paginés
+    // là où « DETRY » en rend 1. Sans second terme, le verdict serait « introuvable » sur un
+    // nom parfaitement juste.
+    h.fixture = rencontre({ matches: [{ ...rencontre().matches[0], homeDisplayName: "DUPONT JEAN" }] });
+    h.searchRanking.mockImplementation(async (q: string) =>
+      q === "DUPONT" ? [ligne("DUPONT JEAN")] : [],
+    );
+    const { report } = await (await POST(req(), ctx())).json();
+    const nous = report.players.find((p: { side: string }) => p.side === "home");
+    expect(nous.verdict).toBe("found");
+    expect(h.searchRanking.mock.calls.map((c: unknown[]) => c[0])).toContain("JEAN");
+    expect(h.searchRanking.mock.calls.map((c: unknown[]) => c[0])).toContain("DUPONT");
   });
 
   // LE BOGUE DES ÉQUIPES NUMÉROTÉES. « Chaville 4 » est une ÉQUIPE ; le classement range ses
@@ -228,7 +264,9 @@ describe("POST /api/captain/check/{id}", () => {
     });
     // Bernard (simple 2) est MIEUX classé que Martin (simple 1) : l'ordre est rompu.
     h.searchRanking.mockImplementation(async (q: string) => {
-      if (q === "Dupont") return [ligne("DUPONT JEAN")];
+      // Les DEUX Dupont sont rapprochés : sans cela, « Marie » partirait en second terme et ce
+      // test compterait une requête qui ne concerne pas l'ordre des simples.
+      if (q === "Dupont") return [ligne("DUPONT JEAN"), ligne("DUPONT MARIE")];
       if (q === "Martin") return [{ ...ligne("MARTIN PAUL", "Squash Club de Rennes"), clt: "5A", rangM: "900" }];
       return [{ ...ligne("BERNARD LUC", "Squash Club de Rennes"), clt: "4A", rangM: "100" }];
     });
