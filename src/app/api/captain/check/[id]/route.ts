@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireCaptainOf } from "@/lib/captain-access";
+import { requireCaptain, requireCaptainOf } from "@/lib/captain-access";
 import { prisma } from "@/lib/db";
 import { loadRosters, refreshRosters } from "@/lib/interclub-roster-db";
 import { getLatestMonth, searchRanking, type RankingRow } from "@/lib/squashnet/client";
@@ -61,6 +61,19 @@ const clubAttendu = (side: "home" | "away", opponent: string, clubRoster: string
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
+  // ⚠️ LA GARDE D'ABORD, LA BASE ENSUITE. On lisait la rencontre AVANT tout contrôle, pour en
+  // tirer l'équipe dont `requireCaptainOf` a besoin. Deux conséquences, toutes deux réelles :
+  //
+  //  * une requête anonyme déclenchait une lecture Neon, fonction coupée ou non — `requireCaptain`
+  //    documente pourtant qu'un flag coupé répond 404 « sans lire la base » ;
+  //  * l'écart des réponses RÉVÉLAIT l'existence d'une rencontre : 401 si elle existe, 404 sinon.
+  //    Un visiteur non connecté pouvait ainsi énumérer des identifiants.
+  //
+  // `requireCaptain` ne demande pas d'équipe : il applique flag → session → rôle. La portée
+  // précise (CETTE équipe) reste vérifiée après lecture, par `requireCaptainOf`.
+  const porte = await requireCaptain(req);
+  if (!porte.ok) return porte.response;
+
   const fixture = await prisma.interclub.findUnique({
     where: { id },
     select: { teamId: true, official: { select: { checkJson: true } } },
@@ -76,6 +89,19 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
+  // ⚠️ LA GARDE D'ABORD, LA BASE ENSUITE. On lisait la rencontre AVANT tout contrôle, pour en
+  // tirer l'équipe dont `requireCaptainOf` a besoin. Deux conséquences, toutes deux réelles :
+  //
+  //  * une requête anonyme déclenchait une lecture Neon, fonction coupée ou non — `requireCaptain`
+  //    documente pourtant qu'un flag coupé répond 404 « sans lire la base » ;
+  //  * l'écart des réponses RÉVÉLAIT l'existence d'une rencontre : 401 si elle existe, 404 sinon.
+  //    Un visiteur non connecté pouvait ainsi énumérer des identifiants.
+  //
+  // `requireCaptain` ne demande pas d'équipe : il applique flag → session → rôle. La portée
+  // précise (CETTE équipe) reste vérifiée après lecture, par `requireCaptainOf`.
+  const porte = await requireCaptain(req);
+  if (!porte.ok) return porte.response;
+
   const fixture = await prisma.interclub.findUnique({
     where: { id },
     select: {

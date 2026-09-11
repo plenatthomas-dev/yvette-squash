@@ -181,31 +181,35 @@ function tableJoueurs(html: string, snTeamId: string): string | null {
 }
 
 /**
- * L'identité de l'équipe, lue dans le tableau `info` — deux lignes, les intitulés puis les
- * valeurs. On lit par POSITION ici, faute de `data-label` sur ce tableau-là ; c'est sans risque
- * parce qu'on APPARIE les deux lignes au lieu de compter jusqu'à cinq : une colonne insérée
- * décale les deux ensemble.
+ * L'identité de l'équipe, lue dans le tableau `info`.
+ *
+ * ⚠️ PAR `data-label`, COMME PARTOUT AILLEURS. Ce code appariait les intitulés `<th>` aux
+ * valeurs `<td>` PAR POSITION, en affirmant que ce tableau n'en portait pas — ce que la fixture
+ * jointe dément : ses cinq cellules ont toutes leur `data-label`. Et l'appariement se faisait
+ * APRÈS avoir écarté les cases vides, si bien qu'un club sans site internet décalait la colonne
+ * suivante : « Association » prenait la place de « Site internet », et le nom du CLUB — celui
+ * sous lequel la fédération range les joueurs — devenait le nom de l'association suivante, ou
+ * disparaissait avec le garde-fou de longueur. En silence, sur un club parfaitement ordinaire.
  */
 function identite(html: string): Pick<TeamRoster, "teamName" | "code" | "club" | "captain"> {
   const vide = { teamName: null, code: null, club: null, captain: null };
   const table = /<table[^>]*id=["']info["'][^>]*>[\s\S]*?<\/table>/i.exec(html)?.[0];
   if (!table) return vide;
 
-  const cellules = (re: RegExp) =>
-    [...table.matchAll(re)].map((m) => texte(m[1])).filter((v) => v !== "");
-  const intitules = cellules(/<th[^>]*>([\s\S]*?)<\/th>/gi);
-  const valeurs = cellules(/<td[^>]*>([\s\S]*?)<\/td>/gi);
-  if (intitules.length === 0 || intitules.length !== valeurs.length) return vide;
+  const par = new Map<string, string>();
+  TD.lastIndex = 0;
+  let td: RegExpExecArray | null;
+  while ((td = TD.exec(table)) !== null) par.set(normalize(td[1].trim()), texte(td[2]));
+  if (par.size === 0) return vide;
 
-  const par = new Map(intitules.map((k, i) => [normalize(k), valeurs[i]]));
   return {
-    teamName: par.get("nom") ?? null,
-    code: par.get("sigle") ?? null,
+    teamName: txt(par.get("nom")),
+    code: txt(par.get("sigle")),
     // « Association » porte le CLUB (« Squash club verrieres le buisson »), là où « Nom » porte
     // l'ÉQUIPE et son numéro (« Verrieres 2 »). C'est la distinction qui a coûté le bug des
     // équipes numérotées (`clubOfTeam`) : la fédération range ses joueurs sous le club.
-    club: par.get("association") ?? null,
-    captain: par.get("capitaine") ?? null,
+    club: txt(par.get("association")),
+    captain: txt(par.get("capitaine")),
   };
 }
 

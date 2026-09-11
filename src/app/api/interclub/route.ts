@@ -319,7 +319,13 @@ export async function POST(req: NextRequest) {
   }
 
   if (awayLines.filter((l) => estDesigne(l.awayName)).length >= 2) {
-    const awayProblem = awayLineupConflict(awayLines, await loadKnownOpponents(teamId));
+    // Le club d'en face est passé explicitement : `loadKnownOpponents` rend les adversaires de
+    // TOUS les clubs déjà affrontés, et un homonyme d'un autre club fausserait le verdict.
+    const awayProblem = awayLineupConflict(
+      awayLines,
+      await loadKnownOpponents(teamId),
+      opponent,
+    );
     if (awayProblem) {
       return NextResponse.json({ error: awayProblem }, { status: 400 });
     }

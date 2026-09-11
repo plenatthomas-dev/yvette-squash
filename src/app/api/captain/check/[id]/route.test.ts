@@ -14,6 +14,17 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/captain-access", () => ({
+  // La PORTE : flag → session → rôle, sans identifiant d'équipe. La route l'appelle AVANT de
+  // lire la rencontre, pour qu'une requête anonyme ne déclenche aucune lecture en base et que
+  // l'écart 401/404 ne révèle pas qu'une rencontre existe à cette adresse.
+  requireCaptain: vi.fn(async () =>
+    h.access.ok
+      ? { ok: true, session: { userId: "u1" }, teamIds: ["t1"], isAdmin: false }
+      : {
+          ok: false,
+          response: new Response(null, { status: h.access.status ?? 403 }) as unknown,
+        },
+  ),
   requireCaptainOf: vi.fn(async () =>
     h.access.ok
       ? { ok: true, session: { userId: "u1" }, teamIds: ["t1"], isAdmin: false }

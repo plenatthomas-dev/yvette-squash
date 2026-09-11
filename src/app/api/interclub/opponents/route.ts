@@ -33,10 +33,15 @@ export async function GET(req: NextRequest) {
 
   const rencontres = await prisma.interclub.findMany({
     where: teamId ? { teamId } : {},
-    // Croissant : `mergeOpponents` retient le nom LE PLUS RÉCENT, ce qui n'a de sens que si les
-    // rencontres arrivent dans l'ordre. À l'envers, la première orthographe l'emporterait —
-    // exactement celle qu'une correction ultérieure était censée remplacer.
-    orderBy: { date: "asc" },
+    // ⚠️ DÉCROISSANT, PUIS REMIS À L'ENDROIT. `take` s'applique APRÈS le tri : en croissant, il
+    // retenait les 40 rencontres LES PLUS ANCIENNES, c'est-à-dire exactement celles dont on n'a
+    // plus rien à faire. Passé la quarantième rencontre enregistrée — trois saisons à deux
+    // équipes —, le menu et la garde se figeaient sur la première année et la poule EN COURS
+    // disparaissait, sans un message : un club qu'on affronte ce soir n'aurait proposé personne.
+    //
+    // Le `reverse()` n'est pas cosmétique : `mergeOpponents` retient le nom LE PLUS RÉCENT, ce
+    // qui n'a de sens que si les rencontres lui arrivent de la plus ancienne à la plus récente.
+    orderBy: { date: "desc" },
     take: MAX_RENCONTRES,
     select: {
       opponent: true,
@@ -46,7 +51,9 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  const sources = rencontres.map((r) => ({
+  // `reverse()` : lues décroissant (pour retenir les PLUS RÉCENTES), rendues croissant — la
+  // fusion en dépend pour que « le nom le plus récent l'emporte » veuille dire quelque chose.
+  const sources = [...rencontres].reverse().map((r) => ({
     opponent: r.opponent,
     snOpponentTeamId: r.snOpponentTeamId,
     matches: r.matches,

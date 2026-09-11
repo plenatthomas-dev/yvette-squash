@@ -39,12 +39,32 @@ describe("GET /api/interclub/opponents", () => {
   // L'ORDRE DE LECTURE EST UNE RÈGLE, pas un détail : `mergeOpponents` retient le nom LE PLUS
   // RÉCENT. À l'envers, la première orthographe l'emporterait — exactement celle qu'une
   // correction ultérieure était censée remplacer.
-  it("lit les rencontres de la plus ancienne à la plus récente, et borne la profondeur", async () => {
+  // ⚠️ CE TEST AFFIRMAIT « asc », ET FIGEAIT AINSI LE DÉFAUT. `take` s'applique APRÈS le tri :
+  // en croissant, il retenait les 40 rencontres LES PLUS ANCIENNES — celles dont on n'a plus
+  // rien à faire. Passé la quarantième rencontre enregistrée, le menu se figeait sur la première
+  // saison et la poule EN COURS disparaissait, sans un message.
+  it("retient les rencontres LES PLUS RÉCENTES, et borne la profondeur", async () => {
     await GET(req());
     const args = h.findMany.mock.calls[0][0] as { orderBy: unknown; take: number; where: unknown };
-    expect(args.orderBy).toEqual({ date: "asc" });
+    expect(args.orderBy).toEqual({ date: "desc" });
     expect(args.take).toBe(40);
     expect(args.where).toEqual({ teamId: "t1" });
+  });
+
+  // L'autre moitié de la correction, et elle compte autant : `mergeOpponents` retient le nom LE
+  // PLUS RÉCENT, ce qui n'a de sens que si les rencontres lui arrivent dans l'ordre. Lues
+  // décroissant sans être remises à l'endroit, c'est la PREMIÈRE orthographe qui l'emporterait —
+  // exactement celle qu'une correction ultérieure était censée remplacer.
+  it("rend les rencontres à la fusion dans l'ordre chronologique", async () => {
+    h.rencontres = [
+      // Tel que la base les rend : la plus récente d'abord.
+      { opponent: "Chaville 4", matches: [{ awayName: "Détry" }], official: null },
+      { opponent: "Chaville 4", matches: [{ awayName: "detry" }], official: null },
+    ];
+    const res = await GET(req());
+    const { players } = (await res.json()) as { players: { name: string }[] };
+    expect(players).toHaveLength(1);
+    expect(players[0].name).toBe("Détry");
   });
 
   it("sans équipe, ne filtre pas plutôt que de filtrer sur rien", async () => {

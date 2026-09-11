@@ -23,8 +23,13 @@ type Db = Pick<Prisma.TransactionClient, "interclub" | "squashnetTeamRoster">;
 type MatchDb = Pick<Prisma.TransactionClient, "interclubMatch">;
 
 /**
- * Profondeur de lecture. Une saison compte cinq à sept rencontres ; deux saisons suffisent
- * largement à connaître une poule, et bornent la requête quoi qu'il arrive.
+ * Profondeur de lecture : les N rencontres LES PLUS RÉCENTES. Une saison en compte cinq à sept ;
+ * quarante couvrent donc largement deux saisons à deux équipes, et bornent la requête quoi
+ * qu'il arrive.
+ *
+ * ⚠️ « Les plus récentes » suppose un tri DÉCROISSANT à la lecture — cf. le commentaire des
+ * requêtes. Trié croissant, ce même `take` retient les plus ANCIENNES et fige les menus sur la
+ * première saison dès qu'on dépasse ce nombre.
  */
 export const MAX_RENCONTRES = 40;
 
@@ -38,9 +43,15 @@ export const MAX_RENCONTRES = 40;
 export async function loadKnownOpponents(teamId: string, db: Db = prisma): Promise<KnownOpponent[]> {
   const rencontres = await db.interclub.findMany({
     where: { teamId },
-    // Croissant : `mergeOpponents` retient le nom LE PLUS RÉCENT, ce qui n'a de sens que si les
-    // rencontres arrivent dans l'ordre.
-    orderBy: { date: "asc" },
+    // ⚠️ DÉCROISSANT, PUIS REMIS À L'ENDROIT. `take` s'applique APRÈS le tri : en croissant, il
+    // retenait les 40 rencontres LES PLUS ANCIENNES, c'est-à-dire exactement celles dont on n'a
+    // plus rien à faire. Passé la quarantième rencontre enregistrée — trois saisons à deux
+    // équipes —, le menu et la garde se figeaient sur la première année et la poule EN COURS
+    // disparaissait, sans un message : un club qu'on affronte ce soir n'aurait proposé personne.
+    //
+    // Le `reverse()` n'est pas cosmétique : `mergeOpponents` retient le nom LE PLUS RÉCENT, ce
+    // qui n'a de sens que si les rencontres lui arrivent de la plus ancienne à la plus récente.
+    orderBy: { date: "desc" },
     take: MAX_RENCONTRES,
     select: {
       opponent: true,
@@ -57,7 +68,9 @@ export async function loadKnownOpponents(teamId: string, db: Db = prisma): Promi
     db,
   );
   return mergeOpponents(
-    rencontres.map((r) => ({
+    // `reverse()` : lues décroissant (pour retenir les PLUS RÉCENTES), rendues croissant — la
+    // fusion en dépend pour que « le nom le plus récent l'emporte » veuille dire quelque chose.
+    [...rencontres].reverse().map((r) => ({
       opponent: r.opponent,
       snOpponentTeamId: r.snOpponentTeamId,
       matches: r.matches,
@@ -90,6 +103,12 @@ export async function findAwayOrderConflict(
   exceptMatchId: string,
   candidate: { order: number; awayName: string },
   known: () => Promise<readonly KnownOpponent[]>,
+  /**
+   * Le club d'en face — `Interclub.opponent`. OBLIGATOIRE : `known` porte les adversaires de
+   * TOUS les clubs déjà affrontés par notre équipe, et sans cette précision un homonyme d'un
+   * autre club prêterait son classement à celui qu'on désigne.
+   */
+  opponent: string,
 ): Promise<string | null> {
   if (!estDesigne(candidate.awayName)) return null;
 
@@ -100,7 +119,7 @@ export async function findAwayOrderConflict(
   const lines = [...siblings, candidate];
   if (lines.filter((l) => estDesigne(l.awayName)).length < 2) return null;
 
-  return awayLineupConflict(lines, await known());
+  return awayLineupConflict(lines, await known(), opponent);
 }
 
 /**

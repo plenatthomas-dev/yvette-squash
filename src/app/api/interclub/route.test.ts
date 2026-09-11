@@ -363,12 +363,18 @@ describe("POST /api/interclub", () => {
     };
   }
 
+  // ⚠️ `opponent` DOIT ÊTRE CELUI DE LA RENCONTRE PASSÉE. Ce test composait contre « Squash de
+  // Massy » (le défaut de `validBody`) avec des adversaires connus de « Chaville 4 », et passait
+  // quand même : la garde raccrochait alors sur le seul NOM, en ignorant le club. Elle prêtait
+  // donc le classement d'un joueur de Chaville à un homonyme de Massy — et refusait en 400 des
+  // compositions parfaitement régulières. Le test était vert À CAUSE du défaut.
   it("refuse un adversaire MIEUX classé placé sur un simple plus tardif", async () => {
     deuxDesNotres();
     h.passees = [rencontreVerifiee()];
     const res = await POST(
       post({
         ...validBody,
+        opponent: "Chaville 4",
         matches: [
           { userId: "u9", awayName: "Paul Martin" }, // 5A au simple n° 1
           { userId: "u8", awayName: "Luc Bernard" }, // 4A au simple n° 2 : l'ordre est rompu
@@ -378,6 +384,25 @@ describe("POST /api/interclub", () => {
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/simples adverses/i);
     expect(h.created).toBeNull();
+  });
+
+  // L'AUTRE MOITIÉ DE LA CORRECTION : le classement d'un homonyme ne traverse plus les clubs.
+  it("ne conclut RIEN sur un homonyme connu d'un AUTRE club", async () => {
+    deuxDesNotres();
+    h.passees = [rencontreVerifiee()]; // Paul Martin et Luc Bernard, à Chaville 4
+    const res = await POST(
+      post({
+        ...validBody,
+        opponent: "UCPA Meudon 2", // on n'a jamais joué contre eux
+        matches: [
+          { userId: "u9", awayName: "Paul Martin" },
+          { userId: "u8", awayName: "Luc Bernard" },
+        ],
+      }),
+    );
+    // Leurs Paul Martin et Luc Bernard ne sont pas ceux de Chaville : on ne sait rien d'eux,
+    // donc on ne refuse rien. Refuser ici rendrait incomposable une première rencontre.
+    expect(res.status).toBe(201);
   });
 
   it("accepte le même duo dans le bon ordre", async () => {

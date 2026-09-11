@@ -72,7 +72,13 @@ export async function POST(req: NextRequest) {
   // chercher un roster que personne n'affiche — ou l'inverse, plus déroutant encore.
   const rencontres = await prisma.interclub.findMany({
     where: teamId ? { teamId } : {},
-    orderBy: { date: "asc" },
+    // DÉCROISSANT : on rafraîchit les rosters des équipes qu'on affronte BIENTÔT, pas ceux des
+    // clubs croisés il y a trois ans. Croissant, ce `take` retenait les plus anciennes — et la
+    // poule en cours n'était jamais rafraîchie passé la quarantième rencontre.
+    //
+    // L'ordre n'a aucune autre conséquence ici : on n'en tire que des identifiants, dédoublonnés
+    // ensuite. C'est la seule des trois requêtes qui ne nourrit pas `mergeOpponents`.
+    orderBy: { date: "desc" },
     take: MAX_RENCONTRES,
     select: { snOpponentTeamId: true },
   });

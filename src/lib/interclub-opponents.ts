@@ -306,12 +306,28 @@ export function opponentTeams(sources: { opponent: string }[]): string[] {
 export function awayLineupConflict(
   lines: readonly { order: number; awayName: string }[],
   known: readonly KnownOpponent[],
+  opponent: string,
 ): string | null {
+  // ⚠️ L'ÉQUIPE EST OBLIGATOIRE, ET C'EST UNE CORRECTION. `known` arrive de
+  // `loadKnownOpponents(teamId)`, qui rend les adversaires de TOUS les clubs que notre équipe a
+  // affrontés — c'est ce qu'il faut pour remplir un menu, jamais pour juger UNE composition.
+  // La carte se construisait sur le seul nom : un « Paul Martin » de Chaville fournissait donc
+  // son classement à un « Paul Martin » de Meudon, et la route refusait en 400 une composition
+  // parfaitement régulière, sur un classement qui n'était pas le sien.
+  //
+  // `mergeOpponents` prend soin de séparer ces homonymes par équipe (c'est même un de ses
+  // tests) : les refondre ici défaisait son travail. L'écran, lui, filtrait déjà sur l'équipe
+  // avant d'appeler — d'où un serveur qui refusait ce que l'écran venait d'autoriser, l'inverse
+  // exact de ce que ce module promet.
+  //
   // La clé est INSENSIBLE À L'ORDRE DES MOTS (`nameKey`) : le roster fédéral écrit « POPULU
   // AXEL », la feuille de match « Axel Populu ». Avec `normalize` seule, un capitaine qui
   // choisit un joueur au menu du roster puis en retape un autre à la main verrait la garde
   // renoncer — « on ne conclut rien » — sur un joueur pourtant parfaitement connu.
-  const parNom = new Map(known.map((k) => [nameKey(k.name), k]));
+  const cible = normalize(opponent);
+  const parNom = new Map(
+    known.filter((k) => normalize(k.team) === cible).map((k) => [nameKey(k.name), k]),
+  );
 
   const designes = lines.filter((l) => estDesigne(l.awayName));
   // Un seul adversaire désigné ne peut violer aucun ordre : il n'y a personne à comparer.

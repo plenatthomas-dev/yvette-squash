@@ -198,6 +198,7 @@ describe("awayLineupConflict", () => {
     const out = awayLineupConflict(
       [ligne(1, "Paul Martin"), ligne(2, "Luc Bernard")],
       [connu("Paul Martin", "5A", 2000), connu("Luc Bernard", "4A", 100)],
+    "Chaville 4",
     );
     expect(out).toMatch(/^Ordre des simples adverses — /);
     expect(out).toContain("LUC BERNARD");
@@ -208,6 +209,7 @@ describe("awayLineupConflict", () => {
       awayLineupConflict(
         [ligne(1, "Luc Bernard"), ligne(2, "Paul Martin")],
         [connu("Paul Martin", "5A", 2000), connu("Luc Bernard", "4A", 100)],
+      "Chaville 4",
       ),
     ).toBeNull();
   });
@@ -217,6 +219,7 @@ describe("awayLineupConflict", () => {
       awayLineupConflict(
         [ligne(1, "Paul Martin"), ligne(2, "Luc Bernard")],
         [connu("Paul Martin", "5A", 2000), connu("Luc Bernard", "5A", 100)],
+      "Chaville 4",
       ),
     ).toContain("à classement égal");
   });
@@ -229,6 +232,7 @@ describe("awayLineupConflict", () => {
       awayLineupConflict(
         [ligne(1, "Paul Martin"), ligne(2, "Jamais Vu")],
         [connu("Paul Martin", "5A", 2000)],
+      "Chaville 4",
       ),
     ).toBeNull();
   });
@@ -238,6 +242,7 @@ describe("awayLineupConflict", () => {
       awayLineupConflict(
         [ligne(1, "Paul Martin"), ligne(2, "Luc Bernard")],
         [connu("Paul Martin", "5A", 2000), connu("Luc Bernard", null as unknown as string, null)],
+      "Chaville 4",
       ),
     ).toBeNull();
   });
@@ -249,6 +254,7 @@ describe("awayLineupConflict", () => {
       awayLineupConflict(
         [ligne(1, "Paul Martin"), ligne(2, "Luc Bernard")],
         [connu("Paul Martin", "5A", 2000), connu("Luc Bernard", "5A", null)],
+      "Chaville 4",
       ),
     ).toBeNull();
   });
@@ -260,6 +266,7 @@ describe("awayLineupConflict", () => {
       awayLineupConflict(
         [ligne(1, "Paul Martin"), ligne(2, "Luc Bernard")],
         [connu("Paul Martin", "NC", null), connu("Luc Bernard", "NC", null)],
+      "Chaville 4",
       ),
     ).toBeNull();
   });
@@ -269,6 +276,7 @@ describe("awayLineupConflict", () => {
       awayLineupConflict(
         [ligne(1, "À désigner"), ligne(2, "Luc Bernard")],
         [connu("Luc Bernard", "4A", 100)],
+      "Chaville 4",
       ),
     ).toBeNull();
   });
@@ -280,6 +288,7 @@ describe("awayLineupConflict", () => {
       awayLineupConflict(
         [ligne(1, "À désigner"), ligne(2, "Luc Bernard"), ligne(3, "Paul Martin")],
         [connu("Paul Martin", "5A", 2000), connu("Luc Bernard", "4A", 100)],
+      "Chaville 4",
       ),
     ).toBeNull();
   });
@@ -289,6 +298,7 @@ describe("awayLineupConflict", () => {
       awayLineupConflict(
         [ligne(1, "  paul MARTIN "), ligne(2, "Luc Bernard")],
         [connu("Paul Martin", "5A", 2000), connu("Luc Bernard", "4A", 100)],
+      "Chaville 4",
       ),
     ).toMatch(/^Ordre des simples adverses — /);
   });
@@ -458,6 +468,7 @@ describe("awayLineupConflict — sur un roster, dès la première rencontre", ()
           { order: 2, awayName: "POPULU AXEL" },
         ],
         known(),
+      "Chaville 4",
       ),
     ).toMatch(/Ordre des simples adverses/);
   });
@@ -472,6 +483,7 @@ describe("awayLineupConflict — sur un roster, dès la première rencontre", ()
           { order: 2, awayName: "Olivier Martin" },
         ],
         known(),
+      "Chaville 4",
       ),
     ).toBeNull();
   });
@@ -635,5 +647,94 @@ describe("awayLineupDuplicate — la composition entière", () => {
         { order: 2, awayName: "À désigner" },
       ]),
     ).toBeNull();
+  });
+});
+
+// ============================================================================
+//  L'HOMONYME D'UN AUTRE CLUB DE LA POULE.
+//
+//  `loadKnownOpponents(teamId)` rend les adversaires de TOUS les clubs que notre
+//  équipe a affrontés — c'est ce qu'il faut pour remplir un menu, jamais pour
+//  juger UNE composition. Aucun test ne lui passait deux clubs, et la garde
+//  raccrochait donc sur le seul nom.
+// ============================================================================
+
+describe("awayLineupConflict — ne confond pas deux clubs", () => {
+  const chez = (name: string, team: string, clt: string, rangM: number): KnownOpponent => ({
+    name,
+    team,
+    fedName: name.toUpperCase(),
+    clt,
+    rangM,
+    licence: null,
+    seen: 1,
+    source: "roster",
+  });
+
+  // Le « Paul Martin » de Chaville est bien mieux classé que celui de Meudon. Emprunter son
+  // classement fait conclure à un ordre rompu là où il ne l'est pas.
+  const poule = [
+    chez("Paul Martin", "Chaville 4", "3A", 300),
+    chez("Paul Martin", "UCPA Meudon 2", "5D", 8000),
+    chez("Luc Bernard", "UCPA Meudon 2", "5A", 2500),
+  ];
+
+  it("n'emprunte PAS le classement d'un homonyme d'un autre club", () => {
+    // Contre Meudon : leur Paul Martin (5D, 8000) est moins bien classé que Luc Bernard
+    // (5A, 2500), donc Bernard en n° 1 puis Martin en n° 2 est CONFORME. Avec le classement du
+    // Paul Martin de Chaville (3A), la composition passerait pour rompue et serait refusée.
+    expect(
+      awayLineupConflict(
+        [
+          { order: 1, awayName: "Luc Bernard" },
+          { order: 2, awayName: "Paul Martin" },
+        ],
+        poule,
+        "UCPA Meudon 2",
+      ),
+    ).toBeNull();
+  });
+
+  it("refuse bien un ordre rompu à l'intérieur du BON club", () => {
+    // La garde ne se contente pas de se taire : contre Meudon, Martin (5D) avant Bernard (5A)
+    // est bel et bien une inversion.
+    expect(
+      awayLineupConflict(
+        [
+          { order: 1, awayName: "Paul Martin" },
+          { order: 2, awayName: "Luc Bernard" },
+        ],
+        poule,
+        "UCPA Meudon 2",
+      ),
+    ).toMatch(/Ordre des simples adverses/);
+  });
+
+  it("ne conclut rien si le joueur n'est connu que dans un AUTRE club", () => {
+    // Luc Bernard n'a jamais joué pour Chaville : contre Chaville, on ne sait pas le situer.
+    // Lui prêter son classement de Meudon serait une affirmation sans fondement.
+    expect(
+      awayLineupConflict(
+        [
+          { order: 1, awayName: "Luc Bernard" },
+          { order: 2, awayName: "Paul Martin" },
+        ],
+        poule,
+        "Chaville 4",
+      ),
+    ).toBeNull();
+  });
+
+  it("compare le nom d'équipe à l'accent et à la casse près, comme la fusion", () => {
+    expect(
+      awayLineupConflict(
+        [
+          { order: 1, awayName: "Paul Martin" },
+          { order: 2, awayName: "Luc Bernard" },
+        ],
+        poule,
+        "ucpa  meudon 2",
+      ),
+    ).toMatch(/Ordre des simples adverses/);
   });
 });

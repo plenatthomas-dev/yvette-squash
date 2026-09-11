@@ -306,6 +306,9 @@ export async function PATCH(
           mid,
           { order: m.order, awayName: propose },
           () => loadKnownOpponents(m.interclub.teamId, tx),
+          // Le club d'en face : sans lui, un homonyme d'un AUTRE club de la poule prêterait son
+          // classement à celui qu'on désigne, et la route refuserait une composition régulière.
+          m.interclub.opponent,
         );
         if (awayProblem) throw new HttpError(400, awayProblem);
         data.awayName = propose;

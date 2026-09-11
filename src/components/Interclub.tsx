@@ -39,6 +39,7 @@ import {
   type GameScore,
 } from "@/lib/interclub";
 import { compareRosterOrder, isNC, lineupOrderConflict, type OrderedSlot } from "@/lib/interclub-order";
+import { normalize } from "@/lib/squashnet/match";
 import {
   awayAlignmentClash,
   awayLineupConflict,
@@ -1298,8 +1299,18 @@ function FixtureDialog({
   // Les adversaires connus de CE club. Le nom d'équipe se compare replié (casse, accents,
   // espaces) : la rencontre porte l'orthographe de son import, la liste celle de la sienne, et
   // rien ne garantit qu'elles coïncident au caractère près.
+  //
+  // ⚠️ `normalize`, ET PAS `toLowerCase()`. Le commentaire ci-dessus promettait les accents et
+  // les espaces depuis l'origine ; `toLowerCase()` n'en replie aucun. « Élancourt 2 » dans la
+  // rencontre et « Elancourt 2 » dans la liste ne coïncidaient donc pas : le menu disparaissait,
+  // `awayLibre` s'initialisait à `true`, et on retapait le nom à la main — exactement ce que ce
+  // menu existe pour éviter.
+  //
+  // C'est aussi LA MÊME FONCTION QUE LE SERVEUR, qui filtre l'équipe de la même façon dans
+  // `awayLineupConflict`. Deux replis différents referaient l'écart qu'on vient de fermer : un
+  // écran qui propose un joueur que la route refuse ensuite.
   const clubOpponents = knownOpponents.filter(
-    (o) => o.team.trim().toLowerCase() === fixture.opponent.trim().toLowerCase(),
+    (o) => normalize(o.team) === normalize(fixture.opponent),
   );
 
   // L'ORDRE DÉJÀ POSÉ EN FACE, pour griser dans le sélecteur un adversaire qui le romprait —
@@ -2146,6 +2157,11 @@ function MatchEditor({
                           l.order === match.order ? { order: match.order, awayName: o.name } : l,
                         ),
                         clubOpponents,
+                        // `clubOpponents` est déjà filtré sur ce club (cf. plus haut), mais
+                        // l'équipe se passe quand même : c'est la MÊME signature que celle du
+                        // serveur, et c'est ce qui garantit que l'écran grise exactement ce que
+                        // la route refuserait.
+                        opponentTeamName,
                       );
                 return (
                   <option

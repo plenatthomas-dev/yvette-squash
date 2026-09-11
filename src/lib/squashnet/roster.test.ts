@@ -137,3 +137,68 @@ describe("nameKey — l'ordre des mots ne fait pas deux joueurs", () => {
     expect(nameKey("   ")).toBe("");
   });
 });
+
+describe("parseTeamRoster — l'identité de l'équipe ne se décale pas", () => {
+  // ⚠️ LE CAS QUI CASSAIT. L'appariement se faisait par POSITION, après avoir écarté les cases
+  // vides : un club sans site internet décalait la colonne suivante, et « Association » — le nom
+  // du CLUB, celui sous lequel la fédération range ses joueurs — prenait la place du site.
+  // En silence, sur un club parfaitement ordinaire.
+  const sansSite = `
+    <table id="info" class="table">
+      <tr><th>Nom</th><th>Sigle</th><th>Capitaine</th><th>Site internet</th><th>Association</th></tr>
+      <tr>
+        <td data-label="Nom">Chaville 4</td>
+        <td data-label="Sigle">CHAV4</td>
+        <td data-label="Capitaine">DUPONT JEAN</td>
+        <td data-label="Site internet"></td>
+        <td data-label="Association">Squash club de Chaville</td>
+      </tr>
+    </table>
+    <table id="players_42"><tr><td data-label="Nom Prénom">DUPONT JEAN</td></tr></table>`;
+
+  it("garde le CLUB à sa place quand une colonne est vide", () => {
+    const r = parseTeamRoster(sansSite, "42");
+    expect(r.club).toBe("Squash club de Chaville");
+    expect(r.teamName).toBe("Chaville 4");
+    expect(r.code).toBe("CHAV4");
+    expect(r.captain).toBe("DUPONT JEAN");
+  });
+
+  it("ne dépend pas de l'ORDRE des colonnes", () => {
+    // C'est ce que `data-label` achète : une colonne insérée ou déplacée par la ligue ne
+    // déplace plus rien.
+    const inverse = `
+      <table id="info">
+        <tr>
+          <td data-label="Association">Squash club de Chaville</td>
+          <td data-label="Nom">Chaville 4</td>
+        </tr>
+      </table>
+      <table id="players_42"><tr><td data-label="Nom Prénom">DUPONT JEAN</td></tr></table>`;
+    const r = parseTeamRoster(inverse, "42");
+    expect(r.club).toBe("Squash club de Chaville");
+    expect(r.teamName).toBe("Chaville 4");
+  });
+
+  it("rend null, jamais la chaîne vide, sur une case présente mais vide", () => {
+    // Une chaîne vide se teste mal : `roster.club ?? clubOfTeam(...)` la laisserait passer et
+    // on chercherait les joueurs sous un club sans nom.
+    const r = parseTeamRoster(sansSite, "42");
+    expect(r).toMatchObject({ club: expect.any(String) });
+    const vide = parseTeamRoster(
+      `<table id="info"><tr><td data-label="Nom"> </td></tr></table>
+       <table id="players_42"><tr><td data-label="Nom Prénom">A B</td></tr></table>`,
+      "42",
+    );
+    expect(vide.teamName).toBeNull();
+  });
+
+  it("rend une identité vide, sans jeter, quand le tableau info manque", () => {
+    const r = parseTeamRoster(
+      '<table id="players_42"><tr><td data-label="Nom Prénom">A B</td></tr></table>',
+      "42",
+    );
+    expect(r).toMatchObject({ teamName: null, code: null, club: null, captain: null });
+    expect(r.players).toHaveLength(1);
+  });
+});
