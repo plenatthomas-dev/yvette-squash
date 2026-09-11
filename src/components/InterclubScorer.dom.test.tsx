@@ -478,6 +478,11 @@ describe("InterclubScorer — les gestes qu'on fait sans regarder", () => {
   it("vibre brièvement sur un point, et double sur une fin de jeu", async () => {
     // Le marquage est le seul écran qu'on utilise sans le regarder : on tape, et on regarde
     // le court. La vibration est la seule confirmation qui n'oblige pas à lever les yeux.
+    //
+    // ⚠️ LA DURÉE EST LE SUJET, pas le fait d'appeler. `vibrate` ne pilote QUE la durée, jamais
+    // l'intensité, et les moteurs à résonance linéaire mettent quelques dizaines de
+    // millisecondes à monter en amplitude : à 12 ms — la valeur du Fil, reprise au premier
+    // essai — l'ordre est fini avant que le moteur ait démarré, et on ne sent rien du tout.
     const vibrate = vi.fn();
     vi.stubGlobal("navigator", { ...navigator, vibrate });
     vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
@@ -488,15 +493,17 @@ describe("InterclubScorer — les gestes qu'on fait sans regarder", () => {
 
     fireEvent.click(getByLabelText("Point pour Thomas"));
     await souffle();
-    expect(vibrate).toHaveBeenLastCalledWith(12);
+    expect(vibrate).toHaveBeenLastCalledWith(30);
 
     for (let i = 0; i < 10; i++) fireEvent.click(getByLabelText("Point pour Thomas"));
     await souffle();
-    expect(vibrate).toHaveBeenLastCalledWith([14, 60, 14]);
+    expect(vibrate).toHaveBeenLastCalledWith([40, 70, 40]);
   });
 
   it("ne jette pas quand le navigateur ne vibre pas", async () => {
-    // iOS ne connaît pas l'API. Le marquage doit fonctionner exactement pareil.
+    // AUCUN navigateur sur iPhone ne connaît l'API — ils utilisent tous le moteur de Safari,
+    // qui ne l'implémente pas. Ce n'est pas rattrapable côté web, et le marquage doit
+    // fonctionner exactement pareil.
     vi.stubGlobal("navigator", { ...navigator, vibrate: undefined });
     vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
     const { getByText, getByLabelText } = monteVierge();
@@ -521,5 +528,25 @@ describe("InterclubScorer — les gestes qu'on fait sans regarder", () => {
     unmount();
     await souffle();
     expect(release).toHaveBeenCalled();
+  });
+});
+
+describe("InterclubScorer — le tableau ne bouge plus sous le doigt", () => {
+  // ⚠️ CE QUI SE VÉRIFIE ICI EST LA MOITIÉ OBSERVABLE. Les panneaux (« Qui engage ? », carré de
+  // service, pause, fin de match) sont sortis du FLUX, pas du DOM : ils restent enfants de
+  // l'écran et passent par-dessus le tableau. jsdom ne calcule aucune mise en page, donc cette
+  // sortie-là ne se teste pas ici — elle est tenue dans globals.css.test.ts, sur la règle
+  // elle-même, qui est l'endroit où elle est écrite.
+  //
+  // Reste ce qui se voit dans le DOM : la ligne des jeux terminés, dont l'apparition tardive
+  // faisait sauter le tableau d'un cran au premier jeu gagné.
+
+  it("réserve la ligne des jeux terminés dès le premier point", async () => {
+    // Elle n'apparaissait qu'au premier jeu gagné, et faisait sauter le tableau d'un cran
+    // exactement à ce moment-là — soit la fin du jeu, quand tout le monde regarde l'écran.
+    vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
+    const ecran = monteVierge();
+    await souffle();
+    expect(ecran.container.querySelector(".ics-history")).not.toBeNull();
   });
 });

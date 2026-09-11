@@ -228,6 +228,22 @@ Le premier est celui qui change le plus l'usage réel : un téléphone posé au 
 verrouille au bout de trente secondes, et le marqueur le déverrouillait entre **chaque échange**.
 Rien dans le code ne le montrait — l'appli fonctionnait parfaitement.
 
+⚠️ **30 ms, et non 12.** `vibrate` ne pilote que la **durée**, jamais l'intensité, et les moteurs
+à résonance linéaire des téléphones récents mettent quelques dizaines de millisecondes à monter en
+amplitude : en dessous, l'ordre est fini avant que le moteur ait démarré et on ne sent rien. La
+valeur du Fil (12 ms) a été reprise au premier essai, et ne se sentait pas — là-bas c'est un tic
+discret sur un écran qu'on regarde, ici c'est la seule confirmation d'un geste fait en regardant
+ailleurs.
+
+⚠️ **Les quatre panneaux passent PAR-DESSUS le tableau** (`.ics-ask`, `position: absolute`, en bas
+de l'écran). Ils en étaient des frères : chaque apparition — « Qui engage ? », le carré de service,
+la pause, la fin de match — prenait sa hauteur au tableau, et comme toute la typographie des deux
+cases se règle en **requêtes de conteneur sur la case elle-même**, le score changeait de taille à la
+fin de chaque jeu, à chaque reprise de service et au coup de sifflet final. Même raison pour la
+ligne des jeux terminés, désormais toujours rendue avec un `min-height` : elle n'apparaissait qu'au
+premier jeu gagné, et faisait sauter le tableau exactement à ce moment-là. La garde est dans
+`globals.css.test.ts` — jsdom ne calcule aucune mise en page, un test de DOM ne peut pas la tenir.
+
 ⚠️ **La règle des balles n'est pas réécrite** : `ballPoint` ajoute un point au camp considéré et
 demande à `gameWinner` si le jeu serait fini. Une seconde copie du « 11 points et 2 d'écart »
 finirait par diverger, et l'écart ne se verrait qu'à 10-10 — devant tout le court.

@@ -200,3 +200,29 @@ describe("les cases de marquage supportent la rafale d'appuis", () => {
     expect(caseDeMarquage()).toMatch(/(?:^|;)\s*user-select\s*:\s*none/);
   });
 });
+
+describe("les panneaux du marquage passent PAR-DESSUS le tableau", () => {
+  /** Le corps d'une règle, sélecteur exact, commentaires ôtés. */
+  const regleDe = (sel: string) => {
+    const sans = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
+    const m = new RegExp(
+      "(?:^|[};])\\s*" + sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}",
+      "m",
+    ).exec(sans);
+    expect(m).not.toBeNull();
+    return (m as RegExpExecArray)[1];
+  };
+
+  it("⚠️ `.ics-ask` est HORS DU FLUX — sinon il vole sa hauteur au tableau", () => {
+    // Toute la typographie des deux cases se règle en requêtes de conteneur sur la case
+    // elle-même : un panneau qui prend de la hauteur change la taille du SCORE. Ça se produisait
+    // à la fin de chaque jeu, à chaque reprise de service, et au coup de sifflet final.
+    expect(regleDe(".ics-ask")).toMatch(/position\s*:\s*absolute/);
+  });
+
+  it("la ligne des jeux terminés garde sa place même vide", () => {
+    // Elle n'apparaît qu'au premier jeu gagné. Sans réserve, le tableau saute d'un cran à ce
+    // moment précis — celui où tout le monde regarde l'écran.
+    expect(regleDe(".ics-history")).toMatch(/min-height/);
+  });
+});

@@ -4823,8 +4823,14 @@ body[data-bottombar] .install-banner {
   background: #fcd34d;
 }
 
+/* ⚠️ SA PLACE EST RÉSERVÉE MÊME QUAND ELLE EST VIDE. Cette ligne n'apparaît qu'au
+   premier jeu terminé : sans réserve, le tableau des scores se réduisait d'un cran à
+   ce moment-là, et toute la typographie des deux cases — réglée en requêtes de
+   conteneur sur la case elle-même — changeait de taille au milieu du match. Vingt
+   pixels réservés valent mieux qu'un tableau qui se redessine sous le doigt. */
 .ics-history {
   margin: 0;
+  min-height: 1.3em;
   text-align: center;
   font-size: 0.85rem;
   font-weight: 600;
@@ -5010,12 +5016,37 @@ body[data-bottombar] .install-banner {
 
 /* Panneau de question (engagement, carré de service, pause, fin). Il occupe le bas de
    l'écran, à portée du pouce. */
+/* ⚠️ PAR-DESSUS LE TABLEAU, JAMAIS EN DESSOUS DE LUI.
+
+   Ces quatre panneaux — « Qui engage ? », le carré de service, la pause, la fin de
+   match — étaient des frères du tableau dans la colonne. Chacune de leurs apparitions
+   lui prenait donc sa hauteur, et comme toute la typographie des deux cases se règle
+   en REQUÊTES DE CONTENEUR sur la case elle-même, le score changeait de taille à
+   chaque fois : à la fin de chaque jeu, à chaque reprise de service, et au coup de
+   sifflet final. Un tableau de marquage qui se redessine sous le doigt, sur un écran
+   qu'on regarde de loin et qu'on tape sans le regarder.
+
+   Sortis du flux, ils ne coûtent plus un pixel au tableau : les deux cases gardent
+   exactement la même taille du premier point au dernier.
+
+   EN BAS, et non au centre : c'est là que sont les pouces, et c'est la moitié de
+   l'écran qu'on peut masquer sans cacher les scores — qui restent lisibles pendant la
+   pause, précisément le moment où on les regarde. `--elev-3` est l'ombre la plus forte
+   du vocabulaire (DESIGN.md) : elle dit « ceci est par-dessus », ce qui est le seul
+   message à faire passer. */
 .ics-ask {
-  flex: 0 0 auto;
+  position: absolute;
+  z-index: 2;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  max-height: 70%;
+  overflow-y: auto;
   padding: 12px;
   border-radius: var(--radius);
   border: 1px solid var(--grid-line);
   background: var(--pico-card-background-color);
+  box-shadow: var(--elev-3);
   text-align: center;
 }
 .ics-ask p { margin: 0 0 8px; }

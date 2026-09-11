@@ -450,11 +450,21 @@ export default function InterclubScorer({
     // court. Une brève vibration confirme l'appui sans lever les yeux — et une double vibration
     // dit qu'un jeu vient de tomber, ce qui est l'autre information qu'on cherchait à l'écran.
     //
-    // `?.` parce que l'API n'existe pas partout (iOS ne la connaît pas) : le marquage doit
-    // fonctionner exactement pareil sans elle. Même doctrine que le verrou d'écran.
+    // ⚠️ 30 ms, ET NON 12. Le premier essai reprenait la durée du Fil (12 ms), et elle ne se
+    // sentait pas : là-bas c'est un tic discret sur un écran qu'on REGARDE, ici c'est la seule
+    // confirmation d'un geste fait en regardant ailleurs. Surtout, `vibrate` ne pilote que la
+    // DURÉE — jamais l'intensité — et les moteurs à résonance linéaire des téléphones récents
+    // mettent quelques dizaines de millisecondes à monter en amplitude : en dessous, le moteur
+    // n'a pas fini de démarrer que l'ordre est déjà fini. 30 ms se sent sans être désagréable
+    // sur une main qui tient l'appareil.
+    //
+    // `?.` parce que l'API n'existe nulle part chez Apple — ni Safari iOS, ni aucun navigateur
+    // sur iPhone, qui utilisent tous le moteur de Safari. Sur ces appareils il n'y aura JAMAIS
+    // de retour haptique ici, et ce n'est pas rattrapable côté web. Le marquage fonctionne
+    // exactement pareil sans elle : même doctrine que le verrou d'écran.
     if (after.games.length !== before.games.length || after.current.home !== before.current.home
         || after.current.away !== before.current.away) {
-      navigator.vibrate?.(gameEnded ? [14, 60, 14] : 12);
+      navigator.vibrate?.(gameEnded ? [40, 70, 40] : 30);
     }
 
     if (gameEnded && !finished) setBreakUntil(Date.now() + BREAK_SECONDS * 1000);
@@ -609,16 +619,18 @@ export default function InterclubScorer({
         </button>
       </header>
 
-      {state.games.length > 0 && (
-        <p className="ics-history">
-          {state.games.map((g: GameScore, i: number) => (
-            <span key={i}>
-              {g.home}-{g.away}
-              {i < state.games.length - 1 ? " · " : ""}
-            </span>
-          ))}
-        </p>
-      )}
+      {/* TOUJOURS RENDUE, même vide (sa hauteur est réservée en CSS). Conditionner son
+          affichage faisait sauter le tableau d'un cran au premier jeu terminé, et toute la
+          typographie des cases avec lui — elle se règle en requêtes de conteneur sur la case,
+          donc sur sa hauteur. */}
+      <p className="ics-history">
+        {state.games.map((g: GameScore, i: number) => (
+          <span key={i}>
+            {g.home}-{g.away}
+            {i < state.games.length - 1 ? " · " : ""}
+          </span>
+        ))}
+      </p>
 
       <div className="ics-board">
         {side("home")}
