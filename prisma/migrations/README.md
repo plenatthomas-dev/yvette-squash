@@ -1,6 +1,10 @@
 # Migrations — règle de nommage et pièges
 
-**Préfixe à DEUX CHIFFRES, toujours.** La prochaine migration s'appelle `52_<sujet>`.
+**Préfixe à DEUX CHIFFRES, toujours.** La prochaine migration s'appelle `56_<sujet>`.
+
+**Et un numéro ne se prend qu'UNE fois.** Le numéro se choisit d'après `main`, au moment de
+créer la migration — pas d'après sa propre branche, qui ignore ce que les autres ont posé
+depuis. Voir « Deux branches, un même numéro » plus bas.
 
 ## Pourquoi la largeur fixe
 
@@ -66,6 +70,46 @@ Concrètement, **avant de fusionner ce changement** :
    script) — le plus simple étant de les réaligner sur `main` juste après la fusion ;
 2. se souvenir qu'un `git revert`, un hotfix sur un ancien tag ou un redéploiement d'un commit
    antérieur exigent de jouer **le script de retour** d'abord.
+
+## Deux branches, un même numéro
+
+**Arrivé le 2026-09-11.** `feature_captain`, créée avant que `main` ne pose
+`51_squashnet_ranking_probe`, avait numéroté `51_interclub_official`. Pendant ce temps
+`feature_audit` posait `52_index_purges` et la branche captain avait déjà son `52_`.
+
+**Git ne dit rien** : ce sont des dossiers différents, la fusion est propre. L'arbre fusionné
+aurait simplement porté deux `51_` et deux `52_`. Ça aurait même *fonctionné* — les quatre
+migrations sont indépendantes, et `localeCompare` leur donne un ordre quelconque mais valide.
+C'est précisément ce qui rend le piège dangereux : il ne se manifeste pas le jour où on le
+pose, mais le jour où deux migrations homonymes ont, elles, une dépendance.
+
+### Comment on l'a dénoué, et ce que ça coûte
+
+Les trois migrations de la branche ont été renumérotées `53_`, `54_`, `55_` — **avant** la
+fusion vers `main`, seul moment où c'est gratuit. La production ne les avait jamais vues.
+
+⚠️ **Mais la base `dev` les avait déjà**, sous leurs anciens noms : toutes les previews la
+partagent, et la branche y avait déjà été déployée. Pour Prisma, un nom nouveau est une
+migration pendante — il allait la rejouer sur une base portant déjà ses objets, échouer en
+`already exists` (P3018) et bloquer les déploiements de preview jusqu'à un `migrate resolve`
+à la main.
+
+Plutôt qu'une intervention manuelle sur une base qu'on ne peut pas atteindre depuis un poste,
+les trois migrations ont été rendues **rejouables** : `CREATE TABLE IF NOT EXISTS`,
+`ADD COLUMN IF NOT EXISTS`, `CREATE UNIQUE INDEX IF NOT EXISTS`, et pour la contrainte de clé
+étrangère — qui ne connaît pas `IF NOT EXISTS` — un `DROP CONSTRAINT IF EXISTS` avant l'ajout.
+La base `dev` se répare donc toute seule au déploiement suivant, et une base vierge ne voit
+aucune différence. Les lignes des anciens noms restent dans son `_prisma_migrations`,
+inoffensives — comme `10_passkey_backup` en production.
+
+Réécrire le corps d'une migration est normalement interdit (la somme de contrôle est en base).
+Ici c'était libre : **sous le nouveau nom, aucune base n'avait de somme enregistrée.** C'est la
+seule fenêtre où l'on peut le faire, et elle se referme à la première application.
+
+Preuve faite sur Docker avant la fusion : base vierge → `migrate deploy` → `migrate diff` sans
+différence ; puis les trois lignes de `_prisma_migrations` remises à leurs anciens noms pour
+simuler `dev`, une donnée insérée, `migrate deploy` rejoué — appliqué sans erreur, donnée
+intacte, `migrate diff` toujours sans différence.
 
 ## Un en-tête de migration est périmé et ne peut pas être corrigé
 

@@ -196,6 +196,7 @@ export async function GET(req: NextRequest) {
         venueAddress: true,
         dateConfirmed: true,
         snMatchKey: true,
+        snOpponentTeamId: true,
       },
     });
     const diff = diffCalendar(stored, published, team.snEventId!);

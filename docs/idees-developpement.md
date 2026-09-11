@@ -351,6 +351,17 @@ réservé** via un code couleur (asso vs autre asso) — **comme en vue jour**.
   Section « Résultats » d'une épreuve (`ic_a=394243`), à rapprocher de nos rencontres par
   `snMatchKey`. Moitié déjà en base pour les rencontres marquées dans l'appli
   (`InterclubMatch.awayName`). Cf. [docs/squashnet.md](squashnet.md).
+- **C. Espace capitaine — vérification avant saisie officielle** · ✅ lot 1 fait · ⭐⭐⭐ · **M** · gated `FEATURE_INTERCLUB`
+  Le score officiel ne se publie pas : un capitaine le **saisit** chez la fédération, le
+  capitaine adverse le **valide**. Les deux gestes se font des jours après, sur un formulaire qui
+  exige les joueurs tels que la fédération les orthographie — ce que ce dépôt sait déjà être le
+  point de rupture (`User.squashnetGivenName`). **Lot 1 livré** : un second rôle, borné à
+  l'officiel (`captain-access.ts`, `requireCaptain` / `requireCaptainOf` — portée = SON équipe),
+  et l'écran qui vérifie une rencontre avant saisie : chaque joueur (les nôtres **et** ceux d'en
+  face, cherchés dans leur propre club) et la cohérence des scores, chaque problème avec son
+  remède. Rapport mis en cache (`InterclubOfficial`) — vérifier coûte huit recherches fédérales.
+  **Lots 2 et 3 en attente d'observation** : lire l'état fédéral d'une rencontre (« l'adversaire
+  a saisi, à toi de valider ») et poser les deux gestes. Cf. [docs/squashnet.md](squashnet.md).
 - **S5. Historique des matchs d'un joueur** · ❓ endpoint inconnu · ⭐⭐ · **?**
   Les lignes du classement ne sont pas cliquables : aucune fiche joueur observée à ce jour.
   Contournement borné mais sûr : reconstituer depuis S4. Cf. [docs/squashnet.md](squashnet.md).
@@ -377,6 +388,7 @@ Rapport valeur / effort (⚠️ estimations grossières, projet solo) :
 | S3 | Roster de l'équipe adverse | ⭐⭐ | S–M | S, interclub | 💡 à étudier (capture à faire) |
 | S4 | Résultats fédéraux (« contre qui ») | ⭐⭐ | M | interclub | 💡 à étudier (capture à faire) |
 | S5 | Historique des matchs d'un joueur | ⭐⭐ | ? | S4 | ❓ endpoint inconnu |
+| C | Espace capitaine (vérification officielle) | ⭐⭐⭐ | M | S, interclub | ✅ **lot 1 fait** (lots 2-3 : observation à faire) |
 | 2 | Reprise auto via « +1 » | ⭐⭐ | L | Attendance | À cadrer (risqué) |
 | 5b | Messagerie générale | ⭐⭐ | L–XL | 6 | Basse |
 | 6a | Annuaire — « je cherche à jouer » | ⭐⭐⭐ | M | 6, push | 💡 à étudier |

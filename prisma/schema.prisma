@@ -913,6 +913,33 @@ model Interclub {
   // nom commun. Conservée, et non supprimée, pour ne pas détruire les valeurs déjà saisies.
   division               String? // ex. "D2 Hommes"
   opponent               String // nom du club adverse, saisi à la main
+  /// `teamid` fédéral de l'équipe ADVERSE — la clé de son roster (`ic_a=393480`).
+  ///
+  /// Le calendrier le publie sur les DEUX équipes de chaque rencontre, et le parsing le lisait
+  /// déjà (`parseTeamCalendar`) : c'est `ownFixtures` qui le jetait, ne gardant que le NOM. On
+  /// se retrouvait donc à chercher les joueurs d'en face par leur orthographe, alors que la
+  /// fédération nous avait donné leur identifiant.
+  ///
+  /// NULL sur une rencontre SAISIE À LA MAIN, et sur toute rencontre importée avant que cette
+  /// colonne n'existe. Le roster est alors simplement indisponible — jamais faux : c'est la
+  /// distinction que `RosterUnreadableError` tient côté parsing.
+  snOpponentTeamId       String?
+  /// `tieid` fédéral de CETTE rencontre — la clé de la feuille de match officielle
+  /// (`ic_a=394248`), celle que la ligue publie et sur laquelle se fait le classement.
+  ///
+  /// ⚠️ IL N'EST PAS DANS LE CALENDRIER. Ni celui de l'épreuve (`ic_a=393986`, d'où viennent nos
+  /// rencontres importées), ni nulle part ailleurs : il n'existe que sur la FICHE D'ÉQUIPE
+  /// (`ic_a=393480`), ligne par ligne. Le poser demande donc une requête de plus, faite une fois
+  /// pour toutes les rencontres d'une équipe (`refreshOwnTieIds`).
+  ///
+  /// LE RAPPROCHEMENT SE FAIT SUR LA DATE, jamais sur le tour ni sur l'adversaire : une équipe
+  /// joue deux phases renumérotées chacune depuis 1 (deux « Tour 1 » à huit mois d'écart), les
+  /// tours ne suivent pas l'ordre des dates, et le même adversaire revient à l'aller et au
+  /// retour. Mesuré sur la fiche de référence, cf. `squashnet/roster.ts`.
+  ///
+  /// NULL = rencontre saisie à la main, ou fiche d'équipe jamais lue. L'absence se dit, et ne se
+  /// confond pas avec un silence de la ligue.
+  snTieId                String?
   home                   Boolean                 @default(true) // true = on reçoit
   matchCount             Int                     @default(4) // nombre de simples de la rencontre
   bestOf                 Int                     @default(5) // 3 => 2 jeux gagnants ; 5 => 3 jeux gagnants
@@ -943,12 +970,42 @@ model Interclub {
   createdAt              DateTime                @default(now())
   matches                InterclubMatch[]
   availability           InterclubAvailability[]
+  official               InterclubOfficial?
 
   // Une journée fédérale ne peut exister qu'une fois par équipe : c'est ce qui permet de
   // ré-importer le calendrier autant de fois qu'on veut sans jamais dupliquer une rencontre.
   @@unique([teamId, snMatchKey])
   @@index([date])
   @@index([teamId, date])
+}
+
+/// CE QUE LE CAPITAINE A VÉRIFIÉ AVANT D'ALLER SAISIR CHEZ LA FÉDÉRATION.
+///
+/// Le score officiel ne se publie pas : un capitaine le SAISIT sur squashnet, l'autre le VALIDE.
+/// Les deux gestes se font des jours après la rencontre, sur un site qui exige les noms tels que
+/// la fédération les orthographie — et l'orthographe est précisément ce qui diverge (cf.
+/// `User.squashnetGivenName`). D'où cet écran : savoir quels noms vont coincer AVANT d'ouvrir
+/// squashnet, plutôt que de le découvrir devant un formulaire qui refuse.
+///
+/// UNE LIGNE PAR RENCONTRE, ET C'EST UN CACHE. Vérifier coûte huit recherches chez la fédération
+/// (quatre simples, deux joueurs) : les refaire à chaque ouverture d'écran ferait payer à
+/// squashnet la curiosité de quelqu'un qui relit son rapport. `checkedAt` est ce qui distingue
+/// « rien à signaler » de « pas encore regardé » — sans lui, les deux s'affichent pareil.
+///
+/// ⚠️ AUCUNE COLONNE D'AVANCE. La saisie et la validation viendront avec leurs propres colonnes
+/// quand elles existeront : le dépôt porte déjà une colonne morte (`Interclub.division`) et sait
+/// ce qu'elle coûte — un champ que rien n'écrit et que personne n'ose supprimer.
+model InterclubOfficial {
+  id          String    @id @default(cuid())
+  interclub   Interclub @relation(fields: [interclubId], references: [id], onDelete: Cascade)
+  interclubId String    @unique
+  /// Dernière vérification. NULL est impossible en pratique (la ligne naît d'une vérification),
+  /// mais reste nullable pour que l'ajout d'un autre chemin d'écriture n'ait pas à mentir.
+  checkedAt   DateTime?
+  /// Le rapport, sérialisé (patron de `InterclubTeam.snStandingsJson`). Relu par un écran qui
+  /// n'a pas d'error boundary : sa forme est VÉRIFIÉE à la lecture (`estRapportValide`), parce
+  /// qu'un JSON d'un format antérieur passe `JSON.parse` puis lève au rendu.
+  checkJson   String?
 }
 
 // Un simple de la rencontre. Côté asso : un MEMBRE (homeUserId) ou un remplaçant hors appli
@@ -1247,4 +1304,46 @@ model ForumPollVote {
   // seconde position sert en plus la limite de débit (compter les voix d'UN membre sur une
   // fenêtre glissante), sans coûter un second index.
   @@index([userId, createdAt])
+}
+
+/// LE ROSTER D'UNE ÉQUIPE FÉDÉRALE, TEL QUE LA LIGUE LE PUBLIE.
+///
+/// UNE LIGNE PAR ÉQUIPE, ET C'EST UN CACHE — le patron d'`InterclubOfficial.checkJson` et de
+/// `InterclubTeam.snStandingsJson`. Un effectif ne bouge que quand un club inscrit un joueur :
+/// le relire à chaque ouverture d'un menu ferait payer à squashnet le simple fait de composer
+/// une rencontre.
+///
+/// CE QUE CETTE TABLE REMPLACE. Le classement d'un adversaire s'obtenait par RAPPROCHEMENT :
+/// une recherche au classement fédéral par joueur, puis une ligne retenue si UNE SEULE collait
+/// au club. Huit recherches par rencontre, un échec sur une orthographe, et un verdict
+/// « introuvable » qu'un capitaine ne peut pas distinguer d'un silence du site. Ici la
+/// fédération DONNE la licence, le classement et le rang mixte des joueurs qu'elle a
+/// elle-même inscrits : une requête par équipe, et plus rien à deviner.
+///
+/// ⚠️ CE SONT LES INSCRITS, PAS LES ALIGNÉS. Un club inscrit son effectif en début de saison ;
+/// qui joue tel soir n'en dépend pas. Un joueur aligné contre nous et absent d'ici EXISTE
+/// (mutation tardive, inscription oubliée) — d'où la saisie libre, qui reste atteignable dans
+/// les menus.
+model SquashnetTeamRoster {
+  /// `teamid` fédéral — la clé naturelle, et la seule stable. Le NOM ne l'est pas : il porte le
+  /// numéro d'équipe (« Verrieres 2 »), change de casse d'une saison à l'autre, et deux clubs
+  /// d'un même réseau ne diffèrent que par un chiffre.
+  snTeamId   String   @id
+  /// Nom publié de l'ÉQUIPE, numéro compris (« Verrieres 2 »).
+  name       String?
+  /// Nom du CLUB (« Squash club verrieres le buisson »), sous lequel la fédération range ses
+  /// joueurs. La distinction équipe/club est celle qui a coûté le bug de `clubOfTeam` : ici
+  /// elle est donnée, plus déduite.
+  club       String?
+  /// Sigle, « VERR2 ».
+  code       String?
+  /// Le roster sérialisé (patron de `InterclubTeam.snStandingsJson`). Relu par un menu et par
+  /// la garde d'ordre des simples, donc à travers une garde de forme (`estRoster`) : « JSON
+  /// valide » ne suffit pas quand un format antérieur passe le `JSON.parse` et lève au rendu.
+  rosterJson String?
+  /// Quand on a regardé. Ce qui distingue « cette équipe n'a inscrit personne » de « on n'a pas
+  /// encore demandé » — sans lui, les deux s'affichent pareil, et c'est le second qui envoie
+  /// un capitaine chercher une explication qui n'existe pas.
+  fetchedAt  DateTime
+  updatedAt  DateTime @updatedAt
 }

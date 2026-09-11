@@ -289,6 +289,33 @@ export function PrivacyNotice() {
                   l&apos;appartenance à une équipe.
                 </p>
                 <p>
+                  <strong>Interclub — la vérification avant saisie officielle.</strong> Le score
+                  officiel se saisit chez la <strong>fédération</strong>, pas ici. Pour aider le
+                  capitaine à le faire sans erreur, l&apos;appli interroge{" "}
+                  <strong>squashnet.fr</strong> (source publique) sur chaque joueur de la
+                  rencontre — <strong>les nôtres comme ceux d&apos;en face</strong> — et conserve
+                  le rapport&nbsp;: pour chacun, le nom tel que la fédération l&apos;écrit, son
+                  classement et son <strong>numéro de licence</strong>, qui sont précisément ce
+                  qu&apos;il faut recopier. Ces données sont <em>déjà publiques</em> à la même
+                  adresse. Le rapport est visible du{" "}
+                  <strong>capitaine de l&apos;équipe concernée</strong> et des administrateurs,
+                  de personne d&apos;autre, et il disparaît avec la rencontre.
+                </p>
+                <p>
+                  <strong>Interclub — les joueurs inscrits dans les équipes adverses.</strong>{" "}
+                  Pour que la composition d&apos;une rencontre n&apos;oblige plus à retaper les
+                  noms d&apos;en face, l&apos;appli lit la <strong>fiche d&apos;équipe</strong>
+                  que <strong>squashnet.fr</strong> publie pour chaque club de notre poule, et en
+                  conserve la liste des joueurs <em>inscrits par leur club</em>&nbsp;: nom,
+                  classement, rang et <strong>numéro de licence</strong>. Ce sont des personnes
+                  qui n&apos;ont pas de compte ici et ne nous ont rien demandé — mais ces mêmes
+                  données sont <em>déjà publiques</em>, sous la même forme, à la même adresse, et
+                  elles nous sont nécessaires&nbsp;: la compétition impose de composer les simples
+                  dans l&apos;ordre du classement, <strong>des deux côtés du filet</strong>. Le
+                  numéro de licence n&apos;est pas affiché dans les menus. Rien n&apos;est envoyé
+                  à la fédération&nbsp;: on lit une page publique, on n&apos;y écrit pas.
+                </p>
+                <p>
                   <strong>Interclub — le classement des joueurs sans compte.</strong> Pour ces
                   joueurs-là, l&apos;appli recherche le <strong>classement fédéral</strong> publié
                   par <strong>squashnet.fr</strong> à partir du nom inscrit, et en conserve le

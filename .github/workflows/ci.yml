@@ -27,11 +27,11 @@ jobs:
     name: types, style, tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # `node-version` suit le `nodeVersion` du projet Vercel (24.x) : vérifier sur une version
       # que la production n'utilise pas ne prouverait pas grand-chose.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
           cache: npm
@@ -93,8 +93,8 @@ jobs:
       DIRECT_URL: postgresql://postgres:test@localhost:55432/postgres
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
           cache: npm

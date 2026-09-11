@@ -202,9 +202,21 @@ export async function getMonths(): Promise<string[]> {
 }
 
 /**
- * Recherche le classement par nom (recherche libre, format « nom prénom » toléré). `month`
+ * Recherche le classement par nom. `month`
  * cible une période (défaut : la plus récente). Renvoie 0..N lignes — le filtrage par club et
  * le rapprochement d'identité sont faits par la couche « matching » (ticket 2).
+ *
+ * ⚠️ `name` EST UN SEUL MOT, PAS UN NOM COMPLET. Ce commentaire annonçait « format nom prénom
+ * toléré » ; c'est faux, et mesuré le 2026-09-11 sur le classement du 2026-09-01 :
+ *
+ *   « DETRY » → 1 résultat      « DE ABREU » → 1 résultat     « DETRY XAVIER » → 0 résultat
+ *   « XAVIER » → 62 résultats   « ABREU »    → 2 résultats    « DE »           → 99 résultats
+ *
+ * La recherche porte sur le nom de famille OU sur le prénom, jamais à cheval sur les deux ; une
+ * PARTIE d'un nom composé suffit (« ABREU » retrouve « DE ABREU ») ; et une particule seule ne
+ * discrimine rien. Le choix du terme appartient donc à l'appelant : `searchQuery`
+ * (`match.ts`) quand le nom de famille est connu, `queryTerms` (`captain-check.ts`) quand on
+ * n'a qu'une chaîne dont on ignore l'ordre.
  */
 export async function searchRanking(
   name: string,

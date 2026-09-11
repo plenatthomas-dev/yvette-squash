@@ -85,6 +85,7 @@ async function storedTies(teamId: string): Promise<{ ties: StoredTie[]; started:
       venueAddress: true,
       dateConfirmed: true,
       snMatchKey: true,
+      snOpponentTeamId: true,
       matchCount: true,
       matches: { select: { gamesHome: true, status: true } },
     },
@@ -333,6 +334,10 @@ export async function POST(req: NextRequest) {
           time: tie.time,
           teamId: team.id,
           opponent: tie.opponent,
+          // L'identifiant fédéral de l'équipe d'en face, posé dès la création : c'est la clé de
+          // son roster, donc du menu de ses joueurs et du contrôle de l'ordre de ses simples.
+          // Le calendrier le publie, on ne fait que cesser de le jeter.
+          snOpponentTeamId: tie.opponentTeamId || null,
           home: tie.home,
           venue: borne(tie.venue, MAX_VENUE_LEN),
           venueAddress: borne(tie.venueAddress, MAX_VENUE_ADDRESS_LEN),
@@ -402,6 +407,23 @@ export async function POST(req: NextRequest) {
       });
     });
     if (dateChanged && known) moved.push({ id: u.id, from: known.date, opponent: u.tie.opponent });
+  }
+
+  // LE RATTRAPAGE DES `teamid` ADVERSES — à part, et sur les rencontres INCHANGÉES aussi.
+  //
+  // Cette clé n'existait pas quand les rencontres de la saison ont été importées : elles la
+  // portent toutes à NULL. La faire passer par `toUpdate` ne l'aurait posée que le jour où la
+  // date ou le lieu d'une rencontre bouge — c'est-à-dire jamais, pour la plupart —, et le
+  // roster d'en face serait resté indisponible sur toute une saison déjà en base.
+  //
+  // Elle n'est PAS gelée par `started` : contrairement à la date, écrire l'identifiant d'une
+  // équipe sur une rencontre déjà jouée ne change rien de ce qui s'est passé ce soir-là. Elle
+  // sert au contraire à la relire — la vérification du capitaine se fait après coup.
+  for (const fix of diff.teamIdFixes) {
+    await prisma.interclub.update({
+      where: { id: fix.id },
+      data: { snOpponentTeamId: fix.snOpponentTeamId },
+    });
   }
 
   // L'EMPREINTE NE SE POSE QUE SUR UN ÉCART ENTIÈREMENT RÉSOLU.

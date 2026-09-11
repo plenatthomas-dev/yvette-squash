@@ -89,6 +89,41 @@ export function gameWinner(g: GameScore): Side | null {
 }
 
 /**
+ * Le camp qui tient une BALLE DE JEU, et si c'est aussi une balle de MATCH.
+ *
+ * C'est ce qu'un marqueur annonce à voix haute avant l'échange, et la seule chose que l'écran
+ * de marquage savait déjà sans jamais la dire : `gameWinner` porte la règle (11 points, 2
+ * d'écart), personne ne lui posait la question un point à l'avance.
+ *
+ * ⚠️ LA RÈGLE N'EST PAS RÉÉCRITE ICI. On ajoute un point au camp considéré et on demande à
+ * `gameWinner` si le jeu serait fini : une seconde copie du « 11 et 2 d'écart » finirait par
+ * diverger, et c'est exactement le genre d'écart qui ne se voit qu'à 10-10.
+ *
+ * Les deux camps ne peuvent pas l'avoir en même temps — il faudrait deux avances simultanées —
+ * donc le premier trouvé est le bon. À 10-10, personne ne l'a : 11-10 ne gagne rien, et
+ * l'annoncer serait une faute d'arbitrage.
+ */
+export function ballPoint(
+  current: GameScore,
+  gamesWon: GameScore,
+  bestOf: number,
+): { side: Side; match: boolean } | null {
+  const needed = winGamesFor(bestOf);
+  for (const side of ["home", "away"] as const) {
+    const apres =
+      side === "home"
+        ? { home: current.home + 1, away: current.away }
+        : { home: current.home, away: current.away + 1 };
+    if (gameWinner(apres) === side) {
+      // Balle de MATCH si ce jeu-là est le dernier qui lui manque. Le distinguer compte : le
+      // marqueur ne l'annonce pas de la même façon, et les joueurs ne la jouent pas pareil.
+      return { side, match: (side === "home" ? gamesWon.home : gamesWon.away) + 1 >= needed };
+    }
+  }
+  return null;
+}
+
+/**
  * Une suite de jeux saisie a posteriori est-elle cohérente ? Chaque jeu doit être terminé, et
  * surtout AUCUN jeu ne doit suivre la fin du match — un « 3-0 » suivi d'un 4e jeu est une
  * faute de frappe, pas un score.

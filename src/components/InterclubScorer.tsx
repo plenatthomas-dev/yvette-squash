@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   applyPoint,
   applyServe,
+  ballPoint,
   BREAK_SECONDS,
   replay,
   resolveColor,
@@ -16,6 +17,7 @@ import {
   type Side,
 } from "@/lib/interclub";
 import { isSoundEnabled } from "@/lib/sound";
+import { keepAwake } from "@/lib/wake-lock";
 
 // Écran de marquage, au bord du terrain. Trois partis pris commandent tout le reste :
 //
@@ -227,6 +229,17 @@ export default function InterclubScorer({
     if (ready) saveLog(match.id, events);
   }, [ready, match.id, events]);
 
+  // --- l'écran reste allumé --------------------------------------------------
+  //
+  // TANT QUE CET ÉCRAN EST OUVERT, ET SEULEMENT LUI. Un téléphone posé au bord du court se
+  // verrouille au bout de trente secondes : le marqueur le reprend, le déverrouille, retrouve
+  // l'écran, tape le point — entre chaque échange. C'est ce geste-là qui fait abandonner le
+  // marquage au milieu du deuxième jeu, et rien dans le code ne le montrait.
+  //
+  // Le verrou n'est JAMAIS une garantie (refusé, ignoré, relâché par le système) et rien ici
+  // n'en dépend : cf. `wake-lock.ts`. C'est du confort, et son échec est silencieux.
+  useEffect(() => keepAwake(), []);
+
   // --- synchro serveur -------------------------------------------------------
   const lastSentRef = useRef(0);
   const timerRef = useRef<number | null>(null);
@@ -432,6 +445,28 @@ export default function InterclubScorer({
 
     const gameEnded = after.games.length > before.games.length;
     const finished = after.status === "done";
+
+    // LE MARQUAGE EST LE SEUL ÉCRAN QU'ON UTILISE SANS LE REGARDER : on tape, et on regarde le
+    // court. Une brève vibration confirme l'appui sans lever les yeux — et une double vibration
+    // dit qu'un jeu vient de tomber, ce qui est l'autre information qu'on cherchait à l'écran.
+    //
+    // ⚠️ 30 ms, ET NON 12. Le premier essai reprenait la durée du Fil (12 ms), et elle ne se
+    // sentait pas : là-bas c'est un tic discret sur un écran qu'on REGARDE, ici c'est la seule
+    // confirmation d'un geste fait en regardant ailleurs. Surtout, `vibrate` ne pilote que la
+    // DURÉE — jamais l'intensité — et les moteurs à résonance linéaire des téléphones récents
+    // mettent quelques dizaines de millisecondes à monter en amplitude : en dessous, le moteur
+    // n'a pas fini de démarrer que l'ordre est déjà fini. 30 ms se sent sans être désagréable
+    // sur une main qui tient l'appareil.
+    //
+    // `?.` parce que l'API n'existe nulle part chez Apple — ni Safari iOS, ni aucun navigateur
+    // sur iPhone, qui utilisent tous le moteur de Safari. Sur ces appareils il n'y aura JAMAIS
+    // de retour haptique ici, et ce n'est pas rattrapable côté web. Le marquage fonctionne
+    // exactement pareil sans elle : même doctrine que le verrou d'écran.
+    if (after.games.length !== before.games.length || after.current.home !== before.current.home
+        || after.current.away !== before.current.away) {
+      navigator.vibrate?.(gameEnded ? [40, 70, 40] : 30);
+    }
+
     if (gameEnded && !finished) setBreakUntil(Date.now() + BREAK_SECONDS * 1000);
     scheduleSync(next);
   }
@@ -500,6 +535,15 @@ export default function InterclubScorer({
 
   if (!ready) return null;
 
+  // Qui tient une balle de jeu — et si c'est une balle de match. La règle vit dans
+  // `interclub.ts` (`ballPoint`), l'écran ne fait que l'afficher : une seconde copie du
+  // « 11 points et 2 d'écart » finirait par diverger, et l'écart ne se verrait qu'à 10-10.
+  //
+  // Éteint pendant la pause et une fois le match fini : « balle de match » sous un score final
+  // n'annonce plus rien, et une balle de jeu à côté d'un minuteur de deux minutes non plus.
+  const balle =
+    state.status === "done" || remaining > 0 ? null : ballPoint(state.current, state.gamesWon, bestOf);
+
   const side = (who: Side) => {
     const isHome = who === "home";
     const c = isHome ? homeC : awayC;
@@ -518,6 +562,14 @@ export default function InterclubScorer({
         aria-label={`Point pour ${name}`}
       >
         <span className="ics-name">{name}</span>
+        {/* Coin HAUT-DROIT, le seul des quatre qui restait libre : le score garde le centre
+            entier, et l'annonce ne lui prend pas un pixel de hauteur. C'est ce qu'un marqueur
+            dit à voix haute avant l'échange, et l'écran le savait déjà sans jamais le dire. */}
+        {balle?.side === who && (
+          <span className={`ics-balle${balle.match ? " ics-balle-match" : ""}`}>
+            {balle.match ? "balle de match" : "balle de jeu"}
+          </span>
+        )}
         <span className="ics-points">{pts}</span>
         {/* Barre du bas : jeux gagnés à gauche, carré de service à droite. Groupés plutôt que
             posés chacun dans son coin — sur une case étroite (téléphone debout), « sert à
@@ -552,21 +604,33 @@ export default function InterclubScorer({
             </span>
           )}
         </span>
-        <button className="secondary" onClick={doUndo} disabled={events.length <= 1}>
+        {/* ⚠️ ACTIF DÈS LE PREMIER ÉVÉNEMENT, et c'est une correction. La garde était
+            `length <= 1`, ce qui rendait le CHOIX DU PREMIER SERVEUR indéfaisable : sur un match
+            vierge, `seedEvents` rend une liste vide, le « Qui engage ? » y pose l'événement n° 1,
+            et un appui de travers condamnait l'indicateur de service pour tout le match (le
+            score, lui, n'était pas touché). Marquer un point puis l'annuler ne rattrapait rien —
+            on retombait à 1.
+
+            Cette garde ne protégeait rien d'autre : on pouvait déjà défaire, un par un, tous les
+            événements reconstruits d'un match repris. Elle n'ajoutait qu'un plancher arbitraire,
+            exactement là où il fallait pouvoir se corriger. */}
+        <button className="secondary" onClick={doUndo} disabled={events.length === 0}>
           ↶ Annuler
         </button>
       </header>
 
-      {state.games.length > 0 && (
-        <p className="ics-history">
-          {state.games.map((g: GameScore, i: number) => (
-            <span key={i}>
-              {g.home}-{g.away}
-              {i < state.games.length - 1 ? " · " : ""}
-            </span>
-          ))}
-        </p>
-      )}
+      {/* TOUJOURS RENDUE, même vide (sa hauteur est réservée en CSS). Conditionner son
+          affichage faisait sauter le tableau d'un cran au premier jeu terminé, et toute la
+          typographie des cases avec lui — elle se règle en requêtes de conteneur sur la case,
+          donc sur sa hauteur. */}
+      <p className="ics-history">
+        {state.games.map((g: GameScore, i: number) => (
+          <span key={i}>
+            {g.home}-{g.away}
+            {i < state.games.length - 1 ? " · " : ""}
+          </span>
+        ))}
+      </p>
 
       <div className="ics-board">
         {side("home")}

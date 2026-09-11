@@ -1,0 +1,54 @@
+-- ⚠️ MIGRATION RENUMÉROTÉE, ET REJOUABLE POUR CETTE RAISON.
+--
+-- Elle s'appelait `53_fixture_tie_id`. Elle n'entrait en collision avec rien : elle a suivi les
+-- deux qui la précèdent sur cette branche (`51_` et `52_`, devenues `53_` et `54_`), pour que
+-- les trois gardent leur ordre relatif. Le préfixe EST le contrat d'ordre de ce dépôt, et
+-- `prisma/migrations/README.md` raconte deux incidents de production nés de son ambiguïté.
+--
+-- La production n'a jamais vu cette migration : la renuméroter ne lui coûte rien. La base
+-- `dev`, partagée par toutes les previews, l'a en revanche déjà appliquée sous son ANCIEN
+-- nom. Pour Prisma, le nouveau nom est une migration pendante : il va la rejouer sur une base
+-- qui porte déjà ses objets. D'où les `IF NOT EXISTS` ci-dessous — ils ne sont pas de la
+-- prudence décorative, ils sont ce qui évite un `already exists` (P3018) et un déploiement
+-- de preview bloqué jusqu'à un `migrate resolve` à la main. Sur une base vierge, ils ne
+-- changent rien.
+--
+-- La ligne de l'ancien nom reste dans `_prisma_migrations` de `dev`, inoffensive — comme la
+-- ligne `10_passkey_backup` que la production garde depuis 2026 (cf. le README des migrations).
+
+-- LA FEUILLE DE MATCH OFFICIELLE : L'IDENTIFIANT QUI Y MÈNE.
+--
+-- CE QUE ÇA OUVRE
+--
+-- La ligue publie, après chaque rencontre, une feuille de match officielle : qui a joué contre
+-- qui, le score jeu par jeu, et le total qui fera le classement de fin de saison. Une erreur de
+-- saisie sur cette feuille ne produit ni message ni alerte — elle produit un classement. La
+-- seule façon de la repérer aujourd'hui est d'aller relire la page de la ligue, simple par
+-- simple, ce que personne ne fait.
+--
+-- Or l'appli a le relevé exact : jeu par jeu, marqué en direct pendant la rencontre. Il ne
+-- manquait que l'adresse de la feuille d'en face pour confronter les deux.
+--
+-- POURQUOI UNE COLONNE, ET PAS UN CALCUL
+--
+-- Le `tieid` ne figure NULLE PART dans ce qu'on télécharge déjà. Le calendrier de l'épreuve
+-- (`ic_a=393986`), d'où viennent toutes nos rencontres importées, ne le publie pas : il n'existe
+-- que sur la FICHE D'ÉQUIPE (`ic_a=393480`), sur chaque ligne de son calendrier. Le retrouver
+-- coûte donc une requête fédérale — et la refaire à chaque ouverture d'écran ferait payer à un
+-- site associatif le simple fait de consulter un score.
+--
+-- LE RAPPROCHEMENT SE FAIT SUR LA DATE, et c'est une mesure, pas une préférence :
+--
+--   * le TOUR ne peut pas servir de clé — une équipe joue DEUX phases (« Poule A » puis
+--     « Poule IVC »), chacune renumérotée depuis 1 : il y a deux « Tour 1 » à huit mois d'écart.
+--     Et les tours ne suivent même pas l'ordre des dates (le 15 se joue avant le 13) ;
+--   * l'ADVERSAIRE non plus — on le rencontre à l'aller et au retour.
+--
+-- La date, elle, distingue chaque rencontre réelle de la fiche de référence (24 rencontres, les
+-- deux seules collisions étant des journées d'exemption, qui ne se jouent pas).
+--
+-- NULLABLE, forcément : une rencontre saisie à la main n'a pas de feuille fédérale, et une
+-- rencontre importée n'a cet identifiant qu'une fois la fiche d'équipe lue. L'absence se dit
+-- (« pas d'identifiant fédéral ») et ne se confond pas avec un silence de la ligue — les deux
+-- appellent des gestes opposés : réimporter, ou réessayer.
+ALTER TABLE "Interclub" ADD COLUMN IF NOT EXISTS "snTieId" TEXT;

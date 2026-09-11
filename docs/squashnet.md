@@ -39,10 +39,12 @@ clair (`<a id="players" data-ic_a="393475" …>`).
 | `131079` | Classement des joueurs      | `name`, `month`, `gender`, `ligue`… | ✅ lu (`client.ts`)         |
 | `393986` | Calendrier d'une épreuve    | `eventid`, `roundid`              | ✅ lu (`calendar.ts`)       |
 | `394242` | Classement d'une poule      | `eventid`, `drawid`, `roundid`    | ✅ lu (`standings.ts`)      |
-| `393480` | **Fiche d'une équipe**      | `teamid`                          | ⬜ non lu — voir « roster » |
-| `393475` | **Joueurs d'une épreuve**   | `eventid`                         | ⬜ non lu                   |
+| `393480` | Fiche d'une équipe          | `teamid` **seul**                 | ✅ lu (`roster.ts`)         |
+| `393475` | Joueurs d'une épreuve       | `eventid`                         | ⬜ coquille vide — voir ci-dessous |
 | `394243` | **Résultats d'une épreuve** | `eventid` (+ `drawid`/`roundid` ?) | ⬜ non lu — voir « résultats » |
-| `393479` | Équipes d'une épreuve       | `eventid`                         | ⬜ non lu                   |
+| `393479` | Équipes d'une épreuve       | `eventid` (+ `teamid`)            | ⬜ non lu — porte le même roster |
+| `393477` | **Fiche d'un JOUEUR**       | `regiid`                          | ⬜ non lu — voir point 4     |
+| `394248` | **Feuille de match**        | `tieid` **seul**                  | ✅ lu (`tie.ts`)            |
 | `393217` | Informations d'une épreuve  | `eventid`                         | ⬜ non lu                   |
 | `393729` | Impression (PDF)            | `eventid`, `drawid`               | — sans intérêt ici          |
 
@@ -70,30 +72,97 @@ La règle qui en découle, tenue par les routes d'admin : **les quatre ensemble,
 
 ## Ce que ça débloquerait (demandes en attente)
 
-### 1. Roster de l'équipe adverse — `ic_a=393480`
+### 1. Roster de l'équipe adverse — `ic_a=393480` ✅ fait
 
-**Faisabilité : bonne.** Le lien existe et son action est connue : sur la fiche d'une équipe
-(le nom de club cliquable dans le calendrier comme dans le classement de poule), squashnet
-appelle `393480` avec le seul `teamid`. Or **on a déjà ce `teamid`** : `parseTeamCalendar` le
-lit sur les deux équipes de chaque rencontre, et il est même stocké pour la nôtre
-(`InterclubTeam.snTeamId`).
+Voir `src/lib/squashnet/roster.ts`, `src/lib/interclub-roster-db.ts` et la table
+`SquashnetTeamRoster` (migration `54_opponent_roster`).
 
-Il manque **une seule chose** : une capture du fragment rendu par `393480`, pour écrire le
-parsing. Elle se fait en trente secondes depuis un navigateur (onglet Réseau → la requête
-`index.php` → « Copier la réponse »), et se range en fixture à côté des deux autres.
+**AUCUN GESTE À FAIRE.** Le roster se rafraîchit tout seul aux deux moments où il sert : à
+l'ouverture d'une rencontre dans Interclub (on va désigner les joueurs d'en face) et au début
+d'une vérification capitaine. Le serveur ne sort chez la ligue que si le roster manque ou date
+de plus d'une semaine (`ROSTER_FRAIS_JOURS`) — un soir de rencontre, où l'écran s'ouvre vingt
+fois, seule la première ouverture coûte une requête.
 
-Le classement de chaque joueur adverse, lui, **ne demande aucun nouvel endpoint** :
-`searchRanking(nom)` + `matchRanking(..., { club: "<club adverse>" })` — la fonction accepte
-déjà un club cible autre que l'Yvette, c'est prévu dans sa signature.
+**UN SEUL PARAMÈTRE : `teamid`.** C'est l'exception au piège des quatre identifiants — ni
+`eventid`, ni `drawid`, ni `roundid`. Mesuré, pas supposé : la fixture
+`equipe-2026-161095-roster.html` a été captée avec ce seul paramètre.
 
-### 2. « Contre qui on a joué » — `ic_a=394243`
+Ce que la fiche donne, par joueur inscrit : **nom fédéral, genre, licence, classement, rang et
+rang mixte**, plus la date d'inscription dans l'équipe. Et, dans son tableau `info`, la
+distinction que le dépôt devait jusqu'ici déduire : le nom de l'**ÉQUIPE** (« Verrieres 2 »,
+numéro compris) *et* celui du **CLUB** (« Squash club verrieres le buisson »), sous lequel la
+fédération range ses joueurs. C'est exactement le piège que `clubOfTeam` a dû contourner — la
+ligue publie les deux, il n'y a plus à deviner.
 
-Moitié déjà là : l'appli **enregistre** l'adversaire de chaque simple qu'elle a servi à
-marquer (`InterclubMatch.awayName`, `homeDisplayName`, jeu par jeu). Ce qui manque, ce sont
-les rencontres jouées **hors de l'appli**, et la version officielle des scores.
+**CE QUE ÇA REMPLACE.** Le classement d'un adversaire s'obtenait par RAPPROCHEMENT :
+`searchRanking(nom)` + `matchRanking(..., { club })`, une recherche par joueur, un échec sur un
+accent, et un verdict « introuvable » indistinguable d'un silence du site. Une requête par
+équipe remplace huit recherches, et il n'y a plus rien à rapprocher.
 
-C'est la section « Résultats » (`394243`). Même besoin qu'au-dessus : une capture, puis un
-parsing. Le rapprochement avec nos rencontres existe déjà (`snMatchKey = <eventid>:<round>`).
+**LE TABLEAU EST EXIGÉ SOUS SON IDENTIFIANT** — `<table id="players_161095">`. C'est ce qui rend
+impossible la panne muette du `drawid` (§ « Les quatre identifiants ») : ou bien on lit les
+joueurs de l'équipe demandée, ou bien on lève `RosterUnreadableError`. Un roster VIDE reste
+distinct d'un roster illisible — une équipe inscrite sans joueur est un fait de début de saison.
+
+⚠️ **Ce sont les INSCRITS, pas les ALIGNÉS.** Un club inscrit son effectif en septembre ; qui
+joue tel soir n'en dépend pas. Un joueur aligné contre nous et absent de la liste existe
+(mutation tardive, inscription oubliée) — d'où la saisie libre, conservée dans les menus.
+
+⚠️ **La clé doit d'abord exister en base.** `Interclub.snOpponentTeamId` est posé par l'import du
+calendrier ; les rencontres importées avant la migration 52 le portent à NULL, et seul un
+**ré-import** (Admin › Interclub › Calendrier › Appliquer) peut le remplir — il est dans le HTML
+de la ligue, pas dans nos données. Le cron ne l'écrit pas : il alerte, il n'applique jamais.
+
+### 2. La feuille de match officielle — `ic_a=394248` ✅ fait
+
+Voir `src/lib/squashnet/tie.ts` (parsing), `src/lib/captain-official.ts` (la confrontation, pure)
+et `src/lib/interclub-tie-db.ts` (base et réseau). Colonne `Interclub.snTieId`, migration
+`55_fixture_tie_id`. Fixture : `rencontre-2026-1643001-feuille.html`.
+
+La feuille donne, simple par simple : les **deux joueurs** avec leur classement **du soir**, le
+score **jeu par jeu**, le vainqueur, et les comptes de jeux et de points — puis le **total de la
+rencontre**, celui qui fera le classement de fin de saison. L'écran Capitaine le confronte à
+notre relevé : « la ligue publie 4-1, ton relevé dit 4-1 », ou la liste des écarts.
+
+**OÙ TROUVER LE `tieid`.** Nulle part dans un calendrier. Ni `393986` (l'épreuve), d'où viennent
+pourtant nos rencontres importées, ni ailleurs : **seule la fiche d'équipe (`393480`) le
+publie**, sur chaque ligne de son calendrier (`data-tieid`). Lire une feuille commence donc par
+lire la fiche de **sa propre** équipe — une requête, cachée une semaine, pour toute la saison.
+
+⚠️ **Une fiche d'équipe porte PLUSIEURS calendriers.** La fixture de référence en a deux :
+`round_338671` (« Hommes 4 - Poule A », 18 rencontres) et `round_370137` (« Hommes 4 - Poule
+IVC », 6 de plus). S'arrêter au premier tableau perdrait toute la phase finale, en silence.
+
+⚠️ **Le rapprochement se fait sur la DATE.** Mesuré, pas choisi : les deux phases renumérotent
+leurs tours depuis 1 (deux « Tour 1 » à huit mois d'écart), les tours ne suivent pas l'ordre des
+dates (le 15 se joue avant le 13), et le même adversaire revient à l'aller et au retour. Quand
+une date en désigne deux — les journées d'**exemption**, adversaire « Non Joue » —, on ne pose
+rien plutôt que de choisir.
+
+⚠️ **« 0 / 0 » N'EST PAS UN SCORE.** La fédération le publie sur toutes les journées à venir,
+avec le libellé « Non joué ». Le lire comme un résultat annoncerait un nul sur une rencontre qui
+n'a pas eu lieu — et à quatre simples, ce nul est crédible.
+
+⚠️ **« A » et « B » ne sont pas « nous » et « eux ».** Les colonnes de joueurs portent le
+**sigle** de chaque équipe dans leur `data-label` : `A:VERR2`, `B:VERR3`. C'est une **donnée**,
+pas un vocabulaire — impossible à coder en dur, et rien ne dit que « A » soit le receveur. On
+reconnaît notre côté par le sigle (le nôtre, ou celui d'en face), à défaut par nos alignés, et à
+défaut **on ne compare rien** : se tromper afficherait un 4-1 *gagné* sur une rencontre perdue.
+
+⚠️ **Ce que la ligue ne publie PAS : « à toi de valider ».** Cet état n'existe nulle part dans le
+HTML public (le seul jeton `validate` rencontré est le `novalidate` d'un formulaire). On sait
+dire « rien de saisi », « saisi en partie », « saisi et conforme », « saisi et divergent » —
+jamais « qui doit valider ».
+
+**La ligne de total se reconnaît à son intitulé VIDE**, pas à sa position : elle a exactement la
+forme d'un simple, et la prendre pour tel ajouterait un match fantôme à la feuille.
+
+### 2 bis. « Contre qui on a joué » — `ic_a=394243`
+
+Reste ouvert, et n'est plus urgent : les scores officiels viennent désormais des feuilles de
+match (ci-dessus), rencontre par rencontre. `394243` n'apporterait que les rencontres jouées
+**hors de l'appli**, en une seule requête au lieu d'une par rencontre. Même besoin qu'avant :
+une capture, puis un parsing.
 
 ### 3. Historique des classements ✅ fait
 
@@ -354,12 +423,26 @@ débusque la panne silencieuse que le schéma documente déjà : quand ResaMania
 verdict est « introuvable » tous les mois sans que rien ne le signale. Remède :
 `squashnetGivenName` / `squashnetFamilyName` sur le membre.
 
-### 4. Historique des matchs d'un joueur — **endpoint inconnu**
+### 4. Historique des matchs d'un joueur — **piste ouverte : `ic_a=393477`**
 
-C'est la seule demande qui n'a pas de chemin identifié. Les lignes du classement des joueurs
-**ne sont pas cliquables** : pas de lien, pas de `data-ic_a`, donc rien à observer dans les
-fragments déjà captés. Il existe peut-être une fiche joueur ailleurs sur le site, mais rien
-dans ce qu'on a ne le prouve.
+La demande n'avait aucun chemin identifié tant qu'on ne regardait que le classement, dont les
+lignes ne sont pas cliquables. La fiche d'équipe en a ouvert un : **chaque nom de joueur y est
+un lien** vers `393477`, avec un paramètre qu'on ne connaissait pas — `regiid`, l'identifiant
+d'une INSCRIPTION (un joueur dans une épreuve), et non celui d'une personne.
+
+```
+<a data-ic_a="393477" data-ic_ajax="1" data-regiid="591184">DETRY XAVIER</a>
+```
+
+Ce `regiid` est lisible dans le fragment que `roster.ts` parse déjà — mais il n'est PAS retenu
+aujourd'hui, faute de savoir ce que la section rend. Prochaine étape : capter `393477&regiid=…`
+et voir si elle porte un historique de rencontres. Tant que ce n'est pas observé, c'est une
+hypothèse.
+
+⚠️ Ne pas confondre avec l'appel `393477&eventid=…` : la section « Joueurs d'une épreuve »
+(`393475`) rend une **coquille vide**, dont le tableau est rempli par un second appel à `393477`
+portant l'`eventid` et un jeton `ic_csrf` lu dans la coquille. Sur l'épreuve d'essai, ce
+tableau-là est ressorti **sans aucune ligne** — le roster par équipe est la voie qui marche.
 
 Deux chemins possibles, dans cet ordre :
 

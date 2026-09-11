@@ -196,3 +196,102 @@ describe("InterclubLive — une rencontre en cours ne ressemble pas à une renco
     expect(container.querySelector(".ic-live-card.is-live")).toBeNull();
   });
 });
+
+// ============================================================================
+//  QUI SERT — l'information qui était déjà dans la réponse, et que personne
+//  n'affichait.
+//
+//  `getLiveFixtures` la met dans la charge utile, les deux écrans qui la lisent
+//  la déclaraient dans leur type, et aucun des deux ne la rendait. Or au squash
+//  le service change de main à chaque échange perdu : sans lui, « 7–5 » ne dit
+//  pas si le meneur est en train de conclure ou de subir.
+// ============================================================================
+
+/** Une rencontre en cours, avec un simple dont le jeu est engagé. */
+function enCours(serving: "home" | "away" | null) {
+  return {
+    ...rencontre("live"),
+    matches: [
+      {
+        id: "m1",
+        order: 1,
+        home: "Thomas",
+        away: "Gérard",
+        homeColor: null,
+        awayColor: null,
+        gamesHome: null,
+        gamesAway: null,
+        live: { current: { home: 7, away: 5 }, serving },
+      },
+    ],
+  };
+}
+
+describe("InterclubLive — le joueur au service", () => {
+  it("marque le serveur, et lui seul", async () => {
+    charge = { fixtures: [enCours("home")] };
+    const { container, getByText } = render(<Banc />);
+    await souffle();
+
+    const pastilles = container.querySelectorAll(".ic-au-service");
+    expect(pastilles).toHaveLength(1);
+    // Elle est DANS le bloc du joueur qui sert, pas posée à côté du score : c'est ce qui la
+    // rend lisible sans légende.
+    expect(pastilles[0].closest(".ic-player")?.textContent).toContain("Thomas");
+    expect(getByText("7–5")).toBeTruthy();
+  });
+
+  it("suit le changement de main", async () => {
+    charge = { fixtures: [enCours("away")] };
+    const { container } = render(<Banc />);
+    await souffle();
+    expect(
+      container.querySelector(".ic-au-service")?.closest(".ic-player")?.textContent,
+    ).toContain("Gérard");
+  });
+
+  it("ne marque personne tant que le premier serveur n'est pas désigné", async () => {
+    // `serving: null` est un état réel : le marqueur n'a pas encore répondu à « Qui engage ? ».
+    // Désigner quelqu'un à sa place se tromperait une fois sur deux.
+    charge = { fixtures: [enCours(null)] };
+    const { container } = render(<Banc />);
+    await souffle();
+    expect(container.querySelectorAll(".ic-au-service")).toHaveLength(0);
+  });
+
+  it("ne marque personne sur un match qui n'est pas engagé", async () => {
+    charge = {
+      fixtures: [
+        {
+          ...rencontre("live"),
+          matches: [
+            {
+              id: "m1",
+              order: 1,
+              home: "Thomas",
+              away: "Gérard",
+              homeColor: null,
+              awayColor: null,
+              gamesHome: 3,
+              gamesAway: 1,
+              live: null,
+            },
+          ],
+        },
+      ],
+    };
+    const { container } = render(<Banc />);
+    await souffle();
+    expect(container.querySelectorAll(".ic-au-service")).toHaveLength(0);
+  });
+
+  it("reste annoncé aux lecteurs d'écran, qui ne voient pas la pastille", () => {
+    // Une pastille de 6 px sans texte ne dit rien à qui écoute la page. C'est le genre de
+    // détail qui rend une information visuelle strictement inutile à une partie des membres.
+    charge = { fixtures: [enCours("home")] };
+    const { container } = render(<Banc />);
+    return souffle().then(() => {
+      expect(container.querySelector(".ic-au-service")?.textContent).toBe("au service");
+    });
+  });
+});

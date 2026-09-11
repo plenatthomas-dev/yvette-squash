@@ -271,6 +271,7 @@ describe("diffCalendar", () => {
     time: "20:00",
     home: true,
     opponent: "Montmartre 1",
+    opponentTeamId: "161001",
     venue: "SQUASH DE L YVETTE",
     venueAddress: "1 RUE DU SQUASH, 91400 - ORSAY",
     dateConfirmed: true,
@@ -287,6 +288,7 @@ describe("diffCalendar", () => {
     venueAddress: "1 RUE DU SQUASH, 91400 - ORSAY",
     dateConfirmed: true,
     snMatchKey: matchKey(EVENT, "J1"),
+    snOpponentTeamId: "161001",
     ...over,
   });
 
@@ -403,6 +405,7 @@ describe("calendarFingerprint", () => {
     time: "20:00",
     home: true,
     opponent: "Montmartre 1",
+    opponentTeamId: "161001",
     venue: "V",
     venueAddress: "A",
     dateConfirmed: true,
