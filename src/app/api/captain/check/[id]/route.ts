@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCaptainOf } from "@/lib/captain-access";
 import { prisma } from "@/lib/db";
-import { loadRosters } from "@/lib/interclub-roster-db";
+import { loadRosters, refreshRosters } from "@/lib/interclub-roster-db";
 import { getLatestMonth, searchRanking, type RankingRow } from "@/lib/squashnet/client";
 import { YVETTE_CLUB } from "@/lib/squashnet/match";
 import {
@@ -163,6 +163,23 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // Le roster ne peut pas se tromper ainsi : il ne contient QUE les joueurs que ce club a
   // inscrits dans CETTE équipe. Pas de sélection à faire, donc pas de mauvaise sélection — et
   // la licence vient avec, qui est ce que le capitaine recopie.
+  //
+  // LA VÉRIFICATION GARANTIT SON PROPRE ROSTER au lieu d'espérer que quelqu'un l'ait chargé.
+  // L'ouverture d'une rencontre dans Interclub le rafraîchit déjà, mais rien ne dit qu'elle ait
+  // eu lieu : une rencontre composée avant que cette fonction n'existe n'a jamais déclenché ce
+  // chemin, et le capitaine retomberait sur la recherche par nom — donc sur l'homonyme.
+  //
+  // Le coût est nul à l'échelle de ce que fait déjà ce verbe : `refreshRosters` ne sort que si
+  // le roster manque ou date de plus d'une semaine, et quand il sort il ÉCONOMISE les quatre
+  // recherches qu'il remplace. Une vérification est plus rapide avec lui que sans.
+  if (fixture.snOpponentTeamId) {
+    try {
+      await refreshRosters([fixture.snOpponentTeamId]);
+    } catch {
+      // Best-effort : une vérification doit pouvoir aboutir sur ce qu'on a déjà. L'échec se
+      // verra de toute façon, joueur par joueur, dans les verdicts du rapport.
+    }
+  }
   const rosters = fixture.snOpponentTeamId
     ? await loadRosters([fixture.snOpponentTeamId])
     : new Map();

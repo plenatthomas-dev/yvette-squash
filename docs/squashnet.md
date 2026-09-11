@@ -74,9 +74,14 @@ La règle qui en découle, tenue par les routes d'admin : **les quatre ensemble,
 
 ### 1. Roster de l'équipe adverse — `ic_a=393480` ✅ fait
 
-Voir `src/lib/squashnet/roster.ts`, `src/lib/interclub-roster-db.ts`, la table
-`SquashnetTeamRoster` (migration `52_opponent_roster`) et le bouton « Mettre à jour les joueurs
-inscrits chez la ligue » de l'écran Capitaine.
+Voir `src/lib/squashnet/roster.ts`, `src/lib/interclub-roster-db.ts` et la table
+`SquashnetTeamRoster` (migration `52_opponent_roster`).
+
+**AUCUN GESTE À FAIRE.** Le roster se rafraîchit tout seul aux deux moments où il sert : à
+l'ouverture d'une rencontre dans Interclub (on va désigner les joueurs d'en face) et au début
+d'une vérification capitaine. Le serveur ne sort chez la ligue que si le roster manque ou date
+de plus d'une semaine (`ROSTER_FRAIS_JOURS`) — un soir de rencontre, où l'écran s'ouvre vingt
+fois, seule la première ouverture coûte une requête.
 
 **UN SEUL PARAMÈTRE : `teamid`.** C'est l'exception au piège des quatre identifiants — ni
 `eventid`, ni `drawid`, ni `roundid`. Mesuré, pas supposé : la fixture

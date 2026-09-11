@@ -132,51 +132,6 @@ export default function Captain({
     }
   };
 
-  /**
-   * Va chercher chez la ligue les JOUEURS INSCRITS dans les équipes qu'on affronte.
-   *
-   * Distinct de « Vérifier » : celui-ci regarde UNE rencontre et ses noms saisis, celui-là
-   * remplit le vivier dans lequel la composition puisera — y compris contre un club qu'on n'a
-   * pas encore affronté, cas où l'appli ne savait jusqu'ici rien proposer du tout.
-   */
-  const majRosters = async () => {
-    setBusy(true);
-    try {
-      const res = await fetch("/api/interclub/opponents/refresh", { method: "POST" });
-      if (onExpired(res.status)) return;
-      const r = await readOk<{
-        fetched: number;
-        fresh: number;
-        unreadable: string[];
-        failed: string[];
-        hint?: string;
-      }>(res);
-      // AUCUN IDENTIFIANT N'EST UN CAS NORMAL, et il a un remède précis que le serveur formule.
-      // L'afficher tel quel vaut mieux qu'un « 0 équipe » qui laisserait chercher au mauvais
-      // endroit.
-      if (r.hint) {
-        toast("info", r.hint);
-        return;
-      }
-      // LES DEUX ÉCHECS RESTENT SÉPARÉS jusqu'ici : « illisible » veut dire que le rendu de la
-      // ligue a changé et qu'un développeur doit recapter une fixture ; « sans réponse » veut
-      // dire de réessayer plus tard. Les confondre enverrait chercher un bug inexistant.
-      const soucis = [
-        r.unreadable.length ? `${r.unreadable.length} illisible(s) — le site a changé` : "",
-        r.failed.length ? `${r.failed.length} sans réponse — à réessayer` : "",
-      ].filter(Boolean);
-      toast(
-        soucis.length ? "info" : "ok",
-        `${r.fetched} équipe(s) mise(s) à jour, ${r.fresh} déjà à jour` +
-          (soucis.length ? ` · ${soucis.join(" · ")}` : ""),
-      );
-    } catch (e) {
-      toast("err", (e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   if (liste === null) return <p className="muted tiny">Chargement…</p>;
 
   // --- Le détail d'une rencontre ------------------------------------------
@@ -215,15 +170,6 @@ export default function Captain({
             Interrogation de la fédération, joueur par joueur — quelques secondes.
           </p>
         )}
-        <button type="button" disabled={busy} onClick={majRosters} className="secondary">
-          Mettre à jour les joueurs inscrits chez la ligue
-        </button>
-        <p className="muted tiny cap-aide">
-          Le second bouton relit, pour chaque équipe de la poule, les joueurs que son club a
-          INSCRITS chez la ligue — avec leur licence, leur classement et leur rang mixte. Ce sont
-          eux que les menus proposeront à la composition, y compris contre un club qu&apos;on
-          n&apos;a pas encore affronté. Une requête par équipe&nbsp;: quelques secondes.
-        </p>
         <p className="muted tiny cap-aide">
           Interroge la fédération pour NOS joueurs et contrôle les scores. Ceux d&apos;en face
           sont lus dans la liste des inscrits de leur équipe quand on l&apos;a — c&apos;est plus

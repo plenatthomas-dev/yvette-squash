@@ -25,6 +25,9 @@ let envois: Envoi[] = [];
 /** Ce que `/api/interclub/opponents` renvoie — surchargé par test. */
 let connus: { teams: string[]; players: unknown[] } = { teams: [], players: [] };
 
+/** La ligue a-t-elle rapporté un roster NEUF au dernier rafraîchissement ? Surchargé par test. */
+let rosterNeuf = false;
+
 const adversaire = (
   name: string,
   clt: string | null = null,
@@ -102,6 +105,10 @@ async function souffle() {
 beforeEach(() => {
   envois = [];
   connus = { teams: [], players: [] };
+  // Remis à zéro comme `connus` : c'est un état de MODULE, et un test qui le laisse à `true`
+  // ferait recharger le menu dans tous les suivants — un doublon d'appel qu'ils constateraient
+  // sans pouvoir l'expliquer.
+  rosterNeuf = false;
   matches = [simple(1, "À désigner"), simple(2, "À désigner")];
   localStorage.clear();
   vi.stubGlobal(
@@ -113,6 +120,12 @@ beforeEach(() => {
         methode: init?.method ?? "GET",
         corps: init?.body ? JSON.parse(String(init.body)) : null,
       });
+      // Le rafraîchissement AVANT le menu : son URL contient celle du menu, l'ordre décide.
+      // `rosterNeuf` dit si la ligue a rapporté quelque chose — c'est ce qui déclenche, ou non,
+      // un rechargement du menu.
+      if (u.includes("/api/interclub/opponents/refresh")) {
+        return reponse({ ok: true, fetched: rosterNeuf ? 1 : 0, fresh: rosterNeuf ? 0 : 1 });
+      }
       if (u.includes("/api/interclub/opponents")) return reponse(connus);
       if (u.includes("/api/interclub/follows")) return reponse({ follows: [], pushReady: false });
       if (u.includes("/availability")) {
@@ -346,10 +359,49 @@ describe("Menu des joueurs adverses (composition d'un simple)", () => {
     expect(envoi?.corps).toMatchObject({ awayName: "Paul Martin" });
   });
 
+  /** Le MENU (liste complète), à distinguer du rafraîchissement d'une seule équipe. */
+  const appelsMenu = () =>
+    envois.filter(
+      (e) => e.url.includes("/api/interclub/opponents") && !e.url.includes("/refresh"),
+    );
+  const appelsRefresh = () => envois.filter((e) => e.url.includes("/opponents/refresh"));
+
   it("ne charge la liste qu'UNE fois pour toute la vue, pas à chaque rencontre ouverte", async () => {
     connus = { teams: ["Massy"], players: [adversaire("Paul Martin")] };
     await ouvreSimple(1);
-    expect(envois.filter((e) => e.url.includes("/api/interclub/opponents"))).toHaveLength(1);
+    expect(appelsMenu()).toHaveLength(1);
+  });
+
+  // ⚠️ COMPOSER, C'EST LE MOMENT OÙ ON A BESOIN DE SAVOIR QUI LE CLUB A INSCRIT. Le demander
+  // par un bouton dans un autre écran revenait à exiger qu'on y ait pensé avant — et à laisser
+  // un champ vide à celui qui n'y avait pas pensé.
+  it("remet à jour les joueurs d'en face à l'ouverture d'une rencontre", async () => {
+    connus = { teams: ["Massy"], players: [adversaire("Paul Martin")] };
+    await ouvreSimple(1);
+    expect(appelsRefresh()).toHaveLength(1);
+    expect(appelsRefresh()[0].methode).toBe("POST");
+    // Sur la RENCONTRE ouverte : composer contre un club n'a aucune raison d'aller relire les
+    // quatre autres de la poule.
+    expect(appelsRefresh()[0].url).toContain("fixtureId=");
+  });
+
+  it("ne recharge PAS le menu quand la ligue n'a rien de neuf", async () => {
+    // « Déjà à jour » est le cas courant — un soir de rencontre, l'écran s'ouvre vingt fois, et
+    // le serveur ne sort chez la ligue qu'une seule. Réafficher le menu à chaque fois le ferait
+    // clignoter pour rien.
+    rosterNeuf = false;
+    connus = { teams: ["Massy"], players: [adversaire("Paul Martin")] };
+    await ouvreSimple(1);
+    expect(appelsMenu()).toHaveLength(1);
+  });
+
+  it("recharge le menu quand la ligue a rapporté des joueurs", async () => {
+    // Le premier chargement plus celui d'après le rafraîchissement : sans le second, les
+    // joueurs qu'on vient d'aller chercher n'apparaîtraient qu'au prochain passage sur l'écran.
+    rosterNeuf = true;
+    connus = { teams: ["Massy"], players: [adversaire("Paul Martin")] };
+    await ouvreSimple(1);
+    expect(appelsMenu()).toHaveLength(2);
   });
 
   // Le menu est un CONFORT de saisie, pas une donnée dont l'écran dépend : une réponse d'un

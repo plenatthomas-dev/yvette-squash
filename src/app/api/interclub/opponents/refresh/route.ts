@@ -10,9 +10,13 @@ export const dynamic = "force-dynamic";
 // secondes, mais le défaut de la plateforme ne les couvrirait pas toutes si une répond mal.
 export const maxDuration = 60;
 
-// POST /api/interclub/opponents/refresh?teamId=…[&force=1]
+// POST /api/interclub/opponents/refresh?fixtureId=…|teamId=…[&force=1]
 //
 // VA CHERCHER CHEZ LA LIGUE LES JOUEURS INSCRITS DANS LES ÉQUIPES QU'ON AFFRONTE.
+//
+// `fixtureId` NE RAFRAÎCHIT QU'UNE ÉQUIPE : celle qu'on affronte dans CETTE rencontre. C'est
+// la forme qu'emploie l'ouverture d'une rencontre, et elle est la bonne pour ça — composer
+// contre Verrieres 3 n'a aucune raison d'aller relire les quatre autres clubs de la poule.
 //
 // POURQUOI C'EST UN GESTE À PART, et pas une lecture de plus dans le menu :
 //
@@ -38,7 +42,30 @@ export async function POST(req: NextRequest) {
   if (!access.ok) return access.response;
 
   const teamId = req.nextUrl.searchParams.get("teamId") || undefined;
+  const fixtureId = req.nextUrl.searchParams.get("fixtureId") || undefined;
   const force = req.nextUrl.searchParams.get("force") === "1";
+
+  // UNE SEULE RENCONTRE, DONC UNE SEULE ÉQUIPE. L'identifiant fédéral est relu EN BASE et
+  // jamais reçu du client : une rencontre inconnue rend une liste vide plutôt qu'une erreur —
+  // ce chemin est déclenché par l'ouverture d'un écran, et un écran ne doit pas se plaindre
+  // d'un confort absent.
+  if (fixtureId) {
+    const f = await prisma.interclub.findUnique({
+      where: { id: fixtureId },
+      select: { snOpponentTeamId: true },
+    });
+    const outcomes = f?.snOpponentTeamId
+      ? await refreshRosters([f.snOpponentTeamId], { force })
+      : [];
+    return NextResponse.json({
+      ok: true,
+      teams: outcomes,
+      fetched: outcomes.filter((o) => o.status === "fetched").length,
+      fresh: outcomes.filter((o) => o.status === "fresh").length,
+      unreadable: outcomes.filter((o) => o.status === "unreadable").map((o) => o.snTeamId),
+      failed: outcomes.filter((o) => o.status === "failed").map((o) => o.snTeamId),
+    });
+  }
 
   // MÊME PROFONDEUR QUE LE MENU (`MAX_RENCONTRES`), importée et non recopiée : on rafraîchit
   // exactement les équipes que la fusion saura lire. Deux profondeurs différentes iraient

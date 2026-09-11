@@ -649,6 +649,56 @@ export default function Interclub({
     else setFixture(null);
   }, [openId, loadFixture]);
 
+  /**
+   * À L'OUVERTURE D'UNE RENCONTRE, ON REMET À JOUR LES JOUEURS DE L'ÉQUIPE D'EN FACE.
+   *
+   * Composer une rencontre, c'est désigner les joueurs adverses : c'est exactement le moment où
+   * il faut savoir qui le club a inscrit. Le demander par un bouton, dans un AUTRE écran,
+   * revenait à exiger qu'on ait pensé à le faire avant — et à laisser un champ vide à celui qui
+   * n'y avait pas pensé.
+   *
+   * ⚠️ CE N'EST PAS UNE REQUÊTE FÉDÉRALE À CHAQUE OUVERTURE. Le serveur ne va chez la ligue que
+   * si le roster manque ou date de plus d'une semaine (`ROSTER_FRAIS_JOURS`) ; sinon il répond
+   * « déjà à jour » sans sortir. Un soir de rencontre, où l'écran s'ouvre et se ferme vingt
+   * fois, le premier appel coûte une seconde et les dix-neuf suivants rien du tout.
+   *
+   * ⚠️ IL NE BLOQUE PAS L'ÉCRAN, et ne le fait pas attendre : la rencontre s'affiche
+   * immédiatement avec ce qu'on a déjà, et le menu se recharge SI quelque chose de nouveau est
+   * arrivé. Le contraire ferait patienter une seconde devant un écran de composition pour un
+   * confort de saisie — au bord d'un terrain, sur un réseau médiocre.
+   *
+   * ⚠️ SILENCIEUX EN CAS D'ÉCHEC, comme `loadKnown` : ces menus sont un confort, pas une donnée
+   * dont l'écran dépend. La saisie libre reste là, et un toast d'erreur ne ferait qu'inquiéter
+   * pour une commodité absente.
+   *
+   * SUR `openId`, DONC UNE FOIS PAR OUVERTURE — surtout pas dans `loadFixture`, qui se rejoue à
+   * chaque retour au premier plan et après chaque enregistrement. Accroché là, un déverrouillage
+   * de téléphone aurait relancé l'interrogation de la ligue.
+   */
+  useEffect(() => {
+    if (!openId) return;
+    let vivant = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/interclub/opponents/refresh?fixtureId=${openId}`, {
+          method: "POST",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { fetched?: unknown };
+        // On ne recharge le menu QUE si la ligue a effectivement rendu quelque chose de neuf.
+        // « Déjà à jour » est le cas courant, et il n'a rien à réafficher.
+        if (vivant && typeof data.fetched === "number" && data.fetched > 0) void loadKnown();
+      } catch {
+        /* menus inchangés : la saisie libre suffit */
+      }
+    })();
+    // La rencontre a pu être refermée pendant l'aller-retour : ne pas recharger un menu dont
+    // plus personne ne se sert.
+    return () => {
+      vivant = false;
+    };
+  }, [openId, loadKnown]);
+
   // Rafraîchissement au retour sur l'onglet : plusieurs personnes saisissent en parallèle un
   // soir de rencontre. Pas d'intervalle — le palier gratuit ne supporte pas le polling.
   //
