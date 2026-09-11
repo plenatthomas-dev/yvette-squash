@@ -4851,10 +4851,21 @@ body[data-bottombar] .install-banner {
    AVEC le score : ils lui volaient donc de la hauteur, et c'est exactement la ressource rare
    quand le téléphone est couché. Ils passent aux quatre coins de la case, le score occupe seul
    le centre et peut enfin prendre toute la place. En paysage il gagne environ 45 %. */
+/* ⚠️ LES DEUX SEULS BOUTONS DE L'APPLI QU'ON TAPE EN RAFALE. C'est là, et nulle part
+   ailleurs, que le navigateur mobile prend deux appuis rapprochés pour un DOUBLE-APPUI
+   et zoome — au milieu d'un jeu, sur un écran qu'on ne regarde pas. Et qu'un appui
+   maintenu, geste ordinaire quand on hésite, SÉLECTIONNE le nom du joueur et fait
+   surgir le menu « Copier ».
+   `touch-action: manipulation` et `user-select: none` sont déjà posés ailleurs dans
+   cette feuille pour exactement ces deux raisons (`.wait-btn`, `td.cell`, `.wk-seg.tap`) ;
+   ils manquaient au seul endroit où le geste est répété cinquante fois par jeu. */
 .ics-side {
   container-type: size;
   position: relative;
   display: block;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
   height: 100%;
   margin: 0;
   padding: 0;
@@ -4869,9 +4880,39 @@ body[data-bottombar] .install-banner {
 /* Le nom et la barre du bas passent AU-DESSUS du score : sa boîte couvre toute la case, et
    c'est le nom qui doit rester lisible si un score à deux chiffres vient l'effleurer. */
 .ics-name,
+.ics-balle,
 .ics-foot {
   position: absolute;
   z-index: 1;
+}
+
+/* BALLE DE JEU / BALLE DE MATCH — coin haut-droit, le seul des quatre qui restait libre.
+   Le score garde donc le centre entier : l'annonce ne lui prend pas un pixel de hauteur,
+   qui est la ressource rare quand le téléphone est couché.
+
+   ⚠️ AUCUN APLAT, ET C'EST DÉLIBÉRÉ. La case porte la couleur du MAILLOT, libre (cf.
+   `inkFor`) : un chip rempli devrait recalculer son encre sur une couleur inconnue, dans
+   les quatre thèmes, pour distinguer deux états que le TEXTE distingue déjà — « balle de
+   jeu » et « balle de match » ne se confondent pas. La balle de match se contente donc
+   d'être pleinement opaque et plus appuyée. Le liseré reprend `currentColor`, qui est
+   l'encre déjà calculée pour cette case : il ne peut pas devenir illisible. */
+.ics-balle {
+  top: 6px;
+  right: 8px;
+  max-width: 46%;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: right;
+  opacity: 0.75;
+}
+.ics-balle-match {
+  border-width: 2px;
+  font-weight: 700;
+  opacity: 1;
 }
 
 /* Haut-gauche. Deux lignes au plus : un nom à rallonge ne doit pas descendre sur le score. */
@@ -5102,6 +5143,27 @@ body[data-bottombar] .install-banner {
   font-size: 1.1rem;
   font-variant-numeric: tabular-nums;
 }
+
+/* AU SERVICE — la pastille du joueur qui sert, dans les listes de matchs en cours.
+
+   ⚠️ ELLE NE DOIT PAS SE CONFONDRE AVEC LA PASTILLE DE MAILLOT (`.ic-dot`), qui vit
+   sur les mêmes lignes. Trois choses les séparent, et il en fallait trois : la
+   POSITION (celle-ci est à droite du nom, celle-là à gauche), la TAILLE (moitié
+   moins), et la COULEUR — cette pastille prend l'encre du texte, jamais une couleur
+   propre, parce qu'elle dit un état du jeu et non l'identité d'un joueur.
+
+   `currentColor` la rend juste dans les quatre thèmes sans une seule variable. */
+.ic-au-service {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: middle;
+}
+
 .ic-live-matches {
   list-style: none;
   padding: 0;

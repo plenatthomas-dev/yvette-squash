@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import AuService from "./AuService";
 import { Dialog } from "@/components/Dialog";
 import { readOk } from "@/lib/apiFetch";
 import { onForeground } from "@/lib/onForeground";
@@ -1464,6 +1465,12 @@ function FixtureDialog({
                     <span className={m.homeDisplayName === UNSET_PLAYER ? "muted" : undefined}>
                       {m.homeDisplayName}
                     </span>
+                    {/* AU SERVICE. La donnée arrivait déjà — `getLiveFixtures` la met dans la
+                        charge utile, cet écran la déclarait dans son type — et il ne l'affichait
+                        pas. Or « 7–5 » sans savoir qui sert ne se lit pas : au squash le service
+                        change de main à chaque échange perdu, et c'est lui qui dit si le meneur
+                        conclut ou subit. Coût serveur nul, elle est déjà payée. */}
+                    {m.live?.serving === "home" && <AuService />}
                   </span>
                   <span className="ic-versus" title="contre">
                     <span className="sr-only">contre</span>
@@ -1472,6 +1479,7 @@ function FixtureDialog({
                   <span className="ic-player">
                     <ColorDot color={m.awayColor} size="lg" />
                     <span className={m.awayName === UNSET_PLAYER ? "muted" : undefined}>{m.awayName}</span>
+                    {m.live?.serving === "away" && <AuService />}
                   </span>
                 </span>
                 {(m.live || m.gamesHome !== null) && (

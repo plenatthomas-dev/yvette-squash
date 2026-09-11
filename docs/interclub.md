@@ -211,6 +211,46 @@ porte de derrière, en consommant DÉFINITIVEMENT `startNotifiedAt` (le vrai dé
 plus jamais). Le score de l'instantané est stocké dans les deux cas : le serveur désigné ne se
 perd pas, seul le statut attend le premier point.
 
+### Au bord du terrain — ce que l'écran fait sans qu'on le lui demande
+
+Quatre conforts, tous **facultatifs par construction** : le marquage fonctionne exactement
+pareil quand chacun d'eux est refusé, et aucun ne dit rien quand il échoue. Personne ne doit
+recevoir un message d'erreur pendant qu'il compte des points.
+
+| Ce que ça fait | Où | Quand ça n'a pas lieu |
+|---|---|---|
+| **L'écran reste allumé** tant que le marquage est ouvert, et le verrou est **repris au retour au premier plan** | `lib/wake-lock.ts` | API absente (Firefox Android), batterie faible, réglage système |
+| **Balle de jeu / balle de match** au coin haut-droit de la case | `ballPoint` (`lib/interclub.ts`) | jamais à 10-10 : 11-10 ne gagne pas le jeu |
+| **Vibration** brève sur un point, double sur une fin de jeu | `InterclubScorer` | iOS ne connaît pas l'API |
+| **Ni zoom au double-appui, ni sélection du nom** sur les deux grandes cases | `.ics-side` | — |
+
+Le premier est celui qui change le plus l'usage réel : un téléphone posé au bord du court se
+verrouille au bout de trente secondes, et le marqueur le déverrouillait entre **chaque échange**.
+Rien dans le code ne le montrait — l'appli fonctionnait parfaitement.
+
+⚠️ **La règle des balles n'est pas réécrite** : `ballPoint` ajoute un point au camp considéré et
+demande à `gameWinner` si le jeu serait fini. Une seconde copie du « 11 points et 2 d'écart »
+finirait par diverger, et l'écart ne se verrait qu'à 10-10 — devant tout le court.
+
+⚠️ **Le choix du premier serveur se défait.** Il ne se défaisait pas : la garde du bouton
+« Annuler » était `events.length <= 1`, or sur un match vierge le « Qui engage ? » pose
+l'événement n° 1. Un appui de travers condamnait l'indicateur de service pour tout le match (le
+score, lui, n'était pas touché), et marquer un point puis l'annuler n'y changeait rien. Cette
+garde ne protégeait rien d'autre — on pouvait déjà défaire un par un tous les événements
+reconstruits d'un match repris.
+
+### Qui sert, côté spectateur
+
+Une pastille (`.ic-au-service`) à droite du nom, dans le panneau « En direct » **et** sur la
+fiche d'une rencontre. La donnée arrivait déjà dans la charge utile (`live.serving`, cf.
+`getLiveFixtures`) et les deux écrans la déclaraient dans leur type sans jamais la rendre : coût
+serveur **nul**. Au squash le service change de main à chaque échange perdu, et c'est lui qui dit
+si le meneur est en train de conclure ou de subir — « 7–5 » seul ne le dit pas.
+
+Elle ne se confond pas avec la pastille de **maillot** : celle-ci est à gauche du nom, pleine et
+colorée ; celle-là est à droite, moitié moins grande, et prend l'encre du texte — elle dit un
+état du jeu, pas une identité. Rien n'est affiché tant que le premier serveur n'est pas désigné.
+
 ---
 
 ## Ordre des simples : classement, puis rang mixte
@@ -1004,7 +1044,7 @@ code d'erreur qu'on lui a soufflé. C'est lui qui a tranché les deux soupçons 
     désormais au lieu de sortir en 500. Ce qu'aucun Postgres local ne peut dire, et qui reste à
     observer sur Recette un jour de base froide : combien de temps Neon met réellement à se
     réveiller.
-- **`Interclub.tsx` fait ~1730 lignes** et concentre cinq écrans, le classement de poule
+- **`Interclub.tsx` fait ~2300 lignes** et concentre cinq écrans, le classement de poule
   s'étant ajouté avec le calendrier. Le découpage n'est plus une éventualité. Découpage à
   envisager si un
   cinquième s'ajoute.

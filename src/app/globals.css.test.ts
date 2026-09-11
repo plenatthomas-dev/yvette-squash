@@ -166,3 +166,37 @@ describe("l'écran Capitaine tient dans une capture d'écran", () => {
     }
   });
 });
+
+// ============================================================================
+//  LES DEUX CASES DE MARQUAGE — les seuls boutons de l'appli qu'on tape en rafale.
+//
+//  Cinquante appuis par jeu, sur un téléphone posé au bord du court, par
+//  quelqu'un qui regarde le court et non l'écran. C'est exactement le régime où
+//  le navigateur mobile prend deux appuis rapprochés pour un DOUBLE-APPUI et
+//  zoome, et où un appui maintenu — geste ordinaire quand on hésite — SÉLECTIONNE
+//  le nom du joueur et fait surgir le menu « Copier ».
+//
+//  Les deux propriétés qui l'empêchent sont posées ailleurs dans cette feuille
+//  depuis longtemps, pour exactement ces raisons. Elles manquaient au seul
+//  endroit où le geste est répété.
+// ============================================================================
+
+describe("les cases de marquage supportent la rafale d'appuis", () => {
+  /** Le corps de la règle `.ics-side`, commentaires ôtés. */
+  const caseDeMarquage = () => {
+    const sans = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
+    const m = /(?:^|[};])\s*\.ics-side\s*\{([^}]*)\}/m.exec(sans);
+    expect(m).not.toBeNull();
+    return (m as RegExpExecArray)[1];
+  };
+
+  it("n'ouvre pas le zoom au double-appui", () => {
+    expect(caseDeMarquage()).toMatch(/touch-action\s*:\s*manipulation/);
+  });
+
+  it("ne laisse pas un appui maintenu sélectionner le nom du joueur", () => {
+    // Le préfixe `-webkit-` compte : c'est Safari iOS qui fait surgir la loupe et le menu.
+    expect(caseDeMarquage()).toMatch(/-webkit-user-select\s*:\s*none/);
+    expect(caseDeMarquage()).toMatch(/(?:^|;)\s*user-select\s*:\s*none/);
+  });
+});

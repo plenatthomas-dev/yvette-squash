@@ -5,6 +5,7 @@ import {
   checkGame,
   contrastRatio,
   describeSequenceProblem,
+  ballPoint,
   gameWinner,
   isValidBestOf,
   isValidMatchCount,
@@ -674,5 +675,77 @@ describe("lineupComplete", () => {
 
   it("vrai quand les deux joueurs sont désignés", () => {
     expect(lineupComplete("Thomas", "Dupont")).toBe(true);
+  });
+});
+
+// ============================================================================
+//  BALLE DE JEU, BALLE DE MATCH — ce que le marqueur annonce avant l'échange.
+//
+//  La règle n'est pas réécrite dans `ballPoint` : il ajoute un point et demande à
+//  `gameWinner` si le jeu serait fini. Ces essais valent donc autant pour lui que
+//  pour l'accord des deux — c'est à 10-10 qu'une seconde copie de la règle se
+//  serait trahie, et c'est le cas qu'ils regardent en premier.
+// ============================================================================
+
+describe("ballPoint", () => {
+  const rien = { home: 0, away: 0 };
+
+  it("annonce la balle de jeu à celui qui est à un point du jeu", () => {
+    expect(ballPoint({ home: 10, away: 8 }, rien, 5)).toEqual({ side: "home", match: false });
+    expect(ballPoint({ home: 3, away: 10 }, rien, 5)).toEqual({ side: "away", match: false });
+  });
+
+  it("⚠️ n'annonce RIEN à 10-10 — 11-10 ne gagne pas le jeu", () => {
+    // Le cas où une seconde copie de la règle (« 11 points ») se trahirait : il faut DEUX
+    // points d'écart, et l'annoncer serait une faute d'arbitrage entendue de tout le court.
+    expect(ballPoint({ home: 10, away: 10 }, rien, 5)).toBeNull();
+    expect(ballPoint({ home: 12, away: 12 }, rien, 5)).toBeNull();
+  });
+
+  it("l'annonce à nouveau dès qu'un camp reprend l'avantage dans les prolongations", () => {
+    expect(ballPoint({ home: 11, away: 10 }, rien, 5)).toEqual({ side: "home", match: false });
+    expect(ballPoint({ home: 12, away: 13 }, rien, 5)).toEqual({ side: "away", match: false });
+  });
+
+  it("ne dit rien tant que personne n'approche", () => {
+    expect(ballPoint({ home: 0, away: 0 }, rien, 5)).toBeNull();
+    expect(ballPoint({ home: 9, away: 4 }, rien, 5)).toBeNull();
+  });
+
+  it("distingue la balle de MATCH de la balle de jeu", () => {
+    // Au meilleur des cinq, il faut trois jeux : à 2 jeux gagnés, le jeu en cours est le dernier
+    // qui manque. Les deux ne s'annoncent pas de la même façon, et ne se jouent pas pareil.
+    expect(ballPoint({ home: 10, away: 8 }, { home: 2, away: 0 }, 5)).toEqual({
+      side: "home",
+      match: true,
+    });
+    expect(ballPoint({ home: 10, away: 8 }, { home: 1, away: 2 }, 5)).toEqual({
+      side: "home",
+      match: false,
+    });
+  });
+
+  it("suit le FORMAT du match, il ne suppose pas le meilleur des cinq", () => {
+    // Au meilleur des trois, deux jeux suffisent : la même position est une balle de match.
+    expect(ballPoint({ home: 10, away: 8 }, { home: 1, away: 0 }, 3)).toEqual({
+      side: "home",
+      match: true,
+    });
+    expect(ballPoint({ home: 10, away: 8 }, { home: 1, away: 0 }, 5)).toEqual({
+      side: "home",
+      match: false,
+    });
+  });
+
+  it("s'accorde avec `gameWinner` sur toute la plage utile", () => {
+    // LA VRAIE GARDE : elle vérifie l'ACCORD des deux fonctions plutôt que des valeurs
+    // recopiées à la main. Une divergence future y tombe, quel que soit le point où elle naît.
+    for (let h = 0; h <= 15; h++) {
+      for (let a = 0; a <= 15; a++) {
+        const b = ballPoint({ home: h, away: a }, { home: 0, away: 0 }, 5);
+        expect(b?.side === "home").toBe(gameWinner({ home: h + 1, away: a }) === "home");
+        expect(b?.side === "away").toBe(gameWinner({ home: h, away: a + 1 }) === "away");
+      }
+    }
   });
 });
