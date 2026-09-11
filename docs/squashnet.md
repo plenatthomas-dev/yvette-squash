@@ -75,7 +75,7 @@ La règle qui en découle, tenue par les routes d'admin : **les quatre ensemble,
 ### 1. Roster de l'équipe adverse — `ic_a=393480` ✅ fait
 
 Voir `src/lib/squashnet/roster.ts`, `src/lib/interclub-roster-db.ts` et la table
-`SquashnetTeamRoster` (migration `52_opponent_roster`).
+`SquashnetTeamRoster` (migration `54_opponent_roster`).
 
 **AUCUN GESTE À FAIRE.** Le roster se rafraîchit tout seul aux deux moments où il sert : à
 l'ouverture d'une rencontre dans Interclub (on va désigner les joueurs d'en face) et au début
@@ -117,7 +117,7 @@ de la ligue, pas dans nos données. Le cron ne l'écrit pas : il alerte, il n'ap
 
 Voir `src/lib/squashnet/tie.ts` (parsing), `src/lib/captain-official.ts` (la confrontation, pure)
 et `src/lib/interclub-tie-db.ts` (base et réseau). Colonne `Interclub.snTieId`, migration
-`53_fixture_tie_id`. Fixture : `rencontre-2026-1643001-feuille.html`.
+`55_fixture_tie_id`. Fixture : `rencontre-2026-1643001-feuille.html`.
 
 La feuille donne, simple par simple : les **deux joueurs** avec leur classement **du soir**, le
 score **jeu par jeu**, le vainqueur, et les comptes de jeux et de points — puis le **total de la

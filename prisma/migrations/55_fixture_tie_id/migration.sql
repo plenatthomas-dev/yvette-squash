@@ -1,3 +1,21 @@
+-- ⚠️ MIGRATION RENUMÉROTÉE, ET REJOUABLE POUR CETTE RAISON.
+--
+-- Elle s'appelait `53_fixture_tie_id`. Elle n'entrait en collision avec rien : elle a suivi les
+-- deux qui la précèdent sur cette branche (`51_` et `52_`, devenues `53_` et `54_`), pour que
+-- les trois gardent leur ordre relatif. Le préfixe EST le contrat d'ordre de ce dépôt, et
+-- `prisma/migrations/README.md` raconte deux incidents de production nés de son ambiguïté.
+--
+-- La production n'a jamais vu cette migration : la renuméroter ne lui coûte rien. La base
+-- `dev`, partagée par toutes les previews, l'a en revanche déjà appliquée sous son ANCIEN
+-- nom. Pour Prisma, le nouveau nom est une migration pendante : il va la rejouer sur une base
+-- qui porte déjà ses objets. D'où les `IF NOT EXISTS` ci-dessous — ils ne sont pas de la
+-- prudence décorative, ils sont ce qui évite un `already exists` (P3018) et un déploiement
+-- de preview bloqué jusqu'à un `migrate resolve` à la main. Sur une base vierge, ils ne
+-- changent rien.
+--
+-- La ligne de l'ancien nom reste dans `_prisma_migrations` de `dev`, inoffensive — comme la
+-- ligne `10_passkey_backup` que la production garde depuis 2026 (cf. le README des migrations).
+
 -- LA FEUILLE DE MATCH OFFICIELLE : L'IDENTIFIANT QUI Y MÈNE.
 --
 -- CE QUE ÇA OUVRE
@@ -33,4 +51,4 @@
 -- rencontre importée n'a cet identifiant qu'une fois la fiche d'équipe lue. L'absence se dit
 -- (« pas d'identifiant fédéral ») et ne se confond pas avec un silence de la ligue — les deux
 -- appellent des gestes opposés : réimporter, ou réessayer.
-ALTER TABLE "Interclub" ADD COLUMN "snTieId" TEXT;
+ALTER TABLE "Interclub" ADD COLUMN IF NOT EXISTS "snTieId" TEXT;

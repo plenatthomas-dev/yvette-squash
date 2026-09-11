@@ -1,3 +1,21 @@
+-- ⚠️ MIGRATION RENUMÉROTÉE, ET REJOUABLE POUR CETTE RAISON.
+--
+-- Elle s'appelait `52_opponent_roster`. La branche avait été créée avant que `main` ne pose sa propre
+-- migration `52_index_purges`, et les deux ont pris le même numéro. Git n'y voit rien — ce sont
+-- deux dossiers différents — mais le préfixe EST le contrat d'ordre de ce dépôt, et
+-- `prisma/migrations/README.md` raconte deux incidents de production nés de cette ambiguïté.
+--
+-- La production n'a jamais vu cette migration : la renuméroter ne lui coûte rien. La base
+-- `dev`, partagée par toutes les previews, l'a en revanche déjà appliquée sous son ANCIEN
+-- nom. Pour Prisma, le nouveau nom est une migration pendante : il va la rejouer sur une base
+-- qui porte déjà ses objets. D'où les `IF NOT EXISTS` ci-dessous — ils ne sont pas de la
+-- prudence décorative, ils sont ce qui évite un `already exists` (P3018) et un déploiement
+-- de preview bloqué jusqu'à un `migrate resolve` à la main. Sur une base vierge, ils ne
+-- changent rien.
+--
+-- La ligne de l'ancien nom reste dans `_prisma_migrations` de `dev`, inoffensive — comme la
+-- ligne `10_passkey_backup` que la production garde depuis 2026 (cf. le README des migrations).
+
 -- LE ROSTER DE L'ÉQUIPE ADVERSE, LU CHEZ LA FÉDÉRATION.
 --
 -- POURQUOI CES DEUX CHANGEMENTS
@@ -24,7 +42,7 @@
 -- portent pas, et seul un ré-import du calendrier peut le poser (il est dans le HTML, pas dans
 -- nos données). Une rencontre sans cet identifiant n'a simplement pas de roster — jamais un
 -- roster faux, ce que la garde de parsing (`RosterUnreadableError`) tient de son côté.
-ALTER TABLE "Interclub" ADD COLUMN "snOpponentTeamId" TEXT;
+ALTER TABLE "Interclub" ADD COLUMN IF NOT EXISTS "snOpponentTeamId" TEXT;
 
 -- 2. `SquashnetTeamRoster` — LE CACHE
 --
@@ -42,7 +60,7 @@ ALTER TABLE "Interclub" ADD COLUMN "snOpponentTeamId" TEXT;
 -- rencontre : cinq rencontres contre le même club partagent une seule ligne, et le roster
 -- survit à la suppression d'une rencontre — c'est un fait publié par la ligue, pas une
 -- observation sur notre saison.
-CREATE TABLE "SquashnetTeamRoster" (
+CREATE TABLE IF NOT EXISTS "SquashnetTeamRoster" (
     "snTeamId" TEXT NOT NULL,
     "name" TEXT,
     "club" TEXT,

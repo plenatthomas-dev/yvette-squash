@@ -94,7 +94,7 @@ squashnet est un site associatif qui ne nous doit rien.
 
 ### Le stockage
 
-`InterclubOfficial` (migration `51_interclub_official`) — **une rencontre, un rapport** :
+`InterclubOfficial` (migration `53_interclub_official`) — **une rencontre, un rapport** :
 relancer **corrige** au lieu d'empiler, donc l'écran n'a jamais à choisir entre deux versions.
 
 `checkedAt` n'est pas décoratif : sans lui, « rien à signaler » et « on n'a pas encore regardé »
@@ -201,7 +201,7 @@ mixte), **on ne conclut rien**.
 - `src/app/page.tsx` — l'entrée de menu, **absente** (pas grisée) si on n'est pas capitaine
 - `src/components/PrivacyNotice.tsx` — le rapport stocke le nom fédéral, le classement et la
   licence **d'adversaires** : ça se dit
-- `prisma/schema.prisma` + migration `51_interclub_official`
+- `prisma/schema.prisma` + migration `53_interclub_official`
 - `docs/interclub.md`, `docs/idees-developpement.md`
 
 **La séparation pur / base** est celle d'`interclub-order.ts` (pur) et `interclub-roster.ts`
