@@ -33,6 +33,7 @@ function fixture(over: Record<string, unknown> = {}) {
     status: "done",
     teamId: "t1",
     teamName: "Équipe 1",
+    teamFedName: "Yvette 1",
     matchCount: 1,
     checkedAt: null,
     problems: null,
@@ -225,7 +226,11 @@ describe("Captain — le détail", () => {
     // il ne faisait que répéter la question. Il coûtait en revanche une ligne de plus par
     // joueur sur un téléphone (« Squash club verrieres le buisson » ne tient pas à côté d'un
     // nom), soit la quatrième vignette hors de l'écran. Le nom d'ÉQUIPE le remplace.
-    expect(screen.getByText(/nous/, { selector: ".cap-club" })).toBeTruthy();
+    //
+    // ⚠️ UN NOM D'ÉQUIPE DES DEUX CÔTÉS, jamais « nous ». Le raccourci tenait tant qu'on
+    // n'alignait qu'une équipe ; à deux, il ne dit plus LAQUELLE — et c'est précisément sur une
+    // capture d'écran, relue plus tard ou envoyée à quelqu'un, que l'ambiguïté coûte.
+    expect(screen.getByText(/Yvette 1/, { selector: ".cap-club" })).toBeTruthy();
     expect(screen.getByText(/Squash Club de Rennes/, { selector: ".cap-club" })).toBeTruthy();
     expect(screen.queryByText(/Squash de l yvette/)).toBeNull();
     // Classement, rang mixte et licence sur une ligne — sans le mot « licence », qui n'apporte
@@ -234,6 +239,17 @@ describe("Captain — le détail", () => {
   });
 
   // LES POINTS, JEU PAR JEU — ce qu'on transcrit chez la ligue, sur la ligne du titre.
+  it("retombe sur notre nom interne quand la ligue ne nous en donne pas", async () => {
+    // La fiche fédérale arrive avec la première vérification (elle est lue pour son `tieid`).
+    // Avant elle, « Équipe 1 » vaut mieux qu'une case vide — et distingue déjà deux équipes.
+    monte([fixture({ teamFedName: null })]);
+    await souffle();
+    await ouvrir();
+    fireEvent.click(screen.getByRole("button", { name: /Vérifier la rencontre/ }));
+    await souffle();
+    expect(screen.getByText(/Équipe 1/, { selector: ".cap-club" })).toBeTruthy();
+  });
+
   it("affiche le détail point par point de chaque simple", async () => {
     monte([fixture()]);
     await souffle();

@@ -48,6 +48,8 @@ interface Fixture {
   status: string;
   teamId: string;
   teamName: string | null;
+  /** Le nom que la LIGUE donne à notre équipe (« Yvette 1 »), quand sa fiche est en cache. */
+  teamFedName: string | null;
   matchCount: number;
   checkedAt: string | null;
   /** Nombre de points à régler au dernier passage. `null` = jamais vérifiée. */
@@ -77,12 +79,20 @@ const camp = (p: PlayerCheck) => (p.side === "home" ? "nous" : "eux");
  * deux — soit 22 px par joueur, 176 px sur une rencontre à quatre simples. C'est à peu près ce
  * qui manquait pour qu'une rencontre entière tienne dans une capture d'écran de téléphone.
  *
- * Le nom d'équipe adverse est celui de la rencontre (`opponent`) : il est déjà à l'écran, il est
- * court, et il est le même pour les quatre adversaires — aucune raison d'aller le chercher
- * joueur par joueur. De notre côté, « nous » dit tout : l'équipe est celle du titre.
+ * ⚠️ DES DEUX CÔTÉS, UN NOM D'ÉQUIPE — plus « nous ». Le raccourci tenait tant qu'on n'alignait
+ * qu'une équipe ; à deux, il ne dit plus LAQUELLE, et c'est justement sur une capture d'écran,
+ * relue plus tard ou envoyée à quelqu'un d'autre, que l'ambiguïté coûte.
+ *
+ * L'ordre de préférence dit d'où vient le nom : celui de la LIGUE d'abord (« Yvette 1 » — le
+ * même vocabulaire que « Verrieres 3 » en face, donc rien à traduire), puis le nôtre
+ * (« Équipe 1 ») tant que la fiche fédérale n'est pas en cache. L'adversaire, lui, est celui de
+ * la rencontre : déjà à l'écran, court, et le même pour les quatre — aucune raison d'aller le
+ * chercher joueur par joueur.
  */
-const equipeDe = (p: PlayerCheck, f: { opponent: string }) =>
-  p.side === "home" ? "nous" : f.opponent;
+const equipeDe = (
+  p: PlayerCheck,
+  f: { opponent: string; teamName: string | null; teamFedName: string | null },
+) => (p.side === "home" ? (f.teamFedName ?? f.teamName ?? "nous") : f.opponent);
 
 export default function Captain({
   toast,

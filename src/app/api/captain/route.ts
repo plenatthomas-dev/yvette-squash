@@ -30,10 +30,29 @@ export async function GET(req: NextRequest) {
     // Un admin qui n'est capitaine de rien a `teamIds` vide : sans ce cas, il verrait une page
     // vide là où il est précisément là pour dépanner.
     where: isAdmin ? {} : { id: { in: teamIds } },
-    select: { id: true, name: true },
+    select: { id: true, name: true, snTeamId: true },
     orderBy: { order: "asc" },
   });
   const visibles = teams.map((t) => t.id);
+
+  // LE NOM FÉDÉRAL DE NOS ÉQUIPES — « Yvette 1 », et non « Équipe 1 ».
+  //
+  // C'est celui que la ligue emploie, donc celui qui se lit à côté de « Verrieres 3 » sans
+  // qu'on ait à traduire. Et il DISTINGUE DEUX ÉQUIPES, ce qui devient nécessaire dès qu'on en
+  // aligne deux : « nous » ne dit plus laquelle.
+  //
+  // Lu dans le cache des fiches d'équipe, qui porte aussi bien les nôtres que celles d'en face
+  // (une fiche est une fiche). Il s'y range tout seul : la lecture de la feuille officielle va
+  // chercher la fiche de notre équipe pour son `tieid`, et la range au passage. Tant qu'aucune
+  // vérification n'a eu lieu, la ligne n'existe pas — d'où le repli sur notre nom interne.
+  const ancrees = teams.map((t) => t.snTeamId).filter((v): v is string => !!v);
+  const fiches = ancrees.length
+    ? await prisma.squashnetTeamRoster.findMany({
+        where: { snTeamId: { in: ancrees } },
+        select: { snTeamId: true, name: true },
+      })
+    : [];
+  const nomFederal = new Map(fiches.map((f) => [f.snTeamId, f.name]));
 
   const fixtures = await prisma.interclub.findMany({
     where: { teamId: { in: visibles } },
@@ -56,8 +75,13 @@ export async function GET(req: NextRequest) {
   });
 
   const teamName = new Map(teams.map((t) => [t.id, t.name]));
+  const fedName = new Map(
+    teams.map((t) => [t.id, (t.snTeamId ? nomFederal.get(t.snTeamId) : null) ?? null]),
+  );
   return NextResponse.json({
-    teams,
+    // `snTeamId` ne SORT PAS : il sert à retrouver la fiche fédérale juste au-dessus, l'écran
+    // n'en fait rien. Une réponse dit ce qu'elle sert, pas ce que la requête a ramené.
+    teams: teams.map((t) => ({ id: t.id, name: t.name })),
     fixtures: fixtures.map((f) => {
       // Le rapport n'est PAS renvoyé ici, seulement son résumé : la liste n'en affiche que la
       // pastille, et servir quarante rapports complets pour quarante pastilles serait payer la
@@ -73,6 +97,9 @@ export async function GET(req: NextRequest) {
         status: f.status,
         teamId: f.teamId,
         teamName: teamName.get(f.teamId) ?? null,
+        /** Le nom que la LIGUE donne à notre équipe (« Yvette 1 »). Null si sa fiche n'est pas
+            encore en cache — l'écran retombe alors sur le nom interne. */
+        teamFedName: fedName.get(f.teamId) ?? null,
         matchCount: f.matchCount,
         checkedAt: f.official?.checkedAt?.toISOString() ?? null,
         // `null` = jamais vérifiée, ou rapport d'un format qu'on ne sait plus lire. Les deux se

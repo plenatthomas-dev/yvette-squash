@@ -8,10 +8,11 @@ const h = vi.hoisted(() => ({
     teamIds?: string[];
     isAdmin?: boolean;
   },
-  teams: [] as { id: string; name: string }[],
+  teams: [] as { id: string; name: string; snTeamId: string | null }[],
   fixtures: [] as Record<string, unknown>[],
   teamFindMany: vi.fn(),
   fixtureFindMany: vi.fn(),
+  rosterFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/captain-access", () => ({
@@ -30,6 +31,7 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     interclubTeam: { findMany: (...a: unknown[]) => h.teamFindMany(...a) },
     interclub: { findMany: (...a: unknown[]) => h.fixtureFindMany(...a) },
+    squashnetTeamRoster: { findMany: (...a: unknown[]) => h.rosterFindMany(...a) },
   },
 }));
 
@@ -63,10 +65,11 @@ function fixture(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   h.access = { ok: true, teamIds: ["t1"], isAdmin: false };
-  h.teams = [{ id: "t1", name: "Équipe 1" }];
+  h.teams = [{ id: "t1", name: "Équipe 1", snTeamId: "42" }];
   h.fixtures = [fixture()];
   h.teamFindMany.mockReset().mockImplementation(async () => h.teams);
   h.fixtureFindMany.mockReset().mockImplementation(async () => h.fixtures);
+  h.rosterFindMany.mockReset().mockImplementation(async () => []);
 });
 
 describe("GET /api/captain", () => {
@@ -152,7 +155,31 @@ describe("GET /api/captain", () => {
 
   it("nomme l'équipe de chaque rencontre", async () => {
     const { fixtures, teams } = await (await GET(req())).json();
+    // L'identifiant fédéral ne sort pas : il sert à retrouver la fiche, l'écran n'en fait rien.
     expect(teams).toEqual([{ id: "t1", name: "Équipe 1" }]);
     expect(fixtures[0].teamName).toBe("Équipe 1");
+  });
+
+  it("donne le nom que la LIGUE emploie pour notre équipe", async () => {
+    // « Yvette 1 », le même vocabulaire que « Verrieres 3 » en face — donc rien à traduire
+    // quand on lit les deux camps d'un simple l'un sous l'autre. Et il distingue DEUX équipes,
+    // ce que « nous » ne faisait pas.
+    h.rosterFindMany.mockImplementation(async () => [{ snTeamId: "42", name: "Yvette 1" }]);
+    const { fixtures } = await (await GET(req())).json();
+    expect(fixtures[0].teamFedName).toBe("Yvette 1");
+  });
+
+  it("retombe sur notre nom interne tant que la fiche fédérale n'est pas connue", async () => {
+    // La fiche arrive avec la première vérification (elle est lue pour son `tieid`). Avant, il
+    // n'y a rien — et « Équipe 1 » vaut mieux qu'une case vide.
+    const { fixtures } = await (await GET(req())).json();
+    expect(fixtures[0].teamFedName).toBeNull();
+    expect(fixtures[0].teamName).toBe("Équipe 1");
+  });
+
+  it("n'interroge pas la base pour rien quand aucune équipe n'est ancrée", async () => {
+    h.teams = [{ id: "t1", name: "Équipe 1", snTeamId: null }];
+    await GET(req());
+    expect(h.rosterFindMany).not.toHaveBeenCalled();
   });
 });
