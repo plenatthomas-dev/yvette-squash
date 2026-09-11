@@ -56,8 +56,20 @@ export function InfoIcon() {
 // comme sur l'appli. La modale réutilise le style .modal existant.
 export function PrivacyNotice() {
   const [open, setOpen] = useState(false);
-  const { directory, ranking, tricount, tournament, delegation, interclub, forum } =
-    useFeatures();
+  const {
+    directory,
+    ranking,
+    rankingHistory,
+    tricount,
+    tournament,
+    delegation,
+    interclub,
+    forum,
+  } = useFeatures();
+  // Même « et » qu'à l'écran et qu'à la route : la note ne décrit que ce qui est réellement
+  // atteignable. Annoncer une collecte pour un écran coupé est aussi trompeur que taire celle
+  // d'un écran ouvert.
+  const progression = ranking && rankingHistory;
   return (
     <footer className="app-footer">
       <button
@@ -193,20 +205,38 @@ export function PrivacyNotice() {
                       impose de composer les simples dans l&apos;ordre du classement, et sans lui
                       tu ne pourrais être aligné nulle part. Il n&apos;apparaît alors pas dans
                       l&apos;annuaire, mais reste visible des membres qui composent une rencontre
-                      — et sur l&apos;écran « Progression » décrit juste en dessous.
+                      {progression && <> — et sur l&apos;écran « Progression » décrit juste en
+                      dessous</>}.
                     </>
                   )}
                 </p>
               )}
+              {/* ⚠️ GARDÉ SUR `ranking`, ET NON SUR `progression` — la collecte ne s'arrête pas
+                  avec l'écran. La passe mensuelle appelle `writePoint` sans consulter
+                  `rankingHistory` : flag de la courbe coupé, les mesures continuent d'être
+                  conservées mois après mois. Masquer ce paragraphe avec l'écran tairait une
+                  conservation bien réelle, ce qui est exactement l'inverse du travail d'une note
+                  de confidentialité. Seule la PHRASE qui décrit l'écran suit le flag. */}
               {ranking && (
                 <p>
                   <strong>Progression (historique du classement).</strong> À chaque
                   rafraîchissement mensuel, l&apos;appli conserve une <strong>mesure</strong> de
                   plus&nbsp;: le classement, les deux rangs et la moyenne de points publiés ce
-                  mois-là. Elles alimentent l&apos;écran <strong>« Progression »</strong>, où
-                  chaque membre connecté peut suivre une courbe et <strong>comparer</strong>
-                  {" "}
-                  celles de plusieurs joueurs. Les mesures antérieures à l&apos;installation de
+                  mois-là.{" "}
+                  {progression ? (
+                    <>
+                      Elles alimentent l&apos;écran <strong>« Progression »</strong>, où chaque
+                      membre connecté peut suivre une courbe et <strong>comparer</strong> celles
+                      de plusieurs joueurs.
+                    </>
+                  ) : (
+                    <>
+                      Elles ne sont <strong>affichées nulle part</strong> pour l&apos;instant
+                      &nbsp;: l&apos;écran qui les trace n&apos;est pas ouvert. Elles sont
+                      conservées pour le jour où il le sera.
+                    </>
+                  )}{" "}
+                  Les mesures antérieures à l&apos;installation de
                   l&apos;appli peuvent avoir été récupérées d&apos;un coup&nbsp;: squashnet
                   garde ses publications passées accessibles, et elles sont
                   {" "}

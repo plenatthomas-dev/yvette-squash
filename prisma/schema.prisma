@@ -93,6 +93,7 @@ model User {
   // l'annuaire et par l'ordre des simples à chaque affichage, et lui faire porter aussi
   // vingt-quatre mois de mesures obligerait tous ses lecteurs à trier avant de lire.
   rankingHistory           SquashnetRankingPoint[]
+  rankingProbes            SquashnetRankingProbe[]
   // Interclub : équipe de l'asso où ce membre est aligné (NULL = non aligné, cas le plus
   // fréquent). Affiché comme colonne de l'annuaire. SetNull à la suppression de l'équipe.
   team                     InterclubTeam?          @relation(fields: [teamId], references: [id], onDelete: SetNull)
@@ -162,6 +163,9 @@ model Session {
   createdAt        DateTime  @default(now())
 
   @@index([userId])
+  // Purge des sessions expirées à chaque `createSession` (cf. lib/session.ts) : sans cet index,
+  // ce balayage par ancienneté lit toute la table à chaque connexion.
+  @@index([expiresAt])
 }
 
 // Passkey WebAuthn (connexion biométrique : Face ID / Touch ID / empreinte). Réservé aux
@@ -231,8 +235,13 @@ model LoginAttempt {
   identifier String?
   createdAt  DateTime @default(now())
 
+  // ⚠️ LES TROIS SERVENT, ET AUCUN NE REMPLACE LES AUTRES. Les deux composites portent la
+  // requête CHAUDE — le décompte des échecs récents d'une IP ou d'un identifiant, à chaque
+  // tentative de connexion. Le troisième porte la PURGE, qui ne filtre que sur l'ancienneté :
+  // un index dont `createdAt` n'est pas la première colonne ne sait pas la servir.
   @@index([ip, createdAt])
   @@index([identifier, createdAt])
+  @@index([createdAt])
 }
 
 // Commentaire envoyé par e-mail (rate limiting : 10 max / 24 h par membre).
@@ -665,10 +674,19 @@ model SquashnetRankingPoint {
   clt       String // classement affiché, ex. « 5A », « NC »
   rang      Int? // rang national DANS SON GENRE
   rangM     Int? // rang national MIXTE, toutes catégories — l'échelle comparable entre joueurs
-  /// La MOYENNE DE POINTS (« 3 832.17 »), et c'est elle qui fait la courbe. Le classement
-  /// (« 5A ») ne bouge que deux ou trois fois dans une vie de joueur, et le rang dépend autant
-  /// des autres que de soi ; la moyenne, elle, bouge à chaque mois joué. Une courbe de `clt`
-  /// serait une ligne plate, ce qui n'apprendrait rien à personne.
+  /// LA MOYENNE (« 3 832.17 »), et c'est elle qui fait la courbe. Le classement (« 5A ») ne
+  /// bouge que deux ou trois fois dans une vie de joueur, et le rang dépend autant des autres
+  /// que de soi ; la moyenne, elle, bouge à chaque mois joué. Une courbe de `clt` serait une
+  /// ligne plate, ce qui n'apprendrait rien à personne.
+  ///
+  /// ⚠️ CE N'EST PAS UNE MOYENNE DE POINTS QU'ON ACCUMULE : plus elle est PETITE, meilleur est
+  /// le classement. Mesuré sur 81 mesures réelles — corrélation r = 1,000 avec `rangM`, et 4B
+  /// (fort) entre 1496 et 1659 quand 5D (faible) est entre 7240 et 9052. C'est une moyenne de
+  /// RANG. Le sens a été pris à l'envers pendant tout le développement de la courbe.
+  ///
+  /// Étant la MÊME grandeur que `rangM` à un lissage près, elle n'est plus TRACÉE : l'écran ne
+  /// montre que le rang, que la fédération publie tel quel. On la garde parce qu'elle ne coûte
+  /// rien et qu'elle est plus fine (décimale) que le rang entier.
   mean      Float?
   fetchedAt DateTime        @default(now())
 
@@ -676,6 +694,46 @@ model SquashnetRankingPoint {
   // autant de fois qu'on veut : un run qui repasse corrige la ligne au lieu d'en ajouter une.
   // NULL étant distinct de NULL en Postgres, la contrainte « membre » ne gêne pas les invités
   // (dont `userId` est NULL) et réciproquement.
+  @@unique([userId, month])
+  @@unique([guestId, month])
+  @@index([month])
+}
+
+/// CE QU'ON A DÉJÀ DEMANDÉ SANS RIEN OBTENIR — la mémoire des trous.
+///
+/// `SquashnetRankingPoint` dit ce qu'on SAIT. Sans cette table-ci, le remplissage rétroactif ne
+/// gardait aucune trace de ce qu'il avait CHERCHÉ en vain, et redemandait donc à la fédération,
+/// à chaque passage, tous les couples (joueur, mois) qui n'aboutiront jamais — un membre entré
+/// au club l'an dernier n'a pas de classement sur les mois d'avant, et n'en aura jamais.
+///
+/// Ce que ça coûtait : le bouton d'admin travaille par tranches de 45 s et invite à recliquer
+/// « jusqu'à ce que reste tombe à zéro ». Chaque clic repartait du mois le plus récent en
+/// repayant ces recherches-là, s'épuisait au même endroit, et le compteur ne descendait plus.
+/// À quarante joueurs sur vingt-quatre périodes, c'étaient des centaines de requêtes par clic
+/// envoyées à un site associatif, pour un résultat connu d'avance.
+///
+/// ⚠️ ON NE MARQUE QUE CE QUE SQUASHNET A RÉPONDU. Une requête qui échoue (réseau, 5xx, timeout)
+/// ne laisse AUCUNE marque : c'est un incident, pas un verdict, et le passage suivant doit la
+/// reprendre. Seule une réponse REÇUE où le joueur n'apparaît pas est consignée — un classement
+/// publié ne change plus, donc l'absence est définitive.
+///
+/// `verdict` garde la nuance de `classifyRanking` pour l'audit : « moved » (nom retrouvé, mais
+/// hors du club ce mois-là) ou « unknown » (introuvable, ou homonymes indépartageables). Le
+/// second peut se dénouer si un admin corrige le nom de recherche du membre : c'est à ça que
+/// sert la reprise forcée du script (`npm run rankings:backfill -- --reprise`), qui ignore ces
+/// marques.
+model SquashnetRankingProbe {
+  id       String          @id @default(cuid())
+  user     User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId   String?
+  guest    InterclubGuest? @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  guestId  String?
+  month    String // période de classement fédérale, « YYYY-MM-DD »
+  verdict  String // « moved » | « unknown » (cf. classifyRanking)
+  probedAt DateTime        @default(now())
+
+  // Mêmes deux index uniques que `SquashnetRankingPoint`, et pour la même raison : un couple
+  // (joueur, mois) n'a qu'un état, et repasser doit corriger la ligne au lieu d'en empiler une.
   @@unique([userId, month])
   @@unique([guestId, month])
   @@index([month])
@@ -805,6 +863,7 @@ model InterclubGuest {
   matches        InterclubMatch[]        @relation("InterclubHomeGuest")
   availability   InterclubAvailability[]
   rankingHistory SquashnetRankingPoint[]
+  rankingProbes  SquashnetRankingProbe[]
 
   // Deux fois le même nom dans la même équipe est une faute de saisie, pas un cas d'usage.
   @@unique([teamId, name])

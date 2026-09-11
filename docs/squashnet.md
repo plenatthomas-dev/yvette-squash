@@ -184,9 +184,186 @@ Le découpage en tranches n'est sûr que parce que le remplissage est **reprenab
 couples déjà en base sont sautés sans un seul appel réseau (`knownPoints`). Sur un historique à
 jour, recliquer ne coûte **aucune requête**.
 
-⚠️ « Sans réponse » n'est pas du travail restant : un membre arrivé au club l'an dernier n'aura
-jamais de mesure sur les mois d'avant. Seul `remaining` (les couples pas encore *regardés*)
-tombe à zéro — c'est lui que le bouton affiche.
+⚠️ « Sans réponse » n'est pas du travail restant : un joueur n'aura jamais de mesure sur les mois
+où il n'était pas licencié. Seul `remaining` (les couples pas encore *regardés*) tombe à zéro —
+c'est lui que le bouton affiche.
+
+#### L'historique suit le JOUEUR, pas le membre du club
+
+Le rapprochement normal exige **nom + club** (`YVETTE_CLUB`) : c'est ce qui permet au passage
+mensuel de constater qu'un membre a quitté le club (verdict `moved`) et de retirer son
+classement. Appliqué tel quel au remplissage rétroactif, ce filtre confondait deux situations
+opposées — « il est parti » et « il n'était pas encore là » — et **tronquait la courbe à la date
+d'arrivée au club**.
+
+Le remplissage passe donc `classifyRanking(..., { horsClub: true, licence })`, avec deux niveaux :
+
+1. **La licence d'abord**, quand on la connaît (`SquashnetRanking.licence` pour un membre,
+   `InterclubGuest.snLicence` pour un invité — renseignées par le rapprochement déjà réussi au
+   club). C'est un identifiant fédéral : insensible au club, à l'orthographe et aux homonymes.
+   Une licence connue mais **absente** de la réponse ne conclut rien — elle peut manquer parce
+   que le joueur n'était pas licencié ce mois-là, mais aussi parce que la colonne est vide sur
+   cette ligne — et on retombe sur le nom.
+2. **À défaut, le nom, tous clubs confondus.** L'unique ligne au nom du joueur est acceptée.
+   **Plusieurs lignes restent `unknown`** : deux personnes du même nom un même mois sont deux
+   personnes, et rien ne dit laquelle. C'est le seul cas que la licence tranche pour de bon.
+
+⚠️ **Ce mode ne rend JAMAIS `moved`**, et c'est tout son intérêt : il n'y a plus de « dehors »
+dont on pourrait constater l'absence. Il ne doit donc **pas** servir au passage mensuel, qui a
+besoin de ce verdict — et dont le disjoncteur de volume en dépend. Le mensuel ne passe d'ailleurs
+ni `horsClub` ni `licence`.
+
+Conséquence assumée : un membre qui quitte le club voit sa courbe **continuer** avec les
+classements publiés sous son nouveau club. C'est cohérent avec « la progression du joueur », et
+c'est ce que l'écran annonce.
+
+#### La mémoire des trous — et l'aveu qui va avec
+
+`SquashnetRankingProbe` consigne ce qu'on a **cherché en vain**, là où `SquashnetRankingPoint`
+dit ce qu'on sait. Sans elle, les recherches vaines — l'essentiel du travail sur les vieux mois —
+étaient repayées à chaque clic, le budget de 45 s s'épuisait toujours au même endroit, et
+« reste » ne tombait jamais à zéro.
+
+⚠️ **Cette table et ses fonctions ont vécu un temps sans que rien ne les appelle.** La migration,
+`writeProbe` et `knownCouples` avaient été écrites et commitées, mais `backfill.ts` utilisait
+toujours `knownPoints` : le code était mort, la table vide dans les deux bases, et le défaut
+qu'elle devait fermer intact. Branché le 2026-09-09, en même temps que le mode hors club.
+
+Ce qu'elle marque, et ce qu'elle ne marque pas :
+
+| Situation | Marque | Pourquoi |
+|---|---|---|
+| squashnet a répondu, le joueur n'y est pas (`unknown`) | ✅ | Un classement publié ne change plus : l'absence est définitive |
+| squashnet a répondu, le joueur est ailleurs (`moved`) | ✅ | Idem — et en mode hors club ce verdict ne sort plus |
+| squashnet n'a **pas** répondu (réseau, 5xx, délai) | ❌ | C'est un incident, pas un verdict : le mois reste ouvert |
+| Échec d'écriture de la marque elle-même | ❌ | La marque est un confort, pas une donnée — le lot continue |
+
+`backfillHistory({ retryProbes: true })` ignore les marques : c'est la reprise à demander **après
+avoir corrigé le nom de recherche d'un membre**, seul cas où une absence peut se dénouer.
+
+#### Son propre flag : `NEXT_PUBLIC_FEATURE_RANKING_HISTORY`
+
+L'écran « Progression » **n'est pas adossé à `ranking`**, et c'est délibéré. `ranking` est le
+seul flag ouvert en production (cf. `docs/flux-branches.md`) : la courbe y serait apparue devant
+les membres le jour de son merge, sans que personne l'ait décidé.
+
+Elle ne montre d'ailleurs pas la même chose que le badge « 5A ». Celui-ci dit **où un joueur en
+est** ; celle-là rend lisible, à tout membre connecté, **le chemin parcouru par chacun sur trois
+ans**, et invite à comparer les courbes côte à côte. C'est une finalité de plus, elle a son
+paragraphe dans `PrivacyNotice`, donc elle a son interrupteur.
+
+| Environnement | Valeur | Effet |
+|---|---|---|
+| Production | **absente** (fail-safe) | Entrée « Progression » grisée, `GET /api/rankings/history` en 404 |
+| Preview (Recette) | `1` | Écran ouvert |
+
+**Les deux flags sont exigés, « et » jamais « ou »** — à l'écran (`page.tsx`), à la route, et
+dans la note de confidentialité. `rankingHistory` seul sur un `ranking` coupé afficherait un
+historique qui gèle sans le dire, puisque c'est la passe mensuelle qui l'alimente.
+
+⚠️ **La conservation, elle, ne s'arrête pas avec l'écran.** `writePoint` ne consulte pas
+`rankingHistory` : flag coupé, les mesures continuent d'être écrites mois après mois. C'est
+voulu (le jour où l'on ouvre l'écran, l'historique est déjà là), et c'est pourquoi le paragraphe
+« Progression » de la note reste affiché sous `ranking` — il change seulement de phrase pour
+dire que rien n'est affiché pour l'instant. Masquer ce paragraphe avec l'écran tairait une
+conservation bien réelle.
+
+#### Les lignes de passage d'un classement à l'autre
+
+Derrière les courbes, en pointillés, passent les marches « 5B », « 5A »… (`frontieresClassement`,
+`lib/ranking-history.ts`). Sans elles, « 1 180 points » ne veut rien dire ; avec elles, on voit
+de quel côté de la marche on se trouve.
+
+**Elles ne viennent d'aucun barème écrit en dur** — ce dépôt ne connaît pas le barème de la
+fédération, et l'inventer donnerait un graphique crédible et faux. Elles se déduisent de nos
+propres mesures : chaque point porte à la fois le classement publié ce mois-là **et** la moyenne
+qui l'a produit. La plus **basse** moyenne jamais vue sous « 5B » et la plus **haute** jamais vue
+sous « 5A » encadrent la frontière, qu'on pose au milieu. Plus le corpus grossit, plus
+l'encadrement se resserre : la règle graduée s'affine seule.
+
+#### ⚠️ `mean` et `rangM` sont la MÊME grandeur — l'écran ne trace plus que le rang
+
+Mesuré le 2026-09-09 sur les 81 mesures de la recette, et sans ambiguïté possible :
+
+| Signal | Résultat |
+|---|---|
+| Corrélation `mean` ↔ `rangM` | **r = 1,000** — les deux sont la même grandeur à un lissage près |
+| Ordre des 7 classements observés | 4B (le plus fort) 1496–1659 … 5D (le plus faible) 7240–9052 |
+| Les 6 changements de classement de l'historique | chaque montée s'accompagne d'un `mean` qui **baisse** |
+
+Ce que squashnet appelle « moyenne » n'est donc pas une moyenne de POINTS qu'on accumulerait,
+mais une **moyenne de rang** — d'où la corrélation parfaite, et d'où le fait qu'une moyenne
+**plus petite** soit un **meilleur** classement.
+
+Deux conséquences, toutes deux traitées le 2026-09-09 :
+
+1. **La courbe « Points » était dessinée à l'envers.** Le code affirmait
+   `plusGrandEstMieux("mean") === true` et le disait jusque dans le libellé sous le sélecteur :
+   le joueur qui progressait plongeait, et la colonne « évolution » mettait un moins devant sa
+   meilleure saison. C'est aussi ce sens inversé qui empêchait la moindre marche d'apparaître,
+   chaque paire de classements échouant en silence à son test d'encadrement.
+2. **Le sélecteur de métrique a été retiré.** Proposer « Points » ou « Rang » offrait un choix
+   sans conséquence — deux vues du même chiffre — payé par une décision à chaque ouverture.
+   L'écran ne trace plus que `rangM`, la valeur que la fédération publie telle quelle. `mean`
+   reste stocké : il ne coûte rien, et c'est la version lissée de la même mesure.
+
+⚠️ Le refus initial de tracer des marches sur le rang (« un classement ne correspond à aucun
+rang fixe ») reposait sur l'hypothèse que les deux grandeurs étaient indépendantes. Elles ne le
+sont pas, et **le rang donne une marche de plus que la moyenne** (5 contre 4 sur le corpus) : le
+passage 5B→5A est net en rangs et chevauchant en moyennes.
+
+#### L'échelle s'élargit un peu pour faire entrer une marche proche
+
+L'écran s'ouvre sur **un** joueur (son parti pris), donc sur les quelques dizaines de points
+qu'il a parcourus en un an. Aucune frontière n'y tombe tant qu'il n'a pas changé de classement :
+sans correctif, la vue par défaut n'aurait jamais montré de ligne.
+
+`bornesAvecMarches` élargit donc l'échelle du seul côté utile, et d'un **quart de l'étendue
+déjà affichée** au maximum (`MARGE_MARCHE`). En dessous, la marche reste invisible ; au-delà, on
+ferait entrer un repère hors de portée en aplatissant la courbe du joueur. Un joueur au milieu de
+sa catégorie ne voit toujours rien — il n'y a rien à lui dire.
+
+Sur le corpus réel de la recette (8 joueurs, 11 mois), cela donne **5 marches** (5B, 5A, 4D, 4C,
+4B), dont **5 joueurs sur 8** en voient au moins une seuls à l'écran. Le passage 5D→5C n'est pas
+tracé : ses plages se chevauchent d'une publication à l'autre, et c'est exactement le cas où
+l'on préfère ne rien dire.
+
+⚠️ **Bornes INCLUSES des deux côtés**, dans le filtre des lignes comme dans `bandesClassement`.
+Une comparaison stricte d'un côté seulement les faisait diverger dans le cas le PLUS courant :
+`bornesAvecMarches` élargit l'échelle *jusqu'à* la frontière, donc `f.valeur === bornes.min` en
+sortie — le trait se dessinait et le fond restait vide. Mesuré : la moitié des joueurs qui
+voyaient une ligne n'avaient aucune bande.
+
+#### Les zones sont peintes en UNE teinte dosée, jamais une couleur par échelon
+
+Entre deux marches, le fond dit dans quel classement on se trouve — ce qui répond d'un coup
+d'œil à « je suis dans quoi, là ? » sans lire une étiquette.
+
+**Une seule teinte par thème, dosée en opacité** (`--rankhist-bande`, 4 % à 17 %), du plus pâle
+en bas au plus soutenu en haut. Les classements forment une **échelle** : une couleur par
+échelon — bleu pour 5B, orange pour 5A — obligerait à apprendre une légende au lieu de lire la
+pente, et détruirait l'ordre que le graphique existe pour montrer. Le plafond bas est ce qui
+garde les douze couleurs de courbes lisibles par-dessus.
+
+La teinte est propre à chaque thème : bleu froid en clair, bleu clairci en sombre (sur fond
+sombre il faut **éclaircir**, un bleu profond à 10 % ne se distingue de rien), rose soutenu en
+thème rose. Les libellés « 5A », eux, gardent le jeton de TEXTE — c'est la bande qui porte
+l'identité, le mot la nomme.
+
+Trois cas où **aucune ligne n'est tracée**, plutôt qu'une ligne mal placée :
+
+- **sur le rang** — un classement ne correspond à aucun rang fixe (le rang dépend du champ), donc
+  la « ligne du 5A » se déplacerait tous les mois ;
+- **quand deux catégories se chevauchent** — une moyenne vue sous « 5A » sous une moyenne vue sous
+  « 5B » : le corpus se contredit (barème révisé, classement corrigé à la main) ;
+- **entre deux échelons non adjacents** — « 5C » puis « 5A » sans « 5B » observé : la marche en
+  recouvrirait deux, et l'étiqueter « 5A » ferait lire un seuil unique là où il y en a deux.
+
+Le calcul porte sur **tout le corpus reçu**, jamais sur la sélection à l'écran : une frontière est
+une propriété de l'échelle fédérale, pas de qui l'on regarde. Cocher un joueur ne doit pas
+déplacer les repères sous ses pieds. Seul l'**affichage** est borné à la fenêtre visible — une
+ligne hors bornes serait plaquée sur le bord du cadre, où elle se lirait comme une frontière
+atteinte.
 
 #### La courbe s'arrête à une date qu'on n'explique pas
 

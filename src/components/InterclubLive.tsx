@@ -5,6 +5,7 @@ import AuService from "./AuService";
 import { readOk } from "@/lib/apiFetch";
 import { onForeground } from "@/lib/onForeground";
 import { resolveColor } from "@/lib/interclub";
+import InterclubTally from "./InterclubTally";
 
 // Suivi en direct, pour ceux qui ne sont pas sur place.
 //
@@ -71,6 +72,8 @@ type LiveFixture = {
   teamName: string;
   opponent: string;
   home: boolean;
+  /** Combien de simples compte la rencontre — ce qui reste à jouer se déduit de là. */
+  matchCount: number;
   status: string;
   score: { home: number; away: number };
   matches: LiveMatch[];
@@ -224,6 +227,12 @@ export default function InterclubLive({
                 {f.score.home}–{f.score.away}
               </span>
             </header>
+            {/* L'AVANCE, sous le score et au-dessus des simples : elle porte sur la rencontre
+                entière, pas sur un match. Réservée à ce qui a COMMENCÉ — une rencontre du soir
+                encore à venir n'a pas d'avance, et une ligne de zéros ne dirait rien. */}
+            {f.status === "live" && (
+              <InterclubTally matchCount={f.matchCount} matches={f.matches} compact />
+            )}
             <ul className="ic-live-matches">
               {f.matches.map((m) => (
                 <li key={m.id}>

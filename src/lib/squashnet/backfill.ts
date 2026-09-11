@@ -1,6 +1,6 @@
 import { getMonths, searchRanking, type RankingRow } from "./client";
 import { classifyRanking } from "./match";
-import { knownPoints, pointKey, writePoint } from "./history";
+import { knownCouples, pointKey, writePoint, writeProbe } from "./history";
 import { subjectsToRefresh, type Subject } from "./refresh";
 
 // ============================================================================
@@ -80,6 +80,14 @@ export interface BackfillResult {
 }
 
 export interface BackfillOptions {
+  /**
+   * Reprendre les couples déjà cherchés EN VAIN, au lieu de les sauter.
+   *
+   * À demander après avoir corrigé le nom de recherche d'un membre : c'est le seul cas où une
+   * absence peut se dénouer. Coûteux (il repaie tout l'historique infructueux), donc jamais
+   * par défaut.
+   */
+  retryProbes?: boolean;
   /** Nombre de périodes à remonter (défaut : `MOIS_PAR_DEFAUT`). */
   months?: number;
   /** Délai entre deux appels réseau (défaut : `DELAI_MS`). 0 en test. */
@@ -132,7 +140,11 @@ export async function backfillHistory(opts: BackfillOptions = {}): Promise<Backf
   };
   if (months.length === 0 || subjects.length === 0) return result;
 
-  const deja = await knownPoints(months);
+  // POINTS **ET** MARQUES. `knownPoints` seul ne sautait que les mesures obtenues ; les
+  // recherches vaines — l'essentiel du travail sur les vieux mois — étaient repayées à chaque
+  // passage, si bien que le budget de 45 s s'épuisait toujours au même endroit et que « reste »
+  // ne tombait jamais à zéro. C'est l'union des deux qui fait CONVERGER le remplissage.
+  const deja = await knownCouples(months, { retryProbes: opts.retryProbes });
 
   boucle: for (const [i, month] of months.entries()) {
     // Le mémo vit le temps D'UN mois : c'est la même recherche d'un mois à l'autre, mais pas
@@ -158,9 +170,28 @@ export async function backfillHistory(opts: BackfillOptions = {}): Promise<Backf
         result.unresolved++;
         continue;
       }
-      const verdict = classifyRanking(subject.identity, rows);
+      // HORS CLUB, ET PAR LICENCE QUAND ON L'A. L'historique suit le JOUEUR : un membre arrivé
+      // l'an dernier a une progression avant son arrivée, et la refuser parce que le libellé du
+      // club diffère confondrait « il est parti » avec « il n'était pas encore là ». La licence,
+      // quand elle est connue, tranche sans rien supposer sur les homonymes ; à défaut, on
+      // accepte l'unique ligne au nom du joueur, tous clubs confondus.
+      const verdict = classifyRanking(subject.identity, rows, {
+        horsClub: true,
+        licence: subject.licence,
+      });
       if (verdict.status !== "matched") {
         result.unresolved++;
+        // LA MARQUE : squashnet A RÉPONDU et le joueur n'y est pas. Un classement publié ne
+        // change plus, donc l'absence est définitive et ce couple n'a pas à être redemandé.
+        // Une réponse ABSENTE (`rows === null`) n'arrive jamais ici — elle est traitée plus
+        // haut, sans marque, parce que c'est un incident et non un verdict.
+        try {
+          await writeProbe(subject, month, verdict.status);
+        } catch {
+          // La marque est un CONFORT, pas une donnée : son échec ne doit pas faire perdre le
+          // travail du lot. Au pire ce couple sera redemandé au passage suivant, ce qui est
+          // exactement l'ancien comportement.
+        }
         continue;
       }
       try {

@@ -39,9 +39,11 @@ feature/xxx ──merge──▶ main ──merge──▶ Recette
 
 Le code étant déjà sur `main`, mettre une fonction en service côté membres consiste à :
 
-1. **Migrations** : appliquer les migrations Prisma manquantes sur la base Neon de prod
-   (`npx prisma migrate deploy` avec la `DATABASE_URL` de prod). ⚠️ le `.env` local pointe
-   sur la prod — ne jamais lancer ça par accident, le faire en conscience.
+1. ~~**Migrations**~~ — **rien à faire**, et surtout **pas** à la main. Cette étape disait
+   d'appliquer `prisma migrate deploy` sur la base de prod « en conscience » : c'était faux,
+   et dangereux à suivre. `npm run build` joue lui-même `db:renumerote` puis `migrate deploy`
+   à **chaque** déploiement, production comprise (cf. § suivant). Le `.env` local pointant sur
+   la prod, exécuter la commande à la main ne pouvait qu'ajouter du risque sans rien apporter.
 2. **Flag** : passer `NEXT_PUBLIC_FEATURE_XXX=1` dans Vercel → Settings → Environment
    Variables → **Production**.
 3. **Redeploy** : les `NEXT_PUBLIC_*` sont inlinés au build → un redéploiement est
@@ -49,6 +51,33 @@ Le code étant déjà sur `main`, mettre une fonction en service côté membres 
 4. **RGPD** : si la fonction expose de nouvelles données, vérifier que la note
    « Confidentialité & données » (`PrivacyNotice`, `page.tsx`) a son paragraphe — il
    s'affiche automatiquement avec le flag.
+
+## Déployer, c'est migrer
+
+⚠️ **`npm run build` applique les migrations avant de compiler.** Ce n'est pas une étape
+séparée qu'on déclenche, c'est une conséquence automatique de tout déploiement :
+
+```
+build
+ └─ prisma generate
+ └─ db:deploy:retry ──▶ db:renumerote  +  prisma migrate deploy
+ └─ next build
+```
+
+Trois conséquences à avoir en tête :
+
+1. **Une migration part en même temps que le code qui l'accompagne.** Pas de fenêtre où le
+   code nouveau tourne sur l'ancien schéma — mais pas de fenêtre non plus pour relire la
+   migration entre les deux. Elle se relit **avant** la fusion.
+2. **Un `git revert` ou un redéploiement d'un vieux commit ne défait pas la migration.**
+   Prisma ne sait pas revenir en arrière ; la base garde la colonne. Prévoir des migrations
+   *additives* (ajouter, pas renommer ni supprimer) est ce qui rend un retour arrière possible.
+3. **`db:renumerote` est joué à chaque build** alors qu'il n'a de sens qu'une fois par base.
+   `prisma/migrations/README.md` explique pourquoi, et à quelle condition on pourra le retirer.
+
+Le réessai après 25 s (`db:deploy:retry`) n'est pas de la superstition : une branche Neon
+archivée met plus longtemps à se réveiller que le délai de connexion de Prisma, et la
+première tentative sert de réveil (commit `a3f6fe5`).
 
 ## Hotfix
 
@@ -65,8 +94,20 @@ correctifs du quotidien.
   divergent silencieusement et la recette ment.
 - Les branches `feature/*` sont jetables : supprimées après merge (celles qui restent sur
   origin sont de l'historique).
-- La base de données de la recette est celle configurée dans l'env **Preview** de Vercel —
-  idéalement une branche Neon séparée de la prod, pour tester les migrations sans risque.
+- **La prod a sa propre branche Neon ; toutes les previews en partagent une autre.** Vérifié
+  (`vercel env ls`) : `DATABASE_URL` et `DIRECT_URL` existent séparément en **Production** et
+  en **Preview**, et la branche Neon des previews s'appelle `dev` (cf. le commit `a3f6fe5`,
+  qui la nomme à l'occasion d'un P1001 au réveil d'une branche archivée). **Un build de
+  preview ne peut donc pas migrer la prod** — c'est la garantie qui rend le § précédent
+  supportable.
+- ⚠️ **Mais `Recette` n'a aucune surcharge `DATABASE_URL`** : ses seules variables par branche
+  sont les `RESA_*`. Elle prend donc la Preview générique, c'est-à-dire **la même base `dev`
+  que toutes les autres previews** (seules `dev` et `feature/tricount` ont leur propre base).
+  Deux branches aux migrations divergentes déployées en même temps écrivent donc dans la même
+  base, et la seconde à déployer trouve des colonnes qu'elle ne connaît pas. Ce n'est pas un
+  incident aujourd'hui parce qu'une seule fonctionnalité avance à la fois ; ça le deviendra le
+  jour où deux se chevaucheront. Le remède, ce jour-là : une `DATABASE_URL` par branche, comme
+  `feature/tricount` en a déjà une.
 
 ## Aide-mémoire
 

@@ -186,3 +186,52 @@ describe("searchQuery", () => {
     expect(searchQuery({ givenName: "Jérôme", familyName: "Courtaut" })).toBe("Courtaut");
   });
 });
+
+describe("classifyRanking — hors club et licence (l'historique)", () => {
+  const jean = { givenName: "Jean", familyName: "Dupont" };
+
+  it("hors club : accepte l'unique ligne au nom, quel que soit le club", () => {
+    const rows = [row({ name: "DUPONT JEAN", club: "Squash Club de Massy" })];
+    expect(classifyRanking(jean, rows).status).toBe("moved");
+    expect(classifyRanking(jean, rows, { horsClub: true }).status).toBe("matched");
+  });
+
+  it("hors club : NE REND JAMAIS `moved` — il n'y a plus de dehors à constater", () => {
+    // C'est ce qui interdit d'utiliser ce mode pour le rafraîchissement mensuel, dont le
+    // verdict `moved` sert à retirer le classement de qui a quitté le club.
+    const rows = [row({ name: "DUPONT JEAN", club: "Squash Club de Massy" })];
+    expect(classifyRanking(jean, rows, { horsClub: true }).status).not.toBe("moved");
+  });
+
+  it("hors club : deux homonymes restent `unknown`, jamais tirés au sort", () => {
+    const rows = [
+      row({ name: "DUPONT JEAN", club: "Squash Club de Massy", licence: "1" }),
+      row({ name: "DUPONT JEAN", club: "Squash de Palaiseau", licence: "2" }),
+    ];
+    expect(classifyRanking(jean, rows, { horsClub: true }).status).toBe("unknown");
+  });
+
+  it("la licence prime sur tout : bon joueur, même chez les homonymes et hors du club", () => {
+    const rows = [
+      row({ name: "DUPONT JEAN", club: "Squash Club de Massy", licence: "42", rangM: "1800" }),
+      row({ name: "DUPONT JEAN", club: "Squash de Palaiseau", licence: "99", rangM: "2500" }),
+    ];
+    const v = classifyRanking(jean, rows, { horsClub: true, licence: "42" });
+    expect(v.status).toBe("matched");
+    if (v.status === "matched") expect(v.match.rangM).toBe(1800);
+  });
+
+  it("une licence connue mais ABSENTE ne conclut rien : on retombe sur le nom", () => {
+    // Elle peut manquer parce que le joueur n'était pas licencié ce mois-là, mais aussi parce
+    // que la colonne est vide sur cette ligne — deux cas qu'on ne sait pas départager ici.
+    const rows = [row({ name: "DUPONT JEAN", club: "Squash Club de Massy", licence: "99" })];
+    expect(classifyRanking(jean, rows, { horsClub: true, licence: "42" }).status).toBe("matched");
+  });
+
+  it("la licence ne sert pas à contourner le filtre par club du passage MENSUEL", () => {
+    // Sans `horsClub`, une licence trouvée ailleurs rapproche quand même — c'est voulu : elle
+    // identifie la PERSONNE. Le mensuel ne la passe simplement pas (cf. `Subject.licence`).
+    const rows = [row({ name: "DUPONT JEAN", club: "Squash Club de Massy", licence: "42" })];
+    expect(classifyRanking(jean, rows).status).toBe("moved");
+  });
+});

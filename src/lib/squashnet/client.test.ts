@@ -135,3 +135,18 @@ describe.each([
     });
   });
 });
+
+describe("parseMonths — l'ordre ne dépend pas de squashnet", () => {
+  it("rend la période la plus récente en tête, même si le select est dans l'autre sens", () => {
+    // Le jour où la fédération retourne son `<select>`, `parseLatestMonth` rendrait la période
+    // la PLUS ANCIENNE : la passe mensuelle écrirait un classement de 2024 dans l'annuaire et
+    // dans l'ordre des simples, sans une erreur ni un compteur anormal.
+    const html = `<select id="month">
+      <option value="2024-05-06">mai 24</option>
+      <option value="2026-06-02">juin 26</option>
+      <option value="2026-07-07">juil. 26</option>
+    </select>`;
+    expect(parseMonths(html)).toEqual(["2026-07-07", "2026-06-02", "2024-05-06"]);
+    expect(parseLatestMonth(html)).toBe("2026-07-07");
+  });
+});

@@ -100,6 +100,7 @@ describe("refreshRankings", () => {
       cleared: 0,
       skipped: 0,
       failed: 0,
+      pointFailed: 0,
       bulkMoveBlocked: false,
     });
     expect(h.findMany).not.toHaveBeenCalled();
@@ -143,8 +144,29 @@ describe("refreshRankings", () => {
     const res = await refreshRankings();
     // Le classement du membre est à jour malgré la panne de la courbe…
     expect(h.upsert).toHaveBeenCalledOnce();
-    // …et l'échec est compté comme une panne base, jamais imputé à squashnet.
-    expect(res).toMatchObject({ failed: 1, skipped: 0 });
+    // …et LE COMPTE-RENDU LE DIT. Ce test assertionnait `failed: 1` sans regarder `matched`,
+    // ce qui laissait passer l'inverse de la vérité : table d'historique indisponible, et la
+    // passe rapportait « 0 rapproché(s), 40 échec(s) base » au moment même où les quarante
+    // classements de l'annuaire venaient d'être écrits sans une erreur.
+    expect(res).toMatchObject({ matched: 1, failed: 0, pointFailed: 1, skipped: 0 });
+  });
+
+  it("dit la panne d'historique à part des échecs base, dans le résumé", async () => {
+    const info = summarizeRefresh({
+      month: "2026-07-07",
+      members: 1,
+      guests: 0,
+      matched: 1,
+      cleared: 0,
+      skipped: 0,
+      failed: 0,
+      pointFailed: 1,
+      bulkMoveBlocked: false,
+    });
+    expect(info.info).toContain("1 rapproché(s)");
+    expect(info.info).toContain("1 sans point d'historique");
+    // L'annuaire est à jour : rien ici n'est un échec, et le heartbeat ne doit pas rougir.
+    expect(info.ok).toBe(true);
   });
 
   it("membre retrouvé UNIQUEMENT dans un autre club → suppression (moved)", async () => {
@@ -438,6 +460,7 @@ describe("summarizeRefresh", () => {
     cleared: 1,
     skipped: 1,
     failed: 0,
+    pointFailed: 0,
     bulkMoveBlocked: false,
   };
 

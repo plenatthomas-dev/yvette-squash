@@ -15,7 +15,7 @@ paie un **cold start (~0,5–1 s)** le temps que le compute se réveille.
 
 Le plan **Vercel Hobby limite les crons à 1 exécution par jour**. Une expression
 sub-quotidienne (`*/4 …`, `0 * * * *`, etc.) **fait échouer le déploiement**
-(`Hobby accounts are limited to daily cron jobs`). Les 4 crons applicatifs de `vercel.json`
+(`Hobby accounts are limited to daily cron jobs`). Les 6 crons applicatifs de `vercel.json`
 sont d'ailleurs tous quotidiens/mensuels pour cette raison.
 
 → Le keep-alive doit donc venir d'un **cron externe**, pas de `vercel.json`.

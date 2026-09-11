@@ -23,10 +23,27 @@ export const dynamic = "force-dynamic";
 // CE QUI EST EXPOSÉ, ET CE QUI NE L'EST PAS. Le nom, l'équipe et les mesures publiées par la
 // fédération (classement, rangs, moyenne) ; jamais la licence, jamais le club rapproché, jamais
 // l'email — ce sont des données de traçabilité interne, et l'annuaire ne les montre pas non
-// plus. La liste couvre exactement les joueurs que la passe mensuelle mesure déjà : les membres
-// opt-in de l'annuaire et ceux alignés en interclub (cf. `subjectsToRefresh`).
+// plus.
 //
-// Réservé aux membres connectés + gated par le flag `ranking`.
+// ⚠️ QUI EST EXPOSÉ SE FILTRE À LA LECTURE, ET PAS SEULEMENT À L'ÉCRITURE (cf. `sujetsVisibles`).
+// Ce commentaire affirmait « la liste couvre exactement les joueurs que la passe mensuelle
+// mesure déjà », et c'était faux : la requête ne portait aucune condition sur le sujet, donc
+// elle couvrait tous les joueurs JAMAIS mesurés. Un membre qui se retirait de l'annuaire
+// disparaissait de `/api/directory` et restait ici — nom, classement, rangs et moyenne, mois
+// par mois — devant tout membre connecté. Sa courbe gelait (la passe cesse de le mesurer), ce
+// qui rendait l'écart d'autant moins visible : rien ne bougeait plus, tout restait affiché.
+//
+// La table, elle, GARDE ses points : un opt-out masque, il n'efface pas un historique qu'un
+// retour dans l'annuaire doit retrouver intact. C'est la lecture qui tranche.
+//
+// Réservé aux membres connectés + gated par les flags `ranking` ET `rankingHistory`.
+//
+// DEUX FLAGS, ET « ET » PLUTÔT QUE « OU ». `rankingHistory` existe parce que `ranking` est le
+// seul flag ouvert en production : adossée à lui, cette courbe serait apparue devant les membres
+// le jour de son merge, sans que personne l'ait décidé. Elle expose autre chose que le badge
+// « 5A » — trois ans de trajectoire de chaque joueur, comparables entre eux — et cela se décide
+// séparément. `ranking` reste exigé parce que c'est lui qui fait tourner la passe mensuelle : la
+// courbe sans lui est un historique qui gèle sans le dire.
 
 /**
  * Profondeur maximale renvoyée, en périodes fédérales. Trois ans : au-delà, la courbe n'est
@@ -34,9 +51,35 @@ export const dynamic = "force-dynamic";
  */
 const MOIS_MAX = 36;
 
+/**
+ * QUI A LE DROIT DE FIGURER SUR LA COURBE — le miroir exact de `subjectsToRefresh`.
+ *
+ * La passe mensuelle ne mesure que les membres OPT-IN de l'annuaire et ceux ALIGNÉS en
+ * interclub (`{ OR: [{ listed: true }, { teamId: { not: null } }] }`). La lecture applique la
+ * même règle, sans quoi l'opt-out d'annuaire ne masque rien ici : un membre qui décoche
+ * « Annuaire des membres » sort de `/api/directory` mais garderait sa courbe nominative,
+ * exactement ce que `PrivacyNotice` promet le contraire.
+ *
+ * ⚠️ Le membre RATTACHÉ À UNE ÉQUIPE reste visible même retiré de l'annuaire, et ce n'est pas
+ * un oubli : c'est ce que la notice de confidentialité énonce noir sur blanc, et c'est la
+ * contrepartie d'être aligné en championnat — le classement d'un joueur composé regarde son
+ * équipe. La règle est la même à l'écriture et à la lecture, donc il n'y a qu'un endroit où en
+ * discuter.
+ *
+ * ⚠️ Les joueurs SANS COMPTE n'existent QUE par l'interclub : fonction coupée, aucun n'est lu.
+ * Le commentaire précédent annonçait « même garde que l'annuaire » alors que seule la JOINTURE
+ * d'équipe était conditionnée — le nom de chaque invité du roster, son classement et sa courbe
+ * sortaient quand même, sous un onglet Interclub affiché « bientôt ». C'est maintenant la même
+ * garde, au sens propre : `api/directory` fait `interclub ? allTeamGuests() : []`.
+ */
+function sujetsVisibles(interclub: boolean) {
+  const membre = { user: { is: { OR: [{ listed: true }, { teamId: { not: null } }] } } };
+  return interclub ? { OR: [membre, { guest: { isNot: null } }] } : membre;
+}
+
 export async function GET(req: NextRequest) {
-  const { ranking, interclub } = await getFeatures();
-  if (!ranking) {
+  const { ranking, rankingHistory, interclub } = await getFeatures();
+  if (!ranking || !rankingHistory) {
     return NextResponse.json({ error: "Classement désactivé" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);
@@ -56,8 +99,15 @@ export async function GET(req: NextRequest) {
   // nombre de joueurs, ce qui n'a aucun sens et ne se voyait pas.
   //
   // `groupBy` se traduit par un vrai `GROUP BY` : le `take` porte alors sur des MOIS.
+  //
+  // Le filtre de visibilité s'applique ICI AUSSI. Sans lui, un mois connu du seul joueur exclu
+  // entrerait dans `months` et la courbe ouvrirait une colonne que rien ne remplit — un trou
+  // qui dirait « personne n'a été mesuré ce mois-là » au lieu de « ce mois-là ne vous regarde
+  // pas ».
+  const visibles = sujetsVisibles(interclub);
   const moisRows = await prisma.squashnetRankingPoint.groupBy({
     by: ["month"],
+    where: visibles,
     orderBy: { month: "desc" },
     take: MOIS_MAX,
   });
@@ -67,7 +117,7 @@ export async function GET(req: NextRequest) {
   }
 
   const points = await prisma.squashnetRankingPoint.findMany({
-    where: { month: { in: months } },
+    where: { month: { in: months }, ...visibles },
     orderBy: { month: "asc" },
     select: {
       month: true,
@@ -80,8 +130,9 @@ export async function GET(req: NextRequest) {
           id: true,
           displayName: true,
           nickname: true,
-          // L'équipe ne sort que si la fonction interclub est active — même garde que
-          // l'annuaire : un flag à `0` doit rendre les équipes aussi invisibles que leur onglet.
+          // L'équipe ne sort que si la fonction interclub est active : un flag à `0` doit
+          // rendre les équipes aussi invisibles que leur onglet. La garde qui compte vraiment
+          // est en amont (`sujetsVisibles`) — celle-ci ne fait que taire un libellé.
           team: interclub ? { select: { name: true } } : false,
         },
       },

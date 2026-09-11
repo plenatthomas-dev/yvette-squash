@@ -186,8 +186,21 @@ interface AlertItem {
 const SPLASH_MIN_MS = 250;
 
 export default function Home() {
-  const { tricount, directory, delegation, tournament, interclub, forum, ranking } =
-    useFeatures();
+  const {
+    tricount,
+    directory,
+    delegation,
+    tournament,
+    interclub,
+    forum,
+    ranking,
+    rankingHistory,
+  } = useFeatures();
+  // « ET », jamais « ou » : la courbe n'a de sens que si la passe mensuelle mesure encore. Avec
+  // `ranking` coupé, l'historique existe toujours en base mais cesse d'être alimenté — l'écran
+  // montrerait alors une courbe gelée sans rien dire. Miroir exact de la garde de
+  // `GET /api/rankings/history`.
+  const progression = ranking && rankingHistory;
   // Voir le garde des vues coupées plus bas : sans ça, « pas encore chargé » se lit « coupé ».
   const featuresReady = useFeaturesReady();
   const [me, setMe] = useState<string | null | undefined>(undefined); // undefined = chargement
@@ -1364,11 +1377,14 @@ export default function Home() {
                   key: "rankhist",
                   label: "Progression",
                   icon: <TrendIcon />,
-                  // Gated sur `ranking` et non sur `directory` : la courbe ne montre pas
-                  // l'annuaire, elle montre le classement fédéral — c'est la même fonction que
-                  // le badge « 5A », vue dans le temps.
-                  disabled: !ranking,
-                  comingSoon: !ranking,
+                  // Gated sur son PROPRE flag, et non sur `directory` ni sur `ranking` seul.
+                  // La courbe ne montre pas l'annuaire ; et si elle montre bien le classement
+                  // fédéral, elle n'en est pas le badge « 5A » vu dans le temps : celui-ci dit
+                  // où un joueur en est, celle-ci rend lisible à tous les membres le chemin de
+                  // chacun sur trois ans, côte à côte. Une finalité de plus, donc son
+                  // interrupteur (cf. `rankingHistory` dans features.ts).
+                  disabled: !progression,
+                  comingSoon: !progression,
                   onClick: () => setRankHistOpen(true),
                 },
                 {
@@ -1409,7 +1425,10 @@ export default function Home() {
         toast={toast}
       />
       <RankingHistory
-        open={rankHistOpen}
+        // `&& progression` : un override de flag arrive à chaud (features-server, sans
+        // redéploiement). Sans ça, une modale ouverte au moment où l'admin coupe la fonction
+        // resterait ouverte devant une route qui répond déjà 404.
+        open={rankHistOpen && progression}
         onClose={() => setRankHistOpen(false)}
         // Le pseudo s'il existe, comme partout ailleurs : c'est sous ce nom que le joueur se
         // reconnaît dans la liste, et c'est celui que la route renvoie.
