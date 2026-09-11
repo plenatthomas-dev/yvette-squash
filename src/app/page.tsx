@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
+import { isSpecialView, viewAtStartup, type View } from "@/lib/views";
 import { PlanningGrid } from "@/components/PlanningGrid";
 import { WeekGrid } from "@/components/WeekGrid";
 import { Dialog } from "@/components/Dialog";
@@ -213,18 +214,8 @@ export default function Home() {
   const [range, setRange] = useState<Range>("all");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
-  const [view, setView] = useState<
-    "day" | "week" | "money" | "tourney" | "interclub" | "forum" | "captain"
-  >(
-    "day",
-  );
-  // Vues « plein écran » sans le chrome planning (Frais, Tournoi).
-  const isSpecial =
-    view === "money" ||
-    view === "tourney" ||
-    view === "interclub" ||
-    view === "forum" ||
-    view === "captain";
+  const [view, setView] = useState<View>("day");
+  const isSpecial = isSpecialView(view);
   const [week, setWeek] = useState<{ date: string; planning: PlanningDay }[]>([]);
   const [busy, setBusy] = useState(false);
   // Retour visuel de `busy` DANS la grille. `busy` seul ne se voit nulle part : entre le tap
@@ -575,27 +566,17 @@ export default function Home() {
     const linkedDate = p.get("date");
     if (linkedDate && isRealDateISO(linkedDate)) setDate(linkedDate);
 
-    // « forum » a été ajouté à l'union de `view` et au menu, mais PAS ici : la vue s'écrivait
-    // donc bien dans l'URL et dans localStorage, et cette garde la refusait à la relecture.
-    // Le Fil ne survivait à aucun rafraîchissement, sur aucun environnement.
-    const isView = (
-      x: string | null,
-    ): x is "day" | "week" | "money" | "tourney" | "interclub" | "forum" =>
-      x === "day" ||
-      x === "week" ||
-      x === "money" ||
-      x === "tourney" ||
-      x === "interclub" ||
-      x === "forum";
-    const vParam = p.get("view");
-    const vLS = localStorage.getItem("view");
-    let v = isView(vParam) ? vParam : isView(vLS) ? vLS : null;
-    // Les vues gated (Frais/Tournoi) sont ramenées à « day » par l'effet correctif plus bas :
-    // il couvre aussi la coupure d'un flag EN COURS de session, pas seulement le démarrage.
-    // Au LANCEMENT, on n'ouvre jamais directement la vue Semaine : /api/week (7 fetches
-    // ResaMania) est lourd sur le chemin critique du démarrage. La Semaine reste à un clic
-    // une fois l'appli chargée.
-    if (v === "week") v = "day";
+    // LA VUE À ROUVRIR EST DÉCIDÉE PAR `viewAtStartup` (`lib/views.ts`), pas ici. Ce garde-fou
+    // recopiait l'union des vues, et l'a désynchronisée deux fois : « forum » d'abord (le Fil
+    // ne survivait à aucun rafraîchissement), « captain » ensuite (un capitaine qui
+    // rafraîchissait son onglet repartait sur les créneaux). Les deux fois la vue s'écrivait
+    // pourtant correctement dans l'URL et dans localStorage — c'est à la RELECTURE qu'elle
+    // était perdue, et le symptôme n'accusait rien.
+    //
+    // Les vues gated (Frais/Tournoi/Interclub/Capitaine) sont ramenées à « day » par l'effet
+    // correctif plus bas : il couvre aussi la coupure d'un flag EN COURS de session, pas
+    // seulement le démarrage.
+    const v = viewAtStartup(p.get("view"), localStorage.getItem("view"));
     if (v) setView(v);
 
     const rParam = p.get("range");
