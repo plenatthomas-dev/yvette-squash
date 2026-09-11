@@ -207,6 +207,26 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const REFRESH_CLAIM_MS = 60_000;
 const REFRESH_WAIT_MS = 20_000;
 
+/**
+ * Délai avant la n-ième relecture, en attendant qu'une autre requête finisse son
+ * rafraîchissement : 250 ms, 500 ms, 1 s, puis 2 s de plateau.
+ *
+ * POURQUOI PAS 250 MS FIXES, la première version. Le rafraîchissement dure ce qu'il dure —
+ * un aller-retour ResaMania, parfois plus quand leur service traîne, et c'est précisément
+ * quand il traîne qu'on boucle. À cadence fixe, les 20 s d'attente coûtaient jusqu'à 80
+ * lectures de la base à UNE requête, toutes pour la même réponse ; le backoff les ramène à
+ * une douzaine sans rien changer au délai perçu dans le cas NORMAL, où la première ou la
+ * deuxième relecture suffit.
+ *
+ * Le plateau à 2 s, plutôt qu'un doublement continu : au-delà, l'attente supplémentaire se
+ * paierait en latence ressentie par le membre, pour une économie d'une poignée de lectures.
+ *
+ * Fonction PURE et exportée pour être vérifiable sans dormir vingt secondes.
+ */
+export function refreshBackoffMs(essai: number): number {
+  return Math.min(250 * 2 ** Math.max(0, essai), 2_000);
+}
+
 type SessionTokenFields = {
   id: string;
   accessToken: string | null;
@@ -251,6 +271,7 @@ async function resolveResaToken(s: SessionTokenFields): Promise<ResaSession | nu
   if (resa.expiresAt > Date.now()) return resa;
 
   const deadline = Date.now() + REFRESH_WAIT_MS;
+  let essais = 0;
   while (true) {
     const claimedAt = new Date();
     const claimed = await prisma.session.updateMany({
@@ -285,8 +306,14 @@ async function resolveResaToken(s: SessionTokenFields): Promise<ResaSession | nu
     }
     // Une attente épuisée est transitoire : on garde la session et son verrou.
     if (Date.now() >= deadline) throw new Error("Rafraîchissement ResaMania en cours — réessaie.");
-    await sleep(250);
-    const latest = await prisma.session.findUnique({ where: { id: s.id } });
+    await sleep(refreshBackoffMs(essais++));
+    // `select` explicite : on ne relit QUE de quoi savoir si le jeton est devenu frais. Sans
+    // lui, chaque tour de boucle rapatriait la ligne entière — identité sérialisée comprise —
+    // pour en lire trois colonnes.
+    const latest = await prisma.session.findUnique({
+      where: { id: s.id },
+      select: { accessToken: true, refreshTokenEnc: true, tokenExpiresAt: true },
+    });
     if (!latest?.accessToken || !latest.refreshTokenEnc || !latest.tokenExpiresAt) return null;
     try {
       resa = {

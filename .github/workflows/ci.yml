@@ -1,0 +1,111 @@
+# Vérification automatique de chaque poussée.
+#
+# POURQUOI CE FICHIER EXISTE. Le dépôt porte plus de 2600 tests, et rien ne les jouait avant
+# d'arriver sur `main` : la seule barrière était de penser à lancer `npm test` à la main. Un
+# oubli suffisait, et le défaut n'apparaissait qu'au déploiement — ou pas du tout.
+#
+# DEUX TRAVAUX, ET C'EST DÉLIBÉRÉ. `verif` ne touche à rien d'extérieur : pas de base, pas de
+# secret, pas de réseau au-delà du registre npm. Il doit rester la barrière OBLIGATOIRE avant
+# fusion, donc il doit être incapable d'échouer pour une raison qui ne soit pas le code. `pg`
+# monte un vrai Postgres parce que quelques tests mesurent des choses qu'aucun bouchon ne peut
+# mesurer — transactions concurrentes, contraintes d'unicité, sérialisation (cf. `pg-harness.ts`).
+name: CI
+
+on:
+  push:
+    branches: [main, Recette]
+  pull_request:
+
+# Une poussée de plus sur une branche annule la vérification en cours : c'est le dernier état
+# du code qui compte, pas l'avant-dernier.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verif:
+    name: types, style, tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `node-version` suit le `nodeVersion` du projet Vercel (24.x) : vérifier sur une version
+      # que la production n'utilise pas ne prouverait pas grand-chose.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      # `npm ci` déclenche le `postinstall` du dépôt, qui fait `prisma generate` : le client
+      # Prisma est donc présent avant `tsc`, sans étape supplémentaire.
+      - run: npm ci
+
+      - run: npx tsc --noEmit
+      - run: npm run lint
+
+      # AUCUNE VARIABLE D'ENVIRONNEMENT N'EST POSÉE, et c'est vérifié : le projet « node » de
+      # vitest n'ouvre aucune base. Le seul test qui importe `@/lib/db` le fait derrière un
+      # `vi.mock` (cf. api/forum/poll/[id]/vote/route.test.ts). Si un jour ce travail réclame une
+      # `DATABASE_URL`, c'est qu'un test a cessé d'être un test de module — le corriger plutôt
+      # que de lui donner une base.
+      - run: npm test
+
+  # ⚠️ CE TRAVAIL N'EST PAS ENCORE FIABLE À 100 %, ET IL NE FAUT PAS LE RENDRE OBLIGATOIRE
+  # TANT QUE ÇA DURE. Mesuré en local : `tricount-approve.pg.test.ts` échoue environ une fois
+  # sur trois — « deux payeurs qui valident en parallèle » reçoit un 409 au lieu d'un 200,
+  # c'est-à-dire que les quatre tentatives de `serializableTransaction` s'épuisent avant que
+  # les deux transactions ne se désynchronisent (120 ms de recul cumulé au pire, pour une
+  # transaction qui lit tout le tricount et ses parts). Ce n'est pas le test qui ment : c'est
+  # un membre qui verrait « Validation concurrente, réessaie » pour avoir cliqué en même
+  # temps qu'un autre. Défaut antérieur à cette CI, à traiter à part.
+  #
+  # C'est `verif` qui est la barrière avant fusion. Celui-ci informe.
+  pg:
+    name: tests sur un vrai Postgres
+    runs-on: ubuntu-latest
+    # Un échec ici ne fait pas rougir la CI tant que la contention ci-dessus n'est pas traitée.
+    continue-on-error: true
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 55432:5432
+        # Sans ce contrôle de santé, l'étape suivante démarre avant que Postgres n'accepte les
+        # connexions et échoue une fois sur deux, au hasard de la machine attribuée.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    # La recette ci-dessous est celle écrite en tête de `src/lib/pg-harness.ts` — elle est
+    # reprise telle quelle pour que le poste de développement et la CI vérifient la même chose
+    # de la même façon.
+    # Les trois variables portent la MÊME valeur, écrite en clair : `pg-harness` lit
+    # `TEST_DATABASE_URL`, `prisma db push` lit les deux autres. Une indirection ici se paierait
+    # au premier débogage d'un fichier que personne ne joue en local.
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:test@localhost:55432/postgres
+      DATABASE_URL: postgresql://postgres:test@localhost:55432/postgres
+      DIRECT_URL: postgresql://postgres:test@localhost:55432/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+
+      # `db push` et non `migrate deploy` : ces tests veulent le SCHÉMA COURANT, pas l'histoire
+      # des migrations. (L'histoire, elle, se vérifie à part — cf. prisma/migrations/README.md.)
+      - name: Pose le schéma sur la base jetable
+        run: npx prisma db push --skip-generate
+
+      # ⚠️ `ALLOW_REMOTE_TEST_DB` n'est PAS posé, et ne doit jamais l'être ici. Le garde-fou
+      # `estJetable` de `pg-harness.ts` n'accepte sans lui que `localhost` — c'est ce qui
+      # empêche ces tests, qui ÉCRIVENT, de viser une base qui ne serait pas jetable.
+      - run: npm run test:pg

@@ -163,6 +163,9 @@ model Session {
   createdAt        DateTime  @default(now())
 
   @@index([userId])
+  // Purge des sessions expirées à chaque `createSession` (cf. lib/session.ts) : sans cet index,
+  // ce balayage par ancienneté lit toute la table à chaque connexion.
+  @@index([expiresAt])
 }
 
 // Passkey WebAuthn (connexion biométrique : Face ID / Touch ID / empreinte). Réservé aux
@@ -232,8 +235,13 @@ model LoginAttempt {
   identifier String?
   createdAt  DateTime @default(now())
 
+  // ⚠️ LES TROIS SERVENT, ET AUCUN NE REMPLACE LES AUTRES. Les deux composites portent la
+  // requête CHAUDE — le décompte des échecs récents d'une IP ou d'un identifiant, à chaque
+  // tentative de connexion. Le troisième porte la PURGE, qui ne filtre que sur l'ancienneté :
+  // un index dont `createdAt` n'est pas la première colonne ne sait pas la servir.
   @@index([ip, createdAt])
   @@index([identifier, createdAt])
+  @@index([createdAt])
 }
 
 // Commentaire envoyé par e-mail (rate limiting : 10 max / 24 h par membre).
