@@ -17,6 +17,12 @@ import {
 import { estLigneClassement } from "@/lib/squashnet/standings";
 import { resolveHomePicks, type HomePick, type ResolvedPick } from "@/lib/interclub-roster";
 import { lineupOrderConflict, type OrderedSlot } from "@/lib/interclub-order";
+import {
+  awayLineupConflict,
+  awayLineupDuplicate,
+  estDesigne,
+} from "@/lib/interclub-opponents";
+import { loadKnownOpponents } from "@/lib/interclub-opponents-db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -280,6 +286,49 @@ export async function POST(req: NextRequest) {
   const orderProblem = lineupOrderConflict(orderSlots);
   if (orderProblem) {
     return NextResponse.json({ error: orderProblem }, { status: 400 });
+  }
+
+  // LE MÊME ORDRE, EN FACE. La règle fédérale vaut pour les deux équipes, et une rencontre
+  // disputée dans le mauvais ordre est sanctionnable des deux côtés — refuser chez nous ce
+  // qu'on laisse passer en face reviendrait à ne protéger personne.
+  //
+  // ⚠️ ON NE BLOQUE QUE CE QU'ON CONNAÎT, et c'est la différence irréductible avec notre propre
+  // composition. Le classement d'un adversaire ne nous est pas donné : il vient de nos
+  // rencontres passées, une fois qu'un capitaine les a vérifiées. Exiger qu'il soit connu, comme
+  // `lineupOrderConflict` l'exige des nôtres, rendrait impossible d'inscrire une première
+  // rencontre contre un club qu'on n'a jamais croisé — c'est-à-dire le cas le plus banal.
+  //
+  // Dès que TOUS les adversaires désignés sont connus, l'ordre est vérifié et le refus tombe.
+  //
+  // La lecture des adversaires connus n'a lieu QUE si deux d'entre eux au moins sont désignés :
+  // en dessous, il n'y a personne à comparer, et faire payer une requête de plus à toute
+  // inscription de rencontre — le cas de loin le plus fréquent, composition vide — serait
+  // gratuit.
+  const awayLines = roster.map((r, i) => ({ order: i + 1, awayName: r.awayName }));
+
+  // UN ADVERSAIRE, UN SIMPLE. La même règle que pour nos joueurs, et elle se contrôle ici sans
+  // rien savoir d'eux : c'est la seule des deux qui ne demande AUCUN classement, donc la seule
+  // qui vaille dès la toute première rencontre contre un club inconnu.
+  //
+  // Posée AVANT le contrôle d'ordre, à dessein : un nom inscrit deux fois rend l'ordre des
+  // simples incohérent par construction, et le message de l'ordre (« X doit précéder Y »)
+  // n'aiderait personne à voir que X et Y sont la même personne.
+  const doublon = awayLineupDuplicate(awayLines);
+  if (doublon) {
+    return NextResponse.json({ error: doublon }, { status: 400 });
+  }
+
+  if (awayLines.filter((l) => estDesigne(l.awayName)).length >= 2) {
+    // Le club d'en face est passé explicitement : `loadKnownOpponents` rend les adversaires de
+    // TOUS les clubs déjà affrontés, et un homonyme d'un autre club fausserait le verdict.
+    const awayProblem = awayLineupConflict(
+      awayLines,
+      await loadKnownOpponents(teamId),
+      opponent,
+    );
+    if (awayProblem) {
+      return NextResponse.json({ error: awayProblem }, { status: 400 });
+    }
   }
 
   const created = await prisma.interclub.create({

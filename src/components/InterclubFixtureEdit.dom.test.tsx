@@ -246,3 +246,58 @@ describe("le report d'une rencontre", () => {
     expect(dernierPatch()).toEqual({ time: "21:00" });
   });
 });
+
+// ============================================================================
+//  QUI SERT, SUR LA FICHE DE LA RENCONTRE.
+//
+//  La même information que dans le panneau « En direct » de l'accueil, et pour
+//  la même raison : elle arrivait déjà dans la réponse (`live.serving`), ce
+//  fichier-ci la déclarait dans son type, et l'écran ne la rendait pas. Un
+//  spectateur lisait « 7–5 » sans savoir si le meneur conclut ou subit.
+//
+//  Elle est testée DES DEUX CÔTÉS parce que ce sont deux écrans distincts qui
+//  montrent le même fait : le jour où l'un des deux la perdra, l'autre ne le
+//  dira pas.
+// ============================================================================
+
+/** Le simple de référence, avec un jeu engagé et un serveur désigné. */
+const engage = (serving: "home" | "away" | null) => ({
+  matches: [
+    {
+      ...FIXTURE.matches[0],
+      status: "live",
+      live: { current: { home: 7, away: 5 }, serving, servingBox: "left", awaitingServeBox: false },
+    },
+  ],
+});
+
+describe("le joueur au service", () => {
+  it("marque le serveur sur la fiche, et lui seul", async () => {
+    surcharge = engage("home");
+    const r = await ouvre(false);
+    const pastilles = r.container.querySelectorAll(".ic-au-service");
+    expect(pastilles).toHaveLength(1);
+    expect(pastilles[0].closest(".ic-player")?.textContent).toContain("Thomas");
+  });
+
+  it("suit le changement de main", async () => {
+    surcharge = engage("away");
+    const r = await ouvre(false);
+    expect(
+      r.container.querySelector(".ic-au-service")?.closest(".ic-player")?.textContent,
+    ).toContain("Jérôme Massy");
+  });
+
+  it("ne désigne personne tant que le premier serveur n'est pas choisi", async () => {
+    // État réel : le marqueur n'a pas encore répondu à « Qui engage ? ». Le deviner se
+    // tromperait une fois sur deux, sur la seule information que le marqueur avait à saisir.
+    surcharge = engage(null);
+    const r = await ouvre(false);
+    expect(r.container.querySelectorAll(".ic-au-service")).toHaveLength(0);
+  });
+
+  it("ne marque personne sur un match qui n'est pas engagé", async () => {
+    const r = await ouvre(false);
+    expect(r.container.querySelectorAll(".ic-au-service")).toHaveLength(0);
+  });
+});

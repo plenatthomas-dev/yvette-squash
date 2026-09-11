@@ -45,6 +45,7 @@ Les seules restrictions protègent quelqu'un d'un **écrasement**, jamais d'un a
 | `knownGameCount` + `knownGames` : l'écriture doit se fonder sur le même ÉTAT que la base — même nombre de jeux **et mêmes scores**. Ce sont les jeux OUVERTS dans l'écran qu'on compare, jamais ceux qu'on envoie : sans quoi corriger un 11-5 en 11-7 se refuserait lui-même. | `PATCH …/matches/{mid}`, `PUT …/live` (règle unique, `staleGamesReason`) | Un écran ouvert dix minutes plus tôt qui efface ce qui a été joué, ou qui rejoue un score corrigé depuis |
 | Un simple **« à désigner »** ne peut ni commencer le marquage en direct ni recevoir un score saisi a posteriori | `POST …/claim`, `PUT …/live`, `PATCH …/matches/{mid}` (règle unique, `lineupComplete`) | Une notification qui annoncerait le placeholder comme un vrai nom de joueur |
 | Une composition qui romprait l'**ordre des simples** (le mieux classé des joueurs présents doit jouer le simple n° 1 ; à classement égal, le meilleur rang mixte passe devant) est refusée | `POST /api/interclub`, `PATCH …/matches/{mid}` (règle unique, `lineupOrderConflict`) | Une rencontre disputée dans le mauvais ordre, sanctionnable par la fédération |
+| Le même refus s'applique à la composition **adverse** — mais seulement quand tous les adversaires désignés nous sont connus | les deux mêmes routes (`awayLineupConflict`) | La sanction vaut des deux côtés ; refuser sur une base incomplète empêcherait d'inscrire une première rencontre contre un club jamais croisé (cf. « L'ordre des simples ADVERSES ») |
 
 Deux choses échappent toutefois au membre, et sont réservées à l'**admin** :
 
@@ -58,6 +59,37 @@ Le contrôle d'accès vit dans **`src/lib/interclub-access.ts`**
 (`requireInterclubMember`) — un seul endroit, pour qu'une route future ne puisse pas oublier
 le flag. ⚠️ À ne pas confondre avec `interclub-gate.ts`, qui ne parle pas de droits du tout :
 c'est le cache du direct.
+
+### La seule exception : le capitaine, et seulement pour l'officiel
+
+Depuis l'**espace capitaine** (`src/lib/captain-access.ts`), il existe **un second rôle** — et
+c'est un renversement assumé de tout ce qui précède, borné à un seul endroit.
+
+**Ce qui ne change pas.** Composer une équipe, prendre le marquage, saisir et corriger un score
+**interne** restent ouverts à tout membre connecté. La règle du soir de match est intacte : rien
+ne se bloque parce que le capitaine joue.
+
+**Ce qui change, et pourquoi.** Le score **officiel** ne vit pas dans l'appli. Un capitaine le
+saisit chez la fédération, le capitaine adverse le valide ; ces gestes-là ne se corrigent pas
+d'un tap, ils sont visibles de tous les clubs de la poule, et ils engagent celui qui les pose
+devant sa ligue. La doctrine ci-dessus réserve déjà ses restrictions à ce qui « protège
+quelqu'un d'un **écrasement** » — on y reste, à ceci près que ce qu'on protège est **dehors**.
+
+| Garde | Ce qu'elle empêche |
+|---|---|
+| `requireCaptain` — capitaine d'au moins une équipe | Qu'un membre découvre un écran dont toutes les routes lui répondraient 403 |
+| `requireCaptainOf(teamId)` — capitaine de **cette** équipe | Que le capitaine de l'Équipe 1 agisse sur une rencontre de l'Équipe 2 |
+
+**La portée est l'ÉQUIPE, jamais le club**, et ce n'est pas de la méfiance : l'accès fédéral
+d'un capitaine ne couvre que la sienne. Une portée plus large dans l'appli que chez la
+fédération promettrait un geste qui échouerait au bout du chemin.
+
+**Les admins passent**, comme partout ailleurs (`isAdminEmail`) : c'est le filet du soir où le
+capitaine est injoignable et où la ligue attend un score.
+
+L'onglet « Capitaine » est **absent** pour les autres — pas grisé. Les autres entrées se grisent
+quand leur fonction est coupée, ce qui est une information utile (« ça arrive ») ; ici ce serait
+l'inverse : annoncer à trente membres une porte que deux personnes peuvent ouvrir.
 
 ---
 
@@ -178,6 +210,62 @@ et le serveur l'acceptait jadis comme un début — ce qui ramenait les deux eff
 porte de derrière, en consommant DÉFINITIVEMENT `startNotifiedAt` (le vrai début ne notifiait donc
 plus jamais). Le score de l'instantané est stocké dans les deux cas : le serveur désigné ne se
 perd pas, seul le statut attend le premier point.
+
+### Au bord du terrain — ce que l'écran fait sans qu'on le lui demande
+
+Quatre conforts, tous **facultatifs par construction** : le marquage fonctionne exactement
+pareil quand chacun d'eux est refusé, et aucun ne dit rien quand il échoue. Personne ne doit
+recevoir un message d'erreur pendant qu'il compte des points.
+
+| Ce que ça fait | Où | Quand ça n'a pas lieu |
+|---|---|---|
+| **L'écran reste allumé** tant que le marquage est ouvert, et le verrou est **repris au retour au premier plan** | `lib/wake-lock.ts` | API absente (Firefox Android), batterie faible, réglage système |
+| **Balle de jeu / balle de match** au coin haut-droit de la case | `ballPoint` (`lib/interclub.ts`) | jamais à 10-10 : 11-10 ne gagne pas le jeu |
+| **Vibration** brève sur un point, double sur une fin de jeu | `InterclubScorer` | iOS ne connaît pas l'API |
+| **Ni zoom au double-appui, ni sélection du nom** sur les deux grandes cases | `.ics-side` | — |
+
+Le premier est celui qui change le plus l'usage réel : un téléphone posé au bord du court se
+verrouille au bout de trente secondes, et le marqueur le déverrouillait entre **chaque échange**.
+Rien dans le code ne le montrait — l'appli fonctionnait parfaitement.
+
+⚠️ **30 ms, et non 12.** `vibrate` ne pilote que la **durée**, jamais l'intensité, et les moteurs
+à résonance linéaire des téléphones récents mettent quelques dizaines de millisecondes à monter en
+amplitude : en dessous, l'ordre est fini avant que le moteur ait démarré et on ne sent rien. La
+valeur du Fil (12 ms) a été reprise au premier essai, et ne se sentait pas — là-bas c'est un tic
+discret sur un écran qu'on regarde, ici c'est la seule confirmation d'un geste fait en regardant
+ailleurs.
+
+⚠️ **Les quatre panneaux passent PAR-DESSUS le tableau** (`.ics-ask`, `position: absolute`, en bas
+de l'écran). Ils en étaient des frères : chaque apparition — « Qui engage ? », le carré de service,
+la pause, la fin de match — prenait sa hauteur au tableau, et comme toute la typographie des deux
+cases se règle en **requêtes de conteneur sur la case elle-même**, le score changeait de taille à la
+fin de chaque jeu, à chaque reprise de service et au coup de sifflet final. Même raison pour la
+ligne des jeux terminés, désormais toujours rendue avec un `min-height` : elle n'apparaissait qu'au
+premier jeu gagné, et faisait sauter le tableau exactement à ce moment-là. La garde est dans
+`globals.css.test.ts` — jsdom ne calcule aucune mise en page, un test de DOM ne peut pas la tenir.
+
+⚠️ **La règle des balles n'est pas réécrite** : `ballPoint` ajoute un point au camp considéré et
+demande à `gameWinner` si le jeu serait fini. Une seconde copie du « 11 points et 2 d'écart »
+finirait par diverger, et l'écart ne se verrait qu'à 10-10 — devant tout le court.
+
+⚠️ **Le choix du premier serveur se défait.** Il ne se défaisait pas : la garde du bouton
+« Annuler » était `events.length <= 1`, or sur un match vierge le « Qui engage ? » pose
+l'événement n° 1. Un appui de travers condamnait l'indicateur de service pour tout le match (le
+score, lui, n'était pas touché), et marquer un point puis l'annuler n'y changeait rien. Cette
+garde ne protégeait rien d'autre — on pouvait déjà défaire un par un tous les événements
+reconstruits d'un match repris.
+
+### Qui sert, côté spectateur
+
+Une pastille (`.ic-au-service`) à droite du nom, dans le panneau « En direct » **et** sur la
+fiche d'une rencontre. La donnée arrivait déjà dans la charge utile (`live.serving`, cf.
+`getLiveFixtures`) et les deux écrans la déclaraient dans leur type sans jamais la rendre : coût
+serveur **nul**. Au squash le service change de main à chaque échange perdu, et c'est lui qui dit
+si le meneur est en train de conclure ou de subir — « 7–5 » seul ne le dit pas.
+
+Elle ne se confond pas avec la pastille de **maillot** : celle-ci est à gauche du nom, pleine et
+colorée ; celle-là est à droite, moitié moins grande, et prend l'encre du texte — elle dit un
+état du jeu, pas une identité. Rien n'est affiché tant que le premier serveur n'est pas désigné.
 
 ---
 
@@ -542,14 +630,97 @@ avant.
 téléphone. Les averages qui départagent — matchs, jeux, points — sont donnés **en toutes
 lettres sous le tableau, pour notre équipe seulement**, là où ils se lisent.
 
-### Le capitaine — une désignation, pas un droit
+### Le capitaine — une désignation, et depuis peu un droit (mais un seul)
 
-Nommé par un admin (`set_captain`), affiché sur son équipe et sur chaque rencontre. Il **ne
-peut rien de plus** que les autres : composer reste ouvert à tout membre, et verrouiller
-créerait un point de blocage le soir où le capitaine n'est pas là. Ce qu'il apporte est
-ailleurs — l'équipe sait à qui parler, et **lui seul** reçoit le récapitulatif des
+Nommé par un admin (`set_captain`), affiché sur son équipe et sur chaque rencontre. Il **ne peut
+rien de plus** que les autres **sur le jeu** : composer reste ouvert à tout membre, et
+verrouiller créerait un point de blocage le soir où le capitaine n'est pas là. Ce qu'il apporte
+est ailleurs — l'équipe sait à qui parler, et **lui seul** reçoit le récapitulatif des
 disponibilités et les alertes de calendrier. Diffusées à tous, ces deux-là deviendraient un
 bruit que chacun ignore.
+
+⚠️ **Une exception, arrivée avec l'espace capitaine** : ce qui touche au score **officiel**
+(chez la fédération) lui est réservé, et à sa seule équipe. Voir « Autorisations › La seule
+exception » en tête de ce document — c'est là qu'est écrit pourquoi.
+
+### L'ordre des simples ADVERSES
+
+La règle du classement (le mieux classé joue le simple n° 1) vaut pour les deux équipes.
+L'appli la fait respecter à notre composition depuis toujours — `lineupOrderConflict` refuse la
+saisie. L'espace capitaine l'applique désormais **en face**, sur les mêmes lignes de code :
+`checkAwayOrder` (`captain-check.ts`) trie les adversaires rapprochés et délègue le verdict à
+`lineupOrderConflict`. Deux copies de cette règle finiraient par diverger, et l'appli refuserait
+chez nous ce qu'elle tolère en face.
+
+**Trois états, et le troisième n'est pas une faute** (`OrderStatus`) :
+
+| État | Quand | Ce que l'écran en fait |
+|---|---|---|
+| `ok` | tous rapprochés, ordre conforme | **rien** — un ordre correct n'apprend rien |
+| `violation` | tous rapprochés, ordre rompu | signalé en rouge, formulé « À vérifier sur la feuille de match » |
+| `unverifiable` | un seul adversaire non rapproché | note grise, aucun jugement |
+
+⚠️ **Pourquoi `unverifiable` existe.** Le classement des adversaires ne nous est pas donné : il
+vient de NOTRE rapprochement, sur un nom recopié à la main sur une feuille de match. Conclure
+« leur composition est irrégulière » sur une base incomplète enverrait un capitaine contester
+une composition parfaitement régulière — un coût sans commune mesure avec celui de se taire. Un
+seul adversaire manquant suffit donc à ne rien conclure, **même si l'écart est visible entre les
+autres**. Et un `unverifiable` ne compte pas dans les « points à régler » : le joueur non
+rapproché qui en est la cause y est déjà compté.
+
+#### Le blocage se fait à la DÉSIGNATION, pas à la vérification
+
+`checkAwayOrder` constate, la veille de la feuille de match. La rencontre est alors jouée : il
+n'y a plus rien à corriger, seulement une sanction à contester. Le refus tombe donc désormais
+**au moment où on désigne l'adversaire** — `awayLineupConflict`
+(`src/lib/interclub-opponents.ts`), sur `POST /api/interclub` comme sur `PATCH …/matches/{mid}`,
+et l'écran grise d'avance ce que la route refuserait. La règle n'est pas réécrite : elle délègue
+à `lineupOrderConflict`, celle-là même qui refuse notre propre composition.
+
+⚠️ **On ne refuse que ce qu'on CONNAÎT**, et c'est la différence irréductible avec notre camp.
+`lineupOrderConflict` refuse un joueur sans classement — juste chez nous, où un admin peut le
+renseigner ; absurde en face, où personne ne le peut. Ce serait rendre impossible d'inscrire une
+première rencontre contre un club jamais croisé, c'est-à-dire le cas le plus banal d'un début de
+saison. Dès qu'**un seul** adversaire désigné nous est inconnu, on ne conclut rien.
+
+#### D'où vient ce qu'on sait d'eux
+
+**D'aucune requête fédérale.** Deux sources déjà en base, fusionnées par `mergeOpponents` :
+
+| Source | Ce qu'elle donne |
+|---|---|
+| `InterclubMatch.awayName` | tous les adversaires jamais alignés contre nous — le nom, rien de plus |
+| `InterclubOfficial.checkJson` | pour ceux qu'une vérification de capitaine a rapprochés : nom fédéral, classement, rang mixte, licence |
+
+Le second enrichit le premier. Un adversaire croisé puis vérifié devient une entrée sûre,
+proposée dans un menu, qu'on ne retape plus — et dont on connaît le classement, donc l'ordre
+qu'il doit tenir. La liste s'enrichit d'elle-même, rencontre après rencontre.
+
+Ce n'est **pas le roster de l'équipe adverse** : un joueur croisé pour la première fois n'y est
+pas, et la saisie libre reste donc atteignable dans les deux menus. Le vrai roster viendra de la
+fiche d'équipe fédérale (`ic_a=393480`, cf. `docs/squashnet.md`), le jour où son rendu aura pu
+être capté.
+
+#### Deux menus, et pourquoi ils existent
+
+Le nom d'un adversaire était un champ de texte, recopié à la main un soir de rencontre sur un
+téléphone. « Détry » un mois, « detry » le suivant : le rapprochement fédéral échouait sur un
+accent, et le rapport du capitaine déclarait « introuvable » un joueur parfaitement réel. Deux
+menus (`GET /api/interclub/opponents`) suppriment la ressaisie : **le club adverse** à la
+création d'une rencontre, **ses joueurs** à la composition d'un simple.
+
+La fusion replie la casse, les accents et les espaces — **pas les fautes de frappe** : « Detri »
+reste un autre joueur que « Detry ». C'est le menu qui traite la faute de frappe, en rendant la
+ressaisie inutile.
+
+Deux règles de fusion qui se voient à l'usage :
+
+- pour un **joueur**, c'est le nom **le plus récent** qui est retenu — il reflète la dernière
+  correction faite à la main — et l'identité fédérale **la plus riche** : une vérification qui a
+  abouti une fois vaut mieux que trois qui n'ont rien conclu ;
+- pour une **équipe**, c'est le **premier** — un nom d'équipe n'est jamais corrigé à la main, il
+  est estampillé par l'import du calendrier fédéral, et une variante saisie plus tard (« chaville
+  4 ») dégrade l'orthographe officielle au lieu de la corriger.
 
 Le serveur **refuse un capitaine qui ne joue pas dans l'équipe** : c'est presque toujours une
 erreur de saisie, et le laisser passer donnerait un destinataire d'alertes qui ne se sent pas
@@ -761,6 +932,10 @@ inventerait des écarts.
   `classementPower`, `isNC`, `lineupOrderConflict`, `parseClassementInput`, `parseRangMInput`.
   Cf. « Ordre des simples : classement, puis rang mixte »
   ci-dessus.
+- `src/lib/interclub-opponents.ts` — ce qu'on sait des joueurs **d'en face** : `mergeOpponents`,
+  `opponentTeams`, `estDesigne`, et `awayLineupConflict` — l'ordre des simples ADVERSES, qui
+  délègue à `lineupOrderConflict` plutôt que de la recopier. Pur, donc employé **par l'écran**
+  autant que par les routes : ce que le menu grise, le serveur le refuse, et réciproquement
 
 **Côté base**
 - `src/lib/interclub-db.ts` — sérialisation, score de rencontre, statut déduit, péremption de la
@@ -768,6 +943,9 @@ inventerait des écarts.
   appliquée par les deux routes d'écriture. Elle a vécu en double, et les deux copies avaient
   divergé — le `PATCH` n'appliquait qu'une moitié de ce que ce document décrivait. Deux
   exemplaires d'une règle finissent toujours par ne plus dire la même chose.
+- `src/lib/interclub-opponents-db.ts` — les lectures qu'attend le module pur ci-dessus :
+  `loadKnownOpponents` (les adversaires connus d'une équipe) et `findAwayOrderConflict` (le
+  pendant de `findOrderConflict` pour le camp adverse, lu dans la transaction qui écrit)
 - `src/lib/interclub-roster.ts` — **qui peut être aligné** (`teamRoster`, `resolveHomePick`, `findAlignmentClash`, `rankingRefusal`), l'effectif de TOUTES les équipes pour l'écran d'admin (`allTeamMembers`, `allTeamGuests`) et, depuis l'ordre par classement, `findOrderConflict`
 - `src/lib/squashnet/refresh.ts` — le **rapprochement fédéral** des DEUX populations en une passe (`refreshRankings`), et à la demande d'un joueur sans compte (`matchGuestRanking`) ou d'un membre dont on vient de corriger le nom de recherche (`refreshMemberRanking`)
 - `src/lib/interclub-gate.ts` — le **cache** du direct
@@ -801,6 +979,9 @@ inventerait des écarts.
 | `POST /api/admin/interclub-teams` (actions `set_captain`, `set_squashnet_event`) | Capitaine de l'équipe · ancrage fédéral — **épreuve, poule ET équipe**, les trois ensemble ou aucun (**admin**) |
 | `POST /api/admin/interclub-calendar` | Import du calendrier : `preview` puis `apply` (**admin**) |
 | `GET /api/cron/interclub-availability` | Appel J-10, relance J-3, récap au capitaine |
+| `GET /api/captain` | Les rencontres dont ce capitaine répond, et où en est leur vérification |
+| `GET /api/captain/check/{id}` | Relit le dernier rapport — sans toucher à squashnet |
+| `POST /api/captain/check/{id}` | REFAIT la vérification (jusqu'à 8 recherches fédérales) |
 | `GET /api/cron/interclub-calendar` | Contrôle hebdomadaire de dérive — alerte, n'écrit rien |
 | `POST /api/admin/members` (action `set_clt_override`) | Correction admin du classement ET du rang mixte d'un membre (**admin**) |
 | `POST /api/admin/members` (action `set_squashnet_name`) | Nom sous lequel chercher un membre sur squashnet, puis rapprochement immédiat (**admin**) |
@@ -879,7 +1060,7 @@ code d'erreur qu'on lui a soufflé. C'est lui qui a tranché les deux soupçons 
     désormais au lieu de sortir en 500. Ce qu'aucun Postgres local ne peut dire, et qui reste à
     observer sur Recette un jour de base froide : combien de temps Neon met réellement à se
     réveiller.
-- **`Interclub.tsx` fait ~1730 lignes** et concentre cinq écrans, le classement de poule
+- **`Interclub.tsx` fait ~2300 lignes** et concentre cinq écrans, le classement de poule
   s'étant ajouté avec le calendrier. Le découpage n'est plus une éventualité. Découpage à
   envisager si un
   cinquième s'ajoute.

@@ -14,6 +14,8 @@ const h = vi.hoisted(() => ({
   /** Idem pour un joueur d'équipe sans compte. */
   guest: null as null | Record<string, unknown>,
   fixtures: [] as Array<Record<string, unknown>>,
+  /** Les rencontres PASSÉES telles que `loadKnownOpponents` les lit — une autre forme, une autre requête. */
+  passees: [] as Array<Record<string, unknown>>,
   created: null as null | Record<string, unknown>,
 }));
 
@@ -28,7 +30,12 @@ vi.mock("@/lib/db", () => ({
       findUnique: vi.fn(async () => h.team),
     },
     interclub: {
-      findMany: vi.fn(async () => h.fixtures),
+      // Deux lectures distinctes passent par ici : le LISTING (GET) et les adversaires déjà
+      // rencontrés (`loadKnownOpponents`). On les sépare sur le `select`, qui seul distingue la
+      // seconde — sans quoi la garde de l'ordre adverse lirait des rencontres au mauvais format.
+      findMany: vi.fn(async (args?: { select?: Record<string, unknown> }) =>
+        args?.select && "official" in args.select ? h.passees : h.fixtures,
+      ),
       create: vi.fn(async (args: { data: Record<string, unknown> }) => {
         h.created = args.data;
         return { id: "f1" };
@@ -92,6 +99,7 @@ beforeEach(() => {
   h.users = [];
   h.guest = null;
   h.fixtures = [];
+  h.passees = [];
   h.created = null;
 });
 
@@ -319,6 +327,128 @@ describe("POST /api/interclub", () => {
       disabledAt: new Date(),
     };
     expect((await POST(post({ ...validBody, matches: [{ userId: "u9" }] }))).status).toBe(400);
+  });
+
+  // --- L'ordre des simples EN FACE -----------------------------------------
+  //
+  // La règle fédérale vaut pour les DEUX équipes, et une rencontre disputée dans le mauvais ordre
+  // est sanctionnable des deux côtés. Ce qu'on sait des adversaires vient de nos rencontres
+  // passées, une fois qu'un capitaine les a vérifiées — jamais d'une requête à la fédération.
+
+  /** Deux membres composables, classés pour que NOTRE ordre ne refuse rien de son côté. */
+  function deuxDesNotres() {
+    h.user = { id: "u9", displayName: "Alpha", nickname: null, teamId: "t1", disabledAt: null, squashnetRanking: { clt: "4A", rangM: 100 } };
+    h.users = [
+      { id: "u8", displayName: "Beta", nickname: null, teamId: "t1", disabledAt: null, squashnetRanking: { clt: "5A", rangM: 2000 } },
+    ];
+  }
+
+  /** Une rencontre passée dont le rapport capitaine a confirmé deux adversaires. */
+  function rencontreVerifiee() {
+    return {
+      opponent: "Chaville 4",
+      matches: [{ awayName: "Paul Martin" }, { awayName: "Luc Bernard" }],
+      official: {
+        checkJson: JSON.stringify({
+          checkedAt: "2026-09-01T10:00:00.000Z",
+          players: [
+            { order: 1, side: "away", name: "Paul Martin", verdict: "found", fedName: "MARTIN PAUL", clt: "5A", rangM: 2000, licence: "0121214", club: "Chaville", hint: null },
+            { order: 2, side: "away", name: "Luc Bernard", verdict: "found", fedName: "BERNARD LUC", clt: "4A", rangM: 100, licence: "0121215", club: "Chaville", hint: null },
+          ],
+          scores: [],
+          tie: { ok: true, home: 2, away: 2, undecided: 0, problem: null },
+          awayOrder: { status: "ok", problem: null },
+        }),
+      },
+    };
+  }
+
+  // ⚠️ `opponent` DOIT ÊTRE CELUI DE LA RENCONTRE PASSÉE. Ce test composait contre « Squash de
+  // Massy » (le défaut de `validBody`) avec des adversaires connus de « Chaville 4 », et passait
+  // quand même : la garde raccrochait alors sur le seul NOM, en ignorant le club. Elle prêtait
+  // donc le classement d'un joueur de Chaville à un homonyme de Massy — et refusait en 400 des
+  // compositions parfaitement régulières. Le test était vert À CAUSE du défaut.
+  it("refuse un adversaire MIEUX classé placé sur un simple plus tardif", async () => {
+    deuxDesNotres();
+    h.passees = [rencontreVerifiee()];
+    const res = await POST(
+      post({
+        ...validBody,
+        opponent: "Chaville 4",
+        matches: [
+          { userId: "u9", awayName: "Paul Martin" }, // 5A au simple n° 1
+          { userId: "u8", awayName: "Luc Bernard" }, // 4A au simple n° 2 : l'ordre est rompu
+        ],
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/simples adverses/i);
+    expect(h.created).toBeNull();
+  });
+
+  // L'AUTRE MOITIÉ DE LA CORRECTION : le classement d'un homonyme ne traverse plus les clubs.
+  it("ne conclut RIEN sur un homonyme connu d'un AUTRE club", async () => {
+    deuxDesNotres();
+    h.passees = [rencontreVerifiee()]; // Paul Martin et Luc Bernard, à Chaville 4
+    const res = await POST(
+      post({
+        ...validBody,
+        opponent: "UCPA Meudon 2", // on n'a jamais joué contre eux
+        matches: [
+          { userId: "u9", awayName: "Paul Martin" },
+          { userId: "u8", awayName: "Luc Bernard" },
+        ],
+      }),
+    );
+    // Leurs Paul Martin et Luc Bernard ne sont pas ceux de Chaville : on ne sait rien d'eux,
+    // donc on ne refuse rien. Refuser ici rendrait incomposable une première rencontre.
+    expect(res.status).toBe(201);
+  });
+
+  it("accepte le même duo dans le bon ordre", async () => {
+    deuxDesNotres();
+    h.passees = [rencontreVerifiee()];
+    const res = await POST(
+      post({
+        ...validBody,
+        matches: [
+          { userId: "u9", awayName: "Luc Bernard" },
+          { userId: "u8", awayName: "Paul Martin" },
+        ],
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(h.created).not.toBeNull();
+  });
+
+  // ⚠️ LA DIFFÉRENCE IRRÉDUCTIBLE AVEC NOTRE CAMP : exiger de connaître le classement d'en face,
+  // comme on l'exige des nôtres, rendrait impossible d'inscrire une PREMIÈRE rencontre contre un
+  // club jamais croisé — c'est-à-dire le cas le plus banal d'un début de saison.
+  it("laisse passer une première rencontre contre un club jamais croisé", async () => {
+    deuxDesNotres();
+    h.passees = [];
+    const res = await POST(
+      post({
+        ...validBody,
+        matches: [
+          { userId: "u9", awayName: "Inconnu Un" },
+          { userId: "u8", awayName: "Inconnu Deux" },
+        ],
+      }),
+    );
+    expect(res.status).toBe(201);
+  });
+
+  // Le cas de loin le plus fréquent — on inscrit la rencontre avant de savoir qui joue — ne doit
+  // pas payer une requête pour n'en rien faire.
+  it("ne lit pas les rencontres passées quand moins de deux adversaires sont désignés", async () => {
+    deuxDesNotres();
+    const { prisma } = await import("@/lib/db");
+    const findMany = prisma.interclub.findMany as unknown as { mock: { calls: unknown[][] } };
+    const avant = findMany.mock.calls.length;
+    const res = await POST(post({ ...validBody, matches: [{ userId: "u9", awayName: "Paul Martin" }] }));
+    expect(res.status).toBe(201);
+    expect(findMany.mock.calls.length).toBe(avant);
   });
 
   // Un nom LIBRE était la dernière porte par laquelle la règle se contournait : plus de champ

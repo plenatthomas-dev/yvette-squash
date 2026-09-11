@@ -338,3 +338,215 @@ describe("InterclubScorer — reprendre un match entamé sur un autre appareil",
     expect(points).toEqual(["2", "0"]);
   });
 });
+
+// ============================================================================
+//  LE BORD DU TERRAIN — quatre défauts qu'aucun test ne voyait parce qu'ils ne
+//  tiennent ni au score ni au réseau, mais au GESTE.
+//
+//  Ils ont tous la même signature : l'appli fonctionne parfaitement, et le
+//  marqueur abandonne quand même au milieu du deuxième jeu.
+// ============================================================================
+
+/** Un match VIERGE : c'est le seul état où l'on désigne le premier serveur. */
+const MATCH_VIERGE = { ...MATCH, games: [], live: null };
+
+function monteVierge(over: Record<string, unknown> = {}) {
+  return render(
+    <InterclubScorer
+      fixtureId="f1"
+      match={{ ...MATCH_VIERGE, ...over }}
+      bestOf={5}
+      onClose={vi.fn()}
+      onExpired={(status) => status === 401}
+      toast={vi.fn()}
+    />,
+  );
+}
+
+describe("InterclubScorer — le premier serveur se corrige", () => {
+  it("⚠️ « Annuler » défait le CHOIX DU PREMIER SERVEUR", async () => {
+    // LE DÉFAUT. La garde était `events.length <= 1` : sur un match vierge, le « Qui engage ? »
+    // pose l'événement n° 1 et il devenait indéfaisable. Un appui de travers condamnait
+    // l'indicateur de service pour tout le match — et marquer un point puis l'annuler ne
+    // rattrapait rien, puisqu'on retombait à 1.
+    vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
+    const { getByText, queryByText } = monteVierge();
+    await souffle();
+
+    expect(getByText(/Qui engage/)).toBeTruthy();
+    fireEvent.click(getByText("Thomas · gauche"));
+    await souffle();
+    // Le panneau a disparu : le serveur est désigné.
+    expect(queryByText(/Qui engage/)).toBeNull();
+
+    const annuler = getByText("↶ Annuler") as HTMLButtonElement;
+    expect(annuler.disabled).toBe(false);
+    fireEvent.click(annuler);
+    await souffle();
+
+    // On peut rechoisir : c'est tout ce qu'on demandait.
+    expect(getByText(/Qui engage/)).toBeTruthy();
+  });
+
+  it("reste inerte quand il n'y a vraiment rien à annuler", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
+    const { getByText } = monteVierge();
+    await souffle();
+    expect((getByText("↶ Annuler") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("InterclubScorer — balle de jeu et balle de match", () => {
+  /**
+   * Amène le jeu à `h`-`a`.
+   *
+   * ⚠️ IL FAUT RÉPONDRE AU CARRÉ DE SERVICE. À chaque reprise de service, l'écran réclame le
+   * carré et IGNORE les appuis tant qu'on ne l'a pas donné (`applyPoint` ne devine pas un
+   * serveur). Une aide qui tape dix fois d'affilée n'enregistre donc qu'un seul point après un
+   * changement de main — et l'essai mesure alors 10-1 en croyant mesurer 10-10.
+   */
+  async function jusqua(ecran: ReturnType<typeof monteVierge>, h: number, a: number) {
+    const tape = async (qui: string) => {
+      // Le carré peut être réclamé AVANT le premier appui : un match repris s'arrête juste
+      // après un jeu gagné, donc en attente du carré du jeu suivant. Sans ce dégagement, le
+      // tout premier appui de l'essai est avalé et il en manque un à l'arrivée.
+      await degage();
+      fireEvent.click(ecran.getByLabelText(`Point pour ${qui}`));
+      await souffle();
+      await degage();
+    };
+    const degage = async () => {
+      const carre = ecran.queryByText("Carré gauche");
+      if (carre) {
+        fireEvent.click(carre);
+        await souffle();
+      }
+      // La pause entre deux jeux bloque aussi les appuis : on la passe, comme le ferait le
+      // marqueur qui enchaîne.
+      const reprendre = ecran.queryByText("Reprendre maintenant");
+      if (reprendre) {
+        fireEvent.click(reprendre);
+        await souffle();
+      }
+    };
+    for (let i = 0; i < h; i++) await tape("Thomas");
+    for (let i = 0; i < a; i++) await tape("Gérard");
+  }
+
+  it("annonce la balle de jeu à un point du jeu, et pas avant", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
+    const ecran = monteVierge();
+    await souffle();
+    fireEvent.click(ecran.getByText("Thomas · gauche"));
+    await souffle();
+
+    await jusqua(ecran, 9, 0);
+    expect(ecran.queryByText("balle de jeu")).toBeNull();
+
+    await jusqua(ecran, 1, 0); // 10-0
+    expect(ecran.getByText("balle de jeu")).toBeTruthy();
+  });
+
+  it("⚠️ se TAIT à 10-10 — 11-10 ne gagne pas le jeu", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
+    const ecran = monteVierge();
+    await souffle();
+    fireEvent.click(ecran.getByText("Thomas · gauche"));
+    await souffle();
+    await jusqua(ecran, 10, 10);
+    expect(ecran.queryByText("balle de jeu")).toBeNull();
+    expect(ecran.queryByText("balle de match")).toBeNull();
+  });
+
+  it("dit « balle de match » quand c'est le dernier jeu qui manque", async () => {
+    // Deux jeux déjà gagnés au meilleur des cinq : le troisième est décisif.
+    vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
+    const ecran = monteVierge({
+      games: [
+        { number: 1, home: 11, away: 2 },
+        { number: 2, home: 11, away: 3 },
+      ],
+    });
+    await souffle();
+    await jusqua(ecran, 10, 0);
+    expect(ecran.getByText("balle de match")).toBeTruthy();
+    expect(ecran.queryByText("balle de jeu")).toBeNull();
+  });
+});
+
+describe("InterclubScorer — les gestes qu'on fait sans regarder", () => {
+  it("vibre brièvement sur un point, et double sur une fin de jeu", async () => {
+    // Le marquage est le seul écran qu'on utilise sans le regarder : on tape, et on regarde
+    // le court. La vibration est la seule confirmation qui n'oblige pas à lever les yeux.
+    //
+    // ⚠️ LA DURÉE EST LE SUJET, pas le fait d'appeler. `vibrate` ne pilote QUE la durée, jamais
+    // l'intensité, et les moteurs à résonance linéaire mettent quelques dizaines de
+    // millisecondes à monter en amplitude : à 12 ms — la valeur du Fil, reprise au premier
+    // essai — l'ordre est fini avant que le moteur ait démarré, et on ne sent rien du tout.
+    const vibrate = vi.fn();
+    vi.stubGlobal("navigator", { ...navigator, vibrate });
+    vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
+    const { getByText, getByLabelText } = monteVierge();
+    await souffle();
+    fireEvent.click(getByText("Thomas · gauche"));
+    await souffle();
+
+    fireEvent.click(getByLabelText("Point pour Thomas"));
+    await souffle();
+    expect(vibrate).toHaveBeenLastCalledWith(30);
+
+    for (let i = 0; i < 10; i++) fireEvent.click(getByLabelText("Point pour Thomas"));
+    await souffle();
+    expect(vibrate).toHaveBeenLastCalledWith([40, 70, 40]);
+  });
+
+  it("ne jette pas quand le navigateur ne vibre pas", async () => {
+    // AUCUN navigateur sur iPhone ne connaît l'API — ils utilisent tous le moteur de Safari,
+    // qui ne l'implémente pas. Ce n'est pas rattrapable côté web, et le marquage doit
+    // fonctionner exactement pareil.
+    vi.stubGlobal("navigator", { ...navigator, vibrate: undefined });
+    vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
+    const { getByText, getByLabelText } = monteVierge();
+    await souffle();
+    fireEvent.click(getByText("Thomas · gauche"));
+    await souffle();
+    expect(() => fireEvent.click(getByLabelText("Point pour Thomas"))).not.toThrow();
+  });
+
+  it("⚠️ garde l'écran allumé, et le relâche en partant", async () => {
+    // Un téléphone posé au bord du court se verrouille au bout de trente secondes : le
+    // marqueur le déverrouille entre chaque échange, et abandonne.
+    const release = vi.fn(async () => {});
+    const request = vi.fn(async () => ({ release, released: false }));
+    vi.stubGlobal("navigator", { ...navigator, wakeLock: { request } });
+    vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
+
+    const { unmount } = monteVierge();
+    await souffle();
+    expect(request).toHaveBeenCalledWith("screen");
+
+    unmount();
+    await souffle();
+    expect(release).toHaveBeenCalled();
+  });
+});
+
+describe("InterclubScorer — le tableau ne bouge plus sous le doigt", () => {
+  // ⚠️ CE QUI SE VÉRIFIE ICI EST LA MOITIÉ OBSERVABLE. Les panneaux (« Qui engage ? », carré de
+  // service, pause, fin de match) sont sortis du FLUX, pas du DOM : ils restent enfants de
+  // l'écran et passent par-dessus le tableau. jsdom ne calcule aucune mise en page, donc cette
+  // sortie-là ne se teste pas ici — elle est tenue dans globals.css.test.ts, sur la règle
+  // elle-même, qui est l'endroit où elle est écrite.
+  //
+  // Reste ce qui se voit dans le DOM : la ligne des jeux terminés, dont l'apparition tardive
+  // faisait sauter le tableau d'un cran au premier jeu gagné.
+
+  it("réserve la ligne des jeux terminés dès le premier point", async () => {
+    // Elle n'apparaissait qu'au premier jeu gagné, et faisait sauter le tableau d'un cran
+    // exactement à ce moment-là — soit la fin du jeu, quand tout le monde regarde l'écran.
+    vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
+    const ecran = monteVierge();
+    await souffle();
+    expect(ecran.container.querySelector(".ics-history")).not.toBeNull();
+  });
+});

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import AuService from "./AuService";
 import { readOk } from "@/lib/apiFetch";
 import { onForeground } from "@/lib/onForeground";
 import { resolveColor } from "@/lib/interclub";
@@ -239,6 +240,12 @@ export default function InterclubLive({
                   <span className="ic-player">
                     <Dot color={m.homeColor} />
                     {m.home}
+                    {/* AU SERVICE. La donnée arrivait déjà — `getLiveFixtures` la met dans la charge
+                      utile, les deux vues la déclaraient dans leur type — et aucune ne
+                      l'affichait. Or « 7–5 » sans savoir qui sert ne se lit pas : c'est
+                      l'information qui transforme un score en cours en score suivi. Coût
+                      serveur nul, elle est déjà payée. */}
+                    {m.live?.serving === "home" && <AuService />}
                   </span>
                   <span className="ic-versus" title="contre">
                     <span className="sr-only">contre</span>
@@ -247,6 +254,7 @@ export default function InterclubLive({
                   <span className="ic-player">
                     <Dot color={m.awayColor} />
                     {m.away}
+                    {m.live?.serving === "away" && <AuService />}
                   </span>
                   <span className="ic-games">
                     {m.live ? (

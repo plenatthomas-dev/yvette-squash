@@ -59,6 +59,14 @@ export interface OwnTie {
   home: boolean;
   /** Nom de l'équipe adverse, tel que publié. */
   opponent: string;
+  /**
+   * `teamid` fédéral de l'équipe adverse — la clé de son ROSTER (`ic_a=393480`).
+   *
+   * Il était lu (`parseTeamCalendar` le pose sur les deux équipes) puis JETÉ ici, ne laissant
+   * que le nom. On cherchait donc les joueurs d'en face par leur orthographe, à une recherche
+   * fédérale par joueur, alors que la ligue nous avait donné leur identifiant.
+   */
+  opponentTeamId: string;
   venue: string | null;
   venueAddress: string | null;
   /**
@@ -312,6 +320,7 @@ export function ownFixtures(ties: CalendarTie[], snTeamId: string): OwnTie[] {
         time: t.time,
         home,
         opponent: home ? t.awayTeamName : t.homeTeamName,
+        opponentTeamId: home ? t.awayTeamId : t.homeTeamId,
         venue: t.venue,
         venueAddress: t.venueAddress,
         // Plusieurs JOURNÉES distinctes le même jour = date de remplissage. Deux rencontres
@@ -440,6 +449,8 @@ export interface StoredTie {
   dateConfirmed: boolean;
   /** NULL = saisie à la main, donc intouchable par l'import. */
   snMatchKey: string | null;
+  /** `teamid` adverse déjà en base. NULL sur toute rencontre importée avant qu'il n'existe. */
+  snOpponentTeamId: string | null;
 }
 
 /** Un champ qui diffère, dans les deux versions, pour l'afficher avant d'écrire. */
@@ -483,6 +494,25 @@ export interface CalendarDiff {
     /** Ce que la déduction lit du calendrier publié aujourd'hui. */
     published: boolean;
   }[];
+  /**
+   * Rencontres dont le `teamid` ADVERSE manque en base, ou n'est plus celui que la ligue
+   * publie. À écrire sans rien demander à personne.
+   *
+   * POURQUOI CETTE LISTE EST À PART DE `toUpdate`, et non un `FieldChange` de plus :
+   *
+   *  * ce n'est PAS un champ publié que quelqu'un relit — c'est une clé opaque. « adversaire :
+   *    161095 → 161112 » dans un écran de prévisualisation n'apprend rien à l'admin qui doit
+   *    décider, et noierait les trois lignes qui comptent (la date, le lieu, l'adversaire) ;
+   *  * surtout, elle doit s'appliquer aux rencontres INCHANGÉES. Les rencontres déjà en base
+   *    ne portent aucun identifiant : passer par `toUpdate` ne les remplirait que le jour où
+   *    leur date ou leur lieu bougerait — c'est-à-dire jamais, pour la plupart. Le roster
+   *    d'en face resterait indisponible sur toute une saison déjà importée.
+   *
+   * L'écrire ne peut rien casser : la colonne n'existe que pour aller lire une fiche publique,
+   * et une valeur fausse rendrait un roster illisible (`RosterUnreadableError`), jamais celui
+   * d'une autre équipe.
+   */
+  teamIdFixes: { id: string; snOpponentTeamId: string }[];
   /** Journées identiques des deux côtés — comptées, pour dire « rien n'a bougé ». */
   unchanged: number;
 }
@@ -514,7 +544,14 @@ export function diffCalendar(stored: StoredTie[], fetched: OwnTie[], eventId: st
   const byKey = new Map(
     stored.filter((s) => s.snMatchKey !== null).map((s) => [s.snMatchKey as string, s]),
   );
-  const diff: CalendarDiff = { toCreate: [], toUpdate: [], toDelete: [], confirmDrift: [], unchanged: 0 };
+  const diff: CalendarDiff = {
+    toCreate: [],
+    toUpdate: [],
+    toDelete: [],
+    confirmDrift: [],
+    teamIdFixes: [],
+    unchanged: 0,
+  };
   const publies = new Set(fetched.map((t) => matchKey(eventId, t.round)));
 
   // Ce qu'on a importé DE CET ÉVÉNEMENT et qui n'y figure plus. Le préfixe est vérifié : les
@@ -543,6 +580,12 @@ export function diffCalendar(stored: StoredTie[], fetched: OwnTie[], eventId: st
     compare("opponent", known.opponent, tie.opponent);
     compare("venue", known.venue, tie.venue);
     compare("venueAddress", known.venueAddress, tie.venueAddress);
+    // Le `teamid` adverse ne rejoint PAS `changes` (cf. `teamIdFixes`) : c'est une clé opaque,
+    // et elle doit pouvoir se poser sur une rencontre par ailleurs inchangée — sans quoi les
+    // rencontres déjà importées n'en auraient jamais.
+    if (tie.opponentTeamId && known.snOpponentTeamId !== tie.opponentTeamId) {
+      diff.teamIdFixes.push({ id: known.id, snOpponentTeamId: tie.opponentTeamId });
+    }
     // `dateConfirmed` N'EST PAS COMPARÉ ICI, et c'est délibéré : il ne rejoint pas `changes`,
     // donc l'application ne le réécrit jamais (cf. `confirmDrift`). Le comparer le rendait
     // « à corriger » comme les autres, et l'`apply` révoquait la correction de l'admin.

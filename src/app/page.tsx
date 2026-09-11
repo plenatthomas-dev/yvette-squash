@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import type { PlanningDay, Slot } from "@/lib/resamania/types";
+import { isSpecialView, viewAtStartup, type View } from "@/lib/views";
 import { PlanningGrid } from "@/components/PlanningGrid";
 import { WeekGrid } from "@/components/WeekGrid";
 import { Dialog } from "@/components/Dialog";
@@ -27,6 +28,7 @@ import {
   BellIcon,
   UsersIcon,
   TrendIcon,
+  WhistleIcon,
   ShareIcon,
   RefreshIcon,
   CalendarIcon,
@@ -39,6 +41,7 @@ const Tricount = dynamic(() => import("@/components/Tricount"), { ssr: false });
 // Idem pour le module Tournoi (vue « Tournoi ») : chargé seulement à l'ouverture.
 const Tournament = dynamic(() => import("@/components/Tournament"), { ssr: false });
 const Interclub = dynamic(() => import("@/components/Interclub"), { ssr: false });
+const Captain = dynamic(() => import("@/components/Captain"), { ssr: false });
 // Idem pour le fil de discussion : son JS embarque le client temps réel, qui n'a aucune
 // raison de peser sur le premier chargement de quelqu'un qui vient réserver un terrain.
 const Forum = dynamic(() => import("@/components/Forum"), { ssr: false });
@@ -149,6 +152,7 @@ const SPECIAL_LABEL: Record<string, string> = {
   money: "Frais partagés",
   tourney: "Tournois",
   interclub: "Interclub",
+  captain: "Capitaine",
 };
 
 interface JournalEntry {
@@ -204,6 +208,10 @@ export default function Home() {
   const [myId, setMyId] = useState<string | null>(null); // id interne (se reconnaître dans l'annuaire)
   const [myHandle, setMyHandle] = useState<string>(""); // token créneau (pseudo tronqué / Tho.P)
   const [nickname, setNickname] = useState<string | null>(null); // pseudonyme choisi
+  // Les équipes dont ce membre est capitaine, telles que le serveur les lui dit
+  // (`/api/auth/me`). Une LISTE, parce que le capitanat appartient à l'équipe et que rien
+  // n'interdit d'en tenir deux. Vide pour l'écrasante majorité des membres.
+  const [captainOf, setCaptainOf] = useState<{ id: string; name: string }[]>([]);
   const [listed, setListed] = useState(true); // visibilité annuaire (idée 6, opt-out)
   const [canBook, setCanBook] = useState(true); // false = session « email seul » (lecture seule)
   const [isAdmin, setIsAdmin] = useState(false); // admin (allowlist) → entrée « Admin » dans le menu
@@ -219,12 +227,8 @@ export default function Home() {
   const [range, setRange] = useState<Range>("all");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
-  const [view, setView] = useState<"day" | "week" | "money" | "tourney" | "interclub" | "forum">(
-    "day",
-  );
-  // Vues « plein écran » sans le chrome planning (Frais, Tournoi).
-  const isSpecial =
-    view === "money" || view === "tourney" || view === "interclub" || view === "forum";
+  const [view, setView] = useState<View>("day");
+  const isSpecial = isSpecialView(view);
   const [week, setWeek] = useState<{ date: string; planning: PlanningDay }[]>([]);
   const [busy, setBusy] = useState(false);
   // Retour visuel de `busy` DANS la grille. `busy` seul ne se voit nulle part : entre le tap
@@ -336,6 +340,7 @@ export default function Home() {
       setMyId(data.id ?? null);
       setMyHandle(data.handle ?? "");
       setNickname(data.nickname ?? null);
+      setCaptainOf(data.captainOf ?? []);
       setListed(data.listed ?? true);
       setCanBook(data.canBook ?? true);
       setIsAdmin(data.isAdmin ?? false);
@@ -574,27 +579,17 @@ export default function Home() {
     const linkedDate = p.get("date");
     if (linkedDate && isRealDateISO(linkedDate)) setDate(linkedDate);
 
-    // « forum » a été ajouté à l'union de `view` et au menu, mais PAS ici : la vue s'écrivait
-    // donc bien dans l'URL et dans localStorage, et cette garde la refusait à la relecture.
-    // Le Fil ne survivait à aucun rafraîchissement, sur aucun environnement.
-    const isView = (
-      x: string | null,
-    ): x is "day" | "week" | "money" | "tourney" | "interclub" | "forum" =>
-      x === "day" ||
-      x === "week" ||
-      x === "money" ||
-      x === "tourney" ||
-      x === "interclub" ||
-      x === "forum";
-    const vParam = p.get("view");
-    const vLS = localStorage.getItem("view");
-    let v = isView(vParam) ? vParam : isView(vLS) ? vLS : null;
-    // Les vues gated (Frais/Tournoi) sont ramenées à « day » par l'effet correctif plus bas :
-    // il couvre aussi la coupure d'un flag EN COURS de session, pas seulement le démarrage.
-    // Au LANCEMENT, on n'ouvre jamais directement la vue Semaine : /api/week (7 fetches
-    // ResaMania) est lourd sur le chemin critique du démarrage. La Semaine reste à un clic
-    // une fois l'appli chargée.
-    if (v === "week") v = "day";
+    // LA VUE À ROUVRIR EST DÉCIDÉE PAR `viewAtStartup` (`lib/views.ts`), pas ici. Ce garde-fou
+    // recopiait l'union des vues, et l'a désynchronisée deux fois : « forum » d'abord (le Fil
+    // ne survivait à aucun rafraîchissement), « captain » ensuite (un capitaine qui
+    // rafraîchissait son onglet repartait sur les créneaux). Les deux fois la vue s'écrivait
+    // pourtant correctement dans l'URL et dans localStorage — c'est à la RELECTURE qu'elle
+    // était perdue, et le symptôme n'accusait rien.
+    //
+    // Les vues gated (Frais/Tournoi/Interclub/Capitaine) sont ramenées à « day » par l'effet
+    // correctif plus bas : il couvre aussi la coupure d'un flag EN COURS de session, pas
+    // seulement le démarrage.
+    const v = viewAtStartup(p.get("view"), localStorage.getItem("view"));
     if (v) setView(v);
 
     const rParam = p.get("range");
@@ -621,7 +616,18 @@ export default function Home() {
     if (view === "tourney" && !tournament) setView("day");
     if (view === "interclub" && !interclub) setView("day");
     if (view === "forum" && !forum) setView("day");
-  }, [featuresReady, view, tricount, tournament, interclub, forum]);
+    // Capitanat retiré pendant la session, ou fonction coupée : la vue ne doit pas rester
+    // ouverte sur un écran dont les routes répondent désormais 403.
+    //
+    // ⚠️ ON ATTEND DE SAVOIR QUI ON EST, exactement comme on attend `featuresReady` juste
+    // au-dessus, et pour la même panne : `captainOf` vaut `[]` au premier rendu parce que
+    // `/api/auth/me` n'a pas répondu, pas parce qu'on n'est capitaine de rien. Sans cette
+    // garde, un capitaine qui rafraîchit sur son onglet est renvoyé sur les créneaux — et
+    // l'effet suivant écrit `view=day` dans l'URL et dans localStorage, si bien que la
+    // réponse du serveur arrive sur un état déjà écrasé, que plus rien ne rattrape.
+    if (me === undefined) return;
+    if (view === "captain" && (!interclub || captainOf.length === 0)) setView("day");
+  }, [featuresReady, view, tricount, tournament, interclub, forum, me, captainOf]);
 
   // Reflète l'état dans l'URL (partageable, survit au refresh) et le persiste.
   useEffect(() => {
@@ -637,7 +643,13 @@ export default function Home() {
 
   useEffect(() => {
     if (!me || !hydrated) return;
-    if (view === "money" || view === "tourney" || view === "interclub" || view === "forum")
+    if (
+      view === "money" ||
+      view === "tourney" ||
+      view === "interclub" ||
+      view === "forum" ||
+      view === "captain"
+    )
       return; // ces vues chargent leurs propres données
     setPlanning(null);
     setJournal([]);
@@ -1328,6 +1340,22 @@ export default function Home() {
                   comingSoon: !interclub,
                   onClick: () => setView(view === "interclub" ? "day" : "interclub"),
                 },
+                // L'ESPACE CAPITAINE N'APPARAÎT QU'AUX CAPITAINES — absent, et non grisé.
+                // Les autres entrées se grisent quand leur fonction est coupée : c'est une
+                // information utile (« ça arrive »). Ici ce serait l'inverse — annoncer à
+                // trente membres une porte que deux personnes peuvent ouvrir, et qui ne
+                // s'ouvrira jamais pour eux.
+                ...(interclub && captainOf.length > 0
+                  ? [
+                      {
+                        key: "captain",
+                        label: "Capitaine",
+                        icon: <WhistleIcon />,
+                        active: view === "captain",
+                        onClick: () => setView(view === "captain" ? "day" : "captain"),
+                      },
+                    ]
+                  : []),
                 {
                   key: "forum",
                   label: "Le fil",
@@ -1610,6 +1638,14 @@ export default function Home() {
       )}
 
       {forum && view === "forum" && <Forum toast={toast} onExpired={handleExpired} />}
+
+      {/* La garde est DOUBLE, et ce n'est pas une redondance : le menu décide de la
+          découvrabilité, celle-ci de l'affichage. Un `view=captain` collé dans l'URL par
+          quelqu'un qui n'est pas capitaine ne doit rien monter — et de toute façon les routes
+          répondraient 403. */}
+      {interclub && captainOf.length > 0 && view === "captain" && (
+        <Captain toast={toast} onExpired={handleExpired} />
+      )}
 
       {isSpecial
         ? null

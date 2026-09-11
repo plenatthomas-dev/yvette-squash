@@ -24,6 +24,12 @@ const h = vi.hoisted(() => ({
   lastPlayers: null as null | { player: string; opponent: string },
   /** Simple de la même rencontre qui aligne déjà le joueur choisi (null = aucun conflit). */
   alignmentClash: null as null | { order: number },
+  /** Voisins tels que `findAwayOrderConflict` les lit — encore un autre select. */
+  awaySiblings: [] as Array<Record<string, unknown>>,
+  /** Rencontres passées, telles que `loadKnownOpponents` les lit. */
+  passees: [] as Array<Record<string, unknown>>,
+  /** Combien de fois on est allé les chercher — une requête évitée doit se prouver. */
+  passeesReads: 0,
 }));
 
 vi.mock("@/lib/features-server", () => ({
@@ -56,9 +62,14 @@ vi.mock("@/lib/db", () => {
       // (select portant `gamesHome`) et `findOrderConflict` (select portant `order`). On les
       // distingue par la forme du `select` reçu, comme le ferait vraiment Prisma selon la
       // requête envoyée.
-      findMany: vi.fn(async (args: { select?: Record<string, unknown> }) =>
-        args?.select && "order" in args.select ? h.orderSiblings : h.siblings,
-      ),
+      findMany: vi.fn(async (args: { select?: Record<string, unknown> }) => {
+        // TROIS appelants partagent ce `findMany`, et seul le `select` les distingue — comme
+        // Prisma le ferait vraiment : l'ordre ADVERSE (`awayName`), l'ordre MAISON (`order`
+        // seul), et le recalcul du statut de la rencontre (`gamesHome`).
+        if (args?.select && "awayName" in args.select) return h.awaySiblings;
+        if (args?.select && "order" in args.select) return h.orderSiblings;
+        return h.siblings;
+      }),
       findFirst: vi.fn(async () => h.alignmentClash),
       update: vi.fn(async (args: { data: Record<string, unknown> }) => {
         h.updated = args.data;
@@ -76,6 +87,10 @@ vi.mock("@/lib/db", () => {
       }),
     },
     interclub: {
+      findMany: vi.fn(async () => {
+        h.passeesReads += 1;
+        return h.passees;
+      }),
       update: vi.fn(async (args: { data: Record<string, unknown> }) => {
         h.fixtureStatus = args.data.status as string;
         h.fixtureUpdate = args.data;
@@ -107,6 +122,7 @@ const NOTIFIED = new Date(Date.now() - 20 * 60_000);
 
 const freshMatch = () => ({
   id: "m1",
+  order: 1,
   interclubId: "f1",
   homeUserId: "u9",
   scorerId: null,
@@ -150,6 +166,9 @@ beforeEach(() => {
   h.notified = [];
   h.lastPlayers = null;
   h.alignmentClash = null;
+  h.awaySiblings = [];
+  h.passees = [];
+  h.passeesReads = 0;
 });
 
 describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
@@ -658,6 +677,84 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
     const res = await PATCH(patch({ homeUserId: "u-benoit" }), ctx);
     expect(res.status).toBe(200);
     expect(h.updated).toMatchObject({ homeDisplayName: "Benoît" });
+  });
+
+  // --- Ordre des simples ADVERSES -------------------------------------------
+  //
+  // Le blocage doit tomber DÈS LA DÉSIGNATION, pas à la vérification du capitaine la veille de
+  // la feuille de match : la rencontre est alors jouée et il n'y a plus rien à corriger.
+
+  /** Une rencontre passée dont le rapport capitaine a confirmé deux adversaires de Massy. */
+  function massyVerifiee() {
+    return {
+      opponent: "Massy",
+      matches: [{ awayName: "Paul Martin" }, { awayName: "Luc Bernard" }],
+      official: {
+        checkJson: JSON.stringify({
+          checkedAt: "2026-09-01T10:00:00.000Z",
+          players: [
+            { order: 1, side: "away", name: "Paul Martin", verdict: "found", fedName: "MARTIN PAUL", clt: "5A", rangM: 2000, licence: "0121214", club: "Massy", hint: null },
+            { order: 2, side: "away", name: "Luc Bernard", verdict: "found", fedName: "BERNARD LUC", clt: "4A", rangM: 100, licence: "0121215", club: "Massy", hint: null },
+          ],
+          scores: [],
+          tie: { ok: true, home: 2, away: 2, undecided: 0, problem: null },
+          awayOrder: { status: "ok", problem: null },
+        }),
+      },
+    };
+  }
+
+  it("refuse un adversaire MIEUX classé désigné sur un simple plus tardif", async () => {
+    h.match = { ...freshMatch(), order: 2 };
+    h.passees = [massyVerifiee()];
+    // Martin (5A) tient déjà le simple 1 : Bernard (4A) ne peut pas prendre le 2.
+    h.awaySiblings = [{ order: 1, awayName: "Paul Martin" }];
+    const res = await PATCH(patch({ awayName: "Luc Bernard" }), ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/simples adverses/i);
+    expect(h.updated).toBeNull();
+  });
+
+  it("accepte le même adversaire sur le simple qui lui revient", async () => {
+    h.match = { ...freshMatch(), order: 2 };
+    h.passees = [massyVerifiee()];
+    // Bernard (4A) tient le simple 1 : Martin (5A) a bien sa place au 2.
+    h.awaySiblings = [{ order: 1, awayName: "Luc Bernard" }];
+    const res = await PATCH(patch({ awayName: "Paul Martin" }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.updated).toMatchObject({ awayName: "Paul Martin" });
+  });
+
+  // ⚠️ LA DIFFÉRENCE IRRÉDUCTIBLE AVEC NOTRE CAMP : exiger de connaître le classement d'en face
+  // rendrait impossible de composer une première rencontre contre un club jamais croisé.
+  it("laisse passer un adversaire qu'on n'a jamais rencontré", async () => {
+    h.match = { ...freshMatch(), order: 2 };
+    h.passees = [massyVerifiee()];
+    h.awaySiblings = [{ order: 1, awayName: "Paul Martin" }];
+    const res = await PATCH(patch({ awayName: "Jamais Vu" }), ctx);
+    expect(res.status).toBe(200);
+  });
+
+  // Nommer le PREMIER adversaire d'une rencontre est le geste le plus courant, et il n'y a alors
+  // personne à comparer : charger ce qu'on sait de la poule pour n'en rien faire serait gratuit.
+  it("ne lit pas les rencontres passées quand il n'y a personne à comparer", async () => {
+    h.match = { ...freshMatch(), order: 1 };
+    h.awaySiblings = [{ order: 2, awayName: "À désigner" }];
+    const res = await PATCH(patch({ awayName: "Paul Martin" }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.updated).toMatchObject({ awayName: "Paul Martin" });
+    expect(h.passeesReads).toBe(0);
+  });
+
+  it("effacer un nom d'adversaire ne lit rien et ne refuse rien", async () => {
+    h.match = { ...freshMatch(), order: 2 };
+    h.awaySiblings = [{ order: 1, awayName: "Paul Martin" }];
+    // Un champ vidé n'atteint même pas la garde : la route ne réécrit `awayName` que s'il porte
+    // quelque chose. Corriger une composition fautive doit rester possible en toutes
+    // circonstances.
+    const res = await PATCH(patch({ awayName: "   " }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.passeesReads).toBe(0);
   });
 
   // --- Début de rencontre --------------------------------------------------

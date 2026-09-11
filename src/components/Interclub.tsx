@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import AuService from "./AuService";
 import { Dialog } from "@/components/Dialog";
 import { readOk } from "@/lib/apiFetch";
 import { onForeground } from "@/lib/onForeground";
@@ -40,6 +41,13 @@ import {
   type GameScore,
 } from "@/lib/interclub";
 import { compareRosterOrder, isNC, lineupOrderConflict, type OrderedSlot } from "@/lib/interclub-order";
+import { normalize } from "@/lib/squashnet/match";
+import {
+  awayAlignmentClash,
+  awayLineupConflict,
+  estDesigne,
+  type KnownOpponent,
+} from "@/lib/interclub-opponents";
 
 // Vue « Interclub » : les rencontres de championnat par équipes.
 //
@@ -526,6 +534,20 @@ export default function Interclub({
   onExpired: (status: number) => boolean;
 }) {
   const [teams, setTeams] = useState<Team[]>([]);
+  /**
+   * CE QU'ON SAIT DES ÉQUIPES ET DES JOUEURS D'EN FACE, pour remplir deux menus : celui du club
+   * adverse à la création, celui de l'adversaire à la composition.
+   *
+   * Chargé UNE FOIS pour toutes les équipes, pas une fois par rencontre ouverte : la liste
+   * change au rythme des rencontres jouées, pas des écrans ouverts, et une requête par
+   * ouverture de détail serait un aller-retour de plus au bord du terrain, là où le réseau est
+   * mauvais. Le filtrage par équipe adverse se fait ici, sur une liste de quelques dizaines de
+   * noms (`KnownOpponent.team`).
+   */
+  const [known, setKnown] = useState<{ teams: string[]; players: KnownOpponent[] }>({
+    teams: [],
+    players: [],
+  });
   const [rows, setRows] = useState<FixtureRow[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [fixture, setFixture] = useState<Fixture | null>(null);
@@ -599,14 +621,86 @@ export default function Interclub({
     }
   }, []);
 
+  // Silencieux en cas d'échec, et VOLONTAIREMENT : ces deux menus sont un confort de saisie,
+  // pas une donnée dont dépend l'écran. Sans eux, la saisie libre reste là et rien n'est perdu —
+  // un toast d'erreur ne ferait qu'inquiéter pour une commodité absente.
+  const loadKnown = useCallback(async () => {
+    try {
+      const res = await fetch("/api/interclub/opponents", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as { teams?: unknown; players?: unknown };
+      // GARDE DE FORME, et pas une politesse : ce qu'on stocke ici alimente deux `.map()` et un
+      // `.filter()` au rendu, sans error boundary au-dessus. Une réponse d'un autre format —
+      // un proxy, un déploiement à cheval sur deux versions — ferait tomber TOUTE la vue
+      // interclub pour un menu de confort.
+      setKnown({
+        teams: Array.isArray(data.teams) ? (data.teams as string[]) : [],
+        players: Array.isArray(data.players) ? (data.players as KnownOpponent[]) : [],
+      });
+    } catch {
+      /* menus vides : la saisie libre suffit */
+    }
+  }, []);
+
   useEffect(() => {
     loadList();
-  }, [loadList]);
+    loadKnown();
+  }, [loadList, loadKnown]);
 
   useEffect(() => {
     if (openId) loadFixture(openId);
     else setFixture(null);
   }, [openId, loadFixture]);
+
+  /**
+   * À L'OUVERTURE D'UNE RENCONTRE, ON REMET À JOUR LES JOUEURS DE L'ÉQUIPE D'EN FACE.
+   *
+   * Composer une rencontre, c'est désigner les joueurs adverses : c'est exactement le moment où
+   * il faut savoir qui le club a inscrit. Le demander par un bouton, dans un AUTRE écran,
+   * revenait à exiger qu'on ait pensé à le faire avant — et à laisser un champ vide à celui qui
+   * n'y avait pas pensé.
+   *
+   * ⚠️ CE N'EST PAS UNE REQUÊTE FÉDÉRALE À CHAQUE OUVERTURE. Le serveur ne va chez la ligue que
+   * si le roster manque ou date de plus d'une semaine (`ROSTER_FRAIS_JOURS`) ; sinon il répond
+   * « déjà à jour » sans sortir. Un soir de rencontre, où l'écran s'ouvre et se ferme vingt
+   * fois, le premier appel coûte une seconde et les dix-neuf suivants rien du tout.
+   *
+   * ⚠️ IL NE BLOQUE PAS L'ÉCRAN, et ne le fait pas attendre : la rencontre s'affiche
+   * immédiatement avec ce qu'on a déjà, et le menu se recharge SI quelque chose de nouveau est
+   * arrivé. Le contraire ferait patienter une seconde devant un écran de composition pour un
+   * confort de saisie — au bord d'un terrain, sur un réseau médiocre.
+   *
+   * ⚠️ SILENCIEUX EN CAS D'ÉCHEC, comme `loadKnown` : ces menus sont un confort, pas une donnée
+   * dont l'écran dépend. La saisie libre reste là, et un toast d'erreur ne ferait qu'inquiéter
+   * pour une commodité absente.
+   *
+   * SUR `openId`, DONC UNE FOIS PAR OUVERTURE — surtout pas dans `loadFixture`, qui se rejoue à
+   * chaque retour au premier plan et après chaque enregistrement. Accroché là, un déverrouillage
+   * de téléphone aurait relancé l'interrogation de la ligue.
+   */
+  useEffect(() => {
+    if (!openId) return;
+    let vivant = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/interclub/opponents/refresh?fixtureId=${openId}`, {
+          method: "POST",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { fetched?: unknown };
+        // On ne recharge le menu QUE si la ligue a effectivement rendu quelque chose de neuf.
+        // « Déjà à jour » est le cas courant, et il n'a rien à réafficher.
+        if (vivant && typeof data.fetched === "number" && data.fetched > 0) void loadKnown();
+      } catch {
+        /* menus inchangés : la saisie libre suffit */
+      }
+    })();
+    // La rencontre a pu être refermée pendant l'aller-retour : ne pas recharger un menu dont
+    // plus personne ne se sert.
+    return () => {
+      vivant = false;
+    };
+  }, [openId, loadKnown]);
 
   // Rafraîchissement au retour sur l'onglet : plusieurs personnes saisissent en parallèle un
   // soir de rencontre. Pas d'intervalle — le palier gratuit ne supporte pas le polling.
@@ -909,7 +1003,13 @@ export default function Interclub({
       )}
 
       {creating && (
-        <CreateDialog teams={teams} busy={busy} onClose={() => setCreating(false)} onSubmit={createFixture} />
+        <CreateDialog
+          teams={teams}
+          knownTeams={known.teams}
+          busy={busy}
+          onClose={() => setCreating(false)}
+          onSubmit={createFixture}
+        />
       )}
 
       {scoringMatch && fixture && (
@@ -925,6 +1025,7 @@ export default function Interclub({
 
       {openId && fixture && !scoringMatch && (
         <FixtureDialog
+          knownOpponents={known.players}
           fixture={fixture}
           busy={busy}
           onClose={() => setOpenId(null)}
@@ -940,6 +1041,16 @@ export default function Interclub({
   );
 }
 
+/**
+ * La valeur d'option qui ROUVRE la saisie libre, dans les deux menus (club adverse, adversaire).
+ *
+ * Une chaîne qu'aucun nom réel ne peut porter — un club ne s'appelle pas « \u0000autre ». Un
+ * sentinelle lisible (« __autre__ », « autre ») finirait un jour par désigner quelqu'un, et ce
+ * jour-là le menu se rouvrirait tout seul en effaçant le nom choisi, sans qu'on comprenne
+ * pourquoi.
+ */
+const AUTRE_CLUB = "\u0000autre";
+
 // --- Création d'une rencontre ----------------------------------------------
 //
 // La COMPOSITION ne se fait pas ici, délibérément : on inscrit une rencontre bien avant de
@@ -949,11 +1060,14 @@ export default function Interclub({
 
 function CreateDialog({
   teams,
+  knownTeams,
   busy,
   onClose,
   onSubmit,
 }: {
   teams: Team[];
+  /** Les clubs déjà rencontrés — après un import de calendrier, exactement ceux de notre poule. */
+  knownTeams: string[];
   busy: boolean;
   onClose: () => void;
   onSubmit: (f: {
@@ -967,7 +1081,17 @@ function CreateDialog({
 }) {
   const [date, setDate] = useState(todayISO());
   const [teamId, setTeamId] = useState(teams[0]?.id ?? "");
-  const [opponent, setOpponent] = useState("");
+  /**
+   * Le club adverse, CHOISI dans un menu plutôt que retapé — c'est l'orthographe de l'import
+   * fédéral qui compte, et une variante saisie à la main (« chaville 4 ») casse silencieusement
+   * le rapprochement des joueurs d'en face au moment de la vérification du capitaine.
+   *
+   * `AUTRE` rouvre la saisie libre, et ce n'est pas une échappatoire de confort : une poule
+   * commence par une première rencontre contre un club qu'on n'a jamais croisé, et le menu est
+   * alors forcément vide. Le menu enlève la ressaisie, il n'interdit rien.
+   */
+  const [opponent, setOpponent] = useState(knownTeams[0] ?? "");
+  const [libre, setLibre] = useState(knownTeams.length === 0);
   const [home, setHome] = useState(true);
   const [matchCount, setMatchCount] = useState(4);
   const [bestOf, setBestOf] = useState(5);
@@ -993,13 +1117,46 @@ function CreateDialog({
       </label>
       <label>
         Club adverse
-        <input
-          value={opponent}
-          onChange={(e) => setOpponent(e.target.value)}
-          placeholder="ex. Squash de Massy"
-          maxLength={60}
-        />
+        {libre || knownTeams.length === 0 ? (
+          <input
+            value={opponent}
+            onChange={(e) => setOpponent(e.target.value)}
+            placeholder="ex. Squash de Massy"
+            maxLength={60}
+            autoFocus={libre && knownTeams.length > 0}
+          />
+        ) : (
+          <select
+            value={opponent}
+            onChange={(e) => {
+              if (e.target.value === AUTRE_CLUB) {
+                setLibre(true);
+                setOpponent("");
+              } else {
+                setOpponent(e.target.value);
+              }
+            }}
+          >
+            {knownTeams.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+            <option value={AUTRE_CLUB}>— un autre club —</option>
+          </select>
+        )}
       </label>
+      {libre && knownTeams.length > 0 && (
+        <button
+          className="ic-linkish"
+          onClick={() => {
+            setLibre(false);
+            setOpponent(knownTeams[0]);
+          }}
+        >
+          Revenir à la liste des clubs déjà rencontrés
+        </button>
+      )}
       {/* PLUS DE DIVISION ICI. Le champ était libre, facultatif, saisi à la main et jamais
           renseigné par l'import fédéral : une rencontre sur deux le portait, l'autre non, et il
           ne servait qu'à afficher « D2 Hommes » sous le score. La division au sens de squashnet
@@ -1068,6 +1225,7 @@ function CreateDialog({
 
 function FixtureDialog({
   fixture,
+  knownOpponents,
   busy,
   onClose,
   onSaveMatch,
@@ -1078,6 +1236,8 @@ function FixtureDialog({
   onExpired,
 }: {
   fixture: Fixture;
+  /** Tous les adversaires connus, toutes équipes confondues — filtrés ci-dessous sur celle-ci. */
+  knownOpponents: KnownOpponent[];
   busy: boolean;
   onClose: () => void;
   onSaveMatch: (matchId: string, body: Record<string, unknown>) => void;
@@ -1137,6 +1297,29 @@ function FixtureDialog({
         rangM: r?.rangM ?? null,
       };
     });
+
+  // Les adversaires connus de CE club. Le nom d'équipe se compare replié (casse, accents,
+  // espaces) : la rencontre porte l'orthographe de son import, la liste celle de la sienne, et
+  // rien ne garantit qu'elles coïncident au caractère près.
+  //
+  // ⚠️ `normalize`, ET PAS `toLowerCase()`. Le commentaire ci-dessus promettait les accents et
+  // les espaces depuis l'origine ; `toLowerCase()` n'en replie aucun. « Élancourt 2 » dans la
+  // rencontre et « Elancourt 2 » dans la liste ne coïncidaient donc pas : le menu disparaissait,
+  // `awayLibre` s'initialisait à `true`, et on retapait le nom à la main — exactement ce que ce
+  // menu existe pour éviter.
+  //
+  // C'est aussi LA MÊME FONCTION QUE LE SERVEUR, qui filtre l'équipe de la même façon dans
+  // `awayLineupConflict`. Deux replis différents referaient l'écart qu'on vient de fermer : un
+  // écran qui propose un joueur que la route refuse ensuite.
+  const clubOpponents = knownOpponents.filter(
+    (o) => normalize(o.team) === normalize(fixture.opponent),
+  );
+
+  // L'ORDRE DÉJÀ POSÉ EN FACE, pour griser dans le sélecteur un adversaire qui le romprait —
+  // exactement ce que fait `orderSlots` pour notre camp. La règle employée ici est CELLE DU
+  // SERVEUR (`awayLineupConflict`, module pur) : ce que l'écran grise, la route le refuse, et
+  // réciproquement.
+  const awayLines = fixture.matches.map((m) => ({ order: m.order, awayName: m.awayName }));
 
   return (
     <Dialog onClose={onClose} label="Rencontre" className="ic-detail">
@@ -1264,6 +1447,9 @@ function FixtureDialog({
                 roster={fixture.roster}
                 takenBy={takenBy}
                 orderSlots={orderSlots}
+                clubOpponents={clubOpponents}
+                awayLines={awayLines}
+                opponentTeamName={fixture.opponent}
                 teamName={fixture.team.name}
                 busy={busy}
                 onCancel={() => setEditing(null)}
@@ -1287,6 +1473,12 @@ function FixtureDialog({
                     <span className={m.homeDisplayName === UNSET_PLAYER ? "muted" : undefined}>
                       {m.homeDisplayName}
                     </span>
+                    {/* AU SERVICE. La donnée arrivait déjà — `getLiveFixtures` la met dans la
+                        charge utile, cet écran la déclarait dans son type — et il ne l'affichait
+                        pas. Or « 7–5 » sans savoir qui sert ne se lit pas : au squash le service
+                        change de main à chaque échange perdu, et c'est lui qui dit si le meneur
+                        conclut ou subit. Coût serveur nul, elle est déjà payée. */}
+                    {m.live?.serving === "home" && <AuService />}
                   </span>
                   <span className="ic-versus" title="contre">
                     <span className="sr-only">contre</span>
@@ -1295,6 +1487,7 @@ function FixtureDialog({
                   <span className="ic-player">
                     <ColorDot color={m.awayColor} size="lg" />
                     <span className={m.awayName === UNSET_PLAYER ? "muted" : undefined}>{m.awayName}</span>
+                    {m.live?.serving === "away" && <AuService />}
                   </span>
                 </span>
                 {(m.live || m.gamesHome !== null) && (
@@ -1747,6 +1940,9 @@ function MatchEditor({
   roster,
   takenBy,
   orderSlots,
+  clubOpponents,
+  awayLines,
+  opponentTeamName,
   teamName,
   busy,
   onCancel,
@@ -1759,6 +1955,11 @@ function MatchEditor({
   takenBy: Map<string, number>;
   /** Simples déjà désignés (hors CELUI-CI), pour griser un choix qui romprait l'ordre. */
   orderSlots: OrderedSlot[];
+  /** Les adversaires déjà rencontrés dans CE club — le menu de saisie, à la place d'un champ libre. */
+  clubOpponents: KnownOpponent[];
+  /** Les adversaires désignés de la rencontre, celui-ci compris — pour vérifier l'ordre d'en face. */
+  awayLines: { order: number; awayName: string }[];
+  opponentTeamName: string;
   teamName: string;
   busy: boolean;
   onCancel: () => void;
@@ -1774,6 +1975,18 @@ function MatchEditor({
     match.homeUserId ? `member:${match.homeUserId}` : match.homeGuestId ? `guest:${match.homeGuestId}` : "",
   );
   const [awayName, setAwayName] = useState(match.awayName === UNSET_PLAYER ? "" : match.awayName);
+  /**
+   * Le nom d'en face se SAISIT-IL LIBREMENT, ou se choisit-il dans la liste ?
+   *
+   * Libre par défaut quand on ne connaît personne dans ce club — le cas d'une première rencontre
+   * —, et aussi quand le nom déjà posé n'est dans aucune entrée : un nom saisi avant que la
+   * liste n'existe ne doit pas disparaître de son propre champ.
+   */
+  const [awayLibre, setAwayLibre] = useState(
+    () =>
+      clubOpponents.length === 0 ||
+      (estDesigne(match.awayName) && !clubOpponents.some((o) => o.name === match.awayName)),
+  );
   const [homeColor, setHomeColor] = useState(match.homeColor ?? "");
   const [awayColor, setAwayColor] = useState(match.awayColor ?? "");
   /**
@@ -1910,15 +2123,100 @@ function MatchEditor({
       <label className="ic-field">
         Adversaire
         <span className="ic-field-row">
-          <input
-            value={awayName}
-            onChange={(e) => setAwayName(e.target.value)}
-            placeholder="Nom de l'adversaire"
-            maxLength={40}
-          />
+          {awayLibre ? (
+            <input
+              value={awayName}
+              onChange={(e) => setAwayName(e.target.value)}
+              placeholder="Nom de l'adversaire"
+              maxLength={40}
+            />
+          ) : (
+            <select
+              value={awayName}
+              onChange={(e) => {
+                if (e.target.value === AUTRE_CLUB) {
+                  setAwayLibre(true);
+                  setAwayName("");
+                } else {
+                  setAwayName(e.target.value);
+                }
+              }}
+            >
+              <option value="">— à désigner —</option>
+              {clubOpponents.map((o) => {
+                // UN ADVERSAIRE NE DISPUTE QU'UN SIMPLE, exactement comme nos joueurs. Comparé
+                // au NUMÉRO du simple et non au choix courant : celui que ce simple-ci retient
+                // doit rester sélectionnable ici — sinon on ne pourrait plus revenir en arrière
+                // après avoir changé d'avis — mais nulle part ailleurs.
+                const dejaA = awayAlignmentClash(awayLines, {
+                  order: match.order,
+                  awayName: o.name,
+                });
+                // LA MÊME RÈGLE QUE POUR NOUS, appliquée aux joueurs d'en face : le mieux classé
+                // dispute le simple n° 1. On grise ici ce que le serveur refuserait, plutôt que
+                // de laisser composer pour se faire refuser à l'enregistrement — même logique
+                // que `takenBy` et `orderProblem` sur le sélecteur juste au-dessus.
+                //
+                // `awayLineupConflict` se tait dès qu'un des désignés nous est inconnu : rien
+                // n'est donc grisé tant que la composition d'en face n'est pas entièrement faite
+                // de joueurs classés. C'est voulu — on ne refuse que ce qu'on sait. Depuis que
+                // le ROSTER fédéral alimente cette liste, ce cas est devenu l'exception plutôt
+                // que la règle : il ne reste que les joueurs qu'aucune inscription ne couvre.
+                //
+                // Inutile de l'évaluer sur un joueur déjà grisé pour doublon : le motif est
+                // acquis, et le message d'ordre le recouvrirait d'une explication moins claire.
+                const conflit =
+                  dejaA !== null
+                    ? null
+                    : awayLineupConflict(
+                        awayLines.map((l) =>
+                          l.order === match.order ? { order: match.order, awayName: o.name } : l,
+                        ),
+                        clubOpponents,
+                        // `clubOpponents` est déjà filtré sur ce club (cf. plus haut), mais
+                        // l'équipe se passe quand même : c'est la MÊME signature que celle du
+                        // serveur, et c'est ce qui garantit que l'écran grise exactement ce que
+                        // la route refuserait.
+                        opponentTeamName,
+                      );
+                return (
+                  <option
+                    key={`${o.team}|${o.name}`}
+                    value={o.name}
+                    disabled={dejaA !== null || !!conflit}
+                  >
+                    {o.name}
+                    {/* Classement et rang mixte, notés comme pour nous (« 5A #1200 ») : ce sont
+                        les deux critères qui décident de l'ordre. Ils viennent du ROSTER publié
+                        par la ligue quand on l'a, sinon d'une vérification de capitaine ; à
+                        défaut des deux, le joueur reste proposable mais son ordre incontrôlable. */}
+                    {o.clt ? ` (${o.clt}${o.rangM != null && !isNC(o.clt) ? ` #${o.rangM}` : ""})` : ""}
+                    {dejaA !== null
+                      ? ` — joue déjà le match n° ${dejaA}`
+                      : conflit
+                        ? " — hors ordre de classement"
+                        : ""}
+                  </option>
+                );
+              })}
+              <option value={AUTRE_CLUB}>— un autre joueur —</option>
+            </select>
+          )}
           <ColorPicker value={awayColor} onChange={setAwayColor} label="Maillot de l'adversaire" />
         </span>
       </label>
+      {awayLibre && clubOpponents.length > 0 && (
+        <button className="ic-linkish" onClick={() => { setAwayLibre(false); setAwayName(""); }}>
+          Revenir aux joueurs connus à {opponentTeamName}
+        </button>
+      )}
+      {!awayLibre && clubOpponents.length > 0 && (
+        <p className="tiny muted">
+          Les joueurs inscrits à {opponentTeamName} chez la ligue, et ceux qu&apos;on a déjà
+          rencontrés. Sans classement affiché, le joueur reste proposable, mais l&apos;ordre des
+          simples d&apos;en face ne peut pas être contrôlé sur lui.
+        </p>
+      )}
 
       <p className="tiny muted ic-games-hint">
         Jeux, dans l&apos;ordre. {winGamesFor(bestOf)} jeux gagnants.
