@@ -580,22 +580,24 @@ export function seedEvents(
 // est CALCULÉE : blanc ou noir, celui des deux qui contraste le mieux.
 //
 // Sur l'encre PLEINE, ce choix tient le seuil AA quelle que soit la couleur : le pire cas du
-// cube RGB atteint 4.58:1, au-dessus des 4.5 requis (le test le vérifie en balayant le cube).
+// cube RGB atteint 4.58:1, au-dessus des 4.5 requis.
 //
-// ⚠️ CE QUE CE MODULE NE PEUT PAS GARANTIR. La borne ci-dessus ne vaut que si l'encre est
-// rendue TELLE QUELLE. Un seul sélecteur la repeint aujourd'hui : `.ics-won` (globals.css),
-// posé à `opacity: 0.9` — le compte de jeux gagnés sur le maillot. Composité sur son fond, le
-// pire cas du cube retombe à 3.86:1 (atteint vers `#ea0042`), et deux des douze raccourcis de
-// couleur passent sous 4.5 : vert 4.49 et rose 4.22. Le test continue de passer — il mesure
-// une couleur qui n'est jamais celle qu'on voit.
+// D'où vient ce 4.58 : c'est le point où les deux encres se valent. L'encre blanche donne
+// 1,05/(L+0,05), la noire (L+0,05)/0,05 ; `inkFor` prend la meilleure des deux, donc le pire
+// fond possible est celui où elles se croisent — (L+0,05)² = 0,0525, soit 4,5826:1. Ce n'est
+// pas une mesure sur un échantillon, c'est la borne, et le cube 8 bits l'atteint.
 //
-// `.ics-serve`, lui, ne porte AUCUNE opacité (poids 800 et `border: 2px solid currentColor`
-// font sa hiérarchie) : le badge de service est donc à 4.58:1 au pire, conforme.
+// ⚠️ CE QUE CE MODULE NE PEUT PAS GARANTIR. La borne ne vaut que si l'encre est rendue TELLE
+// QUELLE. TOUTE OPACITÉ POSÉE SUR CETTE ENCRE DÉFAIT LE CALCUL, et aucun test ne le dira : le
+// test mesure la couleur nominale, pas celle qu'on voit. C'est arrivé — `.ics-won` (le compte
+// de jeux gagnés sur le maillot) a porté `opacity: 0.9`, ce qui composite le texte AVEC le
+// maillot et ramenait le pire cas à 3,86:1, deux des douze raccourcis passant sous le seuil AA
+// (vert 4,49 et rose 4,22). L'opacité a été retirée et `globals.css` porte désormais la
+// consigne à l'endroit où la tentation revient.
 //
-// Écart CONNU ET ASSUMÉ à ce jour ; il se refermerait en retirant cette seule ligne d'opacité.
-// Ce qu'il faut retenir : toute opacité posée sur cette encre défait le calcul, et le test ne
-// le dira pas. Les chiffres ci-dessus ont été MESURÉS sur la CSS en vigueur — s'ils cessent de
-// correspondre à ce que `globals.css` fait, c'est le commentaire qui a tort, pas la CSS.
+// Aucun sélecteur ne repeint cette encre aujourd'hui : `.ics-won` et `.ics-serve` tiennent leur
+// hiérarchie par la graisse et la taille, pas par la transparence. Si un jour ces lignes ne
+// correspondent plus à ce que fait `globals.css`, c'est le commentaire qui a tort, pas la CSS.
 //
 // ⚠️ La couleur s'applique en PASTILLE ou en grande zone TACTILE (les deux demi-écrans du
 // marqueur, cf. `.ics-side`), jamais en aplat décoratif : DESIGN.md réserve les grandes

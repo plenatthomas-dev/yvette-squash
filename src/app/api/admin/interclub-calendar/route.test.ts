@@ -24,6 +24,8 @@ const h = vi.hoisted(() => ({
   published: [] as Array<Record<string, unknown>>,
   fetchThrows: false,
   created: [] as Array<Record<string, unknown>>,
+  /** Nombre de créations à faire échouer en doublon (P2002), comme un second « Appliquer ». */
+  createDoublons: 0,
   updated: [] as Array<{ id: string; data: Record<string, unknown> }>,
   wipedFor: [] as string[],
   moved: [] as Array<[unknown, string, unknown]>,
@@ -82,6 +84,15 @@ vi.mock("@/lib/db", () => {
     interclub: {
       findMany: vi.fn(async () => h.fixtures),
       create: vi.fn(async (args: { data: Record<string, unknown> }) => {
+        if (h.createDoublons > 0) {
+          h.createDoublons--;
+          // Une VRAIE erreur Prisma : `isUniqueViolation` teste l'instance, pas le seul code.
+          const { Prisma } = await import("@prisma/client");
+          throw new Prisma.PrismaClientKnownRequestError("unique", {
+            code: "P2002",
+            clientVersion: "test",
+          });
+        }
         h.created.push(args.data);
         return args.data;
       }),
@@ -170,6 +181,7 @@ beforeEach(() => {
   h.published = [];
   h.fetchThrows = false;
   h.created = [];
+  h.createDoublons = 0;
   h.updated = [];
   h.wipedFor = [];
   h.moved = [];
@@ -508,4 +520,20 @@ describe("classement — la lecture à la demande", () => {
     h.team = { ...(h.team as Record<string, unknown>), snEventId: null };
     expect((await POST(req({ action: "standings", teamId: "t1" }))).status).toBe(400);
   });
+});
+
+it("⚠️ annonce les créations ÉCRITES, pas celles qui étaient prévues", async () => {
+  // La boucle avale les `P2002` — deux clics sur « Appliquer » ne sont pas une faute, et
+  // `@@unique([teamId, snMatchKey])` tient la vérité. Mais le compte rendu lisait
+  // `diff.toCreate.length` : le second clic répondait « 5 rencontres créées » après en avoir
+  // heurté cinq doublons et n'en avoir créé aucune. L'admin ne pouvait pas distinguer un
+  // import qui a pris d'un import qui n'a rien fait.
+  h.fixtures = [];
+  h.published = [publiee(), publiee({ round: "J2", date: "2026-10-16" })];
+
+  h.createDoublons = 1; // la première des deux existait déjà
+
+  const res = await applique();
+  expect(res.status).toBe(200);
+  expect((await res.json()).created).toBe(1);
 });

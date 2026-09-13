@@ -665,6 +665,11 @@ export default function Interclub({
    * « déjà à jour » sans sortir. Un soir de rencontre, où l'écran s'ouvre et se ferme vingt
    * fois, le premier appel coûte une seconde et les dix-neuf suivants rien du tout.
    *
+   * Y COMPRIS QUAND LA FÉDÉRATION EST EN PANNE, et ça n'allait pas de soi : un échec n'écrit
+   * rien en base (pour ne pas écraser un roster valide par un silence du site), donc la
+   * fraîcheur reconcluait « à rafraîchir » à chaque ouverture et les vingt requêtes repartaient.
+   * Un repos de quinze minutes après un échec ferme ce cas (`ECHEC_REPOS_MS`).
+   *
    * ⚠️ IL NE BLOQUE PAS L'ÉCRAN, et ne le fait pas attendre : la rencontre s'affiche
    * immédiatement avec ce qu'on a déjà, et le menu se recharge SI quelque chose de nouveau est
    * arrivé. Le contraire ferait patienter une seconde devant un écran de composition pour un

@@ -40,6 +40,36 @@ export const ROSTER_FRAIS_JOURS = 7;
 /** Espacement entre deux requêtes fédérales, en millisecondes (cf. `backfill.ts`, `DELAI_MS`). */
 export const DELAI_MS = 800;
 
+/**
+ * Combien de temps on s'abstient de redemander une équipe dont la dernière tentative a échoué.
+ *
+ * LE DÉFAUT QUE ÇA FERME. Un échec n'écrivait RIEN — ni `fetchedAt`, ni marque — volontairement,
+ * pour ne pas écraser un roster valide par un silence du site. Mais l'évaluation de fraîcheur
+ * retombait alors exactement sur la même conclusion au coup d'après : « à rafraîchir ». Or
+ * l'ouverture d'une fiche de rencontre déclenche un rafraîchissement. Un soir de rencontre, cinq
+ * membres qui ouvrent et referment la fiche quatre fois chacun — vingt requêtes vers un site
+ * associatif, au lieu d'une, et ça recommence tant que la panne dure. C'est exactement ce que
+ * l'espacement de `DELAI_MS` cherche à éviter par ailleurs.
+ *
+ * ⚠️ LA MÉMOIRE EST CELLE DU PROCESS, pas de la base, et c'est assumé. Une marque en base
+ * coûterait une colonne et une écriture à chaque échec ; ici le pire cas est « une tentative
+ * par instance serverless et par quart d'heure » au lieu d'une par ouverture d'écran, ce qui
+ * suffit largement à la panne qu'on traite. Même compromis, et même limite, que le cache
+ * planning de `resamania/client.ts`.
+ *
+ * `force` la traverse : c'est le bouton de celui qui sait que le site est revenu.
+ */
+export const ECHEC_REPOS_MS = 15 * 60_000;
+
+/** Dernière tentative infructueuse par équipe. Vidangeur : la carte est bornée par le nombre
+ *  d'équipes qu'on interroge (une poule, quelques dizaines au plus sur la saison). */
+const echecs = new Map<string, number>();
+
+/** Pour les tests : une carte de process survivrait d'un cas au suivant. */
+export function oublierEchecs(): void {
+  echecs.clear();
+}
+
 /** Le roster relu depuis sa colonne texte, ou null si elle ne porte rien d'exploitable. */
 function lireRoster(json: string | null): TeamRoster | null {
   if (!json) return null;
@@ -151,6 +181,15 @@ export async function refreshRosters(
       continue;
     }
 
+    // ÉCHEC RÉCENT : on n'y retourne pas tout de suite. Le résultat rendu est celui de la
+    // tentative précédente — c'est bien ce qui s'est passé pour cette équipe, et l'appelant
+    // affiche la même chose qu'à l'ouverture d'avant, sans nouvelle requête.
+    const echec = echecs.get(snTeamId);
+    if (!opts.force && echec !== undefined && now.getTime() - echec < ECHEC_REPOS_MS) {
+      outcomes.push({ snTeamId, status: lireRoster(connu?.rosterJson ?? null) ? "fresh" : "failed" });
+      continue;
+    }
+
     // L'espacement précède l'appel, jamais après le dernier : squashnet est un site associatif
     // qui ne nous doit rien, et une pause qui ne sert plus à rien fait attendre l'appelant.
     if (!premier && delai > 0) await new Promise((r) => setTimeout(r, delai));
@@ -170,11 +209,15 @@ export async function refreshRosters(
         create: { snTeamId, ...data },
         update: data,
       });
+      echecs.delete(snTeamId);
       outcomes.push({ snTeamId, status: "fetched", players: roster.players.length });
     } catch (e) {
       // ON NE TOUCHE PAS À LA LIGNE EXISTANTE SUR UN ÉCHEC. Un roster capté la semaine dernière
       // vaut infiniment mieux que rien, et l'écraser par un silence du site ferait disparaître
       // d'un menu des joueurs parfaitement réels — sans qu'aucune erreur ne l'explique.
+      // ON SE SOUVIENT DE L'ÉCHEC, même si on n'écrit rien en base : sans ça, la prochaine
+      // ouverture d'écran repart chez la fédération pour le même résultat (cf. `ECHEC_REPOS_MS`).
+      echecs.set(snTeamId, now.getTime());
       outcomes.push({
         snTeamId,
         status: e instanceof RosterUnreadableError ? "unreadable" : "failed",

@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { RankingRow } from "./client";
 
+/**
+ * Pas de pause entre les recherches DANS LES TESTS. L'espacement réel est de 800 ms
+ * (`DELAI_MS`) : le subir ici ferait durer ce fichier une minute sans rien prouver de plus.
+ * Ce que l'espacement garantit se vérifie à part, dans le dernier cas de ce fichier.
+ */
+const SANS_PAUSE = { delaiMs: 0 };
+
 // On mocke la couche réseau (client) et la base (prisma) ; le RAPPROCHEMENT (match.ts) reste
 // le vrai code, pour tester le comportement de bout en bout de refreshRankings().
 const h = vi.hoisted(() => ({
@@ -91,7 +98,7 @@ beforeEach(() => {
 describe("refreshRankings", () => {
   it("période introuvable → n'interroge ni la base ni squashnet", async () => {
     h.getLatestMonth.mockResolvedValueOnce(null);
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     expect(res).toEqual({
       month: null,
       members: 0,
@@ -110,7 +117,7 @@ describe("refreshRankings", () => {
   it("hit unique dans le club → upsert du classement (matched)", async () => {
     h.members = [{ id: "u1", displayName: "Jean Dupont" }];
     h.searchRanking.mockResolvedValueOnce([row("DUPONT JEAN")]);
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     expect(res).toMatchObject({ matched: 1, cleared: 0, skipped: 0 });
     expect(h.upsert).toHaveBeenCalledOnce();
     expect(h.deleteMany).not.toHaveBeenCalled();
@@ -119,7 +126,7 @@ describe("refreshRankings", () => {
   it("consigne AUSSI le point d'historique du mois, pour la courbe de progression", async () => {
     h.members = [{ id: "u1", displayName: "Jean Dupont" }];
     h.searchRanking.mockResolvedValueOnce([row("DUPONT JEAN", { mean: "3 832.17" })]);
-    await refreshRankings();
+    await refreshRankings(SANS_PAUSE);
     // La moyenne de points est LA valeur de la courbe : c'est la seule qui bouge tous les mois.
     // Elle doit traverser le rapprochement, qui ne la portait pas avant l'historique.
     expect(h.pointUpsert).toHaveBeenCalledWith(
@@ -133,7 +140,7 @@ describe("refreshRankings", () => {
   it("n'écrit AUCUN point pour un mois non concluant — un trou vaut mieux qu'une valeur inventée", async () => {
     h.members = [{ id: "u1", displayName: "Jean Dupont" }];
     h.searchRanking.mockResolvedValueOnce([]); // squashnet muet / joueur introuvable
-    await refreshRankings();
+    await refreshRankings(SANS_PAUSE);
     expect(h.pointUpsert).not.toHaveBeenCalled();
   });
 
@@ -141,7 +148,7 @@ describe("refreshRankings", () => {
     h.members = [{ id: "u1", displayName: "Jean Dupont" }];
     h.searchRanking.mockResolvedValueOnce([row("DUPONT JEAN")]);
     h.pointUpsert.mockRejectedValueOnce(new Error("table absente"));
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     // Le classement du membre est à jour malgré la panne de la courbe…
     expect(h.upsert).toHaveBeenCalledOnce();
     // …et LE COMPTE-RENDU LE DIT. Ce test assertionnait `failed: 1` sans regarder `matched`,
@@ -173,7 +180,7 @@ describe("refreshRankings", () => {
     h.members = [{ id: "u1", displayName: "Jean Dupont" }];
     // Son nom colle, mais la seule ligne est ailleurs → il a quitté l'Yvette : signal fiable.
     h.searchRanking.mockResolvedValueOnce([row("DUPONT JEAN", { club: "Squash Club de Rennes" })]);
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     expect(res).toMatchObject({ matched: 0, cleared: 1, skipped: 0 });
     expect(h.deleteMany).toHaveBeenCalledWith({ where: { userId: "u1" } });
     expect(h.upsert).not.toHaveBeenCalled();
@@ -186,7 +193,7 @@ describe("refreshRankings", () => {
       row("DUPONT PIERRE", { club: "Autre Club" }),
       row("DUPONT MARC", { club: "Encore Autre" }),
     ]);
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     expect(res).toMatchObject({ matched: 0, cleared: 0, skipped: 1 });
     expect(h.deleteMany).not.toHaveBeenCalled();
     expect(h.upsert).not.toHaveBeenCalled();
@@ -196,7 +203,7 @@ describe("refreshRankings", () => {
     h.members = [{ id: "u1", displayName: "Jean Dupont" }];
     // Deux « Jean Dupont » plausibles dans le club → on n'affirme pas et on ne supprime pas.
     h.searchRanking.mockResolvedValueOnce([row("DUPONT JEAN"), row("DUPONT JEAN PIERRE")]);
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     expect(res).toMatchObject({ matched: 0, cleared: 0, skipped: 1 });
     expect(h.deleteMany).not.toHaveBeenCalled();
     expect(h.upsert).not.toHaveBeenCalled();
@@ -205,7 +212,7 @@ describe("refreshRankings", () => {
   it("réponse VIDE → NE supprime PAS (non concluant, skipped)", async () => {
     h.members = [{ id: "u1", displayName: "Jean Dupont" }];
     h.searchRanking.mockResolvedValueOnce([]);
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     expect(res).toMatchObject({ matched: 0, cleared: 0, skipped: 1 });
     expect(h.deleteMany).not.toHaveBeenCalled();
     expect(h.upsert).not.toHaveBeenCalled();
@@ -214,7 +221,7 @@ describe("refreshRankings", () => {
   it("erreur squashnet → n'écrase rien (skipped)", async () => {
     h.members = [{ id: "u1", displayName: "Jean Dupont" }];
     h.searchRanking.mockRejectedValueOnce(new Error("timeout"));
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     expect(res).toMatchObject({ matched: 0, cleared: 0, skipped: 1 });
     expect(h.deleteMany).not.toHaveBeenCalled();
     expect(h.upsert).not.toHaveBeenCalled();
@@ -229,7 +236,7 @@ describe("refreshRankings", () => {
       .mockResolvedValueOnce([row("DUPONT JEAN")])
       .mockResolvedValueOnce([row("MARTIN MARIE", { gender: "female" })]);
     h.upsert.mockRejectedValueOnce(new Error("Neon down")).mockResolvedValueOnce({});
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     // u1 échoue (failed), mais u2 est bien traité derrière → le lot n'est pas interrompu.
     expect(res).toMatchObject({ matched: 1, failed: 1, skipped: 0, cleared: 0 });
   });
@@ -240,7 +247,7 @@ describe("refreshRankings", () => {
       { id: "u2", displayName: "   " }, // nom vide → ignoré, ne compte pas
     ];
     h.searchRanking.mockResolvedValueOnce([]); // squashnet muet pour l'unique membre évaluable
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     // members reflète les membres RÉELLEMENT évaluables → tous ignorés (base d'un heartbeat honnête).
     expect(res).toMatchObject({ members: 1, skipped: 1, matched: 0 });
     expect(h.searchRanking).toHaveBeenCalledOnce();
@@ -250,7 +257,7 @@ describe("refreshRankings", () => {
     // 6 membres, tous « retrouvés ailleurs » d'un coup → anomalie systémique probable.
     h.members = Array.from({ length: 6 }, (_, i) => ({ id: `u${i}`, displayName: "Jean Dupont" }));
     h.searchRanking.mockResolvedValue([row("DUPONT JEAN", { club: "Squash Club de Rennes" })]);
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     expect(res.bulkMoveBlocked).toBe(true);
     expect(res).toMatchObject({ matched: 0, cleared: 0, skipped: 6 });
     expect(h.deleteMany).not.toHaveBeenCalled();
@@ -264,7 +271,7 @@ describe("refreshRankings", () => {
     h.searchRanking
       .mockResolvedValueOnce([row("DUPONT JEAN", { club: "Squash Club de Rennes" })])
       .mockResolvedValueOnce([row("MARTIN MARIE", { gender: "female" })]);
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     expect(res.bulkMoveBlocked).toBe(false);
     expect(res).toMatchObject({ matched: 1, cleared: 1, skipped: 0 });
     expect(h.deleteMany).toHaveBeenCalledWith({ where: { userId: "u1" } });
@@ -278,7 +285,7 @@ describe("refreshRankings — joueurs sans compte", () => {
   it("balaie les invités comme les membres, et les compte à part", async () => {
     h.guests = [{ id: "g1", name: "Paul Hors-Appli" }];
     h.searchRanking.mockResolvedValueOnce([row("HORS-APPLI PAUL")]);
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     expect(res).toMatchObject({ members: 1, guests: 1, matched: 1 });
     // Écrit sur la LIGNE de l'invité, jamais dans `SquashnetRanking` (qui exige un `User`).
     expect(h.upsert).not.toHaveBeenCalled();
@@ -293,7 +300,7 @@ describe("refreshRankings — joueurs sans compte", () => {
   it("n'écrit QUE les colonnes de rapprochement — la correction admin survit à tous les runs", async () => {
     h.guests = [{ id: "g1", name: "Paul Hors-Appli" }];
     h.searchRanking.mockResolvedValueOnce([row("HORS-APPLI PAUL")]);
-    await refreshRankings();
+    await refreshRankings(SANS_PAUSE);
     const data = h.guestUpdate.mock.calls[0][0].data as Record<string, unknown>;
     // Sans quoi le run mensuel écraserait le classement forcé par un admin pour un joueur que
     // squashnet retrouve mal — et personne ne comprendrait pourquoi la correction a disparu.
@@ -304,7 +311,7 @@ describe("refreshRankings — joueurs sans compte", () => {
   it("note « introuvable » sur l'invité, pour que l'écran d'admin puisse le dire", async () => {
     h.guests = [{ id: "g1", name: "Paul Hors-Appli" }];
     h.searchRanking.mockResolvedValueOnce([]);
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     expect(res).toMatchObject({ matched: 0, skipped: 1 });
     // Un membre ne garde aucune trace d'un non-résultat ; un invité, si — c'est ce qui permet
     // d'écrire « pas trouvable sur squashnet » au lieu d'une ligne muette qu'on découvre
@@ -320,7 +327,7 @@ describe("refreshRankings — joueurs sans compte", () => {
   it("efface le rapprochement d'un invité parti dans un autre club (moved)", async () => {
     h.guests = [{ id: "g1", name: "Paul Hors-Appli" }];
     h.searchRanking.mockResolvedValueOnce([row("HORS-APPLI PAUL", { club: "Squash Club de Rennes" })]);
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     expect(res).toMatchObject({ cleared: 1 });
     const data = h.guestUpdateMany.mock.calls[0][0].data as Record<string, unknown>;
     expect(data).toMatchObject({ snClt: null, snRangM: null, snStatus: "moved" });
@@ -334,7 +341,7 @@ describe("refreshRankings — joueurs sans compte", () => {
     h.members = Array.from({ length: 3 }, (_, i) => ({ id: `u${i}`, displayName: "Jean Dupont" }));
     h.guests = Array.from({ length: 3 }, (_, i) => ({ id: `g${i}`, name: "Jean Dupont" }));
     h.searchRanking.mockResolvedValue([row("DUPONT JEAN", { club: "Squash Club de Rennes" })]);
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     expect(res).toMatchObject({ members: 6, guests: 3, cleared: 0, bulkMoveBlocked: true });
     expect(h.deleteMany).not.toHaveBeenCalled();
     expect(h.guestUpdateMany).not.toHaveBeenCalled();
@@ -346,7 +353,7 @@ describe("refreshRankings — joueurs sans compte", () => {
 // c'est ce qui le rendait inalignable sans qu'aucun écran ne puisse y remédier.
 describe("refreshRankings — qui est balayé", () => {
   it("balaie les membres listés OU rattachés à une équipe interclub", async () => {
-    await refreshRankings();
+    await refreshRankings(SANS_PAUSE);
     expect(h.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { OR: [{ listed: true }, { teamId: { not: null } }] } }),
     );
@@ -371,7 +378,7 @@ describe("refreshRankings — nom de recherche corrigé", () => {
       },
     ];
     h.searchRanking.mockResolvedValue([row("SOISMIER MATTHIEU")]);
-    const res = await refreshRankings();
+    const res = await refreshRankings(SANS_PAUSE);
     expect(h.searchRanking).toHaveBeenCalledWith("Soismier", { month: "2026-07-07" });
     expect(res.matched).toBe(1);
   });
@@ -384,14 +391,14 @@ describe("refreshRankings — nom de recherche corrigé", () => {
       { id: "u1", displayName: "Jean Dupont", squashnetFamilyName: "Zzz", squashnetGivenName: null },
     ];
     h.searchRanking.mockResolvedValue([row("DUPONT JEAN")]);
-    await refreshRankings();
+    await refreshRankings(SANS_PAUSE);
     expect(h.searchRanking).toHaveBeenCalledWith("Dupont", { month: "2026-07-07" });
   });
 
   it("sans correction, cherche le dernier mot du nom affiché — le comportement d'origine", async () => {
     h.members = [{ id: "u1", displayName: "Jean Dupont" }];
     h.searchRanking.mockResolvedValue([row("DUPONT JEAN")]);
-    await refreshRankings();
+    await refreshRankings(SANS_PAUSE);
     expect(h.searchRanking).toHaveBeenCalledWith("Dupont", { month: "2026-07-07" });
   });
 });
@@ -486,4 +493,13 @@ describe("summarizeRefresh", () => {
     expect(info).toContain("2 échec(s) base");
     expect(info).toContain("BLOQUÉE");
   });
+});
+
+it("⚠️ espace ses appels, comme les trois autres consommateurs de squashnet", async () => {
+  // L'en-tête du module revendiquait « séquentiel (doux pour squashnet) » et la boucle
+  // enchaînait pourtant les appels aussi vite que le réseau le permettait : quarante POST
+  // consécutifs vers un site associatif, une fois par mois et à chaque clic admin.
+  // « Séquentiel » dit qu'on ne parallélise pas ; ce n'est pas la même chose que doux.
+  const { DELAI_MS } = await import("./refresh");
+  expect(DELAI_MS).toBeGreaterThanOrEqual(500);
 });

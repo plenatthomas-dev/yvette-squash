@@ -298,6 +298,8 @@ export async function POST(req: NextRequest) {
   }
 
   const moved: { id: string; from: string; opponent: string }[] = [];
+  // Les créations RÉELLEMENT écrites : la boucle avale les doublons, ils ne comptent pas.
+  let creees = 0;
 
   // LES TEXTES LIBRES DE LA LIGUE PASSENT PAR LA MÊME PORTE QUE LA SAISIE HUMAINE.
   //
@@ -361,7 +363,12 @@ export async function POST(req: NextRequest) {
           },
         },
       });
+      creees++;
     } catch (e) {
+      // Le doublon est AVALÉ : deux clics sur « Appliquer » ne sont pas une faute, et
+      // `@@unique([teamId, snMatchKey])` tient la vérité. Mais il ne compte pas comme une
+      // création — c'est pour ça que `creees` s'incrémente APRÈS l'écriture, et non depuis la
+      // taille de `toCreate`.
       if (!isUniqueViolation(e)) throw e;
     }
   }
@@ -473,7 +480,11 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    created: diff.toCreate.length,
+    // ⚠️ CE QUI A ÉTÉ ÉCRIT, PAS CE QUI ÉTAIT PRÉVU. On rendait `diff.toCreate.length` : un
+    // second clic sur « Appliquer » répondait « 5 rencontres créées » alors qu'il venait d'en
+    // heurter cinq doublons et de n'en créer aucune. L'admin n'avait aucun moyen de distinguer
+    // un import qui a pris d'un import qui n'a rien fait.
+    created: creees,
     updated: diff.toUpdate.length,
     unchanged: diff.unchanged,
     moved: moved.length,
