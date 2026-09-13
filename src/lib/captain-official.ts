@@ -56,9 +56,18 @@ function memeCode(a: string | null | undefined, b: string | null | undefined): b
  *
  * DEUX TÉMOINS, dans cet ordre :
  *
- *  1. LE SIGLE. C'est la donnée de la ligue elle-même, et elle est sans ambiguïté. On connaît
- *     presque toujours celui de l'ADVERSAIRE (son roster est en cache) même quand on ignore le
- *     nôtre — d'où les deux entrées.
+ *  1. LE SIGLE. C'est la donnée de la ligue elle-même. On connaît presque toujours celui de
+ *     l'ADVERSAIRE (son roster est en cache) même quand on ignore le nôtre — d'où les deux
+ *     entrées.
+ *
+ *     ⚠️ MAIS IL DOIT TRANCHER, ET ÇA NE VA PAS DE SOI. Le code rendait « A » dès qu'un
+ *     témoin désignait A, sans vérifier qu'aucun ne désignait B. Or `tie.ts` le dit : rien
+ *     n'interdit à deux équipes de porter le même sigle. Deux équipes d'un même club qui se
+ *     rencontrent — ce qui arrive en poule dès qu'on inscrit une seconde équipe — et les deux
+ *     colonnes portent le même : le premier test tombait sur « A » par l'ordre des lignes,
+ *     c'est-à-dire à pile ou face, et un côté deviné inverse le score. On exige donc qu'un
+ *     SEUL des deux côtés soit désigné ; sinon le sigle se tait et on passe aux noms, qui
+ *     eux savent départager deux équipes du même club.
  *  2. LES NOMS ALIGNÉS. Quand aucun sigle n'est connu, le côté qui porte nos joueurs est le
  *     nôtre. Ce témoin-là est à nous, pas à la ligue, donc il ne dépend d'aucun cache.
  *
@@ -66,8 +75,11 @@ function memeCode(a: string | null | undefined, b: string | null | undefined): b
  * mieux vaut afficher « on n'a pas su rapprocher » que d'annoncer une victoire imaginaire.
  */
 export function ourSide(sheet: TieSheet, hints: SideHints): OurSide | null {
-  if (memeCode(sheet.codeA, hints.ourCode) || memeCode(sheet.codeB, hints.opponentCode)) return "A";
-  if (memeCode(sheet.codeB, hints.ourCode) || memeCode(sheet.codeA, hints.opponentCode)) return "B";
+  const aEstNous = memeCode(sheet.codeA, hints.ourCode) || memeCode(sheet.codeB, hints.opponentCode);
+  const bEstNous = memeCode(sheet.codeB, hints.ourCode) || memeCode(sheet.codeA, hints.opponentCode);
+  // Un seul des deux, sinon le sigle ne dit rien : les deux désignés (sigles identiques) comme
+  // aucun (sigles inconnus) tombent sur le témoin suivant.
+  if (aEstNous !== bEstNous) return aEstNous ? "A" : "B";
 
   const nôtres = new Set((hints.ourNames ?? []).map(nameKey).filter(Boolean));
   if (nôtres.size === 0) return null;

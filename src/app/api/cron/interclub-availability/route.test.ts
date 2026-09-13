@@ -334,6 +334,27 @@ describe("relance (J-3) et récapitulatif du capitaine", () => {
       expect(h.updates.at(-1)).toHaveProperty("eveRemindedAt");
     });
 
+    it("⚠️ ne réveille PAS un compte désactivé resté aligné", async () => {
+      // C'était le seul carnet d'adresses du module à ne pas exclure `disabledAt` —
+      // `followersFor`, `teamMemberIds` et `entriesFor` le font tous, et `interclub-notify.ts`
+      // affirme que la règle vaut pour TOUS. Un membre parti du club, désactivé mais resté
+      // aligné sur une composition déjà saisie, recevait « Demain à 20:30 — tu es aligné ».
+      h.fixtures = [
+        veille({
+          matches: [
+            { homeUserId: "u1", homeUser: { disabledAt: new Date("2026-09-01") } },
+            { homeUserId: "u2", homeUser: { disabledAt: null } },
+          ],
+        }),
+      ];
+      await GET(req());
+      // `h.eves` garde TOUS les arguments de l'envoi ; le premier est la liste des destinataires.
+      expect(h.eves).toHaveLength(1);
+      expect(h.eves[0][0]).toEqual(["u2"]);
+      // Le marqueur est posé quand même : repasser demain ne trouverait rien de plus.
+      expect(h.updates.at(-1)).toHaveProperty("eveRemindedAt");
+    });
+
     it("RIEN sur une date prévisionnelle, comme l'appel et la relance", async () => {
       h.fixtures = [veille({ dateConfirmed: false })];
       await GET(req());

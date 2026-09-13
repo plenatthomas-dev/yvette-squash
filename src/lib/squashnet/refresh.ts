@@ -37,6 +37,22 @@ import type { RankingRow } from "./client";
 // `classifyRanking` ne reconnaît plus AUCUNE ligne « dans le club » — et non des départs réels.
 // Dans ce cas on n'effectue AUCUNE suppression ce run (fail-safe : mieux vaut des classements
 // périmés qu'un effacement total). Départs individuels normaux (0-2/mois) : bien en-dessous.
+/**
+ * Pause entre deux recherches fédérales.
+ *
+ * L'en-tête de ce module revendique « séquentiel (doux pour squashnet) » depuis toujours, et la
+ * boucle enchaînait pourtant les appels aussi vite que le réseau le permettait : quarante POST
+ * consécutifs vers un site associatif, une fois par mois et à chaque clic sur « Rafraîchir les
+ * classements ». « Séquentiel » dit seulement qu'on ne parallélise pas — ce n'est pas la même
+ * chose que doux. Les trois autres consommateurs de squashnet du dépôt espacent tous leurs
+ * appels, et chiffrent pourquoi : 600 ms pour la vérification d'une rencontre, 800 ms pour les
+ * rosters, 1,1 s pour le remplissage rétroactif.
+ *
+ * 800 ms, aligné sur les rosters : même site, même type de requête, et un lot d'une quarantaine
+ * de sujets tient alors en une trentaine de secondes — très en deçà des 300 s d'une fonction.
+ */
+export const DELAI_MS = 800;
+
 const BULK_MOVE_MIN = 4; // en-dessous de ce nombre absolu, on fait confiance
 const BULK_MOVE_RATIO = 0.34; // ET au-delà d'~1/3 des membres balayés → anomalie
 
@@ -300,7 +316,8 @@ async function noteAttempt(subject: Subject, status: "unknown" | "moved"): Promi
  * sans interrompre le reste du lot. Renvoie `month: null` sans rien toucher si la période de
  * classement est introuvable.
  */
-export async function refreshRankings(): Promise<RefreshResult> {
+export async function refreshRankings(opts: { delaiMs?: number } = {}): Promise<RefreshResult> {
+  const delai = opts.delaiMs ?? DELAI_MS;
   const month = await getLatestMonth();
   if (!month) {
     return {
@@ -328,7 +345,13 @@ export async function refreshRankings(): Promise<RefreshResult> {
   // (cf. disjoncteur ci-dessus) avant d'effacer quoi que ce soit.
   const moved: Subject[] = [];
 
+  let premier = true;
   for (const subject of subjects) {
+    // L'espacement précède l'appel, jamais après le dernier : une pause qui ne sert plus à rien
+    // fait attendre l'admin devant son bouton. Même forme que `refreshRosters`.
+    if (!premier && delai > 0) await new Promise((r) => setTimeout(r, delai));
+    premier = false;
+
     // 1) Appel réseau squashnet SEUL sous try : un hoquet (timeout, 5xx) → joueur `skipped`.
     let rows: RankingRow[];
     try {

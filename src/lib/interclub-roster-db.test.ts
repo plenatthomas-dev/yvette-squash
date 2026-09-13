@@ -25,7 +25,8 @@ const raw = {
 };
 const db = raw as unknown as Parameters<typeof loadRosters>[1];
 
-const { loadRosters, refreshRosters, ROSTER_FRAIS_JOURS } = await import("./interclub-roster-db");
+const { loadRosters, refreshRosters, ROSTER_FRAIS_JOURS, ECHEC_REPOS_MS, oublierEchecs } =
+  await import("./interclub-roster-db");
 
 const roster = (snTeamId: string, noms: string[]): TeamRoster => ({
   snTeamId,
@@ -54,6 +55,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   raw.squashnetTeamRoster.findMany.mockResolvedValue([]);
   raw.squashnetTeamRoster.upsert.mockResolvedValue({});
+  // La mémoire des échecs vit dans le module : sans ça, elle survivrait d'un cas au suivant.
+  oublierEchecs();
 });
 
 describe("loadRosters", () => {
@@ -180,5 +183,54 @@ describe("refreshRosters", () => {
     expect(await refreshRosters([], { db, now: MAINTENANT })).toEqual([]);
     expect(raw.squashnetTeamRoster.findMany).not.toHaveBeenCalled();
     expect(fetchTeamRoster).not.toHaveBeenCalled();
+  });
+});
+
+describe("refreshRosters — la mémoire des échecs", () => {
+  it("⚠️ ne redemande PAS une équipe dont la tentative vient d'échouer", async () => {
+    // LE DÉFAUT. Un échec n'écrit rien en base — délibérément, pour ne pas écraser un roster
+    // valide par un silence du site. Mais la fraîcheur reconcluait alors « à rafraîchir » au
+    // coup d'après, et l'ouverture d'une fiche de rencontre déclenche un rafraîchissement : un
+    // soir de rencontre, vingt ouvertures d'écran = vingt requêtes vers un site associatif,
+    // et ça recommençait tant que la panne durait.
+    fetchTeamRoster.mockRejectedValue(new Error("504"));
+    const un = await refreshRosters(["1"], { now: MAINTENANT, delaiMs: 0, db });
+    expect(un).toEqual([{ snTeamId: "1", status: "failed" }]);
+    expect(fetchTeamRoster).toHaveBeenCalledTimes(1);
+
+    // Même minute, même équipe : aucune nouvelle requête, et le même verdict.
+    const deux = await refreshRosters(["1"], { now: MAINTENANT, delaiMs: 0, db });
+    expect(deux).toEqual([{ snTeamId: "1", status: "failed" }]);
+    expect(fetchTeamRoster).toHaveBeenCalledTimes(1);
+  });
+
+  it("y retourne une fois le repos écoulé", async () => {
+    fetchTeamRoster.mockRejectedValue(new Error("504"));
+    await refreshRosters(["1"], { now: MAINTENANT, delaiMs: 0, db });
+
+    const apres = new Date(MAINTENANT.getTime() + ECHEC_REPOS_MS + 1);
+    await refreshRosters(["1"], { now: apres, delaiMs: 0, db });
+    expect(fetchTeamRoster).toHaveBeenCalledTimes(2);
+  });
+
+  it("`force` traverse le repos — c'est le bouton de qui sait que le site est revenu", async () => {
+    fetchTeamRoster.mockRejectedValue(new Error("504"));
+    await refreshRosters(["1"], { now: MAINTENANT, delaiMs: 0, db });
+    await refreshRosters(["1"], { now: MAINTENANT, delaiMs: 0, force: true, db });
+    expect(fetchTeamRoster).toHaveBeenCalledTimes(2);
+  });
+
+  it("une lecture réussie efface la marque", async () => {
+    fetchTeamRoster.mockRejectedValueOnce(new Error("504"));
+    await refreshRosters(["1"], { now: MAINTENANT, delaiMs: 0, db });
+
+    // On force une fois pour repasser : la lecture aboutit, la marque doit disparaître…
+    fetchTeamRoster.mockResolvedValue(roster("1", ["DUPONT Jean"]));
+    await refreshRosters(["1"], { now: MAINTENANT, delaiMs: 0, force: true, db });
+
+    // … donc un échec ultérieur redonne droit à une tentative immédiate.
+    fetchTeamRoster.mockRejectedValue(new Error("504"));
+    await refreshRosters(["1"], { now: MAINTENANT, delaiMs: 0, db });
+    expect(fetchTeamRoster).toHaveBeenCalledTimes(3);
   });
 });

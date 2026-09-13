@@ -572,6 +572,23 @@ function unsetPick(): PickResult {
  * n'a par construction rien à violer : on inscrit souvent une rencontre avant de savoir qui
  * joue chaque simple.
  *
+ * ⚠️ LES SIMPLES ORPHELINS SONT ÉCARTÉS, et c'est le seul choix tenable. `homeUserId` et
+ * `homeGuestId` sont en `onDelete: SetNull` pour que l'histoire survive à un départ : une ligne
+ * peut donc porter un nom figé et PLUS AUCUN identifiant. Son classement n'existe alors nulle
+ * part — ni dans un roster, ni dans un compte — et rien ne peut le retrouver.
+ *
+ * Retenue comme « désignée », elle retombait sur `NO_RANKING` et faisait refuser TOUTE écriture
+ * sur la rencontre avec « Marc Dubois : classement inconnu — attribue-lui un classement avant
+ * de composer le simple n° 3 ». Marc Dubois n'est plus dans aucun roster : le conseil n'était
+ * pas suivable, et la rencontre entière devenait incomposable jusqu'à ce que quelqu'un devine
+ * qu'il fallait remettre ce simple-là à « à désigner ». Un geste d'admin présenté comme sans
+ * conséquence (retirer un invité du roster, supprimer un compte) verrouillait une rencontre à
+ * venir.
+ *
+ * On ne vérifie donc pas la paire qu'on ne PEUT pas vérifier, et le reste de l'ordre continue
+ * de l'être. La ligne reste visible à l'écran sous son nom figé : le capitaine la réécrira en
+ * arrivant dessus, et l'état se répare de lui-même.
+ *
  * À appeler DANS la transaction qui écrit, comme `findAlignmentClash` : deux capitaines qui
  * composent au même instant doivent voir le même état.
  */
@@ -587,7 +604,11 @@ export async function findOrderConflict(
     where: { interclubId: fixtureId, id: { not: exceptMatchId } },
     select: { order: true, homeDisplayName: true, homeUserId: true, homeGuestId: true },
   });
-  const designated = siblings.filter((s) => s.homeDisplayName !== UNSET_PLAYER);
+  const designated = siblings.filter(
+    // Le nom figé ne suffit pas : il faut aussi de quoi RETROUVER le classement. Sans l'un des
+    // deux identifiants, la ligne est orpheline (cf. l'avertissement ci-dessus).
+    (s) => s.homeDisplayName !== UNSET_PLAYER && (s.homeUserId !== null || s.homeGuestId !== null),
+  );
 
   const userIds = [...new Set(designated.flatMap((s) => (s.homeUserId ? [s.homeUserId] : [])))];
   const guestIds = [...new Set(designated.flatMap((s) => (s.homeGuestId ? [s.homeGuestId] : [])))];

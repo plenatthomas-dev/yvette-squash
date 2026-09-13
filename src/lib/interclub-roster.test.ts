@@ -570,6 +570,45 @@ describe("findOrderConflict", () => {
     expect(pb).toContain("Benoît");
   });
 
+  it("⚠️ un simple ORPHELIN ne verrouille pas la rencontre", async () => {
+    // `homeUserId`/`homeGuestId` sont en `onDelete: SetNull` pour que l'histoire survive à un
+    // départ : une ligne peut donc porter un nom figé et PLUS AUCUN identifiant. Retenue comme
+    // « désignée », elle retombait sur NO_RANKING et faisait refuser TOUTE écriture sur la
+    // rencontre avec « classement inconnu — attribue-lui un classement ». Conseil insuivable :
+    // le joueur n'est plus dans aucun roster. Un geste d'admin présenté comme sans conséquence
+    // (retirer un invité, supprimer un compte) verrouillait une rencontre à venir.
+    const client = orderDb(
+      [{ order: 3, homeDisplayName: "Marc Dubois", homeUserId: null, homeGuestId: null }],
+      {},
+    );
+    const pb = await findOrderConflict(client, "f1", "m1", {
+      order: 1,
+      clt: "5A",
+      rangM: 1200,
+      name: "Benoît",
+    });
+    expect(pb).toBeNull();
+  });
+
+  it("l'orphelin écarté ne dispense pas les AUTRES voisins du contrôle", async () => {
+    // Écarter ce qu'on ne peut pas vérifier ne doit pas écarter ce qu'on peut : sinon le
+    // correctif ci-dessus ouvrirait un trou bien plus large que le défaut qu'il ferme.
+    const client = orderDb(
+      [
+        { order: 1, homeDisplayName: "Albert", homeUserId: "u1", homeGuestId: null },
+        { order: 3, homeDisplayName: "Marc Dubois", homeUserId: null, homeGuestId: null },
+      ],
+      { u1: membre("5A", 1200) },
+    );
+    const pb = await findOrderConflict(client, "f1", "m2", {
+      order: 2,
+      clt: "4D",
+      rangM: 800,
+      name: "Benoît",
+    });
+    expect(pb).toContain("Benoît");
+  });
+
   it("relit le RANG MIXTE des voisins, pas seulement leur classement", async () => {
     // Deux « 5A » : c'est le rang qui décide, et le voisin n'est comparable que si son rang a
     // bien été relu — l'oublier ferait réclamer un rang mixte pourtant renseigné en base.

@@ -5000,8 +5000,9 @@ body[data-bottombar] .install-banner {
 /* Les jeux gagnés, c'est-à-dire le score de la RENCONTRE.
    PAS D'`opacity` ICI. Elle valait 0,9 pour poser ce libellé un ton en dessous du score, et
    c'est exactement le geste que DESIGN.md interdit : l'opacité composite le texte AVEC son
-   fond, donc avec le MAILLOT. `inkFor` garantit un plancher de 4,62:1 sur n'importe quelle
-   couleur choisie (le pire fond possible pour une encre binaire blanc/noir) ; 0,9 le ramenait
+   fond, donc avec le MAILLOT. `inkFor` garantit un plancher de 4,58:1 sur n'importe quelle
+   couleur choisie (le pire fond possible pour une encre binaire blanc/noir : celui où les deux
+   encres se valent, (L+0,05)² = 0,0525) ; 0,9 le ramenait
    sous le seuil AA — mesuré 4,49:1 sur le vert #2e7d32 et 4,22:1 sur le rose #d81b60, à
    17,6 px, dans les trois thèmes puisque le maillot ne dépend d'aucun d'eux.
    La hiérarchie n'y perd rien : le score fait dix fois cette taille, et le carré de service se

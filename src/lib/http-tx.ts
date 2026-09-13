@@ -229,8 +229,16 @@ export function httpErrorResponse(e: unknown): NextResponse | null {
  *
  * Rendre `{}` remet ces corps sur le chemin ordinaire : la validation manuelle qui suit les
  * refuse comme elle refuse un corps vide, avec le même message et le même statut.
+ *
+ * ⚠️ UN TABLEAU N'EST PAS UN OBJET, même si `typeof` le prétend. `[1,2,3]` ressortait tel
+ * quel, typé `Record<string, unknown>` : la promesse ci-dessus n'était alors tenue que par
+ * ACCIDENT — les routes valident champ par champ, et `tableau.date` vaut `undefined`, donc ça
+ * finissait bien en 400. Mais rien ne garantit que la prochaine route lira un champ plutôt
+ * qu'une longueur ou un index, et `Array.isArray` coûte moins cher que ce raisonnement.
  */
 export async function readJsonBody(req: { json: () => Promise<unknown> }): Promise<Record<string, unknown>> {
   const raw = await req.json().catch(() => null);
-  return raw !== null && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  return raw !== null && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : {};
 }

@@ -473,8 +473,16 @@ describe("formats de rencontre", () => {
 describe("couleurs de joueur — choix libre, encre calculée", () => {
   it("garantit le contraste AA sur TOUT le cube RGB, pas seulement sur une palette curée", () => {
     // C'est la propriété qui autorise le choix libre : en n'utilisant que du blanc ou du noir
-    // PUR comme encre, le pire cas possible atteint 4.58:1, au-dessus des 4.5 exigés. On
-    // balaie le cube par pas de 17 (16^3 = 4096 couleurs) plutôt que de faire confiance.
+    // PUR comme encre, le pire cas possible atteint 4.58:1, au-dessus des 4.5 exigés.
+    //
+    // ⚠️ C'EST UN ÉCHANTILLON DE 4096 COULEURS (pas de 17), ET IL SUFFIT — mais pas parce
+    // qu'on l'espère. Le contraste ne dépend de la couleur que par sa LUMINANCE : l'encre
+    // blanche donne 1,05/(L+0,05), la noire (L+0,05)/0,05, et `inkFor` prend la meilleure des
+    // deux. Le pire fond possible est donc celui où elles se croisent, (L+0,05)² = 0,0525, soit
+    // 4,5826:1 — une borne analytique, pas une mesure. L'échantillon ne sert qu'à vérifier que
+    // `contrastRatio` et `inkFor` calculent bien ce qu'on croit, et le titre de ce cas disait
+    // « TOUT le cube » pour 1/4096e de celui-ci.
+    const PLANCHER = 4.58; // (0,0525^0,5)/0,05 = 4,5826 — atteint par le cube 8 bits.
     let worst = Infinity;
     let worstHex = "";
     const hx = (n: number) => n.toString(16).padStart(2, "0");
@@ -490,7 +498,11 @@ describe("couleurs de joueur — choix libre, encre calculée", () => {
         }
       }
     }
-    expect(worst, `pire cas sur ${worstHex}`).toBeGreaterThanOrEqual(4.5);
+    expect(worst, `pire cas sur ${worstHex}`).toBeGreaterThanOrEqual(PLANCHER);
+
+    // Et on ne se contente pas du seuil : l'échantillon doit APPROCHER la borne, sinon il
+    // manque le voisinage du croisement et ne prouverait plus rien du pire cas.
+    expect(worst, `pire cas sur ${worstHex}`).toBeLessThan(4.7);
   });
 
   it("pose de l'encre claire sur un fond sombre, et l'inverse", () => {

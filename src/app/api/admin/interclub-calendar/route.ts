@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/admin";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
+import { MARQUEURS_A_REARMER } from "@/lib/interclub-availability";
 import {
   fetchTeamCalendar,
   ownFixtures,
@@ -297,6 +298,8 @@ export async function POST(req: NextRequest) {
   }
 
   const moved: { id: string; from: string; opponent: string }[] = [];
+  // Les créations RÉELLEMENT écrites : la boucle avale les doublons, ils ne comptent pas.
+  let creees = 0;
 
   // LES TEXTES LIBRES DE LA LIGUE PASSENT PAR LA MÊME PORTE QUE LA SAISIE HUMAINE.
   //
@@ -360,7 +363,12 @@ export async function POST(req: NextRequest) {
           },
         },
       });
+      creees++;
     } catch (e) {
+      // Le doublon est AVALÉ : deux clics sur « Appliquer » ne sont pas une faute, et
+      // `@@unique([teamId, snMatchKey])` tient la vérité. Mais il ne compte pas comme une
+      // création — c'est pour ça que `creees` s'incrémente APRÈS l'écriture, et non depuis la
+      // taille de `toCreate`.
       if (!isUniqueViolation(e)) throw e;
     }
   }
@@ -402,7 +410,10 @@ export async function POST(req: NextRequest) {
           // premier « Appliquer » suivant — pour un lieu changé trois semaines plus tard — les
           // remettait à « prévisionnelle », et l'équipe cessait d'être convoquée sans un mot.
           // L'écart est désormais SIGNALÉ (`confirmDrift`) et corrigé à la main s'il le faut.
-          ...(dateChanged ? { availabilityOpenedAt: null, availabilityRemindedAt: null } : {}),
+          // ⚠️ La liste des marqueurs vit contre la cascade qui la lit
+          // (`MARQUEURS_A_REARMER`) : énumérée ici à la main, elle avait oublié `eveRemindedAt`,
+          // et le rappel de la veille ne repartait jamais sur la nouvelle date.
+          ...(dateChanged ? MARQUEURS_A_REARMER : {}),
         },
       });
     });
@@ -469,7 +480,11 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    created: diff.toCreate.length,
+    // ⚠️ CE QUI A ÉTÉ ÉCRIT, PAS CE QUI ÉTAIT PRÉVU. On rendait `diff.toCreate.length` : un
+    // second clic sur « Appliquer » répondait « 5 rencontres créées » alors qu'il venait d'en
+    // heurter cinq doublons et de n'en créer aucune. L'admin n'avait aucun moyen de distinguer
+    // un import qui a pris d'un import qui n'a rien fait.
+    created: creees,
     updated: diff.toUpdate.length,
     unchanged: diff.unchanged,
     moved: moved.length,

@@ -304,6 +304,17 @@ export default function InterclubScorer({
             .json()
             .then((d) => (d as { code?: string } | null)?.code)
             .catch(() => undefined);
+          if (code === "write_conflict") {
+            // ⚠️ TROIS REFUS PARTAGENT CE STATUT, ET CELUI-CI N'ACCUSE PERSONNE. C'est la
+            // transaction `Serializable` qui a épuisé ses quatre tentatives — deux écritures sur
+            // la même rencontre, quelques dizaines de millisecondes de contention. Aucun tiers ne
+            // marque ce match-là : dire « quelqu'un d'autre marque » envoyait chercher un marqueur
+            // qui n'existe pas, et ne donnait aucune raison de retaper le point. `http-tx.ts` pose
+            // ce code exactement pour ça — « sans discriminant, le client lit le second dans le
+            // premier ». Le journal local est intact, l'état complet repartira au prochain envoi.
+            toast("err", "Écriture simultanée — retape le point.");
+            return "conflict";
+          }
           if (code === "stale-games") {
             // Le serveur a dépassé ce journal : quelqu'un a saisi un jeu pendant qu'on avait le
             // dos tourné. Le journal ne décrit plus rien — on le jette, et on ferme pour que le
@@ -316,6 +327,7 @@ export default function InterclubScorer({
             onClose();
             return "stale";
           }
+          // Le refus de PRISE DE MARQUAGE : un autre appareil tient ce match (cf. `claim`).
           toast("err", "Quelqu'un d'autre marque ce match.");
           return "conflict";
         }
