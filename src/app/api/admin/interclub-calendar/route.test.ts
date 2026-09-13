@@ -306,7 +306,14 @@ describe("application", () => {
     h.published = [publiee({ date: "2026-10-16" })];
     await applique();
 
-    expect(h.updated[0].data).toMatchObject({ date: "2026-10-16", availabilityOpenedAt: null });
+    // Les TROIS marqueurs, pas deux : `eveRemindedAt` manquait ici aussi, et `dueAction`
+    // étant une cascade, le rappel de la veille ne repartait jamais sur la nouvelle date.
+    expect(h.updated[0].data).toMatchObject({
+      date: "2026-10-16",
+      availabilityOpenedAt: null,
+      availabilityRemindedAt: null,
+      eveRemindedAt: null,
+    });
     expect(h.wipedFor).toEqual(["f1"]);
     expect(h.moved).toHaveLength(1);
   });

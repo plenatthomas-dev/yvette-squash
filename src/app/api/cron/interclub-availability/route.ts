@@ -127,7 +127,13 @@ export async function GET(req: NextRequest) {
       venueAddress: true,
       // Qui est ALIGNÉ. Le rappel ne va qu'à eux — les joueurs sans compte (`homeGuestId`)
       // n'ont personne à notifier, et le récapitulatif de J-3 les a déjà signalés au capitaine.
-      matches: { select: { homeUserId: true } },
+      //
+      // ⚠️ `disabledAt` EST LU, et il manquait. C'était le seul carnet d'adresses du module à
+      // ne pas l'exclure — `followersFor`, `teamMemberIds` et `entriesFor` le font tous, et
+      // `interclub-notify.ts` affirme que la règle vaut pour TOUS. Un membre parti du club,
+      // désactivé mais resté aligné sur une composition déjà saisie, recevait la veille au soir
+      // « Demain à 20:30, 12 rue du Stade. Tu es aligné. » — et la ligne restait dans son journal.
+      matches: { select: { homeUserId: true, homeUser: { select: { disabledAt: true } } } },
       // LE CAPITAINE EST LU AVEC SON COMPTE, pas seulement par son identifiant.
       // `captainId` survit à la désactivation (le schéma ne pose `SetNull` que sur la
       // suppression) : un capitaine parti du club, désactivé, disparaissait de la liste des
@@ -174,7 +180,13 @@ export async function GET(req: NextRequest) {
     // envoi de ce cron qui ne soit pas une question, et le seul qui parte à une liste tirée de
     // la COMPOSITION plutôt que du roster.
     if (action === "eve") {
-      const alignes = [...new Set(f.matches.map((m) => m.homeUserId).filter((id) => id !== null))];
+      const alignes = [
+        ...new Set(
+          f.matches
+            .filter((m) => m.homeUserId !== null && m.homeUser?.disabledAt == null)
+            .map((m) => m.homeUserId as string),
+        ),
+      ];
       if (alignes.length) {
         await notifyEveReminder(
           alignes,

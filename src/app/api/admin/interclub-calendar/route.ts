@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/admin";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
+import { MARQUEURS_A_REARMER } from "@/lib/interclub-availability";
 import {
   fetchTeamCalendar,
   ownFixtures,
@@ -402,7 +403,10 @@ export async function POST(req: NextRequest) {
           // premier « Appliquer » suivant — pour un lieu changé trois semaines plus tard — les
           // remettait à « prévisionnelle », et l'équipe cessait d'être convoquée sans un mot.
           // L'écart est désormais SIGNALÉ (`confirmDrift`) et corrigé à la main s'il le faut.
-          ...(dateChanged ? { availabilityOpenedAt: null, availabilityRemindedAt: null } : {}),
+          // ⚠️ La liste des marqueurs vit contre la cascade qui la lit
+          // (`MARQUEURS_A_REARMER`) : énumérée ici à la main, elle avait oublié `eveRemindedAt`,
+          // et le rappel de la veille ne repartait jamais sur la nouvelle date.
+          ...(dateChanged ? MARQUEURS_A_REARMER : {}),
         },
       });
     });

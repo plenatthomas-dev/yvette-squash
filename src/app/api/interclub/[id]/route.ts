@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
 import { prisma } from "@/lib/db";
 import { isAdminEmail } from "@/lib/admin";
+import { MARQUEURS_A_REARMER } from "@/lib/interclub-availability";
 import {
   interclubInclude,
   serializeInterclub,
@@ -237,8 +238,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         // ferait composer l'équipe sur des « oui » qui ne veulent plus rien dire — et ce sont
         // précisément les soirs de report qu'on se retrouve à trois. On efface, et on relance
         // l'appel en remettant les marqueurs à zéro pour que le cron repose la question.
-        ecriture.availabilityOpenedAt = null;
-        ecriture.availabilityRemindedAt = null;
+        //
+        // ⚠️ La liste ne s'écrit PAS ici : elle vit contre la cascade qui la lit
+        // (`MARQUEURS_A_REARMER`). Énumérée à la main, elle avait oublié `eveRemindedAt`.
+        Object.assign(ecriture, MARQUEURS_A_REARMER);
 
         // LA SAISON SUIT LA DATE, SUR UNE RENCONTRE IMPORTÉE. Elle n'était posée qu'à la
         // création : une J01 du 28 juillet reportée au 10 septembre gardait « 2025/2026 », et le
