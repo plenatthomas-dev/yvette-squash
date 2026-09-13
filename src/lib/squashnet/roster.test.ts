@@ -95,6 +95,21 @@ describe("parseTeamRoster — le roster réel de Verrieres 2", () => {
   it("a la forme que la garde de relecture attend", () => {
     expect(estRoster(roster)).toBe(true);
   });
+
+  it("⚠️ ÉCHAPPE l'identifiant : un `.` ne doit pas servir le tableau d'une autre équipe", () => {
+    // L'identifiant entre dans une `RegExp` construite par concaténation. Sans échappement,
+    // « 16109. » appariait `players_161095` et rendait le roster de Verrieres 2 pour une autre
+    // équipe — en silence, avec le bon nombre de joueurs et les bons classements. Les gardes de
+    // forme existent, mais elles vivent dans la route d'admin et dans le parseur de calendrier :
+    // ce parseur-ci est une fonction pure, appelable depuis n'importe quel futur chemin.
+    expect(() => parseTeamRoster(html, "16109.")).toThrow(RosterUnreadableError);
+  });
+
+  it("ne jette pas sur un identifiant qui contiendrait un métacaractère de RegExp", () => {
+    // `new RegExp("players_(")` lève un `SyntaxError` — une panne brute là où le module promet
+    // partout de distinguer « illisible » de « vide ».
+    expect(() => parseTeamRoster(html, "161095(")).toThrow(RosterUnreadableError);
+  });
 });
 
 describe("parseTeamRoster — les rencontres, et leur `tieid`", () => {

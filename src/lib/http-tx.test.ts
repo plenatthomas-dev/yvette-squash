@@ -192,6 +192,16 @@ describe("readJsonBody — un corps valide mais absurde ne doit pas sortir en 50
     expect(await readJsonBody(req(async () => true))).toEqual({});
   });
 
+  it("⚠️ rend {} sur un TABLEAU, que `typeof` fait pourtant passer pour un objet", async () => {
+    // `[1,2,3]` ressortait tel quel, typé `Record<string, unknown>`. La promesse de cette
+    // fonction — « remettre ces corps sur le chemin ordinaire » — n'était alors tenue que par
+    // ACCIDENT : les routes valident champ par champ, et `tableau.date` vaut `undefined`, donc
+    // ça finissait bien en 400. Rien ne garantit que la prochaine route lira un champ plutôt
+    // qu'une longueur ou un index.
+    expect(await readJsonBody(req(async () => [1, 2, 3]))).toEqual({});
+    expect(await readJsonBody(req(async () => []))).toEqual({});
+  });
+
   it("rend {} sur un corps illisible, comme avant", async () => {
     expect(await readJsonBody(req(async () => { throw new SyntaxError("Unexpected token"); }))).toEqual({});
   });

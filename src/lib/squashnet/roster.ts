@@ -192,10 +192,21 @@ export function nameKey(s: string): string {
   return n ? n.split(" ").sort().join(" ") : "";
 }
 
-/** La table des joueurs porte l'identifiant de l'équipe : `<table id="players_161095">`. */
+/**
+ * La table des joueurs porte l'identifiant de l'équipe : `<table id="players_161095">`.
+ *
+ * ⚠️ L'IDENTIFIANT EST ÉCHAPPÉ, et ce n'est pas de la prudence décorative. Il entre dans une
+ * `RegExp` construite par concaténation : un `.` y vaudrait n'importe quel caractère — on
+ * servirait le tableau d'une AUTRE équipe sans que rien ne le signale — et un `(` ferait
+ * simplement jeter le constructeur. Aujourd'hui les deux sources sont des chiffres (la route
+ * d'admin exige `^\d{1,12}$`, le calendrier ne parse que des chiffres), mais ces gardes vivent
+ * AILLEURS : ce parseur est une fonction pure, appelable depuis n'importe quel futur chemin
+ * d'écriture, et une garde qu'il faut aller vérifier dans une route n'en est pas une ici.
+ */
 function tableJoueurs(html: string, snTeamId: string): string | null {
+  const id = snTeamId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(
-    "<table[^>]*id=[\"']players_" + snTeamId + "[\"'][^>]*>[\\s\\S]*?</table>",
+    "<table[^>]*id=[\"']players_" + id + "[\"'][^>]*>[\\s\\S]*?</table>",
     "i",
   );
   return re.exec(html)?.[0] ?? null;
