@@ -460,6 +460,11 @@ describe("PATCH /api/interclub/{id}", () => {
       date: "2026-10-16",
       availabilityOpenedAt: null,
       availabilityRemindedAt: null,
+      // ⚠️ LE TROISIÈME MARQUEUR, celui qui manquait. `dueAction` est une cascade : resté
+      // posé, il ferme sa branche pour toujours, et le rappel de la veille — l'heure, le lieu
+      // et l'adresse, aux seuls alignés — ne repartait JAMAIS sur la nouvelle date. C'est
+      // pourtant le soir d'une rencontre reportée qu'on a besoin qu'on nous redise où aller.
+      eveRemindedAt: null,
     });
     expect(h.moved).not.toBeNull();
     // L'ANCIENNE date part avec : « déplacée au 16 » ne dit pas laquelle des trois rencontres

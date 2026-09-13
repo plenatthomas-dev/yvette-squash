@@ -184,6 +184,27 @@ export interface ScheduledFixture {
 }
 
 /**
+ * Remettre à zéro TOUS les marqueurs d'envoi d'une rencontre. À étaler dans le `data` d'une
+ * écriture qui **déplace** une rencontre.
+ *
+ * ⚠️ UNE SEULE LISTE, ET ELLE VIT ICI. Les deux chemins qui déplacent une rencontre
+ * énuméraient chacun les marqueurs à la main, et tous deux avaient oublié le troisième :
+ * `eveRemindedAt` n'était remis à zéro NULLE PART. Comme `dueAction` est une cascade, un
+ * marqueur resté posé ferme sa branche définitivement : l'appel se rouvrait bien sur la
+ * nouvelle date, la relance repartait, mais le rappel de la veille — l'heure, le lieu et
+ * l'adresse, aux seuls alignés — ne partait plus jamais. Or c'est précisément le soir d'une
+ * rencontre reportée qu'on a besoin qu'on nous redise où et quand.
+ *
+ * Le piège se rouvrirait à l'identique au prochain marqueur ajouté : la liste est donc posée
+ * CONTRE la cascade qui la lit, pour que les deux se modifient du même geste.
+ */
+export const MARQUEURS_A_REARMER = {
+  availabilityOpenedAt: null,
+  availabilityRemindedAt: null,
+  eveRemindedAt: null,
+} as const satisfies Record<keyof Omit<ScheduledFixture, "date" | "dateConfirmed">, null>;
+
+/**
  * Que faut-il envoyer aujourd'hui pour cette rencontre ?
  *
  * ⚠️ RIEN, JAMAIS, SUR UNE DATE NON CONFIRMÉE. La fédération publie les journées non encore

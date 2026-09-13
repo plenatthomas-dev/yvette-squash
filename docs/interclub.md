@@ -525,6 +525,16 @@ partagent aucune colonne.
 « Je suis dispo le 9 » ne veut pas dire « je suis dispo le 16 », et ce sont précisément les
 soirs de report qu'on se retrouve à trois.
 
+⚠️ **Les TROIS marqueurs, et la liste ne s'écrit qu'à un endroit.** Les deux chemins qui
+déplacent une rencontre (le `PATCH` d'une fiche, l'import du calendrier) les énuméraient chacun
+à la main, et tous deux avaient oublié le troisième : `eveRemindedAt` n'était remis à zéro nulle
+part. `dueAction` étant une cascade, un marqueur resté posé ferme sa branche définitivement :
+l'appel se rouvrait bien sur la nouvelle date et la relance repartait, mais le rappel de la
+veille **ne partait plus jamais** — sur la rencontre même où on a le plus besoin qu'on nous
+redise où et quand. La liste vit désormais dans `MARQUEURS_A_REARMER`
+(`lib/interclub-availability.ts`), posée **contre la cascade qui la lit**, pour que les deux se
+modifient du même geste.
+
 ### Ce que la rencontre rapporte — le nul 2-2, et qui le gagne
 
 **En 2026-27, la division 4 passe de CINQ simples à QUATRE.** Ça n'a l'air de rien et ça change
@@ -774,7 +784,7 @@ cascade.
 
 | Cron | Rythme | Ce qu'il fait |
 |---|---|---|
-| `/api/cron/interclub-availability` | `0 8 * * *` | Ouvre l'appel à **J-10**, relance les non-répondants à **J-3**, envoie le récap au capitaine à J-3. Idempotence par `availabilityOpenedAt` / `availabilityRemindedAt`. **Silence total sur une date non confirmée.** |
+| `/api/cron/interclub-availability` | `0 8 * * *` | Ouvre l'appel à **J-10**, relance les non-répondants à **J-3** et envoie le récap au capitaine à J-3, puis rappelle **à J-1** l'heure, le lieu et l'adresse — aux seuls **alignés**, et sans rien demander. Idempotence par `availabilityOpenedAt` / `availabilityRemindedAt` / `eveRemindedAt`, lus **en cascade** : un seul envoi par jour et par rencontre. **Silence total sur une date non confirmée.** |
 | `/api/cron/interclub-calendar` | `0 9 * * 1` | Pour chaque équipe ancrée : récupère, compare, met à jour `snCheckedAt`. Alerte capitaine et admins **tant que l'écart n'est pas appliqué**, et **n'écrit aucune rencontre** — l'application reste un geste d'admin. |
 
 `snCheckedAt` existe pour répondre à la question que le silence ne tranche pas : « le calendrier

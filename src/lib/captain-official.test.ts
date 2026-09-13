@@ -75,6 +75,32 @@ describe("ourSide — de quel côté sommes-nous ?", () => {
     // Deux équipes d'un même club peuvent aligner des homonymes.
     expect(ourSide(feuille, { ourNames: ["POPULU AXEL", "BABLON XAVIER"] })).toBeNull();
   });
+
+  it("⚠️ un sigle qui désigne LES DEUX côtés ne tranche pas — il passe la main aux noms", () => {
+    // `tie.ts` le dit : rien n'interdit à deux équipes de porter le même sigle, et ça devient
+    // banal le jour où le club inscrit une seconde équipe — elles se rencontrent en poule.
+    // Le code rendait « A » dès qu'un témoin désignait A, sans vérifier qu'aucun ne désignait
+    // B : sur deux sigles identiques, il tombait sur « A » par l'ordre des lignes, c'est-à-dire
+    // à pile ou face. Un côté deviné inverse le score.
+    const memeSigle = { ...feuille, codeA: "YVET", codeB: "YVET" };
+    expect(ourSide(memeSigle, { ourCode: "YVET" })).toBeNull();
+    expect(ourSide(memeSigle, { opponentCode: "YVET" })).toBeNull();
+    expect(ourSide(memeSigle, { ourCode: "YVET", opponentCode: "YVET" })).toBeNull();
+
+    // Les NOMS, eux, savent départager deux équipes du même club : le sigle se tait, ils parlent.
+    expect(
+      ourSide(memeSigle, {
+        ourCode: "YVET",
+        ourNames: releveConforme.map((l) => l.awayName),
+      }),
+    ).toBe("B");
+  });
+
+  it("un sigle qui ne désigne qu'UN côté tranche toujours, même avec les deux témoins", () => {
+    // Le cas nominal ne doit rien perdre au passage : les deux entrées se confirment.
+    expect(ourSide(feuille, { ourCode: "VERR2", opponentCode: "VERR3" })).toBe("A");
+    expect(ourSide(feuille, { ourCode: "VERR3", opponentCode: "VERR2" })).toBe("B");
+  });
 });
 
 describe("compareOfficial — la ligue publie 4-1, notre relevé dit 4-1", () => {

@@ -550,3 +550,45 @@ describe("InterclubScorer — le tableau ne bouge plus sous le doigt", () => {
     expect(ecran.container.querySelector(".ics-history")).not.toBeNull();
   });
 });
+
+describe("InterclubScorer — une contention n'accuse personne", () => {
+  it("⚠️ `write_conflict` ne dit PAS « quelqu'un d'autre marque »", async () => {
+    // TROIS refus partagent le 409 sur cette route, et l'écran n'en branchait qu'un. Le
+    // `write_conflict` est la transaction `Serializable` qui a épuisé ses quatre tentatives —
+    // deux écritures sur la même rencontre, quelques dizaines de millisecondes de contention.
+    // Aucun tiers ne marque ce match : le marqueur partait chercher un concurrent qui n'existe
+    // pas, et n'avait aucune raison de retaper son point. `http-tx.ts` pose ce code exactement
+    // pour ça — « sans discriminant, le client lit le second dans le premier ».
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: "Écriture concurrente, réessaie", code: "write_conflict" }),
+      }) as unknown as Response),
+    );
+
+    // On rend soi-même pour tenir le `toast` : c'est le message qu'on mesure ici.
+    const toast = vi.fn();
+    const { getByText } = render(
+      <InterclubScorer
+        fixtureId="f1"
+        match={MATCH}
+        bestOf={5}
+        onClose={vi.fn()}
+        onExpired={(status) => status === 401}
+        toast={toast}
+      />,
+    );
+    await souffle();
+
+    fireEvent.click(getByText("← Retour"));
+    await souffle();
+
+    // Le journal local SURVIT : rien n'a divergé, l'état complet repartira au prochain envoi.
+    expect(localStorage.getItem(LOG_KEY)).not.toBeNull();
+    const dits = toast.mock.calls.map((c) => String(c[1])).join(" | ");
+    expect(dits).not.toContain("Quelqu'un d'autre marque");
+    expect(dits).toMatch(/simultanée/i);
+  });
+});

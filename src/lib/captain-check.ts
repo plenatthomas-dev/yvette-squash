@@ -349,10 +349,20 @@ export function checkPlayer(
   }
 
   // `moved` = le nom est retrouvé, mais hors du club visé. On rend le club où la fédération le
-  // place : c'est l'information qui permet de comprendre, et `classifyRanking` ne la porte pas
-  // dans ce verdict — on la relit donc dans les lignes.
+  // place : c'est l'information qui permet de comprendre.
+  //
+  // ⚠️ LA LIGNE VIENT DU VERDICT, PLUS DES LIGNES BRUTES. Elle était relue ici par
+  // `rows.find((r) => normalize(r.club) !== normalize(club))` — sur la réponse entière, alors
+  // que la recherche fédérale porte sur le seul nom de FAMILLE. Deux « Martin » dans le lot, et
+  // c'est le club de l'autre qui était nommé, écrit dans `checkJson` et recopié mot pour mot
+  // dans le conseil : le capitaine partait vérifier quelque chose qui n'a rien. Seul
+  // `classifyRanking` filtre par nom et par genre ; refaire ce tri ici, c'était le refaire faux.
+  //
+  // PLUSIEURS HOMONYMES HORS DU CLUB ⇒ AUCUN CLUB NOMMÉ. Rien ne dit lequel est le sien, et
+  // en désigner un au hasard est exactement le défaut qu'on ferme. `hintFor` sait dire
+  // « un autre club ».
   if (v.status === "moved") {
-    const ailleurs = rows.find((r) => normalize(r.club) !== normalize(club));
+    const ailleurs = v.elsewhere.length === 1 ? v.elsewhere[0] : null;
     return {
       order,
       side,

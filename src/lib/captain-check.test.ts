@@ -118,6 +118,37 @@ describe("checkPlayer", () => {
     expect(p.hint).toContain("Squash Club de Rennes");
   });
 
+  it("⚠️ retrouvé ailleurs → nomme SON club, pas celui d'un homonyme", () => {
+    // LE DÉFAUT. Le club était relu dans la réponse BRUTE par la première ligne hors du club
+    // attendu — or la recherche fédérale porte sur le seul nom de FAMILLE, et rend donc tous
+    // les homonymes. Le test ne posait qu'UNE ligne : il passait à l'identique avec
+    // l'implémentation fausse.
+    const rows = [
+      row("MARTIN PAUL", { club: "Squash Club de Rennes" }), // pas lui, mais premier du lot
+      row("MARTIN JEAN", { club: "UCPA Meudon" }),
+    ];
+    const p = checkPlayer(2, "away", "Jean Martin", rows, "Squash de Chaville");
+    expect(p.verdict).toBe("other-club");
+    expect(p.club).toBe("UCPA Meudon");
+    expect(p.fedName).toBe("MARTIN JEAN");
+    expect(p.hint).toContain("UCPA Meudon");
+    expect(p.hint).not.toContain("Rennes");
+  });
+
+  it("plusieurs homonymes hors du club → n'en désigne AUCUN", () => {
+    // Deux personnes du même nom, toutes deux ailleurs : rien ne dit laquelle il est. En
+    // nommer une au hasard renvoie le capitaine vérifier un club qui n'est peut-être pas le bon
+    // — c'est exactement le défaut qu'on vient de fermer, sous une autre forme.
+    const rows = [
+      row("MARTIN JEAN", { club: "UCPA Meudon" }),
+      row("MARTIN JEAN", { club: "Squash Club de Rennes", licence: "0999999" }),
+    ];
+    const p = checkPlayer(2, "away", "Jean Martin", rows, "Squash de Chaville");
+    expect(p.verdict).toBe("other-club");
+    expect(p.club).toBeNull();
+    expect(p.hint).toContain("un autre club");
+  });
+
   it("introuvable → le remède nomme l'orthographe en PREMIER", () => {
     const p = checkPlayer(1, "home", "Jean Dupont", [row("MARTIN PIERRE")], YVETTE_CLUB);
     expect(p.verdict).toBe("unknown");
