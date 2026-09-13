@@ -157,7 +157,20 @@ export function matchRanking(
  */
 export type RankingVerdict =
   | { status: "matched"; match: RankingMatch }
-  | { status: "moved" }
+  /**
+   * Le nom est retrouvé, mais aucune de ses lignes n'est dans le club visé.
+   *
+   * ⚠️ `elsewhere` PORTE LES LIGNES QUI PORTENT SON NOM, et c'est tout l'intérêt de les
+   * rendre. Le verdict ne les portait pas, et l'appelant qui voulait nommer le club d'accueil
+   * les relisait lui-même dans la réponse BRUTE — or la recherche fédérale porte sur le seul
+   * nom de FAMILLE : dès qu'elle rendait deux personnes du même patronyme, il tombait sur
+   * l'autre et affichait le club de quelqu'un qui n'a rien à voir. Le filtrage par nom (et par
+   * genre) n'existe qu'ici ; le refaire ailleurs, c'est le refaire faux.
+   *
+   * Plusieurs lignes = plusieurs homonymes hors du club : l'appelant doit alors s'abstenir de
+   * désigner un club, rien ne dit lequel est le sien.
+   */
+  | { status: "moved"; elsewhere: RankingMatch[] }
   | { status: "unknown" };
 
 export function classifyRanking(
@@ -208,7 +221,9 @@ export function classifyRanking(
   const inClub = byName.filter((r) => normalize(r.club) === target);
   if (inClub.length === 1) return { status: "matched", match: toMatch(inClub[0]) };
   // Nom retrouvé, mais aucune occurrence dans le club cible → parti ailleurs (signal fiable).
-  if (inClub.length === 0 && byName.length > 0) return { status: "moved" };
+  if (inClub.length === 0 && byName.length > 0) {
+    return { status: "moved", elsewhere: byName.map(toMatch) };
+  }
   // 0 hit au nom (peut-être en page 2 / squashnet muet) OU homonymes ambigus dans le club.
   return { status: "unknown" };
 }
