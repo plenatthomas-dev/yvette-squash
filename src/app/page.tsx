@@ -1356,15 +1356,22 @@ export default function Home() {
                       },
                     ]
                   : []),
-                {
-                  key: "forum",
-                  label: "Le fil",
-                  icon: <ChatIcon />,
-                  active: view === "forum",
-                  disabled: !forum,
-                  comingSoon: !forum,
-                  onClick: () => setView(view === "forum" ? "day" : "forum"),
-                },
+                // LE FIL SUIT LA RÈGLE DU CAPITANAT : absent quand il est coupé, et non grisé.
+                // Les autres entrées se grisent parce que « 🚧 en cours » y est une promesse
+                // datée — la fonction existe, elle arrive. Le fil, lui, peut rester coupé
+                // indéfiniment (modération, Pusher, RGPD) : afficher une porte close à chaque
+                // ouverture du menu n'informe personne et n'appelle qu'un clic sans effet.
+                ...(forum
+                  ? [
+                      {
+                        key: "forum",
+                        label: "Le fil",
+                        icon: <ChatIcon />,
+                        active: view === "forum",
+                        onClick: () => setView(view === "forum" ? "day" : "forum"),
+                      },
+                    ]
+                  : []),
                 {
                   key: "directory",
                   label: "Annuaire",
