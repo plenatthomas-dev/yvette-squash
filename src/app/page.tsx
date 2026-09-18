@@ -1356,15 +1356,22 @@ export default function Home() {
                       },
                     ]
                   : []),
-                {
-                  key: "forum",
-                  label: "Le fil",
-                  icon: <ChatIcon />,
-                  active: view === "forum",
-                  disabled: !forum,
-                  comingSoon: !forum,
-                  onClick: () => setView(view === "forum" ? "day" : "forum"),
-                },
+                // LE FIL SUIT LA RÈGLE DU CAPITANAT : absent quand il est coupé, et non grisé.
+                // Les autres entrées se grisent parce que « 🚧 en cours » y est une promesse
+                // datée — la fonction existe, elle arrive. Le fil, lui, peut rester coupé
+                // indéfiniment (modération, Pusher, RGPD) : afficher une porte close à chaque
+                // ouverture du menu n'informe personne et n'appelle qu'un clic sans effet.
+                ...(forum
+                  ? [
+                      {
+                        key: "forum",
+                        label: "Le fil",
+                        icon: <ChatIcon />,
+                        active: view === "forum",
+                        onClick: () => setView(view === "forum" ? "day" : "forum"),
+                      },
+                    ]
+                  : []),
                 {
                   key: "directory",
                   label: "Annuaire",
@@ -1373,20 +1380,29 @@ export default function Home() {
                   comingSoon: !directory,
                   onClick: () => setDirectoryOpen(true),
                 },
-                {
-                  key: "rankhist",
-                  label: "Progression",
-                  icon: <TrendIcon />,
-                  // Gated sur son PROPRE flag, et non sur `directory` ni sur `ranking` seul.
-                  // La courbe ne montre pas l'annuaire ; et si elle montre bien le classement
-                  // fédéral, elle n'en est pas le badge « 5A » vu dans le temps : celui-ci dit
-                  // où un joueur en est, celle-ci rend lisible à tous les membres le chemin de
-                  // chacun sur trois ans, côte à côte. Une finalité de plus, donc son
-                  // interrupteur (cf. `rankingHistory` dans features.ts).
-                  disabled: !progression,
-                  comingSoon: !progression,
-                  onClick: () => setRankHistOpen(true),
-                },
+                // ABSENTE QUAND ELLE EST COUPÉE, comme Le fil et le capitanat — et non grisée.
+                //
+                // Gated sur son PROPRE flag, et non sur `directory` ni sur `ranking` seul.
+                // La courbe ne montre pas l'annuaire ; et si elle montre bien le classement
+                // fédéral, elle n'en est pas le badge « 5A » vu dans le temps : celui-ci dit
+                // où un joueur en est, celle-ci rend lisible à tous les membres le chemin de
+                // chacun sur trois ans, côte à côte. Une finalité de plus, donc son
+                // interrupteur (cf. `rankingHistory` dans features.ts).
+                //
+                // `progression` vaut `ranking && rankingHistory` : deux interrupteurs, dont
+                // l'un (`ranking`) sert d'abord à autre chose. Un « 🚧 » promettrait une date
+                // que personne ne tient — couper la passe mensuelle suffit à l'allumer, sans
+                // que ce soit jamais la courbe qu'on ait voulu annoncer.
+                ...(progression
+                  ? [
+                      {
+                        key: "rankhist",
+                        label: "Progression",
+                        icon: <TrendIcon />,
+                        onClick: () => setRankHistOpen(true),
+                      },
+                    ]
+                  : []),
                 {
                   key: "share",
                   label: "Partager l'appli",
