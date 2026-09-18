@@ -706,10 +706,14 @@ describe("PATCH et DELETE — l'état se relit DANS la transaction", () => {
   });
 
   it("PATCH — 409 `write_conflict` quand la contention ne retombe pas", async () => {
-    // Quatre tentatives, puis on rend la main. Le `code` est ce sur quoi un client branche : la
+    // Six tentatives, puis on rend la main. Le `code` est ce sur quoi un client branche : la
     // route rend deux 409 différents, et « réessaie » n'appelle pas la même réaction que
     // « rencontre déjà commencée ».
-    h.txEchecs = 4;
+    //
+    // Le chiffre suit `MAX_ATTEMPTS` (`http-tx.ts`), passé de quatre à six : un tricount à six
+    // payeurs produit jusqu'à cinq croisements d'affilée, et le quatrième essai manquant
+    // sortait en « réessaie » un clic parfaitement légitime.
+    h.txEchecs = 6;
     const res = await PATCH(patchReq({ venue: "Club" }), ctx);
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toMatchObject({ code: "write_conflict" });

@@ -49,11 +49,22 @@ export class HttpError extends Error {
 }
 
 /**
- * Nombre total de tentatives. Quatre, c'est-à-dire trois réessais : au-delà, l'écriture n'est
- * plus en conflit ponctuel mais en contention durable, et insister ferait attendre le client
- * sans améliorer ses chances.
+ * Nombre total de tentatives. Six, c'est-à-dire cinq réessais.
+ *
+ * QUATRE NE SUFFISAIT PAS, ET ON SAIT MAINTENANT POURQUOI. Le chiffre supposait un conflit
+ * PONCTUEL — deux écritures qui se croisent par malchance. Il en existe un second genre, que
+ * `tricount/{id}/approve` rend systématique : plusieurs transactions lisent le MÊME ensemble
+ * (les validations d'un tricount) et y insèrent chacune une ligne. C'est un write-skew, et
+ * Postgres l'annule à TOUS LES COUPS, pas une fois sur cent. Mesuré sur vraie base : six
+ * payeurs qui valident ensemble produisent 294 conflits en 60 tours, dont 4 épuisaient les
+ * quatre tentatives et sortaient en 409 — le défaut décrit en tête de `.github/workflows/ci.yml`.
+ *
+ * Là, chaque rejeu a de vraies chances d'aboutir : le concurrent qui a gagné a commis, et le
+ * rejeu le VOIT. « Insister n'améliore pas les chances » reste vrai d'une contention durable,
+ * et c'est pourquoi ce plafond reste un plafond ; il est simplement placé au-dessus du nombre
+ * de croisements qu'un tricount à six payeurs produit vraiment.
  */
-const MAX_ATTEMPTS = 4;
+const MAX_ATTEMPTS = 6;
 
 /**
  * Le code du 409 rendu quand les tentatives s'épuisent — « réessaie », et rien d'autre.
@@ -113,7 +124,7 @@ export function isForeignKeyViolation(e: unknown): boolean {
 }
 
 /**
- * Recul entre deux tentatives : croissant, et TIRÉ AU SORT sur toute sa largeur.
+ * Recul entre deux tentatives : PLANCHER + tirage au sort sur une largeur qui DOUBLE.
  *
  * Le raisonnement qui justifie le nombre de tentatives — « au-delà, l'écriture n'est plus en
  * conflit ponctuel mais en contention durable » — suppose implicitement que du TEMPS passe entre
@@ -123,15 +134,38 @@ export function isForeignKeyViolation(e: unknown): boolean {
  * Le tirage au sort compte autant que le recul lui-même : deux marqueurs qui entrent en conflit
  * rejouent sinon en cadence, et se retrouvent au même instant à chaque tour.
  *
- * BORNES EXACTES, parce qu'une borne approximative ne sert à rien : l'attente précédant la
- * tentative n vaut au plus `20 × n` ms, soit 20, 40 puis 60 ms avant la quatrième et dernière —
- * 120 ms cumulées au pire. Le commentaire annonçait « 40 ms au pire avant la dernière
- * tentative » : il comptait l'avant-dernière.
+ * DEUX CHANGEMENTS, ET CHACUN RÉPARE UNE MOITIÉ DU DÉFAUT.
  *
- * Elles restent petites parce qu'un 40001 signifie que la transaction concurrente est déjà
+ *   1. LE PLANCHER (cf. `BACKOFF_FLOOR_MS`) — un tirage pouvait rendre 0, et un rejeu qui part
+ *      avant que le gagnant n'ait commis est une tentative jetée.
+ *   2. LA CROISSANCE, linéaire (`20 × n`) puis DOUBLÉE (`10 × 2^(n-1)`). La linéaire tenait tant
+ *      qu'on supposait un croisement isolé : trois reculs de 20, 40, 60 ms suffisent à se
+ *      désynchroniser d'UN concurrent. Six payeurs qui valident ensemble ne se désynchronisent
+ *      pas comme deux — il faut laisser passer la file, pas le voisin.
+ *
+ * BORNES EXACTES, parce qu'une borne approximative ne sert à rien : l'attente précédant la
+ * tentative n vaut au plus `5 + 10 × 2^(n-1)` ms, soit 15, 25, 45, 85 puis 165 ms avant la
+ * sixième et dernière — 335 ms cumulées au pire, et la moitié en moyenne. C'est le prix d'un
+ * clic qui aboutit, contre un « réessaie » que le membre paie plus cher.
+ *
+ * Le plancher reste petit parce qu'un 40001 signifie que la transaction concurrente est déjà
  * retombée : on attend le temps de se désynchroniser, pas le temps qu'une écriture se termine.
  */
 const BACKOFF_MS = 10;
+
+/**
+ * Recul MINIMAL avant un rejeu, plancher inclus dans chaque tirage.
+ *
+ * Sans lui, `Math.random()` pouvait rendre 0 : le rejeu repartait dans la même milliseconde,
+ * pendant que la transaction concurrente — celle qui a GAGNÉ le conflit — était encore en vol.
+ * Il se heurtait à elle et consommait une tentative sans avoir jamais eu sa chance. Un rejeu
+ * qui part avant que le gagnant n'ait commis est perdu d'avance, et le tirage au sort ne
+ * protège que de la cadence, pas de la précipitation.
+ *
+ * Cinq millisecondes, c'est l'ordre de grandeur d'une transaction de ce dépôt une fois la
+ * connexion ouverte — pas une attente choisie au doigt mouillé.
+ */
+const BACKOFF_FLOOR_MS = 5;
 
 /**
  * Temps accordé pour OBTENIR une connexion, avant même le premier ordre SQL.
@@ -162,7 +196,7 @@ const MAX_WAIT_MS = 10_000;
  * par décrire une autre version du code.
  */
 export function backoffFor(attempt: number): number {
-  return Math.round(Math.random() * BACKOFF_MS * attempt * 2);
+  return BACKOFF_FLOOR_MS + Math.round(Math.random() * BACKOFF_MS * 2 ** (attempt - 1));
 }
 
 /**

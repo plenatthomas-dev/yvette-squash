@@ -74,23 +74,36 @@ describe("serializableTransaction", () => {
     expect(h.appels).toBe(3); // 2 conflits + la bonne
   });
 
-  it("abandonne en 409 après quatre tentatives, avec le message fourni", async () => {
+  it("abandonne en 409 après six tentatives, avec le message fourni", async () => {
     h.conflitsRestants = 99;
     await expect(serializableTransaction(async () => "ok", "Prise concurrente")).rejects.toMatchObject(
       { status: 409, message: "Prise concurrente" },
     );
-    expect(h.appels).toBe(4);
+    expect(h.appels).toBe(6);
+  });
+
+  // LE CAS QUI A MOTIVÉ LE PASSAGE DE QUATRE À SIX. Cinq croisements d'affilée, c'est ce que
+  // produit un tricount à six payeurs qui valident ensemble : sous l'ancien plafond la
+  // cinquième tentative n'existait pas, et le membre lisait « Validation concurrente ».
+  it("tient cinq croisements d'affilée — ce qu'un tricount à six payeurs produit vraiment", async () => {
+    h.conflitsRestants = 5;
+    await expect(serializableTransaction(async () => "ok")).resolves.toBe("ok");
+    expect(h.appels).toBe(6);
   });
 
   it("laisse passer du temps entre deux tentatives, sinon le compte d'essais ne veut rien dire", async () => {
-    // Le plafond de quatre tentatives se justifie par « au-delà, c'est une contention durable ».
-    // Le raisonnement suppose que du temps passe : sans recul, les quatre essais s'épuisaient en
+    // Le plafond de six tentatives se justifie par « au-delà, c'est une contention durable ».
+    // Le raisonnement suppose que du temps passe : sans recul, les essais s'épuisaient en
     // quelques millisecondes et rendaient un 409 qu'une pause de rien du tout aurait évité.
+    //
+    // La borne mesurée est le PLANCHER, pas « plus de zéro » : c'est lui qui garantit qu'un
+    // rejeu ne repart pas dans la milliseconde du gagnant encore en vol. Trois reculs, donc au
+    // moins 3 × 5 ms.
     h.conflitsRestants = 3;
     const t0 = Date.now();
     await serializableTransaction(async () => "ok");
     expect(h.appels).toBe(4);
-    expect(Date.now() - t0).toBeGreaterThan(0);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(15);
   });
 
   it("ne rejoue JAMAIS un refus métier — il se reproduirait à l'identique", async () => {
@@ -148,13 +161,16 @@ describe("backoffFor — la borne annoncée est un chiffre, pas une intention", 
   // Le test voisin (« laisse passer du temps ») n'éprouve rien : `expect(Date.now() - t0)
   // .toBeGreaterThan(0)` passerait à l'identique si le recul valait toujours zéro — ce que trois
   // tirages de `Math.random` autorisent d'ailleurs. On mesure donc la fonction elle-même.
-  it("ne dépasse jamais 20 ms par tentative, soit 60 ms avant la dernière", () => {
+  it("ne dépasse jamais 5 + 10 × 2^(n-1) ms, soit 335 ms cumulées avant la dernière", () => {
     vi.spyOn(Math, "random").mockReturnValue(0.999999);
-    expect(backoffFor(1)).toBeLessThanOrEqual(20);
-    expect(backoffFor(2)).toBeLessThanOrEqual(40);
-    expect(backoffFor(3)).toBeLessThanOrEqual(60);
-    // Cumul au pire avant la quatrième et dernière tentative.
-    expect(backoffFor(1) + backoffFor(2) + backoffFor(3)).toBeLessThanOrEqual(120);
+    expect(backoffFor(1)).toBeLessThanOrEqual(15);
+    expect(backoffFor(2)).toBeLessThanOrEqual(25);
+    expect(backoffFor(3)).toBeLessThanOrEqual(45);
+    expect(backoffFor(4)).toBeLessThanOrEqual(85);
+    expect(backoffFor(5)).toBeLessThanOrEqual(165);
+    // Cumul au pire avant la sixième et dernière tentative.
+    const cumul = [1, 2, 3, 4, 5].reduce((t, n) => t + backoffFor(n), 0);
+    expect(cumul).toBeLessThanOrEqual(335);
     vi.restoreAllMocks();
   });
 
@@ -166,8 +182,21 @@ describe("backoffFor — la borne annoncée est un chiffre, pas une intention", 
 
   it("est TIRÉ AU SORT : deux écrivains en conflit ne doivent pas rejouer en cadence", () => {
     // Sans tirage, deux transactions concurrentes se retrouvent au même instant à chaque tour.
+    // Le tirage porte sur la LARGEUR ; le plancher, lui, ne bouge pas (cas suivant).
     vi.spyOn(Math, "random").mockReturnValue(0);
-    expect(backoffFor(3)).toBe(0);
+    expect(backoffFor(3)).toBe(5);
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    expect(backoffFor(3)).toBe(45);
+    vi.restoreAllMocks();
+  });
+
+  // LE DÉFAUT QUE CE PLANCHER FERME. Le tirage pouvait rendre 0 : le rejeu repartait dans la
+  // même milliseconde, pendant que la transaction gagnante était encore en vol — une tentative
+  // consommée sans avoir jamais eu sa chance. Aucun tirage, si malchanceux soit-il, ne doit
+  // plus rendre un recul nul.
+  it("ne rend JAMAIS zéro, même au tirage le plus malchanceux", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    for (const n of [1, 2, 3, 4, 5]) expect(backoffFor(n)).toBeGreaterThanOrEqual(5);
     vi.restoreAllMocks();
   });
 });
@@ -244,7 +273,7 @@ describe("quels échecs sont rejoués, et lesquels ne le sont pas", () => {
     // Et il n'est pas rejouable en l'état : P2028 recouvre DEUX échecs indiscernables par le
     // code (« pas pu commencer dans `maxWait` » et « expirée après `timeout` »). Rejouer le
     // premier serait juste ; rejouer le second rejouerait un travail qui a déjà tourné jusqu'au
-    // bout, quatre fois.
+    // bout, six fois.
     h.jette = new FauxPrismaError("P2028");
     await expect(serializableTransaction(async () => "ok")).rejects.toMatchObject({ code: "P2028" });
     expect(h.appels).toBe(1);
