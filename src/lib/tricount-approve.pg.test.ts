@@ -147,6 +147,76 @@ describe.skipIf(SANS_BASE)("SUR VRAIE BASE — l'ouverture des remboursements", 
     expect(await prisma.tricountApproval.findMany({ where: { tricountId } })).toHaveLength(0);
     expect(h.push).not.toHaveBeenCalled();
   }, 30_000);
+
+  // SIX PAYEURS, PAS DEUX — le cas que le budget de rejeu ne tenait PAS.
+  //
+  // Le test du dessus (deux payeurs) ne produit qu'UN croisement : le perdant rejoue une fois,
+  // voit la ligne du gagnant, aboutit. Quatre tentatives suffisaient presque toujours, et
+  // « presque » est exactement ce que `.github/workflows/ci.yml` décrivait — un 409 environ une
+  // fois sur trois sur un runner chargé.
+  //
+  // À six, les croisements ne s'additionnent plus, ils se multiplient : chaque validation lit
+  // l'ensemble des validations, donc chacune entre en conflit avec toutes les autres encore en
+  // vol. Mesuré sur vraie base, ancien réglage : 294 conflits 40001 en 60 tours, dont 4
+  // épuisaient les quatre tentatives. Avec le plancher de recul, la croissance doublée et six
+  // tentatives : 0 sur 60, et les conflits ne montaient jamais au-delà de la quatrième.
+  //
+  // CE QU'ON VÉRIFIE ICI, ce n'est pas « c'est rapide » mais « personne ne se fait renvoyer » :
+  // les six validations aboutissent, les six sont en base, et UNE seule annonce part.
+  it("six payeurs qui valident ensemble : personne ne reçoit « réessaie »", async () => {
+    const ajoutes = await Promise.all(
+      Array.from({ length: 4 }, (_, i) =>
+        prisma.user.create({ data: { displayName: `${MARQUEUR} sup ${i}` } }),
+      ),
+    );
+    const sup = ajoutes.map((u) => u.id);
+    for (const payeur of sup) {
+      await prisma.expense.create({
+        data: {
+          tricountId,
+          payerId: payeur,
+          creatorId: payeur,
+          label: "Repas",
+          amountCents: 3000,
+          spentAt: new Date("2026-09-17T12:00:00"),
+          shares: {
+            create: [
+              { userId: payeur, amountCents: 1500 },
+              { userId: debiteur, amountCents: 1500 },
+            ],
+          },
+        },
+      });
+    }
+    const tous = [payeurA, payeurB, ...sup];
+
+    try {
+      // Cinq tours, et non un seul : la course ne se produit pas à tous les coups, et une seule
+      // exécution laisserait le défaut repasser une fois sur deux sans faire rougir personne.
+      for (let tour = 1; tour <= 5; tour++) {
+        vi.clearAllMocks();
+        await prisma.tricountApproval.deleteMany({ where: { tricountId } });
+
+        const reponses = await Promise.all(tous.map(valider));
+
+        // AUCUN 409. C'est la régression elle-même : un membre qui clique en même temps que ses
+        // cinq co-payeurs ne doit pas lire « Validation concurrente, réessaie ».
+        expect(reponses.map((r) => r.status), `tour ${tour}`).toEqual(tous.map(() => 200));
+        const enBase = await prisma.tricountApproval.findMany({ where: { tricountId } });
+        expect(enBase, `tour ${tour}`).toHaveLength(tous.length);
+        expect(h.push.mock.calls.length, `tour ${tour}`).toBe(1);
+        expect((h.push.mock.calls[0] as unknown as [string])[0]).toBe(debiteur);
+      }
+    } finally {
+      // ⚠️ LES DÉPENSES D'ABORD, LES MEMBRES ENSUITE. `Expense.payerId` est en RESTRICT depuis
+      // la migration `13_tricount_restrict_user_delete` — supprimer un payeur qui a encore une
+      // dépense échoue, et le nettoyage laisserait le tricount à six payeurs pour les cas
+      // suivants de ce fichier, qui en attendent deux.
+      await prisma.expense.deleteMany({ where: { payerId: { in: sup } } });
+      await prisma.tricountApproval.deleteMany({ where: { tricountId } });
+      await prisma.user.deleteMany({ where: { id: { in: sup } } });
+    }
+  }, 180_000);
 });
 
 describe.skipIf(!SANS_BASE)("SUR VRAIE BASE — non mesuré", () => {

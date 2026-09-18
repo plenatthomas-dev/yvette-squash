@@ -50,20 +50,33 @@ jobs:
       # que de lui donner une base.
       - run: npm test
 
-  # ⚠️ CE TRAVAIL N'EST PAS ENCORE FIABLE À 100 %, ET IL NE FAUT PAS LE RENDRE OBLIGATOIRE
-  # TANT QUE ÇA DURE. Mesuré en local : `tricount-approve.pg.test.ts` échoue environ une fois
-  # sur trois — « deux payeurs qui valident en parallèle » reçoit un 409 au lieu d'un 200,
-  # c'est-à-dire que les quatre tentatives de `serializableTransaction` s'épuisent avant que
-  # les deux transactions ne se désynchronisent (120 ms de recul cumulé au pire, pour une
-  # transaction qui lit tout le tricount et ses parts). Ce n'est pas le test qui ment : c'est
-  # un membre qui verrait « Validation concurrente, réessaie » pour avoir cliqué en même
-  # temps qu'un autre. Défaut antérieur à cette CI, à traiter à part.
+  # LE DÉFAUT QUI JUSTIFIAIT CE PARAGRAPHE EST TRAITÉ — reste à le vérifier dans la durée.
+  #
+  # Ce travail échouait environ une fois sur trois : « deux payeurs qui valident en parallèle »
+  # recevait un 409 au lieu d'un 200, parce que les quatre tentatives de
+  # `serializableTransaction` s'épuisaient avant que les transactions ne se désynchronisent.
+  # Ce n'était pas le test qui mentait : c'était un membre qui lisait « Validation concurrente,
+  # réessaie » pour avoir cliqué en même temps qu'un autre.
+  #
+  # Traité dans `src/lib/http-tx.ts` — plancher de recul (un rejeu ne repart plus dans la
+  # milliseconde du gagnant encore en vol), croissance doublée au lieu de linéaire, et six
+  # tentatives au lieu de quatre. Mesuré sur vraie base, six payeurs validant ensemble, 60
+  # tours : 4 échecs avant, 0 après. Le cas est désormais tenu par un test
+  # (`tricount-approve.pg.test.ts`, « six payeurs qui valident ensemble »).
+  #
+  # ⚠️ `continue-on-error` RESTE POSÉ, ET C'EST DÉLIBÉRÉ. La mesure ci-dessus vient d'une
+  # machine de développement ; le runner partagé est plus lent, et c'est précisément là que le
+  # défaut se voyait. À retirer — en même temps que ce paragraphe — une fois ce travail observé
+  # vert sur une dizaine d'exécutions d'affilée, et pas avant : rendre obligatoire un travail
+  # qu'on n'a pas vu tenir, c'est échanger un défaut connu contre des fusions bloquées au
+  # hasard.
   #
   # C'est `verif` qui est la barrière avant fusion. Celui-ci informe.
   pg:
     name: tests sur un vrai Postgres
     runs-on: ubuntu-latest
-    # Un échec ici ne fait pas rougir la CI tant que la contention ci-dessus n'est pas traitée.
+    # Un échec ici ne fait pas rougir la CI tant que la tenue de ce travail n'est pas observée
+    # dans la durée (cf. le paragraphe ci-dessus).
     continue-on-error: true
 
     services:
