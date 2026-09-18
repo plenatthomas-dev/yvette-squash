@@ -6,13 +6,13 @@ import { render, screen, waitFor } from "@testing-library/react";
 // Le menu ⋯ a DEUX façons de traiter une fonction coupée, et elles ne sont pas
 // interchangeables :
 //
-//   1. GRISÉE « 🚧 » — Frais, Tournois, Interclub, Annuaire, Progression. La fonction existe
-//      et arrive : l'entrée grisée est une annonce datée.
-//   2. ABSENTE — Capitaine, et désormais LE FIL. Rien à annoncer : montrer une porte close à
-//      chaque ouverture du menu n'informe personne et n'appelle qu'un clic sans effet.
+//   1. GRISÉE « 🚧 » — Frais, Tournois, Interclub, Annuaire. La fonction existe et arrive :
+//      l'entrée grisée est une annonce datée.
+//   2. ABSENTE — Capitaine, LE FIL et PROGRESSION. Rien à annoncer : montrer une porte close
+//      à chaque ouverture du menu n'informe personne et n'appelle qu'un clic sans effet.
 //
-// Le fil est passé de (1) à (2) : ce fichier empêche qu'un copier-coller de l'entrée voisine
-// le fasse revenir en arrière sans qu'on s'en aperçoive.
+// Le fil puis Progression sont passés de (1) à (2) : ce fichier empêche qu'un copier-coller
+// de l'entrée voisine les fasse revenir en arrière sans qu'on s'en aperçoive.
 
 vi.mock("next/dynamic", () => ({ default: () => () => null }));
 vi.mock("@/components/SettingsButton", () => ({ SettingsButton: () => null }));
@@ -91,6 +91,32 @@ describe("le menu ⋯ face à une fonction coupée", () => {
     const item = await screen.findByTestId("item-forum");
     expect(item.textContent).toBe("Le fil");
     expect(item.dataset.soon).toBe("0");
+  });
+
+  it("N'AFFICHE RIEN pour Progression quand elle est coupée", async () => {
+    await menu();
+    expect(screen.queryByTestId("item-rankhist")).toBeNull();
+    expect(screen.queryByText("Progression")).toBeNull();
+  });
+
+  it("affiche Progression, non grisée, quand ses DEUX interrupteurs sont allumés", async () => {
+    h.features = { ranking: true, rankingHistory: true };
+    await menu();
+    const item = await screen.findByTestId("item-rankhist");
+    expect(item.textContent).toBe("Progression");
+    expect(item.dataset.soon).toBe("0");
+  });
+
+  // `progression` vaut `ranking && rankingHistory` : un seul des deux ne suffit pas, et
+  // l'entrée reste ALORS ABSENTE — pas grisée. C'est le cas qu'on casserait en écrivant
+  // `...(rankingHistory ? …)` par raccourci.
+  it.each([
+    ["ranking seul", { ranking: true }],
+    ["rankingHistory seul", { rankingHistory: true }],
+  ])("garde Progression absente avec %s", async (_nom, features) => {
+    h.features = features;
+    await menu();
+    expect(screen.queryByTestId("item-rankhist")).toBeNull();
   });
 
   // Le contre-exemple : les entrées voisines gardent bien leur « 🚧 ». Sans lui, masquer

@@ -1380,20 +1380,29 @@ export default function Home() {
                   comingSoon: !directory,
                   onClick: () => setDirectoryOpen(true),
                 },
-                {
-                  key: "rankhist",
-                  label: "Progression",
-                  icon: <TrendIcon />,
-                  // Gated sur son PROPRE flag, et non sur `directory` ni sur `ranking` seul.
-                  // La courbe ne montre pas l'annuaire ; et si elle montre bien le classement
-                  // fédéral, elle n'en est pas le badge « 5A » vu dans le temps : celui-ci dit
-                  // où un joueur en est, celle-ci rend lisible à tous les membres le chemin de
-                  // chacun sur trois ans, côte à côte. Une finalité de plus, donc son
-                  // interrupteur (cf. `rankingHistory` dans features.ts).
-                  disabled: !progression,
-                  comingSoon: !progression,
-                  onClick: () => setRankHistOpen(true),
-                },
+                // ABSENTE QUAND ELLE EST COUPÉE, comme Le fil et le capitanat — et non grisée.
+                //
+                // Gated sur son PROPRE flag, et non sur `directory` ni sur `ranking` seul.
+                // La courbe ne montre pas l'annuaire ; et si elle montre bien le classement
+                // fédéral, elle n'en est pas le badge « 5A » vu dans le temps : celui-ci dit
+                // où un joueur en est, celle-ci rend lisible à tous les membres le chemin de
+                // chacun sur trois ans, côte à côte. Une finalité de plus, donc son
+                // interrupteur (cf. `rankingHistory` dans features.ts).
+                //
+                // `progression` vaut `ranking && rankingHistory` : deux interrupteurs, dont
+                // l'un (`ranking`) sert d'abord à autre chose. Un « 🚧 » promettrait une date
+                // que personne ne tient — couper la passe mensuelle suffit à l'allumer, sans
+                // que ce soit jamais la courbe qu'on ait voulu annoncer.
+                ...(progression
+                  ? [
+                      {
+                        key: "rankhist",
+                        label: "Progression",
+                        icon: <TrendIcon />,
+                        onClick: () => setRankHistOpen(true),
+                      },
+                    ]
+                  : []),
                 {
                   key: "share",
                   label: "Partager l'appli",
