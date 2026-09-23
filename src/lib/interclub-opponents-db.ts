@@ -23,9 +23,19 @@ type Db = Pick<Prisma.TransactionClient, "interclub" | "squashnetTeamRoster">;
 type MatchDb = Pick<Prisma.TransactionClient, "interclubMatch">;
 
 /**
- * Profondeur de lecture : les N rencontres LES PLUS RÉCENTES. Une saison en compte cinq à sept ;
- * quarante couvrent donc largement deux saisons à deux équipes, et bornent la requête quoi
- * qu'il arrive.
+ * Profondeur de lecture : les N rencontres LES PLUS RÉCENTES, PAR ÉQUIPE (`where: { teamId }`).
+ *
+ * ⚠️ LE CHIFFRE NE COUVRE PLUS CE QUE CE COMMENTAIRE ANNONÇAIT. Il disait « une saison en
+ * compte cinq à sept, quarante couvrent largement deux saisons à deux équipes » : les deux
+ * moitiés étaient fausses. La lecture est bornée à UNE équipe, jamais aux deux ensemble ; et la
+ * saison 2026-27 en compte VINGT — onze équipes en aller-retour, contre six en simple tour en
+ * 2025-26. Quarante, c'est donc exactement deux saisons de ce format, et une seule si la poule
+ * grossit encore.
+ *
+ * Ce n'est pas une panne, parce que la borne retient les PLUS RÉCENTES : la poule en cours tient
+ * dans les vingt premières, et c'est elle qui sert le menu et la garde. Ce qui tombe au-delà,
+ * ce sont les adversaires des saisons passées — un confort, pas une règle. Mais le jour où l'on
+ * voudra s'appuyer sur l'historique, ce chiffre est à revoir en connaissance de cause.
  *
  * ⚠️ « Les plus récentes » suppose un tri DÉCROISSANT à la lecture — cf. le commentaire des
  * requêtes. Trié croissant, ce même `take` retient les plus ANCIENNES et fige les menus sur la
@@ -45,8 +55,8 @@ export async function loadKnownOpponents(teamId: string, db: Db = prisma): Promi
     where: { teamId },
     // ⚠️ DÉCROISSANT, PUIS REMIS À L'ENDROIT. `take` s'applique APRÈS le tri : en croissant, il
     // retenait les 40 rencontres LES PLUS ANCIENNES, c'est-à-dire exactement celles dont on n'a
-    // plus rien à faire. Passé la quarantième rencontre enregistrée — trois saisons à deux
-    // équipes —, le menu et la garde se figeaient sur la première année et la poule EN COURS
+    // plus rien à faire. Passé la quarantième rencontre enregistrée — deux saisons au format
+    // 2026-27 —, le menu et la garde se figeaient sur la première année et la poule EN COURS
     // disparaissait, sans un message : un club qu'on affronte ce soir n'aurait proposé personne.
     //
     // Le `reverse()` n'est pas cosmétique : `mergeOpponents` retient le nom LE PLUS RÉCENT, ce

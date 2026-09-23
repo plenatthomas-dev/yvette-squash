@@ -10,9 +10,17 @@ import { postAjax } from "./client";
 //  TROIS CHOSES OBSERVÉES SUR LE VRAI SITE, et qui commandent tout ce module :
 //
 //   1. LE PARAMÈTRE `teamid` NE FILTRE RIEN. Avec `roundid`, on reçoit la POULE
-//      ENTIÈRE — mesuré sur la nôtre : six équipes, cinq journées, quinze
-//      rencontres, dont cinq sont les nôtres. C'est donc à nous de retenir les
-//      lignes où notre équipe figure — d'où `ownFixtures`.
+//      ENTIÈRE — mesuré sur la nôtre le 2026-09-23 : onze équipes en aller-retour,
+//      vingt-trois journées, CENT DIX rencontres, dont vingt sont les nôtres.
+//      C'est donc à nous de retenir les lignes où notre équipe figure — d'où
+//      `ownFixtures`. (En 2025-26 la même poule en comptait quinze pour cinq des
+//      nôtres : l'ordre de grandeur n'est pas une constante du format, et rien
+//      ici ne doit en dépendre.)
+//
+//      ⚠️ NOS DEUX ÉQUIPES SONT DANS LA MÊME POULE depuis 2026-27. « Squash de
+//      l'Yvette 1 » est donc un adversaire ordinaire du calendrier de l'équipe 2,
+//      et réciproquement : `ownFixtures` retient bien les deux rencontres qui les
+//      opposent, une fois pour chaque équipe, chacune dans son propre calendrier.
 //
 //   2. LES JOURNÉES NON PLANIFIÉES PORTENT UNE DATE BOUCHON. Sur l'événement
 //      d'essai, J11 à J14 tombent toutes le « mardi 30 juin 2026 ». Prendre
@@ -21,8 +29,9 @@ import { postAjax } from "./client";
 //      marque ces rencontres `dateConfirmed: false`, ce qui suffit à couper
 //      toute notification les concernant.
 //
-//   3. LE JOUR DE LA SEMAINE N'EST PAS GARANTI. L'événement d'essai se joue le
-//      MARDI. Rien ici ne suppose un jeudi : la date vient du calendrier.
+//   3. LE JOUR DE LA SEMAINE N'EST PAS GARANTI. L'épreuve 2025-26 se jouait le
+//      MARDI, celle de 2026-27 le JEUDI. Rien ici ne suppose l'un ni l'autre :
+//      la date vient du calendrier, et elle seule.
 //
 //  Le parsing est PUR et exporté, testé sur fragment réel. Il tolère les
 //  guillemets simples ET doubles : squashnet a basculé tout son HTML des uns

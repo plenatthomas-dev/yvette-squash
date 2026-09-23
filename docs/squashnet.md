@@ -59,6 +59,36 @@ C'est le piège principal de ce site, et il a déjà coûté deux pannes **muett
 | `roundid`   | La POULE             | `370138` = poule IVD             |
 | `teamid`    | L'ÉQUIPE             | `161089`                         |
 
+#### L'ancrage de la saison en cours (2026-27)
+
+Relevé sur squashnet le **2026-09-23**, et vérifié de bout en bout : calendrier
+(`ic_a=393986`), classement (`ic_a=394242`) et rosters (`ic_a=393480`) répondent tous les trois
+sur ces valeurs. C'est ce qu'il faut saisir dans **Admin → Interclub → équipe → « championnat
+squashnet »**, et les quatre vont ensemble.
+
+| | Équipe 1 | Équipe 2 |
+|---|---|---|
+| `snEventId` | `bd775f1a60dbeda0d8f73323538d8404` | idem |
+| `snDrawId` | `52162` | idem |
+| `snRoundId` | `383987` | idem |
+| `snTeamId` | **`176167`** | **`176168`** |
+
+**Nos deux équipes sont dans la MÊME poule** (Hommes 4, poule B) — c'est nouveau, et ça n'a
+rien d'un cas limite : elles se rencontrent à **J7** (2026-12-10, l'équipe 2 reçoit) et **J18**
+(2027-03-18, l'équipe 1 reçoit). Chaque rencontre existe deux fois en base, une par équipe, ce
+que la clé `@@unique([teamId, snMatchKey])` autorise sans rien confondre. L'équipe d'en face
+étant la nôtre, son « roster adverse » est celui que la ligue publie pour notre propre club.
+
+Le format a changé d'échelle : **onze équipes en aller-retour**, soit 23 journées, 110
+rencontres dans la poule et **20 pour chacune de nos équipes** — contre 5 en 2025-26. Deux
+conséquences mesurées plus loin dans le code : la profondeur de lecture des adversaires
+(`MAX_RENCONTRES = 40`) ne couvre plus que deux saisons pour une équipe, et la poule se joue le
+**jeudi** (elle se jouait le mardi l'an dernier — rien ne code un jour en dur).
+
+⚠️ **J20 est publiée hors de l'ordre des dates** : elle tombe le 2027-03-04, donc AVANT J17
+(2027-03-11), J18 et J19. C'est exactement le cas que le rapprochement par JOURNÉE — et non par
+date — existe pour absorber ; il ne demande aucune correction.
+
 - **Sans `roundid`**, le calendrier rend *une* poule au hasard — bien formée, où notre équipe
   ne figure pas. Zéro rencontre importée, aucune erreur.
 - **Sans `drawid`**, le `roundid` du classement est **ignoré** et la fédération rend la
