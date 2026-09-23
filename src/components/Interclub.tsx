@@ -549,6 +549,8 @@ export default function Interclub({
     players: [],
   });
   const [rows, setRows] = useState<FixtureRow[] | null>(null);
+  /** La route a-t-elle coupé la liste ? Affiché, jamais tu — cf. `loadList`. */
+  const [truncated, setTruncated] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [fixture, setFixture] = useState<Fixture | null>(null);
   const [creating, setCreating] = useState(false);
@@ -594,13 +596,35 @@ export default function Interclub({
     [],
   );
 
+  // ⚠️ LA LIMITE EST DEMANDÉE, ET C'EST LE PLAFOND DE LA ROUTE.
+  //
+  // Cet appel partait NU, donc avec le défaut de la route : VINGT rencontres, toutes équipes
+  // confondues. Ça a tenu tant qu'une saison en comptait cinq par équipe. La poule 2026-27 en
+  // compte vingt, et nos deux équipes y jouent : quarante lignes, coupées à vingt.
+  //
+  // Et la coupe tombait du mauvais côté. Le serveur trie par date DÉCROISSANTE : les vingt
+  // servies étaient donc les vingt DERNIÈRES de la saison, et ce qui manquait était exactement
+  // ce qu'on vient chercher en ouvrant l'écran — les prochaines journées. Le calendrier
+  // s'ouvrait sur J13. Le tri « à venir d'abord » plus bas ne pouvait rien y faire : on ne
+  // trie pas ce qu'on n'a pas reçu.
+  //
+  // Le filtrage par onglet aggravait le tout, parce qu'il est CLIENT (`f.team.id === tab`) : il
+  // découpait dans les vingt déjà coupées, laissant une dizaine de lignes par équipe.
+  //
+  // Cent, c'est le plafond de la route. Au format 2026-27 — deux équipes, vingt journées — cela
+  // couvre deux saisons et demie, et ce qui tombe au-delà est TOUJOURS le plus ancien (tri
+  // décroissant) : la saison en cours y est entière quoi qu'il arrive. `hasMore` dit le reste.
   const loadList = useCallback(async () => {
     try {
-      const res = await fetch("/api/interclub", { cache: "no-store" });
+      const res = await fetch("/api/interclub?limit=100", { cache: "no-store" });
       if (onExpiredRef.current(res.status)) return;
-      const data = await readOk<{ teams: Team[]; fixtures: FixtureRow[] }>(res);
+      const data = await readOk<{ teams: Team[]; fixtures: FixtureRow[]; hasMore?: boolean }>(res);
       setTeams(data.teams);
       setRows(data.fixtures);
+      // La route renvoyait `hasMore` depuis toujours et PERSONNE NE LE LISAIT : une liste
+      // tronquée était indiscernable d'une liste complète. C'est ce silence qui a fait chercher
+      // la panne du côté de l'import, où il n'y avait rien.
+      setTruncated(Boolean(data.hasMore));
     } catch (e) {
       setRows([]);
       toastRef.current("err", (e as Error).message);
@@ -950,6 +974,16 @@ export default function Interclub({
         >
           {visibleRows.length === 0 && (
             <li className="ic-empty-tab muted">Aucune rencontre pour cette équipe.</li>
+          )}
+          {/* Une liste coupée le DIT. Elle ne l'a pas dit pendant toute une saison, et le
+              calendrier paraissait simplement commencer à J13. Ce qui manque est toujours le
+              plus ancien (le serveur trie par date décroissante), donc jamais la saison en
+              cours — d'où une phrase et pas un bouton. */}
+          {truncated && (
+            <li className="ic-empty-tab muted">
+              Seules les cent rencontres les plus récentes sont affichées — les saisons les plus
+              anciennes ne figurent pas dans cette liste.
+            </li>
           )}
           {visibleRows.map((f) => (
             <li key={f.id}>
