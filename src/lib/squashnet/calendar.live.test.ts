@@ -14,26 +14,35 @@ import { fetchTeamCalendar, ownFixtures } from "./calendar";
 //
 //     npx vitest run src/lib/squashnet/calendar.live.test.ts -t "" --reporter=verbose
 //
-// en remplaçant `describe.skip` par `describe` le temps de la mesure. Ce qu'on regarde : le
-// nombre de rencontres (TROIS par journée dans notre poule — six équipes, donc trois
-// rencontres ; la fixture figée en compte quinze pour cinq journées), les dates, et que les
-// journées non planifiées ressortent bien en `dateConfirmed: false`.
+// en remplaçant `describe.skip` par `describe` le temps de la mesure.
 //
-// L'événement visé est le Critérium IDF Hommes 2025-26, Hommes 4, poule IVD — CELUI DE NOTRE
-// ÉQUIPE, et c'est important : une sonde branchée sur la poule de quelqu'un d'autre resterait
+// L'événement visé est le Critérium IDF Hommes 2026-27, Hommes 4, poule B — CELUI DE NOS
+// ÉQUIPES, et c'est important : une sonde branchée sur la poule de quelqu'un d'autre resterait
 // verte le jour où notre ancrage est faux. Il finira par disparaître ; le remplacer par
 // l'épreuve de la saison en cours fait partie de l'usage de cette sonde.
-//
-// Dernière mesure, le 2026-09-04 : 15 rencontres dans la poule, 5 pour nous, aucune date
-// prévisionnelle.
-const EVENT_ESSAI = "879981be57df0005cac674dce4378296";
-/** La POULE de notre équipe dans cette épreuve (Hommes 4 - Poule IVD). SANS ELLE, ON REÇOIT
+const EVENT_ESSAI = "bd775f1a60dbeda0d8f73323538d8404";
+/** La POULE de nos équipes dans cette épreuve (Hommes 4 - poule B). SANS ELLE, ON REÇOIT
  *  une autre poule, où l'Yvette ne figure pas — et la sonde mesurerait le calendrier de
  *  quelqu'un d'autre en le croyant vert. */
-const POULE_ESSAI = "370138";
-/** Notre `data-teamid` dans cette poule. */
-const EQUIPE_ESSAI = "161092";
+const POULE_ESSAI = "383987";
 
+/**
+ * NOS DEUX ÉQUIPES SONT DANS LA MÊME POULE cette saison, et la sonde les mesure toutes les deux.
+ *
+ * Ce n'est pas un détail de confort : l'ancrage se règle par équipe, et une sonde qui n'en
+ * vérifierait qu'une resterait verte le jour où l'autre pointe la mauvaise poule. Elles se
+ * rencontrent d'ailleurs deux fois (J7 et J18), ce qui fait de « Squash de l'Yvette 1 » un
+ * adversaire ordinaire du calendrier de l'équipe 2, et réciproquement.
+ */
+const EQUIPES_ESSAI = [
+  { nom: "Yvette 1", snTeamId: "176167" },
+  { nom: "Yvette 2", snTeamId: "176168" },
+];
+
+// Dernière mesure, le 2026-09-23 : ONZE équipes en aller-retour, soit 23 journées et 110
+// rencontres dans la poule, 20 pour chacune des nôtres, aucune date prévisionnelle. Le format
+// a changé d'échelle depuis 2025-26 (six équipes, cinq journées, quinze rencontres) : c'est
+// pourquoi les bornes ci-dessous ne figent aucun chiffre, seulement l'ordre de grandeur.
 describe.skip("calendrier squashnet — sonde réseau manuelle", () => {
   it("le format publié est toujours celui que le parsing attend", async () => {
     const ties = await fetchTeamCalendar(EVENT_ESSAI, POULE_ESSAI);
@@ -41,13 +50,15 @@ describe.skip("calendrier squashnet — sonde réseau manuelle", () => {
     console.log([...new Set(ties.map((t) => `${t.round} = ${t.date} ${t.time}`))].join("\n"));
     console.log(JSON.stringify(ties[0], null, 2));
 
-    // NOTRE équipe, et pas une équipe quelconque : c'est le chemin réel de l'import, filtrage
-    // compris. Zéro ici voudrait dire que l'ancrage désigne une poule où l'on ne joue pas.
-    const own = ownFixtures(ties, EQUIPE_ESSAI);
-    console.log(`nos rencontres : ${own.length}`);
-    console.log(own.map((t) => `${t.round} ${t.date} ${t.home ? "dom." : "ext."} ${t.opponent}`).join(" | "));
-    console.log(`non confirmées : ${own.filter((t) => !t.dateConfirmed).map((t) => t.round).join(", ")}`);
-    expect(own.length).toBeGreaterThan(0);
+    for (const { nom, snTeamId } of EQUIPES_ESSAI) {
+      // NOS équipes, et pas une équipe quelconque : c'est le chemin réel de l'import, filtrage
+      // compris. Zéro ici voudrait dire que l'ancrage désigne une poule où l'on ne joue pas.
+      const own = ownFixtures(ties, snTeamId);
+      console.log(`\n${nom} — nos rencontres : ${own.length}`);
+      console.log(own.map((t) => `${t.round} ${t.date} ${t.home ? "dom." : "ext."} ${t.opponent}`).join(" | "));
+      console.log(`non confirmées : ${own.filter((t) => !t.dateConfirmed).map((t) => t.round).join(", ")}`);
+      expect(own.length).toBeGreaterThan(0);
+    }
 
     expect(ties.length).toBeGreaterThan(0);
     expect(ties[0].date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
