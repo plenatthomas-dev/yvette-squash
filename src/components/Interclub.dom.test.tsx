@@ -97,8 +97,11 @@ describe("Interclub — indépendance au rendu du parent", () => {
     // …et il ne se rejoue pas, alors que le `catch` vient de toaster et donc de rendre le parent.
     await respire();
 
-    expect(compte("/api/interclub?")).toBe(0); // pas de variante paramétrée : la liste est entière
-    expect(calls.filter((u) => u.endsWith("/api/interclub")).length).toBe(1);
+    // UNE seule requête de liste — c'est tout l'objet de ce fichier. Elle porte `limit=100`
+    // depuis que deux équipes jouent vingt journées chacune : le défaut de la route (vingt)
+    // coupait la saison en cours par le milieu. On compte donc l'URL EXACTE, ce qui reste une
+    // assertion sur le nombre d'appels et non sur leur forme.
+    expect(calls.filter((u) => u === "/api/interclub?limit=100").length).toBe(1);
     expect(calls.length).toBeLessThan(PLAFOND);
   });
 
