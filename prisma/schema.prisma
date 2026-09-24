@@ -132,6 +132,24 @@ model User {
   // ici on répare la recherche, et le classement continue de se mettre à jour tout seul.
   squashnetGivenName       String?
   squashnetFamilyName      String?
+  // --- Rapprochement avec NOTRE FICHE D'ÉQUIPE fédérale (cf. lib/interclub-federal.ts) --------
+  //
+  // TROISIÈME SOURCE, ET LA SEULE QUI CONNAISSE LES NC. Le classement national
+  // (`squashnetRanking` ci-dessus) ne contient QUE les joueurs classés : mesuré le 2026-09-24,
+  // sept des huit inscrits de Verrieres 4 y sont introuvables. Ils sont pourtant licenciés et
+  // alignables. La fiche d'équipe (`ic_a=393480`), elle, les publie tous.
+  //
+  // ⚠️ COLONNES DISTINCTES DE `SquashnetRanking`, ET CE N'EST PAS UNE DUPLICATION. Ce sont deux
+  // lectures fédérales différentes, et la passe MENSUELLE écrit la première : les confondre
+  // ferait effacer un rapprochement de fiche par un run de classement, sans rien pour le dire.
+  // La priorité de lecture est dans `interclub-roster.ts` : correction admin, puis classement
+  // national, puis fiche d'équipe — cette dernière ne comble donc que le trou.
+  snLicence                String? // licence lue sur NOTRE fiche — la clé de tout le reste
+  snRosterClt              String? // « NC », « 4D »… tel que la fiche le publie
+  // ⚠️ NULL POUR UN NC, JAMAIS 9311. La fiche porte 9311 pour tous les non-classés : c'est une
+  // sentinelle, pas un rang (cf. `rangMUtile`). L'écrire les placerait au 9311e rang national.
+  snRosterRangM            Int?
+  snRosterAt               DateTime? // quand le rapprochement a été fait — « pas regardé » ≠ « rien »
   interclubsCreated        Interclub[]             @relation("InterclubCreator")
   interclubPlayed          InterclubMatch[]        @relation("InterclubHomePlayer")
   interclubScored          InterclubMatch[]        @relation("InterclubScorer")
@@ -859,6 +877,13 @@ model InterclubGuest {
   // NULL = jamais tenté.
   snStatus       String?
   snCheckedAt    DateTime? // dernière TENTATIVE (réussie ou non), pas le dernier succès
+  // --- Rapprochement avec NOTRE FICHE D'ÉQUIPE fédérale (cf. lib/interclub-federal.ts) --------
+  // Mêmes deux valeurs que côté membre, mêmes raisons (cf. `User.snRosterClt`). `snLicence`
+  // ci-dessus sert de clé aux deux sources : c'est le seul identifiant fédéral, et il ne
+  // dépend d'aucune des deux lectures.
+  rosterClt      String?
+  rosterRangM    Int? // null pour un NC — la sentinelle 9311 n'est pas un rang
+  rosterAt       DateTime?
   createdAt      DateTime                @default(now())
   matches        InterclubMatch[]        @relation("InterclubHomeGuest")
   availability   InterclubAvailability[]

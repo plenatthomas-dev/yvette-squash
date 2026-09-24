@@ -4,6 +4,8 @@ import { requireAdmin, isAdminEmail } from "@/lib/admin";
 import { listMembers, deleteBlockersFor } from "@/lib/members";
 import { getFeatures } from "@/lib/features-server";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
+import { doublonsAppli } from "@/lib/interclub-federal";
+import { joueursDeLEquipe } from "@/lib/interclub-federal-db";
 import { parseClassementInput, parseRangMInput } from "@/lib/interclub-order";
 import { refreshMemberRanking } from "@/lib/squashnet/refresh";
 import { createEmailToken, authLinkFor, clientIp } from "@/lib/email-auth";
@@ -202,7 +204,23 @@ export async function POST(req: NextRequest) {
         data: { captainId: null },
       });
     });
-    return NextResponse.json({ ok: true, teamId });
+
+    // ─── LE DOUBLON QUI ARRIVE TOUT SEUL ────────────────────────────────────────────────────
+    //
+    // C'est ICI qu'il naît, et nulle part ailleurs. On inscrit au roster, depuis la fiche
+    // fédérale, un joueur qui n'a pas de compte : il devient un INVITÉ. Puis un jour il ouvre
+    // l'appli, et c'est ce geste-ci — le rattacher à son équipe — qui fait exister la même
+    // personne deux fois. Le menu de composition la propose alors deux fois, avec deux
+    // classements qui peuvent diverger, et rien ne le signale.
+    //
+    // On ne fusionne SURTOUT PAS d'office : deux homonymes existent, et fondre le mauvais
+    // effacerait un joueur. On rend le soupçon, l'écran propose, l'admin tranche
+    // (`promote_guest`, api/admin/interclub-roster).
+    const doublon = teamId
+      ? (doublonsAppli(await joueursDeLEquipe(teamId)).find((d) => d.membre.id === target.id) ??
+        null)
+      : null;
+    return NextResponse.json({ ok: true, teamId, doublon });
   }
 
   if (action === "set_clt_override") {

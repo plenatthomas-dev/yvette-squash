@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { getFeatures } from "@/lib/features-server";
-import { allTeamGuests } from "@/lib/interclub-roster";
+import { allTeamGuests, memberClt, memberRangM } from "@/lib/interclub-roster";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,6 +62,11 @@ export async function GET(req: NextRequest) {
         // interclub s'en sert, un admin peut en forcer un — le taire ici laisserait l'annuaire
         // trier un membre corrigé à une place que plus rien ne justifie.
         interclubRangMOverride: ranking,
+        // Le TROISIÈME étage : notre fiche d'équipe fédérale. Sans lui, `memberClt` répondrait
+        // ici moins bien qu'ailleurs — et c'est précisément le genre d'oubli qui a fait qu'un
+        // membre non classé s'affichait « NC » en composition et sans rien à l'annuaire.
+        snRosterClt: ranking,
+        snRosterRangM: ranking,
         // Équipe interclub où le membre est aligné : jointure seulement si la fonction est active.
         team: interclub ? { select: { id: true, name: true } } : false,
       },
@@ -89,19 +94,23 @@ export async function GET(req: NextRequest) {
   // échelle comparable entre tous) + cat (info-bulle) ; jamais la licence ni le club
   // (données de traçabilité internes).
   //
-  // `clt` ET `rangM` PRIORISENT la correction admin (`interclubCltOverride`,
-  // `interclubRangMOverride`) sur le rapprochement squashnet — même règle qu'en composition
-  // d'interclub (`memberClt`/`memberRangM`, `interclub-roster.ts`) : c'est ce qui rend visible
-  // le classement d'un membre jamais rapproché (pas encore licencié, licence mal orthographiée
-  // côté ResaMania…) sans attendre que squashnet le résolve de lui-même.
+  // `clt` ET `rangM` viennent de `memberClt`/`memberRangM` (`interclub-roster.ts`), APPELÉS et
+  // non recopiés. Cette chaîne était réécrite ici à deux étages, et elle a manqué le troisième
+  // le jour où il est arrivé : un membre non classé s'affichait « NC » en composition et sans
+  // rien du tout à l'annuaire, pour la même personne et le même jour.
+  //
+  // Ses trois étages : la correction admin, puis le classement national rapproché, puis NOTRE
+  // fiche d'équipe fédérale. C'est ce qui rend visible le classement d'un membre que le
+  // classement national ne connaît pas — un NC licencié qui n'a jamais joué de match, cas de
+  // loin le plus courant dans un club de loisir.
   //
   // `rang` (le rang DANS SON GENRE) et `cat`, eux, ne viennent QUE du rapprochement : ils ne
   // se corrigent nulle part, faute d'un écran qui les demande — le premier ne sert qu'aux têtes
   // de série du tournoi, le second qu'à une info-bulle.
   const memberRows = users
     .map((u) => {
-      const clt = u.interclubCltOverride ?? u.squashnetRanking?.clt ?? null;
-      const rangM = u.interclubRangMOverride ?? u.squashnetRanking?.rangM ?? null;
+      const clt = memberClt(u);
+      const rangM = memberRangM(u);
       return {
         id: u.id,
         kind: "member" as const,
