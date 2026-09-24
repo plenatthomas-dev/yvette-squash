@@ -240,6 +240,17 @@ describe("bloc de disponibilité — répondre", () => {
     expect(puts()).toEqual([{ status: null }]);
   });
 
+  it("ANNONCE le geste d'annulation EN TEXTE, pas seulement dans un `title`", async () => {
+    // Le `title` du bouton retenu demande un survol : sur téléphone — où ce bloc est presque
+    // toujours ouvert — il n'existe pas, et la fonction restait introuvable. La ligne est là
+    // avant le premier appui, y compris quand personne n'a encore répondu.
+    await monte([entree({ key: "u1", name: "Thomas" })]);
+
+    expect(
+      screen.getByText(/Toucher à nouveau la réponse retenue l'annule/),
+    ).toBeTruthy();
+  });
+
   it("annule aussi la réponse d'un COÉQUIPIER, en le désignant", async () => {
     await monte([
       entree({ key: "u1", name: "Thomas" }),
