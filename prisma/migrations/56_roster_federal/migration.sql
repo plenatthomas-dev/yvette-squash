@@ -21,6 +21,16 @@
 --
 -- Rejouable : la base de recette est partagée par toutes les previews, et une branche voisine
 -- peut avoir déjà posé ces colonnes (cf. prisma/migrations/README.md).
+--
+-- PROUVÉE SUR DOCKER LE 2026-09-24, dans les trois cas qui comptent :
+--   * base VIERGE : `migrate deploy` des 56 migrations, puis `migrate diff --exit-code`
+--     contre le schéma → « No difference detected » ;
+--   * base PEUPLÉE au stade 55 (un membre avec ses corrections admin, un invité avec son
+--     rapprochement de classement) : après application, les données sont intactes et les sept
+--     colonnes sont là, à NULL. Aucune valeur n'est inventée — c'est bien ce qu'on veut, un
+--     rapprochement de fiche ne se devine pas ;
+--   * REJOUÉE telle quelle sur la base déjà migrée : sept NOTICE « already exists, skipping »,
+--     sortie 0. C'est ce qui permet à la base `dev` partagée de se réparer d'elle-même.
 
 ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "snLicence" TEXT;
 ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "snRosterClt" TEXT;
