@@ -173,14 +173,40 @@ export async function allTeamMembers(): Promise<TeamMemberEntry[]> {
 // ---------------------------------------------------------------------------
 //  Le CLASSEMENT EFFECTIF d'un joueur — une seule définition, deux populations.
 //
-//  Membres et invités ont désormais la même structure : une correction ADMIN, prioritaire, et
-//  un RAPPROCHEMENT squashnet en dessous. Les colonnes diffèrent (un membre porte son
-//  rapprochement dans une table à part, un invité à plat), la RÈGLE non — d'où quatre
-//  accesseurs symétriques plutôt qu'un `??` recopié à chaque requête, où l'un des deux finit
-//  toujours par oublier l'override.
+//  Membres et invités ont la même structure, et désormais TROIS ÉTAGES :
+//
+//    1. la correction ADMIN, prioritaire — elle existe pour rattraper les deux autres ;
+//    2. le CLASSEMENT NATIONAL rapproché (`ic_a=131079`, passe mensuelle) ;
+//    3. NOTRE FICHE D'ÉQUIPE fédérale (`ic_a=393480`, cf. `interclub-federal.ts`).
+//
+//  POURQUOI UN TROISIÈME. Le classement national ne contient QUE les joueurs classés : mesuré
+//  le 2026-09-24, sept des huit inscrits d'une équipe de D4 y sont introuvables. Ils sont
+//  pourtant licenciés et alignables. Sans cet étage, chacun d'eux réclame une correction admin
+//  à la main, à refaire saison après saison — le geste que l'étage 1 devrait pouvoir rattraper,
+//  pas porter seul.
+//
+//  L'ORDRE COMPTE, ET C'EST 2 AVANT 3. Le classement national bouge tous les mois ; la fiche
+//  d'équipe est figée sur la saison. Un joueur qui monte de classement en cours d'année le voit
+//  donc tout de suite. La fiche NE COMBLE QUE LE TROU — c'est-à-dire, en pratique, les NC.
+//
+//  Les colonnes diffèrent (un membre porte son rapprochement de classement dans une table à
+//  part, un invité à plat), la RÈGLE non — d'où quatre accesseurs symétriques plutôt qu'un `??`
+//  recopié à chaque requête, où l'un des trois finit toujours par manquer.
 // ---------------------------------------------------------------------------
 
-/** Les colonnes qu'il faut lire sur un membre pour établir son classement effectif. */
+/**
+ * Les colonnes qu'il faut lire sur un membre pour établir son classement effectif — SANS son
+ * identité, pour que les écrans qui sélectionnent déjà la leur puissent s'en servir tel quel.
+ */
+export const MEMBER_CLT_SELECT = {
+  interclubCltOverride: true,
+  interclubRangMOverride: true,
+  squashnetRanking: { select: { clt: true, rangM: true } },
+  snRosterClt: true,
+  snRosterRangM: true,
+} as const;
+
+/** Idem, plus ce qu'il faut pour NOMMER le membre — ce dont le roster de composition a besoin. */
 const MEMBER_RANKING_SELECT = {
   id: true,
   displayName: true,
@@ -188,9 +214,11 @@ const MEMBER_RANKING_SELECT = {
   interclubCltOverride: true,
   interclubRangMOverride: true,
   squashnetRanking: { select: { clt: true, rangM: true } },
+  snRosterClt: true,
+  snRosterRangM: true,
 } as const;
 
-/** Idem pour un invité — mêmes deux étages, colonnes à plat. */
+/** Idem pour un invité — mêmes trois étages, colonnes à plat. */
 const GUEST_RANKING_SELECT = {
   id: true,
   teamId: true,
@@ -199,6 +227,8 @@ const GUEST_RANKING_SELECT = {
   rangMOverride: true,
   snClt: true,
   snRangM: true,
+  rosterClt: true,
+  rosterRangM: true,
 } as const;
 
 /** La forme minimale que `memberClt`/`memberRangM` savent lire. */
@@ -206,6 +236,8 @@ interface MemberRanking {
   interclubCltOverride: string | null;
   interclubRangMOverride: number | null;
   squashnetRanking: { clt: string; rangM?: number | null } | null;
+  snRosterClt?: string | null;
+  snRosterRangM?: number | null;
 }
 
 /** La forme minimale que `guestClt`/`guestRangM` savent lire. */
@@ -214,37 +246,50 @@ interface GuestRanking {
   rangMOverride: number | null;
   snClt: string | null;
   snRangM: number | null;
+  rosterClt?: string | null;
+  rosterRangM?: number | null;
 }
 
 /**
- * Classement effectif d'un membre : la correction admin si posée, sinon le dernier
- * rapprochement squashnet. PRIORITÉ à la correction — c'est tout son objet : corriger un
- * rapprochement qui s'est trompé (nom mal orthographié côté ResaMania, licence pas encore
- * rapprochée…) sans attendre que squashnet se corrige de lui-même le mois suivant.
+ * Classement effectif d'un membre : la correction admin si posée, sinon le classement national
+ * rapproché, sinon notre fiche d'équipe fédérale. PRIORITÉ à la correction — c'est tout son
+ * objet : corriger un rapprochement qui s'est trompé (nom mal orthographié côté ResaMania,
+ * homonyme…) sans attendre que squashnet se corrige de lui-même le mois suivant.
+ *
+ * EXPORTÉ, et il faut que ça le reste : deux écrans calculaient cette chaîne pour leur compte
+ * (`lib/members.ts`, `api/directory`). Ils ont manqué le troisième étage le jour où il est
+ * arrivé, et le même membre s'affichait « NC » en composition et sans classement à l'annuaire.
+ * Une définition, trois lecteurs.
  */
-function memberClt(u: MemberRanking): string | null {
-  return u.interclubCltOverride ?? u.squashnetRanking?.clt ?? null;
+export function memberClt(u: MemberRanking): string | null {
+  return u.interclubCltOverride ?? u.squashnetRanking?.clt ?? u.snRosterClt ?? null;
 }
 
 /**
  * Rang mixte effectif d'un membre, MÊME priorité que `memberClt`.
  *
- * ⚠️ Les deux corrections sont INDÉPENDANTES : forcer le classement ne force pas le rang, et
- * réciproquement. Un membre dont le rapprochement squashnet est bon mais le classement
- * fraîchement monté garde ainsi son rang rapproché, sans qu'un admin ait à le recopier.
+ * ⚠️ Les trois étages sont INDÉPENDANTS d'un champ à l'autre : forcer le classement ne force
+ * pas le rang, et réciproquement. Un membre dont le rapprochement squashnet est bon mais le
+ * classement fraîchement monté garde ainsi son rang rapproché, sans qu'un admin le recopie.
+ *
+ * ⚠️ `snRosterRangM` EST NUL POUR UN NC, et c'est voulu : la fédération publie 9311 pour tous
+ * les non-classés, une sentinelle que `rangMUtile` (`interclub-federal.ts`) refuse d'écrire. Un
+ * NC est alignable sans rang mixte (cf. `isNC`), donc ce nul ne coûte rien.
+ *
+ * EXPORTÉ pour la même raison que `memberClt`.
  */
-function memberRangM(u: MemberRanking): number | null {
-  return u.interclubRangMOverride ?? u.squashnetRanking?.rangM ?? null;
+export function memberRangM(u: MemberRanking): number | null {
+  return u.interclubRangMOverride ?? u.squashnetRanking?.rangM ?? u.snRosterRangM ?? null;
 }
 
 /** Classement effectif d'un invité — même règle, autres colonnes (cf. `MEMBER_RANKING_SELECT`). */
 function guestClt(g: GuestRanking): string | null {
-  return g.cltOverride ?? g.snClt ?? null;
+  return g.cltOverride ?? g.snClt ?? g.rosterClt ?? null;
 }
 
 /** Rang mixte effectif d'un invité — même règle, autres colonnes. */
 function guestRangM(g: GuestRanking): number | null {
-  return g.rangMOverride ?? g.snRangM ?? null;
+  return g.rangMOverride ?? g.snRangM ?? g.rosterRangM ?? null;
 }
 
 /**

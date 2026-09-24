@@ -31,9 +31,18 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 // Le classement effectif d'un joueur sans compte est résolu par `interclub-roster` (correction
-// admin sinon rapprochement squashnet), éprouvé chez lui : ici on vérifie ce que la route en
-// FAIT, pas comment il est calculé.
-vi.mock("@/lib/interclub-roster", () => ({ allTeamGuests: vi.fn(async () => h.guests) }));
+// admin, sinon classement national, sinon fiche d'équipe fédérale), éprouvé chez lui : ici on
+// vérifie ce que la route en FAIT, pas comment il est calculé.
+//
+// ⚠️ SEUL `allTeamGuests` EST BOUCHONNÉ, et `memberClt`/`memberRangM` sont les VRAIS. Ce sont
+// eux que la route appelle désormais au lieu de recopier la chaîne de priorité — la recopier
+// lui avait fait manquer le troisième étage, et un membre non classé s'affichait « NC » en
+// composition et sans rien ici. Les bouchonner referait de cette route un lecteur autonome,
+// c'est-à-dire exactement ce qu'on vient de corriger.
+vi.mock("@/lib/interclub-roster", async () => ({
+  ...(await vi.importActual<typeof import("@/lib/interclub-roster")>("@/lib/interclub-roster")),
+  allTeamGuests: vi.fn(async () => h.guests),
+}));
 
 import { GET } from "./route";
 

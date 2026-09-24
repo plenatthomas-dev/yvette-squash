@@ -41,13 +41,13 @@ type Member = {
   // d'une correction déjà posée avant d'écraser l'un ou l'autre.
   clt: string | null;
   cltOverride: string | null;
-  cltSource: "override" | "squashnet" | null;
+  cltSource: "override" | "squashnet" | "roster" | null;
   // Le RANG MIXTE, exactement de la même façon : c'est le SECOND critère de l'ordre des simples
   // (il départage deux joueurs de même classement), donc un membre non-NC qui n'en a pas ne
   // peut être aligné nulle part — d'où une correction propre, à côté de celle du classement.
   rangM: number | null;
   rangMOverride: number | null;
-  rangMSource: "override" | "squashnet" | null;
+  rangMSource: "override" | "squashnet" | "roster" | null;
   // Nom sous lequel CHERCHER ce membre sur squashnet, quand celui venu de ResaMania ne permet
   // pas de l'y retrouver. Rien à voir avec les deux corrections ci-dessus : celles-là FIGENT une
   // valeur, celui-ci répare la recherche et laisse le classement continuer de se rafraîchir.
@@ -580,15 +580,31 @@ export default function MembersPage() {
                       </span>
                     )}
 
+                    {/* LA FICHE D'ÉQUIPE A RÉPONDU LÀ OÙ LE CLASSEMENT SE TAIT, et ce n'est
+                        pas un pis-aller : le classement national ne contient que les joueurs
+                        classés, et un NC licencié n'y aura jamais de ligne. Afficher « jamais
+                        retrouvé » sur lui serait faux, et enverrait corriger une orthographe
+                        déjà juste — c'est arrivé, et ça a coûté une heure. */}
+                    {m.cltSource === "roster" && (
+                      <span className="muted">
+                        Classement lu sur la fiche d&apos;équipe fédérale
+                        {m.clt === "NC" ? " (non classé : c'est son vrai statut)" : ""}.
+                      </span>
+                    )}
+
                     {/* Signal PERMANENT, lui : ce membre n'a jamais été retrouvé. C'est
                         exactement ce silence qui laissait passer le défaut — un joueur qu'on
                         croyait classé et qu'aucun rapprochement n'avait jamais atteint. Tu ne
-                        l'affiches pas si une correction manuelle couvre déjà le besoin. */}
-                    {!m.squashnetMatched && m.cltSource !== "override" && snStatus?.id !== m.id && (
-                      <span className="muted" style={{ color: "var(--warn-fg)" }}>
-                        ⚠️ Jamais retrouvé sur squashnet.
-                      </span>
-                    )}
+                        l'affiches pas si une correction manuelle, ou la fiche d'équipe,
+                        couvre déjà le besoin. */}
+                    {!m.squashnetMatched &&
+                      m.cltSource !== "override" &&
+                      m.cltSource !== "roster" &&
+                      snStatus?.id !== m.id && (
+                        <span className="muted" style={{ color: "var(--warn-fg)" }}>
+                          ⚠️ Jamais retrouvé sur squashnet.
+                        </span>
+                      )}
                   </div>
                 )}
 
@@ -617,9 +633,14 @@ export default function MembersPage() {
                         style={{ flex: 1, minWidth: 0, margin: 0 }}
                       >
                         <option value="">
-                          {m.cltSource === "squashnet" && m.clt
+                          {/* NOMMER LA SOURCE, et pas seulement la valeur : « squashnet » sur
+                              un classement venu de la fiche d'équipe enverrait le chercher au
+                              classement national, où il n'est pas. */}
+                          {m.clt && m.cltSource === "squashnet"
                             ? `— aucune (squashnet : ${m.clt}) —`
-                            : "— aucune correction —"}
+                            : m.clt && m.cltSource === "roster"
+                              ? `— aucune (fiche d'équipe : ${m.clt}) —`
+                              : "— aucune correction —"}
                         </option>
                         {KNOWN_CLASSEMENTS.map((c) => (
                           <option key={c} value={c}>
@@ -651,11 +672,13 @@ export default function MembersPage() {
                         aria-label={`Rang mixte interclub forcé pour ${m.displayName}`}
                         title="Écrase le rang mixte squashnet. Départage les joueurs de même classement. Inutile pour un NC."
                         placeholder={
-                          m.rangMSource === "squashnet" && m.rangM != null
+                          m.rangM != null && m.rangMSource === "squashnet"
                             ? `squashnet : ${m.rangM}`
-                            : m.clt === "NC"
-                              ? "inutile (NC)"
-                              : "aucun"
+                            : m.rangM != null && m.rangMSource === "roster"
+                              ? `fiche d'équipe : ${m.rangM}`
+                              : m.clt === "NC"
+                                ? "inutile (NC)"
+                                : "aucun"
                         }
                         style={{ flex: "0 1 7.5rem", minWidth: 0, margin: 0 }}
                       />

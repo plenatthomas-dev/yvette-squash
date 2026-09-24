@@ -50,21 +50,30 @@ jobs:
       # que de lui donner une base.
       - run: npm test
 
-  # ⚠️ CE TRAVAIL N'EST PAS ENCORE FIABLE À 100 %, ET IL NE FAUT PAS LE RENDRE OBLIGATOIRE
-  # TANT QUE ÇA DURE. Mesuré en local : `tricount-approve.pg.test.ts` échoue environ une fois
-  # sur trois — « deux payeurs qui valident en parallèle » reçoit un 409 au lieu d'un 200,
-  # c'est-à-dire que les quatre tentatives de `serializableTransaction` s'épuisent avant que
-  # les deux transactions ne se désynchronisent (120 ms de recul cumulé au pire, pour une
-  # transaction qui lit tout le tricount et ses parts). Ce n'est pas le test qui ment : c'est
-  # un membre qui verrait « Validation concurrente, réessaie » pour avoir cliqué en même
-  # temps qu'un autre. Défaut antérieur à cette CI, à traiter à part.
+  # LA CONTENTION QUI RENDAIT CE TRAVAIL PEU FIABLE EST TRAITÉE (2026-09-24).
   #
-  # C'est `verif` qui est la barrière avant fusion. Celui-ci informe.
+  # Ce qu'on lisait ici : « `tricount-approve.pg.test.ts` échoue environ une fois sur trois —
+  # deux payeurs qui valident en parallèle reçoivent un 409 au lieu d'un 200 ». Le diagnostic
+  # était bon et la cause n'était pas dans la route : les quatre tentatives de
+  # `serializableTransaction` s'épuisaient en 120 ms de recul cumulé au pire, moins que la durée
+  # de la transaction concurrente, si bien que les deux écrivains se rattrapaient à chaque tour.
+  # Le défaut touchait donc les dix-huit routes qui rejouent, pas une.
+  #
+  # Corrigé dans `src/lib/http-tx.ts` : recul EXPONENTIEL au lieu de linéaire (20, 40, 80, 160,
+  # 320 ms, tirés au sort sur toute leur largeur) et six tentatives au lieu de quatre — 620 ms
+  # cumulées au pire contre 120.
+  #
+  # MESURE, sur Postgres local, suite `test:pg` complète : AVANT, un échec sur six exécutions
+  # (celui-là sur `tricount-refunds.pg.test.ts`, même mode de panne). APRÈS, douze exécutions
+  # d'affilée sans un seul échec.
+  #
+  # ⚠️ Douze exécutions vertes réduisent la probabilité, elles ne la mettent pas à zéro : ces
+  # tests mesurent une COURSE, et une machine de CI partagée n'a pas les temps d'un poste de
+  # développement. Si un échec revient ici, c'est un vrai signal de contention — le rejouer sans
+  # le lire serait reprendre le défaut par l'autre bout.
   pg:
     name: tests sur un vrai Postgres
     runs-on: ubuntu-latest
-    # Un échec ici ne fait pas rougir la CI tant que la contention ci-dessus n'est pas traitée.
-    continue-on-error: true
 
     services:
       postgres:

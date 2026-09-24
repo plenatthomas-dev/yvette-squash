@@ -74,18 +74,28 @@ describe("serializableTransaction", () => {
     expect(h.appels).toBe(3); // 2 conflits + la bonne
   });
 
-  it("abandonne en 409 après quatre tentatives, avec le message fourni", async () => {
+  it("abandonne en 409 après six tentatives, avec le message fourni", async () => {
     h.conflitsRestants = 99;
     await expect(serializableTransaction(async () => "ok", "Prise concurrente")).rejects.toMatchObject(
       { status: 409, message: "Prise concurrente" },
     );
-    expect(h.appels).toBe(4);
+    expect(h.appels).toBe(6);
+  });
+
+  it("⚠️ REJOUE ENCORE APRÈS LE QUATRIÈME CONFLIT — c'est là qu'il abandonnait", async () => {
+    // Quatre tentatives à recul linéaire s'épuisaient en 120 ms au pire, moins que la durée de
+    // la transaction concurrente : deux écrivains se rattrapaient à chaque tour et sortaient
+    // tous deux en 409. Mesuré sur `npm run test:pg`, ça tombait une fois sur six sur la suite
+    // complète, et « environ une fois sur trois » sur `tricount-approve` d'après la CI.
+    h.conflitsRestants = 5;
+    await expect(serializableTransaction(async () => "ok")).resolves.toBe("ok");
+    expect(h.appels).toBe(6);
   });
 
   it("laisse passer du temps entre deux tentatives, sinon le compte d'essais ne veut rien dire", async () => {
-    // Le plafond de quatre tentatives se justifie par « au-delà, c'est une contention durable ».
-    // Le raisonnement suppose que du temps passe : sans recul, les quatre essais s'épuisaient en
-    // quelques millisecondes et rendaient un 409 qu'une pause de rien du tout aurait évité.
+    // Le plafond de tentatives se justifie par « au-delà, c'est une contention durable ». Le
+    // raisonnement suppose que du temps passe : sans recul, les essais s'épuisaient en quelques
+    // millisecondes et rendaient un 409 qu'une pause de rien du tout aurait évité.
     h.conflitsRestants = 3;
     const t0 = Date.now();
     await serializableTransaction(async () => "ok");
@@ -148,13 +158,26 @@ describe("backoffFor — la borne annoncée est un chiffre, pas une intention", 
   // Le test voisin (« laisse passer du temps ») n'éprouve rien : `expect(Date.now() - t0)
   // .toBeGreaterThan(0)` passerait à l'identique si le recul valait toujours zéro — ce que trois
   // tirages de `Math.random` autorisent d'ailleurs. On mesure donc la fonction elle-même.
-  it("ne dépasse jamais 20 ms par tentative, soit 60 ms avant la dernière", () => {
+  it("double à chaque tentative : 20, 40, 80, 160 puis 320 ms au plus", () => {
     vi.spyOn(Math, "random").mockReturnValue(0.999999);
     expect(backoffFor(1)).toBeLessThanOrEqual(20);
     expect(backoffFor(2)).toBeLessThanOrEqual(40);
-    expect(backoffFor(3)).toBeLessThanOrEqual(60);
-    // Cumul au pire avant la quatrième et dernière tentative.
-    expect(backoffFor(1) + backoffFor(2) + backoffFor(3)).toBeLessThanOrEqual(120);
+    expect(backoffFor(3)).toBeLessThanOrEqual(80);
+    expect(backoffFor(4)).toBeLessThanOrEqual(160);
+    expect(backoffFor(5)).toBeLessThanOrEqual(320);
+    // Cumul au pire avant la sixième et dernière tentative — le chiffre annoncé en commentaire.
+    const cumul = [1, 2, 3, 4, 5].reduce((somme, n) => somme + backoffFor(n), 0);
+    expect(cumul).toBeLessThanOrEqual(620);
+    vi.restoreAllMocks();
+  });
+
+  it("⚠️ EXPONENTIEL, et pas seulement croissant — la nuance EST le correctif", () => {
+    // « Croît avec le numéro de tentative » passait déjà avec le recul linéaire `20 × n`, qui
+    // donnait 100 ms à la cinquième tentative là où le doublement en donne 320. Sans ce test,
+    // un retour au linéaire ramènerait le 409 sans faire rougir quoi que ce soit.
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    expect(backoffFor(5)).toBe(320);
+    expect(backoffFor(5)).toBeGreaterThan(backoffFor(4) * 1.5);
     vi.restoreAllMocks();
   });
 

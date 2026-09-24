@@ -2,6 +2,7 @@
 // restent minces en s'appuyant sur ces helpers, eux-mêmes testables sans HTTP.
 
 import { prisma } from "./db";
+import { memberClt, memberRangM } from "./interclub-roster";
 
 // Un passkey enrôlé (un par appareil). Exposé à l'admin pour révoquer appareil par appareil
 // (ex. téléphone perdu) sans tout effacer d'un coup.
@@ -29,20 +30,29 @@ export type MemberRow = {
   // préférence du membre : elle décide qui peut être aligné dans une rencontre.
   teamId: string | null;
   // Classement fédéral EFFECTIF pour l'ordre des simples interclub (cf. lib/interclub-order.ts) :
-  // la correction admin si posée, sinon le dernier rapprochement squashnet. `cltOverride` porte
-  // la correction seule (pour préremplir le champ de saisie) ; `cltSource` dit d'où vient
-  // `clt` — l'admin doit savoir si ce qu'il voit est le rapprochement automatique ou déjà une
-  // correction, avant d'écraser l'un ou l'autre.
+  // la correction admin si posée, sinon le classement national rapproché, sinon NOTRE fiche
+  // d'équipe fédérale. `cltOverride` porte la correction seule (pour préremplir le champ de
+  // saisie) ; `cltSource` dit d'où vient `clt` — l'admin doit savoir si ce qu'il voit est un
+  // rapprochement automatique ou déjà une correction, avant d'écraser l'un ou l'autre.
+  //
+  // « roster » est la TROISIÈME source, et c'est souvent la seule : le classement national ne
+  // contient que les joueurs classés, la fiche d'équipe les porte tous. Un NC licencié qui n'a
+  // jamais joué de match n'a de classement que par elle.
   clt: string | null;
   cltOverride: string | null;
-  cltSource: "override" | "squashnet" | null;
+  cltSource: "override" | "squashnet" | "roster" | null;
   // Le RANG MIXTE, exactement de la même façon — c'est le SECOND critère de l'ordre des simples
   // (il départage deux joueurs de même classement), donc un membre non-NC qui n'en a pas n'est
   // alignable nulle part. La correction est indépendante de celle du classement : on peut
   // forcer l'un en laissant l'autre au rapprochement.
   rangM: number | null;
   rangMOverride: number | null;
-  rangMSource: "override" | "squashnet" | null;
+  rangMSource: "override" | "squashnet" | "roster" | null;
+  // La licence lue sur notre fiche d'équipe fédérale, et QUAND on a regardé. Les deux ensemble
+  // distinguent trois états que le seul `snLicence` confondrait : rapproché (licence + date),
+  // cherché sans succès (date seule), jamais cherché (ni l'un ni l'autre).
+  snLicence: string | null;
+  snRosterAt: string | null;
   // Nom sous lequel CHERCHER ce membre sur squashnet, quand son `displayName` (venu de
   // ResaMania, et y étant réécrit à chaque connexion) ne permet pas de le retrouver. Vides =
   // pas de correction. À distinguer des deux `*Override` ci-dessus, qui FIGENT une valeur :
@@ -99,6 +109,10 @@ export async function listMembers(): Promise<MemberRow[]> {
       squashnetGivenName: true,
       squashnetFamilyName: true,
       squashnetRanking: { select: { clt: true, rangM: true } },
+      snRosterClt: true,
+      snRosterRangM: true,
+      snLicence: true,
+      snRosterAt: true,
       passkeys: {
         select: { id: true, deviceLabel: true, createdAt: true, lastUsedAt: true },
         orderBy: { createdAt: "desc" },
@@ -124,19 +138,36 @@ export async function listMembers(): Promise<MemberRow[]> {
     disabledAt: u.disabledAt?.toISOString() ?? null,
     createdAt: u.createdAt.toISOString(),
     teamId: u.teamId,
-    clt: u.interclubCltOverride ?? u.squashnetRanking?.clt ?? null,
+    // LA CHAÎNE DE PRIORITÉ N'EST PAS RECOPIÉE ICI. Elle l'était, à deux étages, et elle a
+    // manqué le troisième le jour où il est arrivé : le même membre s'affichait « NC » en
+    // composition et sans classement sur cet écran. Une définition (`interclub-roster.ts`),
+    // trois lecteurs.
+    clt: memberClt(u),
     cltOverride: u.interclubCltOverride,
-    cltSource: u.interclubCltOverride ? "override" : u.squashnetRanking ? "squashnet" : null,
-    rangM: u.interclubRangMOverride ?? u.squashnetRanking?.rangM ?? null,
+    cltSource: u.interclubCltOverride
+      ? "override"
+      : u.squashnetRanking
+        ? "squashnet"
+        : u.snRosterClt
+          ? "roster"
+          : null,
+    rangM: memberRangM(u),
     rangMOverride: u.interclubRangMOverride,
     // « squashnet » seulement si le rapprochement porte RÉELLEMENT un rang : contrairement au
     // classement, `SquashnetRanking.rangM` est nullable — une ligne rapprochée sans rang ne
-    // doit pas faire croire à l'admin qu'une valeur existe quelque part.
+    // doit pas faire croire à l'admin qu'une valeur existe quelque part. Même prudence pour la
+    // fiche d'équipe, qui rend NULL pour tous les NC (la sentinelle 9311 n'est pas un rang).
     rangMSource: u.interclubRangMOverride
       ? "override"
       : u.squashnetRanking?.rangM != null
         ? "squashnet"
-        : null,
+        : u.snRosterRangM != null
+          ? "roster"
+          : null,
+    // La licence lue sur NOTRE fiche d'équipe fédérale, et quand. C'est ce qui distingue « ce
+    // membre n'est pas inscrit chez la fédération » de « on ne lui a jamais cherché de fiche ».
+    snLicence: u.snLicence,
+    snRosterAt: u.snRosterAt?.toISOString() ?? null,
     squashnetGivenName: u.squashnetGivenName,
     squashnetFamilyName: u.squashnetFamilyName,
     squashnetMatched: u.squashnetRanking != null,
