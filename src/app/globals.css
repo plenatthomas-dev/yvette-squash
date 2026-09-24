@@ -5483,6 +5483,17 @@ body[data-bottombar] .install-banner {
 .ic-dispo[open] > .ic-dispo-head {
   margin-bottom: 8px;
 }
+/* LA LIGNE QUI DIT LE GESTE. Elle vit entre le sommaire et la liste, et elle est le seul
+   endroit où l'annulation s'annonce au doigt : le `title` du bouton retenu demande un survol,
+   que le téléphone n'a pas. 0,80rem — le cran du texte secondaire courant (DESIGN.md), celui
+   de `.ic-dispo-note` juste en dessous : deux phrases d'appoint dans le même bloc ne se lisent
+   pas à deux tailles. Marges posées à la main plutôt que par `.tiny`, dont les 14 px de
+   `margin-top` creuseraient un trou sous l'en-tête qui en donne déjà 8. */
+.ic-dispo-aide {
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+}
+
 .ic-dispo-head h4 {
   margin: 0;
   margin-right: auto;
