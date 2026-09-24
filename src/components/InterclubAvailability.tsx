@@ -56,7 +56,8 @@ interface Payload {
 /** Ce que le serveur renvoie en 409 : la réponse qu'on s'apprête à remplacer. */
 interface Conflict {
   key: string;
-  status: AvailabilityStatus;
+  /** `null` : on s'apprêtait à EFFACER sa réponse, pas à la remplacer. */
+  status: AvailabilityStatus | null;
   existing: { status: AvailabilityStatus; updatedAt: string };
 }
 
@@ -186,9 +187,9 @@ export function InterclubAvailability({
   /**
    * Poser une réponse. `key` est la mienne par défaut ; un `guest:` ou l'identifiant d'un
    * coéquipier en fait un relais. `confirm` ne part qu'après que l'écran a montré ce qu'il
-   * remplace.
+   * remplace. `status: null` annule la réponse (retour à « pas répondu »).
    */
-  async function answer(key: string, status: AvailabilityStatus, comment?: string, confirm = false) {
+  async function answer(key: string, status: AvailabilityStatus | null, comment?: string, confirm = false) {
     setBusy(key);
     try {
       const isGuest = key.startsWith("guest:");
@@ -304,7 +305,10 @@ export function InterclubAvailability({
                     type="button"
                     aria-pressed={e.status === s}
                     disabled={busy === e.key}
-                    onClick={() => answer(e.key, s)}
+                    // RE-CLIQUER ANNULE. Sans ça, un clic de travers ne se rattrapait qu'en
+                    // choisissant une autre réponse — impossible de revenir à « pas répondu ».
+                    title={e.status === s ? "Cliquer à nouveau pour annuler" : undefined}
+                    onClick={() => answer(e.key, e.status === s ? null : s)}
                   >
                     {AVAILABILITY_LABELS[s]}
                   </button>
@@ -385,11 +389,13 @@ export function InterclubAvailability({
         <div className="notice" role="alertdialog" aria-label="Confirmer le remplacement">
           <p>
             {entries.find((e) => e.key === conflict.key)?.name} avait répondu «{" "}
-            {AVAILABILITY_LABELS[conflict.existing.status]} » lui-même. Remplacer par «{" "}
-            {AVAILABILITY_LABELS[conflict.status]} » ?
+            {AVAILABILITY_LABELS[conflict.existing.status]} » lui-même.{" "}
+            {conflict.status
+              ? <>Remplacer par « {AVAILABILITY_LABELS[conflict.status]} » ?</>
+              : "Effacer sa réponse ?"}
           </p>
           <button type="button" onClick={() => answer(conflict.key, conflict.status, undefined, true)}>
-            Remplacer
+            {conflict.status ? "Remplacer" : "Effacer"}
           </button>{" "}
           <button type="button" className="secondary" onClick={() => setConflict(null)}>
             Annuler

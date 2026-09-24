@@ -30,6 +30,7 @@ const h = vi.hoisted(() => ({
   horsTx: [] as string[],
   created: null as null | Record<string, unknown>,
   updated: null as null | { where: unknown; data: Record<string, unknown> },
+  deleted: null as null | { where: unknown },
 }));
 
 vi.mock("@/lib/features-server", () => ({ getFeatures: async () => ({ interclub: h.interclub }) }));
@@ -64,6 +65,10 @@ vi.mock("@/lib/db", () => {
     update: vi.fn(async (args: { where: unknown; data: Record<string, unknown> }) => {
       h.updated = args;
       return args.data;
+    }),
+    delete: vi.fn(async (args: { where: unknown }) => {
+      h.deleted = args;
+      return {};
     }),
   };
 
@@ -124,6 +129,7 @@ beforeEach(() => {
   h.horsTx = [];
   h.created = null;
   h.updated = null;
+  h.deleted = null;
 });
 
 describe("GET /api/interclub/{id}/availability", () => {
@@ -257,6 +263,35 @@ describe("PUT /api/interclub/{id}/availability", () => {
     h.answers = [{ interclubId: "f1", id: "a1", guestId: null, userId: "u1", setById: "u1", status: "yes", comment: "pas avant 20h30", updatedAt: new Date() }];
     await PUT(req({ status: "yes", comment: "   " }), ctx);
     expect(h.updated?.data).toMatchObject({ comment: null });
+  });
+
+  it("ANNULE ma réponse avec `status: null` — retour à « pas répondu »", async () => {
+    h.answers = [{ interclubId: "f1", id: "a1", guestId: null, userId: "u1", setById: "u1", status: "yes", comment: null, updatedAt: new Date() }];
+    const res = await PUT(req({ status: null }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.deleted).toEqual({ where: { id: "a1" } });
+    expect(h.created).toBeNull();
+    expect(h.updated).toBeNull();
+  });
+
+  it("annuler sans réponse existante ne crée rien", async () => {
+    expect((await PUT(req({ status: null }), ctx)).status).toBe(200);
+    expect(h.deleted).toBeNull();
+    expect(h.created).toBeNull();
+  });
+
+  it("annuler la réponse de PREMIÈRE MAIN d'un tiers se confirme aussi", async () => {
+    h.answers = [
+      { interclubId: "f1", id: "a1", guestId: null, userId: "u2", setById: "u2", status: "no", updatedAt: new Date(), comment: null, setBy: { displayName: "Bob", nickname: null } },
+    ];
+    expect((await PUT(req({ status: null, userId: "u2" }), ctx)).status).toBe(409);
+    expect(h.deleted).toBeNull();
+    expect((await PUT(req({ status: null, userId: "u2", confirmOverride: true }), ctx)).status).toBe(200);
+    expect(h.deleted).toEqual({ where: { id: "a1" } });
+  });
+
+  it("refuse une requête SANS statut — seul un `null` explicite annule", async () => {
+    expect((await PUT(req({}), ctx)).status).toBe(400);
   });
 
   it("refuse un statut inventé", async () => {

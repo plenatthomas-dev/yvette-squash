@@ -227,6 +227,33 @@ describe("bloc de disponibilité — répondre", () => {
     expect(presses).toEqual(["Incertain"]);
   });
 
+  it("ANNULE sa réponse en recliquant sur le bouton déjà choisi", async () => {
+    // Un clic de travers ne se rattrapait qu'en choisissant une AUTRE réponse : impossible de
+    // revenir à « pas répondu ». Recliquer envoie `status: null`, que le serveur efface.
+    await monte([entree({ key: "u1", name: "Thomas", status: "yes" })]);
+
+    await act(async () => {
+      fireEvent.click(within(boutonsDe("Thomas")).getByRole("button", { name: "Dispo" }));
+      await souffle();
+    });
+
+    expect(puts()).toEqual([{ status: null }]);
+  });
+
+  it("annule aussi la réponse d'un COÉQUIPIER, en le désignant", async () => {
+    await monte([
+      entree({ key: "u1", name: "Thomas" }),
+      entree({ key: "guest:g1", name: "Xavier", isMember: false, reachable: false, status: "no" }),
+    ]);
+
+    await act(async () => {
+      fireEvent.click(within(boutonsDe("Xavier")).getByRole("button", { name: "Pas dispo" }));
+      await souffle();
+    });
+
+    expect(puts()).toEqual([{ status: null, guestId: "g1" }]);
+  });
+
   it("garde le repère « moi » même si la réponse du serveur omet `me`", async () => {
     // Le défaut qui a motivé ce test : le PUT ne rendait pas `me`, et l'écran remplaçant tout
     // son état par ce corps, plus aucune ligne n'était la mienne après la première réponse — le

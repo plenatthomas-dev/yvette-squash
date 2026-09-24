@@ -175,7 +175,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 // PUT /api/interclub/{id}/availability — poser une réponse, la sienne ou celle d'un autre.
 //   { status, comment?, userId? | guestId?, confirmOverride? }
-// Sans `userId` ni `guestId` : c'est la sienne.
+// Sans `userId` ni `guestId` : c'est la sienne. `status: null` ANNULE la réponse (retour à
+// « pas répondu ») — mêmes contrôles d'équipe et même confirmation qu'une écriture.
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const ctx = await loadContext(req, id);
@@ -183,7 +184,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const { session, fixture } = ctx;
 
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!isAvailabilityStatus(body.status)) {
+  // `null` = ANNULER. Un clic de travers sur « Pas dispo » ne doit pas laisser une réponse
+  // qu'on ne peut que remplacer par une autre : « je ne sais pas encore » se dit en ne répondant
+  // pas, et c'est ce qui fait revenir la personne dans la liste des relances.
+  const clear = body.status === null;
+  if (!clear && !isAvailabilityStatus(body.status)) {
     return NextResponse.json({ error: "Réponse invalide" }, { status: 400 });
   }
   // ABSENT ≠ VIDE. Les trois boutons de l'écran envoient un statut SANS commentaire : traiter
@@ -225,7 +230,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   const data = {
-    status: body.status,
+    status: body.status as AvailabilityStatus,
     ...(commentGiven ? { comment } : {}),
     setById: session.userId,
   };
@@ -261,7 +266,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         return { status: existing!.status as AvailabilityStatus, updatedAt: existing!.updatedAt };
       }
 
-      if (existing) {
+      if (clear) {
+        // Rien à annuler : l'état voulu est déjà là, on ne crée pas de ligne vide.
+        if (existing) await tx.interclubAvailability.delete({ where: { id: existing.id } });
+      } else if (existing) {
         await tx.interclubAvailability.update({ where: { id: existing.id }, data });
       } else {
         await tx.interclubAvailability.create({
