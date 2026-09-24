@@ -135,9 +135,10 @@ describe("POST /api/tournaments/[id]/finals — les trois façons d'échouer", (
     expect(h.appels).toBe(2);
   });
 
-  it("409 « réessaie » après quatre tentatives infructueuses", async () => {
-    // Quatre, pas plus : au-delà, ce n'est plus un conflit ponctuel mais de la contention, et
-    // insister ferait attendre le créateur sans améliorer ses chances.
+  it("409 « réessaie » après six tentatives infructueuses", async () => {
+    // Six, pas plus : au-delà, ce n'est plus un conflit ponctuel mais de la contention, et
+    // insister ferait attendre le créateur sans améliorer ses chances. C'était quatre, ce qui
+    // rendait un 409 à deux écrivains dont aucun n'était en faute (cf. `http-tx.ts`).
     //
     // ⚠️ Ce cas ne distingue PAS les deux branches du `catch` : la traduction de l'`HttpError`
     // par `httpErrorResponse` et le repli final produisent ici exactement la même réponse
@@ -155,7 +156,7 @@ describe("POST /api/tournaments/[id]/finals — les trois façons d'échouer", (
       error: "Génération concurrente, réessaie",
       code: "write_conflict",
     });
-    expect(h.appels).toBe(4);
+    expect(h.appels).toBe(6);
   });
 
   it.each([

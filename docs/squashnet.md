@@ -143,6 +143,95 @@ calendrier ; les rencontres importées avant la migration 52 le portent à NULL,
 **ré-import** (Admin › Interclub › Calendrier › Appliquer) peut le remplir — il est dans le HTML
 de la ligue, pas dans nos données. Le cron ne l'écrit pas : il alerte, il n'applique jamais.
 
+### 1 bis. NOTRE fiche d'équipe — la seule source qui connaisse les NC ✅ fait
+
+Voir `src/lib/interclub-federal.ts` (pur), `src/lib/interclub-federal-db.ts`,
+`src/app/api/admin/interclub-roster/route.ts` et la migration `56_roster_federal`.
+
+**Le classement national ne suffit pas, et ce n'est pas un réglage à ajuster.** `ic_a=131079`
+— la seule source que le rapprochement interrogeait — ne contient **que les joueurs classés**.
+Mesuré le 2026-09-24 sur la fiche de Verrières 4 :
+
+| joueur | licence | clt | recherche au classement |
+|---|---|---|---|
+| LAUNAY EMMANUEL | 1463138W | 4D | **1 ligne**, licence retrouvée |
+| DOXAT ERIC | 1528030W | NC | **0 ligne** |
+| BOUGARDIER FRANCK | 0171783 | NC | **0 ligne** |
+| CAGLIULI OLIVIER | 0126100 | NC | **0 ligne** |
+| MARTIN OLIVIER | 0126975 | NC | 86 lignes, **licence absente** |
+
+Sept inscrits sur huit sont introuvables. Ils sont pourtant licenciés et parfaitement
+alignables : `matchGuestRanking` ne **peut pas** les rapprocher, faute de ligne à rapprocher.
+Dans un club de loisir c'est la majorité de l'effectif, et chacun réclamait jusqu'ici une
+correction admin à la main, à refaire saison après saison.
+
+**La fiche d'équipe (`ic_a=393480`) les publie tous**, avec leur licence. Le même point d'entrée
+que le roster adverse — c'est la même lecture, braquée sur nos propres `snTeamId`.
+
+#### La licence est la clé, le nom n'est que le repli
+
+`rapprocherRoster` apparie dans cet ordre :
+
+1. **la licence**, quand on la connaît — identifiant fédéral, indépendant du club, de
+   l'orthographe et des homonymes ;
+2. **le nom**, via `nameKey` — insensible à la casse, aux accents et à **l'ordre des mots** (la
+   fédération écrit « POPULU AXEL », l'appli « Axel Populu »).
+
+Deux règles tiennent le reste, et ce sont elles qui empêchent un mauvais rapprochement :
+
+- **une licence connue et différente disqualifie**, si parfait que soit le nom. Le rapprochement
+  se resserre donc à mesure qu'on le fait, au lieu de rester aussi flou chaque saison ;
+- **l'ambiguïté se lit dans les deux sens.** Deux lignes fédérales peuvent désigner le même
+  joueur de l'appli — deux licenciés homonymes dont un seul a un compte. Chacune prise isolément
+  conclurait « lié », et la même personne serait appariée deux fois. Un appariement par nom n'est
+  retenu que si sa cible n'est convoitée par aucune autre ligne.
+
+#### ⚠️ `rangM = 9311` est une SENTINELLE, pas un rang
+
+Les sept NC de la fiche portent tous `rang: 9311, rangM: 9311`, à la même seconde. L'écrire les
+placerait au 9311e rang national — un nombre qui a l'air d'un fait, qui se trie, et qui
+s'afficherait à l'annuaire. `rangMUtile` rend donc `null` dès que le classement est `NC`, ce que
+l'ordre des simples accepte sans broncher : la fédération n'ordonne pas les NC entre eux
+(cf. `isNC`, `interclub-order.ts`).
+
+#### ⚠️ La garde de club, et pourquoi elle n'est pas décorative
+
+Les fiches adverses vivent dans **la même table** (`SquashnetTeamRoster`) : c'est elle qui sert
+le menu « en face ». Sans contrôle, une erreur d'**un chiffre** dans l'ancrage d'une de nos
+équipes ferait entrer huit joueurs de Verrières dans notre effectif — alignables, et personne ne
+s'attendant à devoir vérifier ça. `notreFiche` compare donc le **club** (et non le nom d'équipe,
+puisque « Squash de l'Yvette 1 » et « … 2 » sont deux équipes du même club) à `YVETTE_CLUB`, et
+l'écran distingue trois états qui ne se confondent pas : *pas encore téléchargée*, *fiche d'un
+autre club* (donc notre configuration est fausse), *lisible*.
+
+#### Trois étages de classement, et l'ordre compte
+
+`memberClt` / `memberRangM` (`interclub-roster.ts`) résolvent désormais :
+
+> correction admin › **classement national** › **fiche d'équipe**
+
+Le classement national bouge tous les mois, la fiche est figée sur la saison : un joueur qui
+monte en cours d'année le voit tout de suite, et la fiche ne comble que le trou — c'est-à-dire,
+en pratique, les NC. Ces accesseurs sont **exportés et appelés**, plus recopiés : `lib/members.ts`
+et `api/directory` réécrivaient la chaîne à deux étages et auraient manqué le troisième, le même
+membre s'affichant « NC » en composition et sans rien à l'annuaire.
+
+#### Le doublon naît tout seul, et on ne le fusionne pas d'office
+
+Cycle normal : on inscrit un invité depuis la fiche, il ouvre l'appli des mois plus tard, un
+admin le rattache à son équipe — et l'équipe le porte **deux fois**. `doublonsAppli` le repère
+(licence d'abord, nom ensuite, et seulement si le nom ne désigne qu'une personne **de chaque
+côté**), `POST set_team` le signale au moment où il naît, et `promote_guest` le répare :
+
+1. recopier sur le membre la licence et les valeurs de fiche ;
+2. **réattribuer les simples à venir** (`homeGuestId → homeUserId`) — sans quoi la suppression
+   laisserait des lignes avec un nom figé et plus personne derrière ;
+3. supprimer l'invité. Les rencontres jouées survivent (`SetNull` + `homeDisplayName` figé).
+
+⚠️ Les **disponibilités déjà saisies par l'invité sont perdues** (cascade). L'écran le dit avant.
+
+---
+
 ### 2. La feuille de match officielle — `ic_a=394248` ✅ fait
 
 Voir `src/lib/squashnet/tie.ts` (parsing), `src/lib/captain-official.ts` (la confrontation, pure)

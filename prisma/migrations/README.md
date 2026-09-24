@@ -1,6 +1,6 @@
 # Migrations — règle de nommage et pièges
 
-**Préfixe à DEUX CHIFFRES, toujours.** La prochaine migration s'appelle `56_<sujet>`.
+**Préfixe à DEUX CHIFFRES, toujours.** La prochaine migration s'appelle `57_<sujet>`.
 
 **Et un numéro ne se prend qu'UNE fois.** Le numéro se choisit d'après `main`, au moment de
 créer la migration — pas d'après sa propre branche, qui ignore ce que les autres ont posé

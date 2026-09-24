@@ -121,6 +121,43 @@ type CalTie = {
   dateConfirmed: boolean;
 };
 /** Ce que rend la PRÉVISUALISATION : ce qui serait écrit, avant de l'écrire. */
+/**
+ * NOTRE fiche d'équipe chez la fédération, appariée aux joueurs de l'appli.
+ *
+ * Elle existe parce que le CLASSEMENT national ne contient que les joueurs classés : un
+ * licencié NC qui n'a jamais joué de match n'y a aucune ligne, et n'avait donc jusqu'ici de
+ * classement que par une correction admin, à refaire chaque saison. La fiche d'équipe, elle,
+ * les publie tous — avec leur licence, qui devient la clé de tout le reste.
+ */
+type FicheJoueur = { kind: "member" | "guest"; id: string; name: string; licence: string | null };
+type FicheLigne = {
+  player: { name: string; licence: string | null; clt: string | null; rangM: number | null };
+  /** Ce qui serait écrit : `rangM` est NUL pour un NC (la fédération publie 9311, une sentinelle). */
+  valeurs: { licence: string | null; clt: string | null; rangM: number | null };
+  appariement:
+    | { statut: "lie"; joueur: FicheJoueur; par: "licence" | "nom" }
+    | { statut: "ambigu"; candidats: FicheJoueur[] }
+    | { statut: "inconnu" };
+};
+type Fiche = {
+  team: { id: string; name: string; snTeamId: string };
+  /** « ok », « absente » (jamais téléchargée) ou « autre_club » (ancrage faux). Trois états qui
+      ne se confondent pas : le dernier est une erreur de NOTRE configuration, pas de la ligue. */
+  etat: "ok" | "absente" | "autre_club";
+  fiche: {
+    teamName: string | null;
+    club: string | null;
+    captain: string | null;
+    fetchedAt: string | null;
+  } | null;
+  clubRecu: string | null;
+  lignes: FicheLigne[];
+  /** Joueurs de l'appli que la fédération n'a PAS inscrits — souvent un engagement oublié. */
+  absents: FicheJoueur[];
+  /** La même personne des deux côtés : un invité, et le compte qu'il vient de créer. */
+  doublons: { membre: FicheJoueur; invite: FicheJoueur; par: "licence" | "nom" }[];
+};
+
 type CalPreview = {
   teamId: string;
   teamName: string;
@@ -402,6 +439,11 @@ export default function AdminPage() {
    * boîte bloquante fige l'onglet. Une seule à la fois — c'est un geste qui se pèse.
    */
   const [icDelArm, setIcDelArm] = useState<string | null>(null);
+  /** La fiche fédérale ouverte, et l'équipe dont on attend la réponse. */
+  const [icFiche, setIcFiche] = useState<Fiche | null>(null);
+  const [icFicheBusy, setIcFicheBusy] = useState<string | null>(null);
+  /** Promotion armée : fondre un invité dans un membre SUPPRIME l'invité, donc on confirme. */
+  const [icPromoArm, setIcPromoArm] = useState<string | null>(null);
   const [icName, setIcName] = useState("");
 
   useEffect(() => {
@@ -886,6 +928,75 @@ export default function AdminPage() {
       setIcResult({ ok: false, text: "Réseau indisponible." });
     } finally {
       setIcCalBusy(null);
+    }
+  };
+
+  // ─── LA FICHE D'ÉQUIPE FÉDÉRALE ─────────────────────────────────────────────────────────────
+  //
+  // Tous les gestes passent par la même route et rechargent la fiche ensuite : un appariement
+  // change ce que les AUTRES lignes peuvent conclure (une licence posée disqualifie les
+  // homonymes), et laisser l'écran sur l'état d'avant proposerait des choix déjà caducs.
+  const loadFiche = async (t: IcTeam) => {
+    setIcFicheBusy(t.id);
+    setIcResult(null);
+    try {
+      const res = await fetch(`/api/admin/interclub-roster?teamId=${encodeURIComponent(t.id)}`);
+      const data = (await res.json().catch(() => ({}))) as Partial<Fiche> & { error?: string };
+      if (!res.ok || !data.team) {
+        setIcFiche(null);
+        setIcResult({ ok: false, text: data.error ?? "Lecture impossible." });
+        return;
+      }
+      setIcFiche(data as Fiche);
+    } catch {
+      setIcResult({ ok: false, text: "Lecture impossible." });
+    } finally {
+      setIcFicheBusy(null);
+    }
+  };
+
+  const ficheAction = async (t: IcTeam, body: Record<string, unknown>, succes: string) => {
+    setIcFicheBusy(t.id);
+    setIcResult(null);
+    try {
+      const res = await fetch("/api/admin/interclub-roster", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, teamId: t.id }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        outcome?: { status: string; players?: number };
+      };
+      if (!res.ok) {
+        setIcResult({ ok: false, text: data.error ?? "Enregistrement impossible." });
+        return;
+      }
+      // `unreadable` et `failed` ne se confondent pas : le premier veut dire que le rendu de
+      // squashnet a changé, le second qu'ils n'ont pas répondu. Les afficher pareil enverrait
+      // chercher un bug qui n'existe pas.
+      const o = data.outcome;
+      setIcResult({
+        ok: o?.status !== "unreadable" && o?.status !== "failed",
+        text: !o
+          ? succes
+          : o.status === "fetched"
+            ? `Fiche relue : ${o.players ?? 0} joueur(s) inscrit(s).`
+            : o.status === "fresh"
+              ? "Fiche déjà à jour (moins d'une semaine)."
+              : o.status === "unreadable"
+                ? "Fiche reçue mais illisible : le rendu de squashnet a changé."
+                : "La fédération n'a pas répondu — réessaie dans un moment.",
+      });
+      await loadFiche(t);
+      // Le classement effectif des joueurs vient de changer : la liste d'effectif au-dessus
+      // l'affiche, et la laisser sur l'ancien ferait douter que le geste ait servi.
+      await loadTeams();
+    } catch {
+      setIcResult({ ok: false, text: "Enregistrement impossible." });
+    } finally {
+      setIcFicheBusy(null);
+      setIcPromoArm(null);
     }
   };
 
@@ -2057,6 +2168,317 @@ export default function AdminPage() {
                                 </div>
                               )}
                             </details>
+
+                            {/* --- La FICHE D'ÉQUIPE fédérale, et qui est qui -----------------
+                                POURQUOI CET ÉCRAN EXISTE. Le rapprochement automatique
+                                interroge le CLASSEMENT national, qui ne contient QUE les
+                                joueurs classés : mesuré le 2026-09-24, sept des huit inscrits
+                                d'une équipe de D4 y sont introuvables. Ils sont pourtant
+                                licenciés et alignables. Chacun réclamait jusqu'ici une
+                                correction manuelle, à refaire chaque saison.
+                                La FICHE D'ÉQUIPE, elle, les publie tous. */}
+                            <details className="ic-sn">
+                              <summary>
+                                Fiche d&apos;équipe fédérale
+                                <span className="muted tiny">
+                                  {t.snTeamId ? " · qui est qui" : " · non rattachée"}
+                                </span>
+                              </summary>
+
+                              <p className="muted tiny">
+                                La fiche publie <strong>tous</strong> les joueurs inscrits, avec
+                                leur licence — y compris les <strong>NC</strong>, que le
+                                classement national ne connaît pas. C&apos;est la seule source
+                                qui donne un classement à un licencié n&apos;ayant jamais joué de
+                                match.
+                              </p>
+                              <p className="muted tiny">
+                                Le rapprochement se fait sur la <strong>licence</strong> quand
+                                elle est connue, sinon sur le <strong>nom</strong> (l&apos;ordre
+                                des mots n&apos;a pas d&apos;importance). Quand deux joueurs
+                                pourraient convenir, rien n&apos;est décidé : c&apos;est à toi de
+                                trancher.
+                              </p>
+
+                              <div className="ic-sn-fields">
+                                <button
+                                  type="button"
+                                  className="secondary"
+                                  disabled={icFicheBusy !== null || !t.snTeamId}
+                                  onClick={() => loadFiche(t)}
+                                  title={
+                                    t.snTeamId
+                                      ? "Affiche la fiche déjà téléchargée, appariée à l'effectif."
+                                      : "Renseigne d'abord l'identifiant d'équipe (teamid)."
+                                  }
+                                >
+                                  {icFicheBusy === t.id ? "…" : "Voir la fiche"}
+                                </button>
+                                {/* `force` traverse la fraîcheur d'une semaine : c'est le bouton
+                                    du soir où le capitaine vient d'inscrire quelqu'un. */}
+                                <button
+                                  type="button"
+                                  className="secondary"
+                                  disabled={icFicheBusy !== null || !t.snTeamId}
+                                  onClick={() =>
+                                    ficheAction(t, { action: "refresh", force: true }, "Fiche relue.")
+                                  }
+                                  title="Retélécharge la fiche chez la fédération maintenant, sans attendre la semaine."
+                                >
+                                  Relire chez la fédération
+                                </button>
+                              </div>
+
+                              {icFiche?.team.id === t.id && (
+                                <div className="ic-cal-preview">
+                                  {/* ⚠️ TROIS ÉTATS, ET ILS NE SE CONFONDENT PAS. Une fiche d'un
+                                      AUTRE club veut dire que l'identifiant d'équipe est faux —
+                                      c'est notre configuration, pas une panne de la ligue. Sans
+                                      ce message on chercherait longtemps du mauvais côté. */}
+                                  {icFiche.etat === "absente" && (
+                                    <p className="muted tiny">
+                                      Aucune fiche téléchargée pour cette équipe. Utilise «&nbsp;Relire
+                                      chez la fédération&nbsp;».
+                                    </p>
+                                  )}
+                                  {icFiche.etat === "autre_club" && (
+                                    <p className="muted tiny" style={{ color: "var(--warn-fg)" }}>
+                                      ⚠️ La fiche téléchargée est celle de{" "}
+                                      <strong>{icFiche.clubRecu ?? "un autre club"}</strong>, pas
+                                      de la nôtre. L&apos;identifiant d&apos;équipe (
+                                      <code>{icFiche.team.snTeamId}</code>) désigne une équipe
+                                      adverse — corrige-le ci-dessus. Rien ne sera importé.
+                                    </p>
+                                  )}
+
+                                  {icFiche.etat === "ok" && (
+                                    <>
+                                      <p className="ic-cal-sum">
+                                        <strong>{icFiche.lignes.length}</strong> inscrit
+                                        {icFiche.lignes.length > 1 ? "s" : ""} chez la fédération ·{" "}
+                                        {
+                                          icFiche.lignes.filter((l) => l.appariement.statut === "lie")
+                                            .length
+                                        }{" "}
+                                        rapproché(s) ·{" "}
+                                        {
+                                          icFiche.lignes.filter((l) => l.appariement.statut !== "lie")
+                                            .length
+                                        }{" "}
+                                        à traiter
+                                        {icFiche.fiche?.fetchedAt && (
+                                          <span className="muted tiny">
+                                            {" "}
+                                            (relevé du{" "}
+                                            {new Date(icFiche.fiche.fetchedAt).toLocaleDateString(
+                                              "fr-FR",
+                                              { day: "numeric", month: "short" },
+                                            )}
+                                            )
+                                          </span>
+                                        )}
+                                      </p>
+
+                                      {/* LE DOUBLON, EN TÊTE. Il naît tout seul : on inscrit un
+                                          invité depuis la fiche, il ouvre l'appli des mois plus
+                                          tard, et l'équipe le porte deux fois — proposé deux fois
+                                          à la composition, avec deux classements. C'est le seul
+                                          bloc qui SUPPRIME quelque chose, d'où la confirmation. */}
+                                      {icFiche.doublons.map((d) => (
+                                        <p key={d.invite.id} className="muted tiny">
+                                          👥 <strong>{d.membre.name}</strong> est présent deux fois :
+                                          comme membre, et comme joueur hors appli (
+                                          {d.invite.name}) — rapprochés par{" "}
+                                          {d.par === "licence" ? "leur licence" : "leur nom"}.{" "}
+                                          {icPromoArm === d.invite.id ? (
+                                            <>
+                                              <strong>
+                                                Le joueur hors appli sera supprimé, et ses
+                                                disponibilités déjà saisies avec lui.
+                                              </strong>{" "}
+                                              Les simples à venir passent au membre ; les
+                                              rencontres jouées gardent le nom d&apos;alors.{" "}
+                                              <button
+                                                type="button"
+                                                className="secondary ic-cal-del"
+                                                disabled={icFicheBusy !== null}
+                                                onClick={() => setIcPromoArm(null)}
+                                              >
+                                                Non, garder les deux
+                                              </button>{" "}
+                                              <button
+                                                type="button"
+                                                className="danger ic-cal-del"
+                                                disabled={icFicheBusy !== null}
+                                                onClick={() =>
+                                                  ficheAction(
+                                                    t,
+                                                    {
+                                                      action: "promote_guest",
+                                                      userId: d.membre.id,
+                                                      guestId: d.invite.id,
+                                                    },
+                                                    `${d.membre.name} ne figure plus qu'une fois.`,
+                                                  )
+                                                }
+                                              >
+                                                Fondre dans le membre
+                                              </button>
+                                            </>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              className="secondary ic-cal-del"
+                                              disabled={icFicheBusy !== null}
+                                              onClick={() => setIcPromoArm(d.invite.id)}
+                                            >
+                                              N&apos;en garder qu&apos;un
+                                            </button>
+                                          )}
+                                        </p>
+                                      ))}
+
+                                      <ul className="ic-cal-list">
+                                        {icFiche.lignes.map((l) => (
+                                          <li key={l.player.licence ?? l.player.name}>
+                                            <strong>{l.player.name}</strong>{" "}
+                                            <span className="muted tiny">
+                                              {l.valeurs.clt ?? "classement inconnu"}
+                                              {/* Pas de rang pour un NC, et ce n'est pas un
+                                                  manque : la fédération ne les ordonne pas entre
+                                                  eux. Le dire évite qu'on le cherche. */}
+                                              {l.valeurs.rangM != null
+                                                ? ` #${l.valeurs.rangM}`
+                                                : l.valeurs.clt === "NC"
+                                                  ? " (pas de rang, et il n'en faut pas)"
+                                                  : ""}
+                                              {l.player.licence ? ` · ${l.player.licence}` : ""}
+                                            </span>
+                                            <br />
+                                            {l.appariement.statut === "lie" ? (
+                                              <span className="muted tiny">
+                                                ✔️ {l.appariement.joueur.name} (
+                                                {l.appariement.joueur.kind === "member"
+                                                  ? "membre"
+                                                  : "hors appli"}
+                                                , par{" "}
+                                                {l.appariement.par === "licence"
+                                                  ? "la licence"
+                                                  : "le nom"}
+                                                ){" "}
+                                                <button
+                                                  type="button"
+                                                  className="secondary ic-cal-del"
+                                                  disabled={icFicheBusy !== null}
+                                                  onClick={() =>
+                                                    ficheAction(
+                                                      t,
+                                                      {
+                                                        action: "unlink",
+                                                        kind: (l.appariement as { joueur: FicheJoueur })
+                                                          .joueur.kind,
+                                                        id: (l.appariement as { joueur: FicheJoueur })
+                                                          .joueur.id,
+                                                      },
+                                                      "Rapprochement défait.",
+                                                    )
+                                                  }
+                                                >
+                                                  Défaire
+                                                </button>
+                                              </span>
+                                            ) : (
+                                              <span className="ic-fiche-choix">
+                                                {/* ON NE TRANCHE PAS À LA PLACE DE L'ADMIN. Un
+                                                    mauvais rapprochement pose un classement faux
+                                                    sur quelqu'un, et personne ne va le vérifier.
+                                                    Le menu ne propose que l'effectif de CETTE
+                                                    équipe — le serveur le revérifie. */}
+                                                <select
+                                                  defaultValue=""
+                                                  disabled={icFicheBusy !== null}
+                                                  aria-label={`Rapprocher ${l.player.name}`}
+                                                  onChange={(ev) => {
+                                                    const [kind, id] = ev.target.value.split(":");
+                                                    if (!id) return;
+                                                    void ficheAction(
+                                                      t,
+                                                      {
+                                                        action: "link",
+                                                        licence: l.player.licence,
+                                                        kind,
+                                                        id,
+                                                      },
+                                                      `${l.player.name} rapproché.`,
+                                                    );
+                                                  }}
+                                                >
+                                                  <option value="">
+                                                    {l.appariement.statut === "ambigu"
+                                                      ? "— plusieurs possibles, choisis —"
+                                                      : "— personne ne correspond —"}
+                                                  </option>
+                                                  {siens.map((m) => (
+                                                    <option key={m.id} value={`member:${m.id}`}>
+                                                      {m.name} (membre)
+                                                    </option>
+                                                  ))}
+                                                  {mine.map((g) => (
+                                                    <option key={g.id} value={`guest:${g.id}`}>
+                                                      {g.name} (hors appli)
+                                                    </option>
+                                                  ))}
+                                                </select>{" "}
+                                                {/* ⚠️ ON NE CHERCHE PAS AU CLASSEMENT NATIONAL en
+                                                    créant : ce chemin sert d'abord les NC, qui
+                                                    n'y figurent pas. La fiche vient de tout
+                                                    donner — licence, classement, rang. */}
+                                                <button
+                                                  type="button"
+                                                  className="secondary ic-cal-del"
+                                                  disabled={icFicheBusy !== null}
+                                                  onClick={() =>
+                                                    ficheAction(
+                                                      t,
+                                                      {
+                                                        action: "create_guest",
+                                                        licence: l.player.licence,
+                                                      },
+                                                      `${l.player.name} ajouté hors appli.`,
+                                                    )
+                                                  }
+                                                  title="Crée le joueur hors appli avec sa licence, son classement et son rang, tels que la fédération les publie."
+                                                >
+                                                  Créer hors appli
+                                                </button>
+                                              </span>
+                                            )}
+                                          </li>
+                                        ))}
+                                      </ul>
+
+                                      {/* L'AUTRE SENS, et il compte autant. Un joueur que la
+                                          fédération n'a pas inscrit sera refusé sur la feuille
+                                          de match : le seul moment où on peut encore le
+                                          rattraper, c'est maintenant. On ne touche à rien — la
+                                          fiche peut aussi être en retard sur le club. */}
+                                      {icFiche.absents.length > 0 && (
+                                        <p className="muted tiny" style={{ color: "var(--warn-fg)" }}>
+                                          ⚠️ Pas inscrit{icFiche.absents.length > 1 ? "s" : ""} chez
+                                          la fédération :{" "}
+                                          <strong>
+                                            {icFiche.absents.map((j) => j.name).join(", ")}
+                                          </strong>
+                                          . Ils ne pourront pas être alignés tant que la ligue ne
+                                          les aura pas engagés.
+                                        </p>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </details>
+
                           </div>
                         </div>
                       );

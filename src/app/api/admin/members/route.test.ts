@@ -20,6 +20,9 @@ const h = vi.hoisted(() => ({
   members: [{ id: "u1" }] as unknown[],
   teams: [{ id: "t1", name: "Équipe 1" }] as unknown[],
   team: { id: "t1" } as null | { id: string },
+  /** L'effectif relu par `set_team` pour y chercher un doublon invite/membre. */
+  effectif: [] as unknown[],
+  invites: [] as unknown[],
   userUpdate: vi.fn(),
   userDelete: vi.fn(),
   sessionDeleteMany: vi.fn(),
@@ -69,9 +72,14 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     user: {
       findUnique: vi.fn(async () => h.target),
+      // `set_team` relit l'effectif de l'équipe pour y chercher un DOUBLON : l'invité inscrit
+      // depuis la fiche fédérale, et le compte que la même personne vient de créer. C'est ce
+      // geste-ci qui fait naître le doublon, donc c'est ici qu'on le signale.
+      findMany: vi.fn(async () => h.effectif),
       update: h.userUpdate,
       delete: h.userDelete,
     },
+    interclubGuest: { findMany: vi.fn(async () => h.invites) },
     session: { deleteMany: h.sessionDeleteMany },
     // La désactivation est ATOMIQUE : poser `disabledAt`, révoquer les sessions et valider
     // d'office les tricounts dont le membre est payeur vont ensemble. Le mock exécute le
@@ -281,6 +289,48 @@ describe("POST /api/admin/members", () => {
     const res = await POST(postReq({ id: "u1", action: "set_team", teamId: "t1" }));
     expect(res.status).toBe(200);
     expect(h.userUpdate).toHaveBeenCalledWith({ where: { id: "u1" }, data: { teamId: "t1" } });
+  });
+
+  // ─── LE DOUBLON QUI NAÎT ICI ────────────────────────────────────────────────────────────
+  //
+  // On inscrit au roster, depuis la fiche fédérale, un joueur sans compte : il devient un
+  // INVITÉ. Puis un jour il ouvre l'appli, et c'est CE geste — le rattacher à son équipe — qui
+  // fait exister la même personne deux fois. Le menu de composition la propose alors deux fois,
+  // avec deux classements qui peuvent diverger, et rien ne le signalait.
+
+  it("⚠️ set_team : signale l'invité que ce membre vient de doubler", async () => {
+    h.effectif = [{ id: "u1", displayName: "Eric Doxat", snLicence: null }];
+    h.invites = [{ id: "g1", name: "DOXAT ERIC", snLicence: "1528030W" }];
+    const body = await (await POST(postReq({ id: "u1", action: "set_team", teamId: "t1" }))).json();
+    expect(body.doublon).toMatchObject({
+      membre: { id: "u1" },
+      invite: { id: "g1" },
+      par: "nom",
+    });
+  });
+
+  it("set_team : NE FUSIONNE RIEN d'office — il signale, et c'est tout", async () => {
+    // La fusion supprime l'invité et ses disponibilités : sur deux homonymes, elle effacerait
+    // la mauvaise personne sans retour possible. C'est à l'admin de trancher (`promote_guest`).
+    h.effectif = [{ id: "u1", displayName: "Eric Doxat", snLicence: null }];
+    h.invites = [{ id: "g1", name: "DOXAT ERIC", snLicence: "1528030W" }];
+    await POST(postReq({ id: "u1", action: "set_team", teamId: "t1" }));
+    expect(h.userUpdate).toHaveBeenCalledWith({ where: { id: "u1" }, data: { teamId: "t1" } });
+    expect(h.userUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("set_team : rien à signaler quand personne ne correspond", async () => {
+    h.effectif = [{ id: "u1", displayName: "Jean Dupont", snLicence: null }];
+    h.invites = [{ id: "g1", name: "DOXAT ERIC", snLicence: "1528030W" }];
+    const body = await (await POST(postReq({ id: "u1", action: "set_team", teamId: "t1" }))).json();
+    expect(body.doublon).toBeNull();
+  });
+
+  it("set_team : un RETRAIT d'équipe ne cherche aucun doublon", async () => {
+    // Il n'y a plus d'équipe où regarder, et interroger la base pour rien ferait payer une
+    // lecture à un geste qui n'en a pas besoin.
+    const body = await (await POST(postReq({ id: "u1", action: "set_team", teamId: null }))).json();
+    expect(body.doublon).toBeNull();
   });
 
   it("set_team : null retire de toute équipe", async () => {

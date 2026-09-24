@@ -49,11 +49,24 @@ export class HttpError extends Error {
 }
 
 /**
- * Nombre total de tentatives. Quatre, c'est-à-dire trois réessais : au-delà, l'écriture n'est
- * plus en conflit ponctuel mais en contention durable, et insister ferait attendre le client
- * sans améliorer ses chances.
+ * Nombre total de tentatives. Six, c'est-à-dire cinq réessais.
+ *
+ * ⚠️ C'ÉTAIT QUATRE, ET C'ÉTAIT MESURABLEMENT TROP PEU. Le raisonnement d'origine — « au-delà,
+ * l'écriture n'est plus en conflit ponctuel mais en contention durable » — reste juste. Ce qu'il
+ * ratait, c'est que quatre tentatives à recul LINÉAIRE ne laissent que 120 ms cumulées au pire
+ * pour se désynchroniser, alors que la transaction qu'on rejoue dure elle-même plus que ça (lire
+ * un tricount, ses dépenses et toutes leurs parts). Deux écrivains se rattrapaient donc à chaque
+ * tour et s'épuisaient ensemble — le 409 partait sans qu'aucun des deux ne soit en faute.
+ *
+ * MESURÉ le 2026-09-24, six exécutions de `npm run test:pg` sur Postgres local : un échec, sur
+ * `tricount-refunds.pg.test.ts` — deux remboursements partiels simultanés reçoivent un 409 au
+ * lieu d'aboutir. La CI documentait le même mode de panne sur `tricount-approve.pg.test.ts`,
+ * « environ une fois sur trois ». Ce n'est donc pas un défaut d'une route, mais de cette boucle.
+ *
+ * Ce n'est pas le nombre seul qui corrige, c'est son couple avec le recul EXPONENTIEL de
+ * `backoffFor` : six tentatives à recul linéaire n'auraient ajouté que 90 ms.
  */
-const MAX_ATTEMPTS = 4;
+const MAX_ATTEMPTS = 6;
 
 /**
  * Le code du 409 rendu quand les tentatives s'épuisent — « réessaie », et rien d'autre.
@@ -113,7 +126,7 @@ export function isForeignKeyViolation(e: unknown): boolean {
 }
 
 /**
- * Recul entre deux tentatives : croissant, et TIRÉ AU SORT sur toute sa largeur.
+ * Recul entre deux tentatives : EXPONENTIEL, et TIRÉ AU SORT sur toute sa largeur.
  *
  * Le raisonnement qui justifie le nombre de tentatives — « au-delà, l'écriture n'est plus en
  * conflit ponctuel mais en contention durable » — suppose implicitement que du TEMPS passe entre
@@ -123,13 +136,19 @@ export function isForeignKeyViolation(e: unknown): boolean {
  * Le tirage au sort compte autant que le recul lui-même : deux marqueurs qui entrent en conflit
  * rejouent sinon en cadence, et se retrouvent au même instant à chaque tour.
  *
- * BORNES EXACTES, parce qu'une borne approximative ne sert à rien : l'attente précédant la
- * tentative n vaut au plus `20 × n` ms, soit 20, 40 puis 60 ms avant la quatrième et dernière —
- * 120 ms cumulées au pire. Le commentaire annonçait « 40 ms au pire avant la dernière
- * tentative » : il comptait l'avant-dernière.
+ * ⚠️ LA CROISSANCE ÉTAIT LINÉAIRE, ET C'EST CE QUI RENDAIT LE 409. `20 × n` ms plafonne à
+ * 120 ms cumulées sur quatre tentatives — moins que la durée de la transaction qu'on cherche
+ * justement à ne plus chevaucher. Le doublement corrige à l'endroit exact du défaut : il ne
+ * coûte rien quand le conflit se résout tôt (les deux premiers reculs sont inchangés), et il
+ * n'ouvre l'écart que là où la contention dure.
  *
- * Elles restent petites parce qu'un 40001 signifie que la transaction concurrente est déjà
- * retombée : on attend le temps de se désynchroniser, pas le temps qu'une écriture se termine.
+ * BORNES EXACTES, parce qu'une borne approximative ne sert à rien : l'attente précédant la
+ * tentative n vaut au plus `10 × 2ⁿ` ms, soit 20, 40, 80, 160 puis 320 ms avant la sixième et
+ * dernière — 620 ms cumulées au pire, contre 120 auparavant. En moyenne la moitié, le tirage
+ * étant uniforme sur toute la largeur.
+ *
+ * 620 ms au pire est un plafond ASSUMÉ, et il ne se paie que sur cinq conflits d'affilée. En
+ * face, un 409 demande à l'utilisateur de recliquer : plus long, et à sa charge.
  */
 const BACKOFF_MS = 10;
 
@@ -162,7 +181,7 @@ const MAX_WAIT_MS = 10_000;
  * par décrire une autre version du code.
  */
 export function backoffFor(attempt: number): number {
-  return Math.round(Math.random() * BACKOFF_MS * attempt * 2);
+  return Math.round(Math.random() * BACKOFF_MS * 2 ** attempt);
 }
 
 /**
@@ -175,9 +194,9 @@ export function backoffFor(attempt: number): number {
  * Après épuisement des tentatives, lève une `HttpError` 409 portant `conflictMessage` : au
  * client de réessayer, c'est un état transitoire et non une faute de sa part.
  *
- * Entre deux tentatives, un court recul tiré au sort (cf. `backoffFor`) : sans lui, la boucle
- * épuisait ses quatre essais en quelques millisecondes, et deux écrivains en conflit se
- * retrouvaient au même instant à chaque tour.
+ * Entre deux tentatives, un recul tiré au sort qui DOUBLE à chaque tour (cf. `backoffFor`) :
+ * sans lui, la boucle épuisait ses essais plus vite que la transaction concurrente ne se
+ * terminait, et deux écrivains en conflit se retrouvaient au même instant à chaque tour.
  */
 export async function serializableTransaction<T>(
   run: (tx: Prisma.TransactionClient) => Promise<T>,
