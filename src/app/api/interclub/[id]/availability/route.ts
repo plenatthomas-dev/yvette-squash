@@ -176,7 +176,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 // PUT /api/interclub/{id}/availability — poser une réponse, la sienne ou celle d'un autre.
 //   { status, comment?, userId? | guestId?, confirmOverride? }
 // Sans `userId` ni `guestId` : c'est la sienne. `status: null` ANNULE la réponse (retour à
-// « pas répondu ») — mêmes contrôles d'équipe et même confirmation qu'une écriture.
+// « pas répondu ») — mêmes contrôles d'équipe qu'une écriture, sans confirmation.
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const ctx = await loadContext(req, id);
@@ -259,7 +259,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       // qui a eu la personne au téléphone confirme et passe — mais personne ne doit faire
       // disparaître un « non » assumé sans l'avoir vu. On renvoie ce qu'elle disait et quand,
       // pour que l'écran puisse le montrer plutôt que d'annoncer un refus sec.
+      // L'ANNULATION PASSE SANS CONFIRMATION : elle ne met rien à la place, la personne
+      // redevient « à répondre » et sera relancée — rien d'assumé ne disparaît en silence.
       if (
+        !clear &&
         body.confirmOverride !== true &&
         needsOverrideConfirm(existing, subjectUserId, session.userId)
       ) {

@@ -56,8 +56,7 @@ interface Payload {
 /** Ce que le serveur renvoie en 409 : la réponse qu'on s'apprête à remplacer. */
 interface Conflict {
   key: string;
-  /** `null` : on s'apprêtait à EFFACER sa réponse, pas à la remplacer. */
-  status: AvailabilityStatus | null;
+  status: AvailabilityStatus;
   existing: { status: AvailabilityStatus; updatedAt: string };
 }
 
@@ -221,7 +220,7 @@ export function InterclubAvailability({
           error?: string;
           existing?: Conflict["existing"];
         };
-        if (body.existing) {
+        if (body.existing && status) {
           setConflict({ key, status, existing: body.existing });
         } else {
           toast("err", body.error ?? "Deux réponses en même temps, réessaie.");
@@ -389,13 +388,11 @@ export function InterclubAvailability({
         <div className="notice" role="alertdialog" aria-label="Confirmer le remplacement">
           <p>
             {entries.find((e) => e.key === conflict.key)?.name} avait répondu «{" "}
-            {AVAILABILITY_LABELS[conflict.existing.status]} » lui-même.{" "}
-            {conflict.status
-              ? <>Remplacer par « {AVAILABILITY_LABELS[conflict.status]} » ?</>
-              : "Effacer sa réponse ?"}
+            {AVAILABILITY_LABELS[conflict.existing.status]} » lui-même. Remplacer par «{" "}
+            {AVAILABILITY_LABELS[conflict.status]} » ?
           </p>
           <button type="button" onClick={() => answer(conflict.key, conflict.status, undefined, true)}>
-            {conflict.status ? "Remplacer" : "Effacer"}
+            Remplacer
           </button>{" "}
           <button type="button" className="secondary" onClick={() => setConflict(null)}>
             Annuler

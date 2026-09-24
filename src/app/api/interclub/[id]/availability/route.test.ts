@@ -280,13 +280,12 @@ describe("PUT /api/interclub/{id}/availability", () => {
     expect(h.created).toBeNull();
   });
 
-  it("annuler la réponse de PREMIÈRE MAIN d'un tiers se confirme aussi", async () => {
+  it("annule la réponse de PREMIÈRE MAIN d'un tiers SANS confirmation", async () => {
+    // Rien n'est mis à la place : la personne redevient « à répondre » et sera relancée.
     h.answers = [
       { interclubId: "f1", id: "a1", guestId: null, userId: "u2", setById: "u2", status: "no", updatedAt: new Date(), comment: null, setBy: { displayName: "Bob", nickname: null } },
     ];
-    expect((await PUT(req({ status: null, userId: "u2" }), ctx)).status).toBe(409);
-    expect(h.deleted).toBeNull();
-    expect((await PUT(req({ status: null, userId: "u2", confirmOverride: true }), ctx)).status).toBe(200);
+    expect((await PUT(req({ status: null, userId: "u2" }), ctx)).status).toBe(200);
     expect(h.deleted).toEqual({ where: { id: "a1" } });
   });
 
