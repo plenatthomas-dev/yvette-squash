@@ -186,9 +186,9 @@ export function InterclubAvailability({
   /**
    * Poser une réponse. `key` est la mienne par défaut ; un `guest:` ou l'identifiant d'un
    * coéquipier en fait un relais. `confirm` ne part qu'après que l'écran a montré ce qu'il
-   * remplace.
+   * remplace. `status: null` annule la réponse (retour à « pas répondu »).
    */
-  async function answer(key: string, status: AvailabilityStatus, comment?: string, confirm = false) {
+  async function answer(key: string, status: AvailabilityStatus | null, comment?: string, confirm = false) {
     setBusy(key);
     try {
       const isGuest = key.startsWith("guest:");
@@ -220,7 +220,7 @@ export function InterclubAvailability({
           error?: string;
           existing?: Conflict["existing"];
         };
-        if (body.existing) {
+        if (body.existing && status) {
           setConflict({ key, status, existing: body.existing });
         } else {
           toast("err", body.error ?? "Deux réponses en même temps, réessaie.");
@@ -304,7 +304,10 @@ export function InterclubAvailability({
                     type="button"
                     aria-pressed={e.status === s}
                     disabled={busy === e.key}
-                    onClick={() => answer(e.key, s)}
+                    // RE-CLIQUER ANNULE. Sans ça, un clic de travers ne se rattrapait qu'en
+                    // choisissant une autre réponse — impossible de revenir à « pas répondu ».
+                    title={e.status === s ? "Cliquer à nouveau pour annuler" : undefined}
+                    onClick={() => answer(e.key, e.status === s ? null : s)}
                   >
                     {AVAILABILITY_LABELS[s]}
                   </button>
