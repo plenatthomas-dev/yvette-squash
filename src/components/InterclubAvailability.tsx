@@ -286,6 +286,15 @@ export function InterclubAvailability({
         </span>
       </summary>
 
+      {/* LE GESTE D'ANNULATION SE DIT, IL NE SE DEVINE PAS.
+          Il ne tenait qu'au `title` du bouton retenu, c'est-à-dire à un SURVOL : rien, sur le
+          téléphone — l'appareil sur lequel ce bloc est presque toujours ouvert, au bord du
+          terrain. Une ligne posée une fois pour toute la liste, plutôt qu'un signe par bouton :
+          les trois cibles gardent leur largeur, et le nom du joueur la sienne. */}
+      <p className="muted ic-dispo-aide">
+        Toucher à nouveau la réponse retenue l'annule : le joueur repasse « à répondre ».
+      </p>
+
       <ul className="ic-dispo-list">
         {entries.map((e) => {
           const moi = e.key === data.me;
@@ -306,6 +315,9 @@ export function InterclubAvailability({
                     disabled={busy === e.key}
                     // RE-CLIQUER ANNULE. Sans ça, un clic de travers ne se rattrapait qu'en
                     // choisissant une autre réponse — impossible de revenir à « pas répondu ».
+                    // Le `title` ne fait que REDIRE au survol ce que la ligne d'aide au-dessus
+                    // de la liste annonce déjà : il ne porte plus seul la découverte du geste,
+                    // qu'il laissait invisible au doigt.
                     title={e.status === s ? "Cliquer à nouveau pour annuler" : undefined}
                     onClick={() => answer(e.key, e.status === s ? null : s)}
                   >
