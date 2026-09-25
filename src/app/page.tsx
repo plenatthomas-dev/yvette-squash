@@ -53,6 +53,7 @@ import {
   syncPushSubscription,
   pushSupported,
   pushEnabledOnServer,
+  clearSystemNotifications,
 } from "@/lib/pushClient";
 import { useFeatures, useFeaturesReady } from "@/components/FeatureProvider";
 import { recheckBanner } from "@/components/AnnouncementBanner";
@@ -395,6 +396,10 @@ export default function Home() {
       const d = (await r.json()) as { items: typeof notifs; unread: number };
       setNotifs(d.items);
       setUnread(d.unread);
+      // Plus rien de non lu (lu ou vidé ailleurs, sur un autre appareil) : les notifications
+      // système restées dans le volet n'ont plus rien à annoncer, et c'est elles que la pastille
+      // de l'icône compte (cf. `clearSystemNotifications`).
+      if (d.unread === 0) clearSystemNotifications();
     } catch {
       /* la cloche est un confort : son échec ne doit rien interrompre */
     }
@@ -1274,6 +1279,9 @@ export default function Home() {
                   setNotifs((prev) => prev.map((n) => ({ ...n, read: true })));
                   fetch("/api/notifications", { method: "POST" }).catch(() => {});
                 }
+                // Hors du `if` : le compteur peut être à zéro alors que le volet, lui, garde
+                // encore des notifications — c'est précisément le cas de la pastille bloquée.
+                clearSystemNotifications();
               }}
               aria-label={`Notifications et liste d'attente${unread ? ` (${unread} non lue${unread > 1 ? "s" : ""})` : ""}`}
               title="Notifications et liste d'attente"
@@ -1775,6 +1783,7 @@ export default function Home() {
                         setConfirmWipe(false);
                         setNotifs([]);
                         setUnread(0);
+                        clearSystemNotifications();
                         await fetch("/api/notifications", { method: "DELETE" }).catch(() => {});
                       }}
                     >

@@ -162,3 +162,33 @@ export async function unsubscribePush(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Ferme les notifications SYSTÈME encore affichées par l'appli, et efface la pastille d'icône.
+ *
+ * ⚠️ LA PASTILLE DE L'ICÔNE NE LIT PAS LA CLOCHE. Sur Android, le lanceur compte les
+ * notifications de l'appli toujours présentes dans le volet — pas nos lignes en base. Lire ou
+ * vider la cloche laissait donc « 18 » sur l'icône, indéfiniment, tant que personne n'allait
+ * balayer le volet à la main : un calendrier republié par la ligue a suffi à le montrer.
+ *
+ * `clearAppBadge` couvre les plateformes qui gèrent une pastille à part (bureau, iOS) ; Chrome
+ * Android ne l'implémente pas, d'où la fermeture des notifications elles-mêmes, qui est ce que
+ * son lanceur compte. Silencieuse : un échec ici ne doit rien interrompre.
+ */
+export async function clearSystemNotifications(): Promise<void> {
+  if (typeof navigator === "undefined") return;
+  try {
+    const nav = navigator as Navigator & { clearAppBadge?: () => Promise<void> };
+    await nav.clearAppBadge?.();
+  } catch {
+    /* non supporté ou refusé : rien à faire */
+  }
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return;
+    for (const n of await reg.getNotifications()) n.close();
+  } catch {
+    /* pas de service worker, ou API absente : rien à fermer */
+  }
+}
