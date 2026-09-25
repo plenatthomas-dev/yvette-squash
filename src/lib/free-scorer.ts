@@ -89,6 +89,36 @@ export function pushHistory(list: readonly FreeMatch[], m: FreeMatch, now = Date
   return pruneHistory([m, ...list.filter((x) => x.id !== m.id)], now);
 }
 
+/** Ce qu'un écran a besoin de savoir d'un match pour l'afficher sans rejouer le journal. */
+export type MatchSummary = {
+  done: boolean;
+  /** Vainqueur si terminé, sinon « home ». C'est le côté affiché en premier. */
+  first: Side;
+  second: Side;
+  /** Jeux gagnés, dans l'ordre (first, second). */
+  gamesWon: [number, number];
+  /** Scores des jeux terminés, du point de vue de `first`. */
+  games: [number, number][];
+  /** Jeu en cours (home, away), `null` si 0-0 ou match fini. */
+  current: [number, number] | null;
+};
+
+export function summarize(m: FreeMatch): MatchSummary {
+  const st = replay(m.events, m.bestOf);
+  const done = st.status === "done" && st.winner !== null;
+  const first: Side = done ? (st.winner as Side) : "home";
+  const second: Side = first === "home" ? "away" : "home";
+  return {
+    done,
+    first,
+    second,
+    gamesWon: [st.gamesWon[first], st.gamesWon[second]],
+    games: st.games.map((g) => [g[first], g[second]]),
+    current:
+      !done && st.current.home + st.current.away > 0 ? [st.current.home, st.current.away] : null,
+  };
+}
+
 /**
  * Le résultat en une ligne, prêt à coller dans un message :
  * « Paul bat Marc 3-1 (11-7, 9-11, 11-4, 11-8) ».
@@ -97,17 +127,14 @@ export function pushHistory(list: readonly FreeMatch[], m: FreeMatch, now = Date
  * dans l'ordre de saisie, suffixés « en cours ».
  */
 export function resultLine(m: FreeMatch): string {
-  const st = replay(m.events, m.bestOf);
-  const w: Side | null = st.status === "done" ? st.winner : null;
-  const first: Side = w ?? "home";
-  const second: Side = first === "home" ? "away" : "home";
-  const games = st.games.map((g) => `${g[first]}-${g[second]}`).join(", ");
+  const s = summarize(m);
+  const games = s.games.map(([a, b]) => `${a}-${b}`).join(", ");
   const detail = games ? ` (${games})` : "";
-  if (w) {
-    return `${m[first].name} bat ${m[second].name} ${st.gamesWon[first]}-${st.gamesWon[second]}${detail}`;
+  if (s.done) {
+    return `${m[s.first].name} bat ${m[s.second].name} ${s.gamesWon[0]}-${s.gamesWon[1]}${detail}`;
   }
-  const cur = st.current.home + st.current.away > 0 ? `, ${st.current.home}-${st.current.away}` : "";
-  return `${m.home.name} ${st.gamesWon.home}-${st.gamesWon.away} ${m.away.name} (en cours${cur})${
+  const cur = s.current ? `, ${s.current[0]}-${s.current[1]}` : "";
+  return `${m.home.name} ${s.gamesWon[0]}-${s.gamesWon[1]} ${m.away.name} (en cours${cur})${
     games ? ` — jeux : ${games}` : ""
   }`;
 }

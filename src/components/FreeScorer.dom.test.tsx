@@ -70,7 +70,7 @@ describe("FreeScorer — vue « Marqueur »", () => {
     expect(screen.getByText("Match en cours")).toBeTruthy();
     clic(bouton("Abandonner"));
     expect(localStorage.getItem(CURRENT_KEY)).not.toBeNull();
-    clic(bouton("Confirmer l'abandon"));
+    clic(bouton("Oui, abandonner"));
     expect(localStorage.getItem(CURRENT_KEY)).toBeNull();
     expect(bouton("Commencer")).toBeTruthy();
   });
@@ -85,7 +85,8 @@ describe("FreeScorer — vue « Marqueur »", () => {
     expect(localStorage.getItem(CURRENT_KEY)).toBeNull();
     const hist = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
     expect(hist).toHaveLength(1);
-    expect(screen.getAllByText("Paul bat Marc 2-0 (11-0, 11-0)").length).toBeGreaterThan(0);
+    // Le tableau de marque se lit à l'œil ; le lecteur d'écran reçoit la phrase entière.
+    expect(screen.getByRole("img", { name: "Paul bat Marc 2-0 (11-0, 11-0)" })).toBeTruthy();
     expect(bouton("Partager le résultat")).toBeTruthy();
   });
 

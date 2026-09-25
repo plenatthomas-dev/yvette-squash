@@ -5,8 +5,8 @@ import {
   applyPoint,
   applyServe,
   colorsTooClose,
-  COLOR_PRESETS,
   replay,
+  resolveColor,
   undo as undoEvent,
   winGamesFor,
   type Box,
@@ -24,10 +24,13 @@ import {
   resultLine,
   saveHistory,
   saveMatch,
+  summarize,
   type FreeMatch,
 } from "@/lib/free-scorer";
 import { useBreakTimer } from "@/lib/useBreakTimer";
 import { keepAwake } from "@/lib/wake-lock";
+import ColorPicker from "./ColorPicker";
+import { ShareIcon, TrashIcon } from "./icons";
 import ScoreBoard, { hapticFor } from "./ScoreBoard";
 
 type Toast = (type: "ok" | "err" | "info", msg: string) => void;
@@ -157,49 +160,57 @@ export function FreeScoringSession({
   );
 }
 
-function Swatches({
-  value,
-  onChange,
-  label,
-}: {
-  value: string | null;
-  onChange: (v: string | null) => void;
-  label: string;
-}) {
-  return (
-    <div className="fs-swatches" role="radiogroup" aria-label={label}>
-      <button
-        type="button"
-        role="radio"
-        aria-checked={value === null}
-        aria-label="Aucune couleur"
-        title="Aucune couleur"
-        className={`ic-swatch ic-swatch-none${value === null ? " is-on" : ""}`}
-        onClick={() => onChange(null)}
-      />
-      {COLOR_PRESETS.map((c) => (
-        <button
-          key={c.key}
-          type="button"
-          role="radio"
-          aria-checked={value === c.hex}
-          aria-label={c.label}
-          title={c.label}
-          className={`ic-swatch${value === c.hex ? " is-on" : ""}`}
-          style={{ background: c.hex }}
-          onClick={() => onChange(c.hex)}
-        />
-      ))}
-    </div>
-  );
-}
-
 function prettyDay(ms: number): string {
   return new Date(ms).toLocaleDateString("fr-FR", {
     weekday: "short",
     day: "numeric",
     month: "short",
   });
+}
+
+/**
+ * Le score d'un match, en tableau de marque : une ligne par joueur, ses points jeu par jeu,
+ * puis ses jeux gagnés en gros. C'est la forme qu'on lit sans réfléchir sur n'importe quel
+ * écran de sport — là où une phrase (« Paul bat Marc 2-1 (11-7, 9-11, 11-4) ») obligeait à
+ * remettre les nombres en face des noms.
+ *
+ * Match terminé : le vainqueur en tête et en gras. En cours : l'ordre de saisie, et une colonne
+ * de plus pour le jeu en cours, peinte comme l'est « en cours » partout ailleurs.
+ *
+ * Le lecteur d'écran reçoit la phrase (`resultLine`) : le tableau est une aide VISUELLE, et le
+ * lire case par case serait plus long que la phrase.
+ */
+function MatchScore({ m }: { m: FreeMatch }) {
+  const s = summarize(m);
+  const rows = [s.first, s.second] as const;
+  return (
+    <div className="fs-score" role="img" aria-label={resultLine(m)}>
+      {rows.map((side, r) => {
+        const c = resolveColor(m[side].color);
+        const winner = s.done && r === 0;
+        return (
+          <div key={side} className={"fs-score-row" + (winner ? " is-winner" : "")}>
+            <span
+              className={"fs-dot" + (c ? "" : " is-none")}
+              style={c ? { background: c.bg } : undefined}
+            />
+            <span className="fs-name">{m[side].name}</span>
+            <span className="fs-games">
+              {s.games.map((g, i) => (
+                <span key={i} className={g[r] > g[1 - r] ? "is-won" : ""}>
+                  {g[r]}
+                </span>
+              ))}
+              {s.current && (
+                <span className="fs-current">{s.current[side === "home" ? 0 : 1]}</span>
+              )}
+            </span>
+            <strong className="fs-won">{s.gamesWon[r]}</strong>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 /**
@@ -219,8 +230,9 @@ export default function FreeScorer({ toast }: { toast: Toast }) {
 
   const [homeName, setHomeName] = useState("");
   const [awayName, setAwayName] = useState("");
-  const [homeColor, setHomeColor] = useState<string | null>(null);
-  const [awayColor, setAwayColor] = useState<string | null>(null);
+  // `""` = pas de couleur : c'est la convention de `ColorPicker`, partagé avec l'interclub.
+  const [homeColor, setHomeColor] = useState("");
+  const [awayColor, setAwayColor] = useState("");
   const [bestOf, setBestOf] = useState<3 | 5>(3);
 
   // localStorage n'existe qu'au navigateur : lu après le montage, jamais au rendu serveur.
@@ -234,8 +246,8 @@ export default function FreeScorer({ toast }: { toast: Toast }) {
     const m: FreeMatch = {
       id: newId(),
       startedAt: Date.now(),
-      home: { name: cleanName(homeName, "Joueur 1"), color: homeColor },
-      away: { name: cleanName(awayName, "Joueur 2"), color: awayColor },
+      home: { name: cleanName(homeName, "Joueur 1"), color: homeColor || null },
+      away: { name: cleanName(awayName, "Joueur 2"), color: awayColor || null },
       bestOf,
       events: [],
     };
@@ -284,7 +296,9 @@ export default function FreeScorer({ toast }: { toast: Toast }) {
     );
   }
 
-  const tooClose = !!homeColor && !!awayColor && colorsTooClose(homeColor, awayColor);
+  // Le match qu'on vient de finir a sa propre carte, bouton de partage en avant : on ne le
+  // répète pas en tête de l'historique juste en dessous.
+  const others = last ? history.filter((m) => m.id !== last.id) : history;
 
   return (
     <section className="free-scorer">
@@ -294,128 +308,144 @@ export default function FreeScorer({ toast }: { toast: Toast }) {
       </p>
 
       {last && (
-        <article className="fs-card fs-result" aria-live="polite">
-          <p className="fs-line">{resultLine(last)}</p>
-          <button type="button" onClick={() => void shareResult(resultLine(last), toast)}>
+        <article className="fs-card fs-last" aria-live="polite">
+          <h3>Match terminé</h3>
+          <MatchScore m={last} />
+          <button type="button" className="fs-share" onClick={() => void shareResult(resultLine(last), toast)}>
+            <ShareIcon />
             Partager le résultat
           </button>
         </article>
       )}
 
       {current ? (
-        <article className="fs-card">
+        <article className="fs-card fs-live">
+          {/* Pas de pastille « en cours » : le titre le dit déjà, et le voile ambre de la carte
+              est la marque de cet état partout dans le produit. */}
           <h3>Match en cours</h3>
-          <p className="fs-line">{resultLine(current)}</p>
+          <MatchScore m={current} />
           <div className="fs-actions">
-            <button type="button" onClick={() => setPlaying(true)}>
-              Reprendre
-            </button>
             {confirmAbandon ? (
               <>
                 <button type="button" className="cancel" onClick={abandon}>
-                  Confirmer l&apos;abandon
+                  Oui, abandonner
                 </button>
-                <button type="button" className="secondary" onClick={() => setConfirmAbandon(false)}>
-                  Garder
+                <button type="button" className="secondary outline" onClick={() => setConfirmAbandon(false)}>
+                  Non, garder
                 </button>
               </>
             ) : (
-              <button type="button" className="secondary" onClick={() => setConfirmAbandon(true)}>
-                Abandonner
-              </button>
+              <>
+                <button type="button" onClick={() => setPlaying(true)}>
+                  Reprendre
+                </button>
+                <button type="button" className="secondary outline" onClick={() => setConfirmAbandon(true)}>
+                  Abandonner
+                </button>
+              </>
             )}
           </div>
         </article>
       ) : (
-        <form
-          className="fs-card fs-setup"
-          onSubmit={(e) => {
-            e.preventDefault();
-            start();
-          }}
-        >
-          <h3>Nouveau match</h3>
-          <label>
-            Joueur 1
-            <input
-              value={homeName}
-              onChange={(e) => setHomeName(e.target.value)}
-              placeholder="Joueur 1"
-              maxLength={40}
-              autoComplete="off"
-            />
-          </label>
-          <Swatches value={homeColor} onChange={setHomeColor} label="Couleur du joueur 1" />
-          <label>
-            Joueur 2
-            <input
-              value={awayName}
-              onChange={(e) => setAwayName(e.target.value)}
-              placeholder="Joueur 2"
-              maxLength={40}
-              autoComplete="off"
-            />
-          </label>
-          <Swatches value={awayColor} onChange={setAwayColor} label="Couleur du joueur 2" />
-          {tooClose && (
-            <p className="muted tiny" role="status">
-              ⚠️ Couleurs très proches : difficile de distinguer les joueurs.
-            </p>
-          )}
-          <fieldset className="fs-format">
-            <legend>Format</legend>
+        <article className="fs-card">
+          <form
+            className="fs-setup"
+            onSubmit={(e) => {
+              e.preventDefault();
+              start();
+            }}
+          >
+            <h3>Nouveau match</h3>
             <label>
-              <input
-                type="radio"
-                name="fs-bestof"
-                checked={bestOf === 3}
-                onChange={() => setBestOf(3)}
-              />
-              2 jeux gagnants
+              Joueur 1
+              <span className="ic-field-row">
+                <input
+                  value={homeName}
+                  onChange={(e) => setHomeName(e.target.value)}
+                  placeholder="Joueur 1"
+                  maxLength={40}
+                  autoComplete="off"
+                  enterKeyHint="next"
+                />
+                <ColorPicker value={homeColor} onChange={setHomeColor} label="Couleur du joueur 1" />
+              </span>
             </label>
             <label>
-              <input
-                type="radio"
-                name="fs-bestof"
-                checked={bestOf === 5}
-                onChange={() => setBestOf(5)}
-              />
-              3 jeux gagnants
+              Joueur 2
+              <span className="ic-field-row">
+                <input
+                  value={awayName}
+                  onChange={(e) => setAwayName(e.target.value)}
+                  placeholder="Joueur 2"
+                  maxLength={40}
+                  autoComplete="off"
+                  enterKeyHint="go"
+                />
+                <ColorPicker value={awayColor} onChange={setAwayColor} label="Couleur du joueur 2" />
+              </span>
             </label>
-          </fieldset>
-          <button type="submit">Commencer</button>
-        </form>
+            {colorsTooClose(homeColor, awayColor) && (
+              <p className="notice tiny ic-problem" role="status">
+                Ces deux couleurs se ressemblent trop pour distinguer les joueurs d&apos;un coup
+                d&apos;œil.
+              </p>
+            )}
+            <fieldset className="trn-choice">
+              <legend>Format</legend>
+              <button
+                type="button"
+                className={bestOf === 3 ? "on" : ""}
+                aria-pressed={bestOf === 3}
+                onClick={() => setBestOf(3)}
+              >
+                2 jeux gagnants
+              </button>
+              <button
+                type="button"
+                className={bestOf === 5 ? "on" : ""}
+                aria-pressed={bestOf === 5}
+                onClick={() => setBestOf(5)}
+              >
+                3 jeux gagnants
+              </button>
+            </fieldset>
+            <button type="submit">Commencer</button>
+          </form>
+        </article>
       )}
 
-      {history.length > 0 && (
-        <div className="fs-history">
+      {others.length > 0 && (
+        <article className="fs-card fs-history">
           <h3>Derniers matchs</h3>
           <ul>
-            {history.map((m) => (
+            {others.map((m) => (
               <li key={m.id}>
-                <span className="fs-date muted tiny">{prettyDay(m.startedAt)}</span>
-                <span className="fs-line">{resultLine(m)}</span>
-                <span className="fs-actions">
+                <span className="fs-date">{prettyDay(m.startedAt)}</span>
+                <MatchScore m={m} />
+                <span className="fs-row-actions">
                   <button
                     type="button"
-                    className="secondary"
+                    className="secondary outline icon-btn"
+                    aria-label={`Partager : ${resultLine(m)}`}
+                    title="Partager"
                     onClick={() => void shareResult(resultLine(m), toast)}
                   >
-                    Partager
+                    <ShareIcon />
                   </button>
                   <button
                     type="button"
-                    className="secondary"
-                    aria-label={`Effacer ${resultLine(m)}`}
+                    className="secondary outline icon-btn"
+                    aria-label={`Effacer : ${resultLine(m)}`}
+                    title="Effacer"
                     onClick={() => forget(m.id)}
                   >
-                    ✕
+                    <TrashIcon />
                   </button>
                 </span>
               </li>
             ))}
           </ul>
-        </div>
+        </article>
       )}
     </section>
   );

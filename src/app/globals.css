@@ -3895,9 +3895,11 @@ body[data-bottombar] .install-banner {
   font-variant-numeric: tabular-nums;
 }
 /* « 🎯 Marquer » : ouvre le marqueur point par point. Seul bouton plein (non `secondary`) de la
-   ligne, sur sa propre ligne : c'est l'action recommandée au bord du court, les boutons 3–0…
-   restent la saisie rapide après coup. */
-.trn-scorepick .trn-live { flex: 1 0 100%; font-size: 0.9rem; padding: 6px 10px; }
+   rangée — c'est l'action à faire AU BORD DU COURT — mais à la taille des boutons de score :
+   pleine largeur, il se répétait en barre verte sur chaque match à jouer d'une poule et
+   écrasait la saisie rapide 2–0…, qui reste le geste d'après coup. Un écart plus large le
+   détache des scores : ce sont deux façons de saisir, pas cinq choix d'une même liste. */
+.trn-scorepick .trn-live { font-weight: 600; margin-right: 10px; }
 /* Bouton « ✏️ Corriger » / « Annuler » d'un match déjà saisi : discret, jamais pleine largeur. */
 .trn-correct {
   width: auto;
@@ -4065,7 +4067,10 @@ body[data-bottombar] .install-banner {
   border: none;
   border-radius: var(--radius-sm);
   background: rgba(127, 127, 127, 0.22);
-  color: var(--pico-color);
+  /* `inherit`, et NON `var(--pico-color)` : Pico redéfinit cette variable SUR le bouton lui-même
+     (en l'encre inversée du primaire, du blanc), si bien que le choix non sélectionné sortait
+     blanc sur gris clair — illisible. Hériter reprend l'encre du texte qui l'entoure. */
+  color: inherit;
   font-weight: 600;
   cursor: pointer;
 }
@@ -7618,35 +7623,77 @@ button.cap-pastille {
 
 /* --- Marqueur libre (vue « Marqueur ») ---------------------------------------------------
    L'écran de marquage lui-même réutilise `.ics` (partagé avec l'interclub) : seuls l'écran de
-   départ, la reprise et l'historique sont propres à cette vue. */
+   départ, la reprise et l'historique sont propres à cette vue. Aucune couleur nouvelle : le
+   voile « en cours », le creux et la pastille ambre sont ceux du reste du produit. */
 .free-scorer { margin-top: 6px; }
-.free-scorer h2 { margin-bottom: 4px; }
-.free-scorer h3 { font-size: 1rem; margin: 0 0 10px; }
-.fs-card { margin: 12px 0; padding: 14px 16px; }
-.fs-setup label { margin-bottom: 6px; }
-.fs-setup input:not([type="radio"]) { margin-bottom: 8px; }
-.fs-swatches {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0 0 14px;
-}
-.fs-format { margin: 4px 0 14px; }
-.fs-format legend { font-size: 0.9rem; margin-bottom: 4px; }
-.fs-format label { display: inline-flex; align-items: center; gap: 6px; margin-right: 16px; }
-.fs-setup button[type="submit"] { width: 100%; margin: 0; }
-.fs-line { margin: 0 0 10px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.fs-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.fs-actions button { width: auto; margin: 0; padding: 6px 12px; }
-.fs-history ul { list-style: none; padding: 0; margin: 0; }
-.fs-history li {
-  display: flex;
-  flex-wrap: wrap;
+.free-scorer > h2 { margin-bottom: 4px; }
+.free-scorer > p { margin-bottom: 14px; }
+.fs-card { margin: 0 0 14px; padding: 14px 16px; }
+.fs-card h3 { font-size: 1.02rem; margin: 0 0 10px; }
+
+/* Tableau de marque : pastille · nom · points par jeu · jeux gagnés. Les colonnes de chiffres
+   sont à chasse fixe pour que les jeux s'alignent d'une ligne à l'autre. */
+.fs-score { display: grid; gap: 4px; margin: 0 0 14px; font-variant-numeric: tabular-nums; }
+.fs-score-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto 2ch;
   align-items: center;
-  gap: 4px 10px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--grid-line);
-  list-style: none;
+  gap: 10px;
 }
-.fs-history li .fs-line { flex: 1 1 60%; margin: 0; }
-.fs-date { flex: 0 0 100%; }
+.fs-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid var(--grid-line);
+}
+.fs-dot.is-none { background: transparent; }
+.fs-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-score-row.is-winner .fs-name { font-weight: 700; }
+.fs-games { display: flex; gap: 2px; font-size: 0.9rem; color: var(--pico-muted-color); }
+.fs-games > span { min-width: 2.2ch; text-align: center; }
+.fs-games > .is-won { color: var(--pico-color); font-weight: 600; }
+/* Le jeu en cours se lit comme « en cours » partout ailleurs : la paire ambre hors thème. */
+.fs-games > .fs-current {
+  color: #78350f;
+  background: #fcd34d;
+  border-radius: 4px;
+  font-weight: 700;
+}
+.fs-won { font-size: 1.25rem; text-align: right; }
+
+/* Match en cours : le seul état qui peint sa carte (Règle du voile d'état). */
+.fs-live { background: var(--live-wash); border: 1px solid var(--live-edge); }
+.fs-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.fs-actions button { flex: 1 1 0; margin: 0; }
+
+.fs-share { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin: 0; }
+
+.fs-setup label { margin-bottom: 12px; }
+.fs-setup .ic-field-row { margin-top: 4px; }
+.fs-setup .ic-problem { margin: 0 0 12px; }
+/* Deux formats côte à côte, à parts égales : empilés, ils se lisaient comme une liste. */
+.fs-setup .trn-choice { display: flex; gap: 10px; flex-wrap: wrap; }
+.fs-setup .trn-choice legend { flex: 0 0 100%; }
+.fs-setup .trn-choice button { flex: 1 1 0; margin: 0; padding: 10px; font-size: 0.9rem; }
+.fs-setup button[type="submit"] { width: 100%; margin: 0; }
+
+/* Historique : des lignes CREUSÉES dans la carte, jamais des cartes dans la carte. */
+.fs-history ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.fs-history li {
+  list-style: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "date actions" "score score";
+  column-gap: 10px;
+  align-items: center;
+  background: var(--sunken);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px 12px 14px;
+}
+/* Actions sur la ligne de la DATE, et non à côté du score : à côté, elles prenaient la largeur
+   qui manquait ensuite aux noms (« Jean-Ch… »). */
+.fs-date { grid-area: date; font-size: 0.75rem; color: var(--pico-muted-color); }
+.fs-history .fs-score { grid-area: score; margin: 6px 0 0; }
+.fs-row-actions { grid-area: actions; display: flex; gap: 6px; }
+/* 40px : cible tactile confortable sans épaissir chaque ligne. */
+.fs-row-actions .icon-btn { min-width: 40px; min-height: 40px; }
