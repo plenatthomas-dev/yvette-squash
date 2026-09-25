@@ -26,6 +26,7 @@ export const VIEWS = [
   "interclub",
   "forum",
   "captain",
+  "scorer",
 ] as const;
 
 export type View = (typeof VIEWS)[number];

@@ -3894,6 +3894,10 @@ body[data-bottombar] .install-banner {
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
 }
+/* « 🎯 Marquer » : ouvre le marqueur point par point. Seul bouton plein (non `secondary`) de la
+   ligne, sur sa propre ligne : c'est l'action recommandée au bord du court, les boutons 3–0…
+   restent la saisie rapide après coup. */
+.trn-scorepick .trn-live { flex: 1 0 100%; font-size: 0.9rem; padding: 6px 10px; }
 /* Bouton « ✏️ Corriger » / « Annuler » d'un match déjà saisi : discret, jamais pleine largeur. */
 .trn-correct {
   width: auto;
@@ -7611,3 +7615,38 @@ button.cap-pastille {
   font-size: 0.8rem;
   color: var(--pico-muted-color);
 }
+
+/* --- Marqueur libre (vue « Marqueur ») ---------------------------------------------------
+   L'écran de marquage lui-même réutilise `.ics` (partagé avec l'interclub) : seuls l'écran de
+   départ, la reprise et l'historique sont propres à cette vue. */
+.free-scorer { margin-top: 6px; }
+.free-scorer h2 { margin-bottom: 4px; }
+.free-scorer h3 { font-size: 1rem; margin: 0 0 10px; }
+.fs-card { margin: 12px 0; padding: 14px 16px; }
+.fs-setup label { margin-bottom: 6px; }
+.fs-setup input:not([type="radio"]) { margin-bottom: 8px; }
+.fs-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+.fs-format { margin: 4px 0 14px; }
+.fs-format legend { font-size: 0.9rem; margin-bottom: 4px; }
+.fs-format label { display: inline-flex; align-items: center; gap: 6px; margin-right: 16px; }
+.fs-setup button[type="submit"] { width: 100%; margin: 0; }
+.fs-line { margin: 0 0 10px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.fs-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.fs-actions button { width: auto; margin: 0; padding: 6px 12px; }
+.fs-history ul { list-style: none; padding: 0; margin: 0; }
+.fs-history li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--grid-line);
+  list-style: none;
+}
+.fs-history li .fs-line { flex: 1 1 60%; margin: 0; }
+.fs-date { flex: 0 0 100%; }

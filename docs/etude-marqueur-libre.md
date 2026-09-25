@@ -1,6 +1,10 @@
 # 🎯 Étude — un marqueur de points accessible hors interclub
 
-- **Statut** : 💡 à étudier · **Valeur** ⭐⭐ · **Effort** S–M (phase 1)
+- **Statut** : ✅ options C + E livrées · **Valeur** ⭐⭐ · **Effort** M
+- **Livré** : `ScoreBoard` (écran partagé), `useBreakTimer`, `lib/free-scorer.ts`,
+  `FreeScorer` (vue « Marqueur », flag `scorer` / `NEXT_PUBLIC_FEATURE_SCORER`), bouton
+  « 🎯 Marquer » sur les matchs de tournoi à jouer (résultat en jeux envoyé par
+  `PATCH /api/tournaments/{id}/matches/{mid}`, journal purgé seulement si le serveur accepte).
 - **Question** : sortir le module de comptage des points de l'interclub pour en faire une
   entrée du menu général ? Et si oui, faut-il garder les scores, et où ?
 
