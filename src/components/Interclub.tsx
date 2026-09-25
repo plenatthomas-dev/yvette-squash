@@ -1378,7 +1378,10 @@ function FixtureDialog({
               atteignable qu'au bas du défilement. Même motif que les Paramètres. */}
           <div className="settings-head ic-detail-head">
             <h3>
-              {fixture.team.name} {fixture.home ? "–" : "chez"} {fixture.opponent}
+              {/* Convention du sport : l'équipe qui REÇOIT d'abord. */}
+              {fixture.home
+                ? `${fixture.team.name} – ${fixture.opponent}`
+                : `${fixture.opponent} – ${fixture.team.name}`}
             </h3>
             <button
               type="button"
