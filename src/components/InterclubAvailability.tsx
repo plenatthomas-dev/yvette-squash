@@ -114,16 +114,9 @@ export function InterclubAvailability({
    */
   const [refus, setRefus] = useState<string | null>(null);
   /**
-   * Le bloc est-il déplié ?
-   *
-   * `null` = pas encore décidé, faute de données. À la première charge, on ouvre SI JE N'AI PAS
-   * ENCORE RÉPONDU, et on referme sinon : c'est la seule règle qui satisfait les deux usages du
-   * même écran. Tant que ma réponse manque, la question doit me sauter aux yeux ; une fois
-   * répondu, ce bloc n'est plus qu'une consultation, et il poussait les simples si bas qu'il
-   * fallait faire défiler pour voir la composition.
-   *
-   * L'état est GARDÉ ici plutôt que calculé à chaque rendu : passer `open={!jaiRépondu}` en
-   * dur refermerait le bloc sous les doigts de l'utilisateur à l'instant où il répond.
+   * Le bloc est-il déplié ? REPLIÉ PAR DÉFAUT : ouvert, il repoussait la composition si bas
+   * qu'il fallait faire défiler. C'est son en-tête, très coloré, qui attire l'œil à la place.
+   * `null` = l'utilisateur n'y a pas encore touché.
    */
   const [ouvert, setOuvert] = useState<boolean | null>(null);
 
@@ -135,10 +128,6 @@ export function InterclubAvailability({
    * bascule et le bloc se referme sous mes doigts, juste avant que je relise ce que je viens
    * de poser. Un test le tient.
    */
-  useEffect(() => {
-    if (!data || ouvert !== null) return;
-    setOuvert(!(data.entries.find((e) => e.key === data.me)?.status ?? null));
-  }, [data, ouvert]);
 
   const load = useCallback(async () => {
     try {
@@ -262,7 +251,7 @@ export function InterclubAvailability({
   const { entries, counts, matchCount } = data;
   const manque = counts.yes < matchCount;
   const maReponse = entries.find((e) => e.key === data.me)?.status ?? null;
-  const deplie = ouvert ?? !maReponse;
+  const deplie = ouvert ?? false;
 
   return (
     <details
