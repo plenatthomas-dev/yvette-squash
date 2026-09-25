@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, act, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
-import FreeScorer from "@/components/FreeScorer";
+import FreeScorer, { shareResult } from "@/components/FreeScorer";
 import Tournament from "@/components/Tournament";
 import { CURRENT_KEY, HISTORY_KEY, tournamentKey } from "@/lib/free-scorer";
 
@@ -11,6 +11,14 @@ import { CURRENT_KEY, HISTORY_KEY, tournamentKey } from "@/lib/free-scorer";
 
 vi.mock("@/components/FeatureProvider", () => ({
   useFeatures: () => ({ scorer: true }),
+}));
+
+// jsdom n'a pas de canvas : le rendu de l'image est remplacé par un faux, piloté par test.
+const image = vi.hoisted(() => ({ ok: true }));
+vi.mock("@/lib/score-image", () => ({
+  renderScoreCard: () => (image.ok ? ({} as HTMLCanvasElement) : null),
+  canvasToPng: (_c: unknown, name: string) => new File(["png"], name, { type: "image/png" }),
+  scoreFileName: () => "score-paul-marc.png",
 }));
 
 const clic = (el: HTMLElement) => act(() => fireEvent.click(el));
@@ -108,6 +116,85 @@ describe("FreeScorer — vue « Marqueur »", () => {
     localStorage.setItem(CURRENT_KEY, "{pas du json");
     render(<FreeScorer toast={toast} />);
     expect(bouton("Commencer")).toBeTruthy();
+  });
+});
+
+describe("ordre de la vue — l'action d'abord", () => {
+  it("le formulaire de nouveau match passe AVANT l'historique", () => {
+    localStorage.setItem(
+      "free:history",
+      JSON.stringify([
+        {
+          id: "h1",
+          startedAt: Date.now(),
+          home: { name: "Paul", color: null },
+          away: { name: "Marc", color: null },
+          bestOf: 3,
+          events: [],
+        },
+      ]),
+    );
+    render(<FreeScorer toast={vi.fn()} />);
+    const form = screen.getByRole("button", { name: "Commencer" });
+    const hist = screen.getByText("Derniers matchs");
+    expect(form.compareDocumentPosition(hist) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("shareResult — on partage une IMAGE du score", () => {
+  const m = {
+    id: "a",
+    startedAt: Date.now(),
+    home: { name: "Paul", color: null },
+    away: { name: "Marc", color: null },
+    bestOf: 3 as const,
+    events: [],
+  };
+
+  beforeEach(() => {
+    image.ok = true;
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("téléphone : la feuille de partage reçoit le PNG", async () => {
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, canShare: () => true, share });
+    await shareResult(m, vi.fn());
+    expect(share).toHaveBeenCalledTimes(1);
+    const arg = share.mock.calls[0][0] as ShareData;
+    expect(arg.files?.[0].type).toBe("image/png");
+  });
+
+  it("annulation de la feuille : ni téléchargement ni message", async () => {
+    const abort = Object.assign(new Error("annulé"), { name: "AbortError" });
+    vi.stubGlobal("navigator", { ...navigator, canShare: () => true, share: vi.fn().mockRejectedValue(abort) });
+    const toast = vi.fn();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    await shareResult(m, toast);
+    expect(click).not.toHaveBeenCalled();
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it("ordinateur sans partage de fichiers : le PNG est téléchargé", async () => {
+    vi.stubGlobal("navigator", { ...navigator, canShare: () => false, share: vi.fn() });
+    const createURL = vi.fn(() => "blob:x");
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: createURL, revokeObjectURL: vi.fn() }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const toast = vi.fn();
+    await shareResult(m, toast);
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith("ok", "Image du score enregistrée");
+  });
+
+  it("pas de canvas : repli sur le texte", async () => {
+    image.ok = false;
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, share });
+    await shareResult(m, vi.fn());
+    expect(share).toHaveBeenCalledWith({ text: "Paul 0-0 Marc (en cours)" });
   });
 });
 
