@@ -4,20 +4,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   applyPoint,
   applyServe,
-  ballPoint,
-  BREAK_SECONDS,
   replay,
-  resolveColor,
   seedEvents,
   undo as undoEvent,
   winGamesFor,
   type Box,
-  type GameScore,
   type ScoreEvent,
   type Side,
 } from "@/lib/interclub";
-import { isSoundEnabled } from "@/lib/sound";
+import { useBreakTimer } from "@/lib/useBreakTimer";
 import { keepAwake } from "@/lib/wake-lock";
+import ScoreBoard, { hapticFor } from "./ScoreBoard";
 
 // Écran de marquage, au bord du terrain. Trois partis pris commandent tout le reste :
 //
@@ -139,13 +136,6 @@ function saveAck(matchId: string, ack: Ack) {
   }
 }
 
-/** mm:ss */
-function mmss(total: number): string {
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
 /**
  * Issue d'un envoi, telle que `finish` a besoin de la connaître.
  *
@@ -178,13 +168,10 @@ export default function InterclubScorer({
   const eventsRef = useRef<ScoreEvent[]>([]);
   const [ready, setReady] = useState(false);
   const [offline, setOffline] = useState(false);
-  const [breakUntil, setBreakUntil] = useState<number | null>(null);
-  const [now, setNow] = useState(() => Date.now());
+  const { remaining, startBreak, stopBreak } = useBreakTimer();
 
   const state = replay(events, bestOf);
   const needed = winGamesFor(bestOf);
-  const homeC = resolveColor(match.homeColor);
-  const awayC = resolveColor(match.awayColor);
 
   // --- journal local ---------------------------------------------------------
   // Amorcé UNE SEULE FOIS par match. `match.games` est une référence de tableau reconstruite à
@@ -425,27 +412,6 @@ export default function InterclubScorer({
     };
   }, []);
 
-  // --- minuteur de pause -----------------------------------------------------
-  useEffect(() => {
-    if (breakUntil === null) return;
-    const t = window.setInterval(() => setNow(Date.now()), 500);
-    return () => window.clearInterval(t);
-  }, [breakUntil]);
-
-  const remaining = breakUntil === null ? 0 : Math.max(0, Math.ceil((breakUntil - now) / 1000));
-  useEffect(() => {
-    if (breakUntil === null || remaining > 0) return;
-    if (isSoundEnabled()) {
-      // Réutilise le bip déjà connu des membres plutôt que d'inventer un son de plus.
-      import("@/lib/sound").then((m) => m.playAlert()).catch(() => {});
-    }
-    // La pause est FINIE : on l'éteint ici, et pas seulement sur « Reprendre maintenant » ou
-    // sur un undo. Sans cela `breakUntil` restait posé, donc l'intervalle de 500 ms continuait
-    // de battre — deux rendus complets de l'écran par seconde jusqu'au jeu suivant, alors que
-    // le panneau de pause a déjà disparu et que plus rien ne dépend de `now`.
-    setBreakUntil(null);
-  }, [breakUntil, remaining]);
-
   // --- actions ---------------------------------------------------------------
   function commit(build: (prev: ScoreEvent[]) => ScoreEvent[]) {
     const prev = eventsRef.current;
@@ -458,37 +424,13 @@ export default function InterclubScorer({
     const gameEnded = after.games.length > before.games.length;
     const finished = after.status === "done";
 
-    // LE MARQUAGE EST LE SEUL ÉCRAN QU'ON UTILISE SANS LE REGARDER : on tape, et on regarde le
-    // court. Une brève vibration confirme l'appui sans lever les yeux — et une double vibration
-    // dit qu'un jeu vient de tomber, ce qui est l'autre information qu'on cherchait à l'écran.
-    //
-    // ⚠️ 30 ms, ET NON 12. Le premier essai reprenait la durée du Fil (12 ms), et elle ne se
-    // sentait pas : là-bas c'est un tic discret sur un écran qu'on REGARDE, ici c'est la seule
-    // confirmation d'un geste fait en regardant ailleurs. Surtout, `vibrate` ne pilote que la
-    // DURÉE — jamais l'intensité — et les moteurs à résonance linéaire des téléphones récents
-    // mettent quelques dizaines de millisecondes à monter en amplitude : en dessous, le moteur
-    // n'a pas fini de démarrer que l'ordre est déjà fini. 30 ms se sent sans être désagréable
-    // sur une main qui tient l'appareil.
-    //
-    // `?.` parce que l'API n'existe nulle part chez Apple — ni Safari iOS, ni aucun navigateur
-    // sur iPhone, qui utilisent tous le moteur de Safari. Sur ces appareils il n'y aura JAMAIS
-    // de retour haptique ici, et ce n'est pas rattrapable côté web. Le marquage fonctionne
-    // exactement pareil sans elle : même doctrine que le verrou d'écran.
-    if (after.games.length !== before.games.length || after.current.home !== before.current.home
-        || after.current.away !== before.current.away) {
-      navigator.vibrate?.(gameEnded ? [40, 70, 40] : 30);
-    }
+    hapticFor(before, after);
 
-    if (gameEnded && !finished) setBreakUntil(Date.now() + BREAK_SECONDS * 1000);
+    if (gameEnded && !finished) startBreak();
     scheduleSync(next);
   }
 
-  /**
-   * Tant que le premier serveur n'est pas désigné, marquer n'a pas de sens — et `applyPoint`
-   * IGNORE d'ailleurs un point dans cet état (« on ne devine pas un serveur »). Sans cette
-   * condition, les deux grandes cases restaient actives et absorbaient les appuis en silence :
-   * le pire des états pour un écran qu'on utilise sans le regarder, au bord du terrain.
-   */
+  // Cf. `ScoreBoard` : sans premier serveur désigné, un point n'a pas de sens.
   const attendServeur = state.serving === null;
 
   const scorePoint = (side: Side) => {
@@ -506,7 +448,7 @@ export default function InterclubScorer({
     commit((prev) => applyServe(prev, bestOf, side, box));
 
   const doUndo = () => {
-    setBreakUntil(null);
+    stopBreak();
     commit((prev) => undoEvent(prev));
   };
 
@@ -547,168 +489,34 @@ export default function InterclubScorer({
 
   if (!ready) return null;
 
-  // Qui tient une balle de jeu — et si c'est une balle de match. La règle vit dans
-  // `interclub.ts` (`ballPoint`), l'écran ne fait que l'afficher : une seconde copie du
-  // « 11 points et 2 d'écart » finirait par diverger, et l'écart ne se verrait qu'à 10-10.
-  //
-  // Éteint pendant la pause et une fois le match fini : « balle de match » sous un score final
-  // n'annonce plus rien, et une balle de jeu à côté d'un minuteur de deux minutes non plus.
-  const balle =
-    state.status === "done" || remaining > 0 ? null : ballPoint(state.current, state.gamesWon, bestOf);
-
-  const side = (who: Side) => {
-    const isHome = who === "home";
-    const c = isHome ? homeC : awayC;
-    const name = isHome ? match.homeDisplayName : match.awayName;
-    const pts = isHome ? state.current.home : state.current.away;
-    const won = isHome ? state.gamesWon.home : state.gamesWon.away;
-    const serving = state.serving === who;
-    return (
-      <button
-        className="ics-side"
-        style={c ? { background: c.bg, color: c.fg, borderColor: c.fg } : undefined}
-        onClick={() => scorePoint(who)}
-        disabled={
-          attendServeur || state.awaitingServeBox || state.status === "done" || remaining > 0
-        }
-        aria-label={`Point pour ${name}`}
-      >
-        <span className="ics-name">{name}</span>
-        {/* Coin HAUT-DROIT, le seul des quatre qui restait libre : le score garde le centre
-            entier, et l'annonce ne lui prend pas un pixel de hauteur. C'est ce qu'un marqueur
-            dit à voix haute avant l'échange, et l'écran le savait déjà sans jamais le dire. */}
-        {balle?.side === who && (
-          <span className={`ics-balle${balle.match ? " ics-balle-match" : ""}`}>
-            {balle.match ? "balle de match" : "balle de jeu"}
-          </span>
-        )}
-        <span className="ics-points">{pts}</span>
-        {/* Barre du bas : jeux gagnés à gauche, carré de service à droite. Groupés plutôt que
-            posés chacun dans son coin — sur une case étroite (téléphone debout), « sert à
-            gauche » et « 1 jeu » ne tiennent pas côte à côte, et se chevauchaient. Ici la
-            barre se replie sur deux lignes au lieu de les superposer. */}
-        <span className="ics-foot">
-          <span className="ics-won">
-            <span className="sr-only">Jeux gagnés : </span>
-            {won} jeu{won > 1 ? "x" : ""}
-          </span>
-          {serving && (
-            <span className="ics-serve" title={`${name} sert`}>
-              sert {state.servingBox === "left" ? "à gauche" : state.servingBox === "right" ? "à droite" : ""}
-            </span>
-          )}
-        </span>
-      </button>
-    );
-  };
-
   return (
-    <div className="ics" role="dialog" aria-label="Marquage du match">
-      <header className="ics-head">
-        <button className="secondary" onClick={() => void finish()}>
-          ← Retour
-        </button>
-        <span className="ics-meta" title={`Match numéro ${match.order}, ${needed} jeux gagnants`}>
+    <ScoreBoard
+      state={state}
+      bestOf={bestOf}
+      homeName={match.homeDisplayName}
+      awayName={match.awayName}
+      homeColor={match.homeColor}
+      awayColor={match.awayColor}
+      metaTitle={`Match numéro ${match.order}, ${needed} jeux gagnants`}
+      meta={
+        <>
           Match #{match.order} · {needed} jeux gagnants
           {offline && (
             <span className="ics-offline" title="Les points sont gardés sur cet appareil">
               hors-ligne
             </span>
           )}
-        </span>
-        {/* ⚠️ ACTIF DÈS LE PREMIER ÉVÉNEMENT, et c'est une correction. La garde était
-            `length <= 1`, ce qui rendait le CHOIX DU PREMIER SERVEUR indéfaisable : sur un match
-            vierge, `seedEvents` rend une liste vide, le « Qui engage ? » y pose l'événement n° 1,
-            et un appui de travers condamnait l'indicateur de service pour tout le match (le
-            score, lui, n'était pas touché). Marquer un point puis l'annuler ne rattrapait rien —
-            on retombait à 1.
-
-            Cette garde ne protégeait rien d'autre : on pouvait déjà défaire, un par un, tous les
-            événements reconstruits d'un match repris. Elle n'ajoutait qu'un plancher arbitraire,
-            exactement là où il fallait pouvoir se corriger. */}
-        <button className="secondary" onClick={doUndo} disabled={events.length === 0}>
-          ↶ Annuler
-        </button>
-      </header>
-
-      {/* TOUJOURS RENDUE, même vide (sa hauteur est réservée en CSS). Conditionner son
-          affichage faisait sauter le tableau d'un cran au premier jeu terminé, et toute la
-          typographie des cases avec lui — elle se règle en requêtes de conteneur sur la case,
-          donc sur sa hauteur. */}
-      <p className="ics-history">
-        {state.games.map((g: GameScore, i: number) => (
-          <span key={i}>
-            {g.home}-{g.away}
-            {i < state.games.length - 1 ? " · " : ""}
-          </span>
-        ))}
-      </p>
-
-      <div className="ics-board">
-        {side("home")}
-        {side("away")}
-      </div>
-
-      {/* Premier service du match : il faut désigner qui sert ET de quel carré. */}
-      {state.serving === null && state.status !== "done" && (
-        <div className="ics-ask">
-          <p>Qui engage&nbsp;?</p>
-          <div className="ics-ask-row">
-            <button onClick={() => chooseFirstServer("home", "left")}>
-              {match.homeDisplayName} · gauche
-            </button>
-            <button onClick={() => chooseFirstServer("home", "right")}>
-              {match.homeDisplayName} · droite
-            </button>
-          </div>
-          <div className="ics-ask-row">
-            <button onClick={() => chooseFirstServer("away", "left")}>
-              {match.awayName} · gauche
-            </button>
-            <button onClick={() => chooseFirstServer("away", "right")}>
-              {match.awayName} · droite
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Reprise de service : le carré ne se déduit pas, le joueur le CHOISIT. */}
-      {state.awaitingServeBox && state.serving && state.status !== "done" && remaining === 0 && (
-        <div className="ics-ask">
-          <p>
-            {state.serving === "home" ? match.homeDisplayName : match.awayName} sert&nbsp;:
-          </p>
-          <div className="ics-ask-row">
-            <button onClick={() => chooseBox("left")}>Carré gauche</button>
-            <button onClick={() => chooseBox("right")}>Carré droit</button>
-          </div>
-        </div>
-      )}
-
-      {/* Pause réglementaire entre deux jeux. Interruptible : les pauses réelles ne suivent
-          pas toujours le règlement, et un minuteur qu'on ne peut pas passer devient un
-          obstacle plutôt qu'une aide. */}
-      {remaining > 0 && (
-        <div className="ics-ask">
-          <p className="ics-timer">{mmss(remaining)}</p>
-          <p className="muted tiny">Pause entre les jeux</p>
-          <div className="ics-ask-row">
-            <button onClick={() => setBreakUntil(null)}>Reprendre maintenant</button>
-          </div>
-        </div>
-      )}
-
-      {state.status === "done" && (
-        <div className="ics-ask">
-          <p className="ics-done">
-            {state.winner === "home" ? match.homeDisplayName : match.awayName} l&apos;emporte{" "}
-            {state.gamesWon.home}–{state.gamesWon.away}
-          </p>
-          <div className="ics-ask-row">
-            <button onClick={() => void finish()}>Terminer</button>
-          </div>
-        </div>
-      )}
-    </div>
+        </>
+      }
+      canUndo={events.length > 0}
+      remaining={remaining}
+      onPoint={scorePoint}
+      onFirstServe={chooseFirstServer}
+      onBox={chooseBox}
+      onUndo={doUndo}
+      onSkipBreak={stopBreak}
+      onBack={() => void finish()}
+      onFinish={() => void finish()}
+    />
   );
 }
