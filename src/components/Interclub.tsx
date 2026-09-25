@@ -1374,9 +1374,22 @@ function FixtureDialog({
         />
       ) : (
         <>
-          <h3>
-            {fixture.team.name} {fixture.home ? "–" : "chez"} {fixture.opponent}
-          </h3>
+          {/* En-tête COLLANT avec sa croix : la fiche est longue, et « Fermer » n'était
+              atteignable qu'au bas du défilement. Même motif que les Paramètres. */}
+          <div className="settings-head ic-detail-head">
+            <h3>
+              {fixture.team.name} {fixture.home ? "–" : "chez"} {fixture.opponent}
+            </h3>
+            <button
+              type="button"
+              className="secondary settings-close"
+              onClick={onClose}
+              aria-label="Fermer la rencontre"
+              title="Fermer"
+            >
+              ✕
+            </button>
+          </div>
           <p className="muted tiny">
             {fixture.round && `${fixture.round} · `}
             {shortDate(fixture.date)}

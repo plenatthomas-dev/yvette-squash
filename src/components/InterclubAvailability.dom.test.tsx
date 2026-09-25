@@ -449,17 +449,15 @@ describe("bloc de disponibilité — écraser une réponse de première main", (
 describe("le bloc se replie, et son résumé dit l'essentiel", () => {
   const details = () => document.querySelector("details.ic-dispo") as HTMLDetailsElement;
 
-  it("s'ouvre TANT QUE JE N'AI PAS RÉPONDU", async () => {
-    // C'est le seul moment où ce bloc demande un geste. Replié, la question passerait
-    // inaperçue et personne ne répondrait avant la relance.
+  it("reste REPLIÉ par défaut, même tant que je n'ai pas répondu", async () => {
+    // Ouvert, il repoussait la composition si bas qu'il fallait faire défiler. C'est son
+    // en-tête coloré, avec « à répondre », qui appelle le geste.
     await monte([entree({ key: "u1", name: "Thomas" }), entree({ key: "u2", name: "Léa" })]);
-    expect(details().open).toBe(true);
+    expect(details().open).toBe(false);
     expect(screen.getByText("à répondre")).toBeTruthy();
   });
 
-  it("se replie UNE FOIS MA RÉPONSE POSÉE", async () => {
-    // Il n'est plus qu'une consultation : ouvert, il repoussait les simples si bas qu'il
-    // fallait faire défiler pour voir la composition de l'équipe.
+  it("reste replié une fois ma réponse posée", async () => {
     await monte([
       entree({ key: "u1", name: "Thomas", status: "yes" }),
       entree({ key: "u2", name: "Léa" }),
@@ -478,6 +476,7 @@ describe("le bloc se replie, et son résumé dit l'essentiel", () => {
     // `open={!jaiRépondu}` calculé à chaque rendu refermerait le bloc à l'instant précis où
     // l'utilisateur clique — juste avant qu'il ne relise ce qu'il vient de poser.
     await monte([entree({ key: "u1", name: "Thomas" })]);
+    fireEvent.click(document.querySelector("summary.ic-dispo-head") as HTMLElement);
     expect(details().open).toBe(true);
 
     fetchMock.mockImplementation(async () =>
