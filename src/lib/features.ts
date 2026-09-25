@@ -29,6 +29,7 @@ export const FEATURE_KEYS = [
   "externalBookings",
   "interclub",
   "forum",
+  "scorer",
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
@@ -52,6 +53,7 @@ export const FEATURE_LABELS: Record<FeatureKey, string> = {
   externalBookings: "Détection des résas faites directement sur ResaMania",
   interclub: "Rencontres par équipes (interclub)",
   forum: "Fil de discussion",
+  scorer: "Marqueur de points (hors interclub)",
 };
 
 function isOn(v: string | undefined): boolean {
@@ -110,6 +112,11 @@ export const ENV_FEATURES: Features = {
   // présence du canal temps réel, expose le FAIT D'ÊTRE EN LIGNE — deux choses qui n'existaient
   // pas avant → à éprouver sur Recette, et à annoncer dans la note de confidentialité.
   forum: isOn(process.env.NEXT_PUBLIC_FEATURE_FORUM),
+  // Marqueur de points libre : vue « Marqueur » + bouton « Marquer » sur les matchs de
+  // tournoi. INDÉPENDANT de `interclub`. Aucune route, aucune donnée serveur : le journal et
+  // l'historique restent dans le localStorage du téléphone (cf. lib/free-scorer.ts) — seul le
+  // résultat en jeux d'un match de tournoi part, par la route de saisie qui existe déjà.
+  scorer: isOn(process.env.NEXT_PUBLIC_FEATURE_SCORER),
 };
 
 /** État effectif = override s'il y en a un, sinon le défaut de l'environnement. */

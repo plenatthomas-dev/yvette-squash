@@ -20,6 +20,7 @@ const env: Features = {
   externalBookings: false,
   interclub: false,
   forum: false,
+  scorer: false,
 };
 
 describe("resolveFeatures", () => {
