@@ -5,6 +5,18 @@ import { Dialog } from "@/components/Dialog";
 import { MIN_PLAYERS, MAX_PLAYERS } from "@/lib/tournament";
 import { accountHolders, fetchDirectory, type DirectoryMember } from "@/lib/directoryCache";
 import { compareRosterOrder } from "@/lib/interclub-order";
+import { useFeatures } from "@/components/FeatureProvider";
+import { FreeScoringSession } from "@/components/FreeScorer";
+import { isValidBestOf, replay } from "@/lib/interclub";
+import {
+  loadHistory,
+  loadMatch,
+  pushHistory,
+  removeKey,
+  saveHistory,
+  tournamentKey,
+  type FreeMatch,
+} from "@/lib/free-scorer";
 
 // Vue « Tournoi » : liste des tournois, assistant de création (roster annuaire + invités,
 // cible de matchs) → proposition de formule → génération, puis suivi (poules/tableau,
@@ -177,6 +189,10 @@ export default function Tournament({ toast, onExpired }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Match de tournoi marqué point par point au bord du court (flag `scorer`). Le déroulé reste
+  // sur le téléphone ; seul le résultat en JEUX part, par la saisie habituelle.
+  const { scorer } = useFeatures();
+  const [scoring, setScoring] = useState<{ m: MatchView; match: FreeMatch } | null>(null);
 
   // Assistant de création (1 roster, 2 têtes de série, 3 réglages, 4 formules)
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -426,8 +442,9 @@ export default function Tournament({ toast, onExpired }: Props) {
     }
   };
 
-  const enterScore = async (m: MatchView, g1: number, g2: number) => {
-    if (!m.id || !openId || busy) return;
+  /** `true` si le serveur a pris le score (le marqueur ne purge son journal qu'à ce prix). */
+  const enterScore = async (m: MatchView, g1: number, g2: number): Promise<boolean> => {
+    if (!m.id || !openId || busy) return false;
     setBusy(true);
     try {
       const res = await fetch(`/api/tournaments/${openId}/matches/${m.id}`, {
@@ -435,13 +452,15 @@ export default function Tournament({ toast, onExpired }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ score1: g1, score2: g2 }),
       });
-      if (onExpired(res.status)) return;
+      if (onExpired(res.status)) return false;
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error ?? `Erreur ${res.status}`);
       setEditing(null); // sort du mode correction
       await loadDetail(openId);
+      return true;
     } catch (e) {
       toast("err", "Score refusé : " + (e as Error).message);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -475,12 +494,58 @@ export default function Tournament({ toast, onExpired }: Props) {
   //  - match À JOUER : boutons de score (tout participant) ;
   //  - match DÉJÀ SAISI : bouton « ✏️ Corriger » (créateur seulement, comme le backend) qui
   //    ré-ouvre les boutons de score → permet de rattraper une faute de frappe.
+  /**
+   * Ouvre le marqueur sur un match à jouer, en reprenant son journal s'il en a un.
+   *
+   * Un journal ne se reprend que s'il désigne les MÊMES joueurs au même format : en tableau, un
+   * slot se remplit quand le match amont est joué, et une correction en amont peut en changer
+   * l'occupant. Reprendre alors l'ancien journal attribuerait des points à quelqu'un d'autre.
+   */
+  const openScorer = (m: MatchView) => {
+    if (!m.id || !m.p1 || !m.p2 || !detail || !isValidBestOf(detail.bestOf)) return;
+    const saved = loadMatch(tournamentKey(m.id));
+    const same =
+      saved &&
+      saved.home.name === m.p1.name &&
+      saved.away.name === m.p2.name &&
+      saved.bestOf === detail.bestOf;
+    setScoring({
+      m,
+      match: same
+        ? saved
+        : {
+            id: m.id,
+            startedAt: Date.now(),
+            home: { name: m.p1.name, color: null },
+            away: { name: m.p2.name, color: null },
+            bestOf: detail.bestOf,
+            events: [],
+          },
+    });
+  };
+
+  const sendScored = async (m: MatchView, fm: FreeMatch) => {
+    const st = replay(fm.events, fm.bestOf);
+    if (st.status !== "done" || !m.id) return;
+    // p1 = « home » du marqueur, p2 = « away » : c'est l'ordre dans lequel on l'a ouvert.
+    const ok = await enterScore(m, st.gamesWon.home, st.gamesWon.away);
+    // Refus (réseau, match déjà saisi ailleurs) : `enterScore` a prévenu, le journal RESTE et
+    // l'écran aussi — on peut retaper « Envoyer », ou revenir et saisir à la main.
+    if (!ok) return;
+    removeKey(tournamentKey(m.id));
+    saveHistory(pushHistory(loadHistory(), { ...fm, id: `trn-${m.id}` }));
+    setScoring(null);
+    toast("ok", "Résultat enregistré");
+  };
+
   const scoreControls = (m: MatchView) => {
     if (!m.p1 || !m.p2 || !detail) return null;
     const done = m.status === "done";
     const canEnter = done ? detail.isCreator : m.status === "pending" && canScore;
     if (!canEnter) return null;
     const open = m.status === "pending" || editing === m.id;
+    const canLive = scorer && !done && !!m.id && isValidBestOf(detail.bestOf);
+    const resume = canLive && loadMatch(tournamentKey(m.id!)) !== null;
     if (!open) {
       return (
         <button
@@ -495,6 +560,17 @@ export default function Tournament({ toast, onExpired }: Props) {
     }
     return (
       <div className="trn-scorepick">
+        {canLive && (
+          <button
+            type="button"
+            className="trn-live"
+            disabled={busy}
+            onClick={() => openScorer(m)}
+            aria-label={`${resume ? "Reprendre le marquage" : "Marquer point par point"} : ${m.p1.name} contre ${m.p2.name}`}
+          >
+            🎯 {resume ? "Reprendre" : "Marquer"}
+          </button>
+        )}
         {scorelines(detail.bestOf).map(([a, b]) => (
           <button
             key={`${a}-${b}`}
@@ -1164,6 +1240,18 @@ export default function Tournament({ toast, onExpired }: Props) {
             </>
           )}
         </Dialog>
+      )}
+
+      {scoring && (
+        <FreeScoringSession
+          key={scoring.match.id}
+          match={scoring.match}
+          storageKey={tournamentKey(scoring.m.id!)}
+          meta={<>Tournoi · {Math.floor(scoring.match.bestOf / 2) + 1} jeux gagnants</>}
+          finishLabel="Envoyer le résultat"
+          onBack={() => setScoring(null)}
+          onFinish={(fm) => sendScored(scoring.m, fm)}
+        />
       )}
 
       {confirmDelete && (

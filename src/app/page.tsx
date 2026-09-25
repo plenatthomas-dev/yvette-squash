@@ -25,6 +25,7 @@ import {
   EuroIcon,
   TrophyIcon,
   TeamsIcon,
+  ScoreIcon,
   BellIcon,
   UsersIcon,
   TrendIcon,
@@ -45,6 +46,7 @@ const Captain = dynamic(() => import("@/components/Captain"), { ssr: false });
 // Idem pour le fil de discussion : son JS embarque le client temps réel, qui n'a aucune
 // raison de peser sur le premier chargement de quelqu'un qui vient réserver un terrain.
 const Forum = dynamic(() => import("@/components/Forum"), { ssr: false });
+const FreeScorer = dynamic(() => import("@/components/FreeScorer"), { ssr: false });
 import { fmtTime, slotMinutes, stampFR, isRealDateISO } from "@/lib/time";
 import { NOTIFICATION_RETENTION_DAYS } from "@/lib/notifications-shared";
 import { downloadIcs } from "@/lib/ics";
@@ -153,6 +155,7 @@ const SPECIAL_LABEL: Record<string, string> = {
   tourney: "Tournois",
   interclub: "Interclub",
   captain: "Capitaine",
+  scorer: "Marqueur",
 };
 
 interface JournalEntry {
@@ -193,6 +196,7 @@ export default function Home() {
     tournament,
     interclub,
     forum,
+    scorer,
     ranking,
     rankingHistory,
   } = useFeatures();
@@ -616,6 +620,7 @@ export default function Home() {
     if (view === "tourney" && !tournament) setView("day");
     if (view === "interclub" && !interclub) setView("day");
     if (view === "forum" && !forum) setView("day");
+    if (view === "scorer" && !scorer) setView("day");
     // Capitanat retiré pendant la session, ou fonction coupée : la vue ne doit pas rester
     // ouverte sur un écran dont les routes répondent désormais 403.
     //
@@ -627,7 +632,7 @@ export default function Home() {
     // réponse du serveur arrive sur un état déjà écrasé, que plus rien ne rattrape.
     if (me === undefined) return;
     if (view === "captain" && (!interclub || captainOf.length === 0)) setView("day");
-  }, [featuresReady, view, tricount, tournament, interclub, forum, me, captainOf]);
+  }, [featuresReady, view, tricount, tournament, interclub, forum, scorer, me, captainOf]);
 
   // Reflète l'état dans l'URL (partageable, survit au refresh) et le persiste.
   useEffect(() => {
@@ -648,7 +653,8 @@ export default function Home() {
       view === "tourney" ||
       view === "interclub" ||
       view === "forum" ||
-      view === "captain"
+      view === "captain" ||
+      view === "scorer"
     )
       return; // ces vues chargent leurs propres données
     setPlanning(null);
@@ -671,7 +677,13 @@ export default function Home() {
   // actualiser plusieurs fois ».
   const reload = useCallback(
     (fresh = false) => {
-      if (view === "money" || view === "tourney" || view === "interclub" || view === "forum")
+      if (
+        view === "money" ||
+        view === "tourney" ||
+        view === "interclub" ||
+        view === "forum" ||
+        view === "scorer"
+      )
         return; // ces vues se rechargent seules
       if (view === "week") loadWeek(date, fresh);
       else load(date, fresh);
@@ -1340,6 +1352,17 @@ export default function Home() {
                   comingSoon: !interclub,
                   onClick: () => setView(view === "interclub" ? "day" : "interclub"),
                 },
+                // Hors interclub À DESSEIN : compter un amical ne doit pas dépendre du
+                // championnat, ni de son interrupteur.
+                {
+                  key: "scorer",
+                  label: "Marqueur",
+                  icon: <ScoreIcon />,
+                  active: view === "scorer",
+                  disabled: !scorer,
+                  comingSoon: !scorer,
+                  onClick: () => setView(view === "scorer" ? "day" : "scorer"),
+                },
                 // L'ESPACE CAPITAINE N'APPARAÎT QU'AUX CAPITAINES — absent, et non grisé.
                 // Les autres entrées se grisent quand leur fonction est coupée : c'est une
                 // information utile (« ça arrive »). Ici ce serait l'inverse — annoncer à
@@ -1654,6 +1677,8 @@ export default function Home() {
       )}
 
       {forum && view === "forum" && <Forum toast={toast} onExpired={handleExpired} />}
+
+      {scorer && view === "scorer" && <FreeScorer toast={toast} />}
 
       {/* La garde est DOUBLE, et ce n'est pas une redondance : le menu décide de la
           découvrabilité, celle-ci de l'affichage. Un `view=captain` collé dans l'URL par
