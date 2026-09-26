@@ -132,6 +132,7 @@ describe("parseTeamRoster — les rencontres, et leur `tieid`", () => {
       date: "2025-10-09",
       time: "20:00",
       round: "1",
+      table: "338671",
       opponentTeamId: "161096",
       opponentName: "Verrieres 3",
       venue: "SQUASH CLUB DE VERRIERES LE BUISSON",

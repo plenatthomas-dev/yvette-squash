@@ -1,4 +1,5 @@
 import { postAjax } from "./client";
+import { fetchTeamRoster, RosterUnreadableError, type TeamTie } from "./roster";
 
 // ============================================================================
 //  CALENDRIER D'UN CHAMPIONNAT PAR ÉQUIPES (squashnet.fr), source PUBLIQUE.
@@ -352,6 +353,69 @@ export function ownFixtures(ties: CalendarTie[], snTeamId: string): OwnTie[] {
     });
 }
 
+/** « J07 » → « 7 », « 7 » → « 7 » : le numéro de journée, sans préfixe ni zéro de tête. */
+const roundNumber = (round: string | null): string | null => {
+  const m = /(\d+)\s*$/.exec(round ?? "");
+  return m ? String(Number.parseInt(m[1], 10)) : null;
+};
+
+/**
+ * Remplace la date (et l'heure) de nos rencontres par celles que publie la FICHE DE L'ÉQUIPE.
+ *
+ * ⚠️ LE CALENDRIER DE POULE PEUT ÊTRE FAUX QUAND LA FICHE EST JUSTE. Mesuré le 2026-09-26 sur la
+ * D4 poule B : l'exemption de Meudon a fait recalculer le calendrier, et la section `393986` a
+ * rendu dix-sept de nos vingt rencontres au 08/06/2027 — la date bouchon —, alors que la fiche
+ * d'équipe (`393480`) et l'espace capitaine donnaient les vraies dates, vérifiées à la main.
+ * La fiche, elle, ne porte ni le `teamid` du receveur, ni l'adresse du club : on garde donc la
+ * structure de la poule et on n'emprunte à la fiche que ce qu'elle a de sûr.
+ *
+ * LE RAPPROCHEMENT SE FAIT SUR LA JOURNÉE, DANS LE TABLEAU DE NOTRE POULE. Pas sur la date : c'est
+ * elle qui est fausse. Pas sur n'importe quel tableau : la phase finale renumérote ses tours
+ * depuis 1 (cf. `parseTies`). Une journée que la fiche porte deux fois, ou dont l'adversaire n'est
+ * pas le même des deux côtés, garde sa date de poule — on ne choisit pas.
+ *
+ * LE STATUT DE LA DATE est recalculé sur la date retenue : bouchon si la FICHE porte une autre
+ * rencontre le même jour (les deux exemptions y tombent ensemble le 08/06/2027), ou si c'est
+ * une date bouchon de la POULE (plusieurs journées ce jour-là).
+ */
+export function withTeamDates(
+  pool: CalendarTie[],
+  own: OwnTie[],
+  teamTies: readonly TeamTie[],
+  roundId: string | null,
+): OwnTie[] {
+  const lignes = roundId ? teamTies.filter((t) => t.table === roundId && t.date) : [];
+  if (lignes.length === 0) return own;
+
+  const parJournee = new Map<string, TeamTie | null>();
+  const parDate = new Map<string, number>();
+  for (const t of lignes) {
+    const n = roundNumber(t.round);
+    if (n) parJournee.set(n, parJournee.has(n) ? null : t);
+    parDate.set(t.date!, (parDate.get(t.date!) ?? 0) + 1);
+  }
+  const journeesPoule = new Map<string, Set<string>>();
+  for (const t of pool) {
+    const set = journeesPoule.get(t.date) ?? new Set<string>();
+    set.add(t.round);
+    journeesPoule.set(t.date, set);
+  }
+
+  return own.map((tie) => {
+    const n = roundNumber(tie.round);
+    const t = n ? parJournee.get(n) : null;
+    if (!t) return tie;
+    if (t.opponentTeamId && tie.opponentTeamId && t.opponentTeamId !== tie.opponentTeamId) return tie;
+    const date = t.date!;
+    return {
+      ...tie,
+      date,
+      time: t.time ?? tie.time,
+      dateConfirmed: parDate.get(date) === 1 && (journeesPoule.get(date)?.size ?? 0) <= 1,
+    };
+  });
+}
+
 // --- Réseau ----------------------------------------------------------------
 
 /**
@@ -408,6 +472,36 @@ export async function fetchTeamCalendar(
     );
   }
   return ties;
+}
+
+/**
+ * Nos rencontres, datées par la fiche de l'équipe (cf. `withTeamDates`). DEUX requêtes.
+ *
+ * ⚠️ UNE FICHE ILLISIBLE OU MUETTE FAIT ÉCHOUER LE TOUT, au lieu de retomber sur les dates de
+ * la poule. Retomber, c'est réannoncer des dates qu'on sait bouchon : l'aperçu proposerait de
+ * ramener dix-sept rencontres au 08/06/2027, et le contrôle hebdomadaire alerterait d'un
+ * « changement » qui n'est qu'une panne de lecture. Mieux vaut ne rien dire cette fois-ci.
+ */
+export async function fetchOwnFixtures(
+  eventId: string,
+  roundId: string | null,
+  snTeamId: string,
+): Promise<OwnTie[]> {
+  const pool = await fetchTeamCalendar(eventId, roundId);
+  const own = ownFixtures(pool, snTeamId);
+  if (own.length === 0) return own;
+  let fiche;
+  try {
+    fiche = await fetchTeamRoster(snTeamId);
+  } catch (e) {
+    if (e instanceof RosterUnreadableError) {
+      throw new CalendarUnreadableError(
+        "La fiche de l'équipe a été reçue mais n'a pas pu être lue : le rendu de squashnet a changé.",
+      );
+    }
+    throw e;
+  }
+  return withTeamDates(pool, own, fiche.ties, roundId);
 }
 
 /**

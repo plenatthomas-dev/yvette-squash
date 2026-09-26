@@ -105,6 +105,13 @@ export interface TeamTie {
   time: string | null;
   /** Le TOUR tel qu'affiché (« 1 »), SANS le « J » de nos journées. */
   round: string | null;
+  /**
+   * La POULE du tableau d'où vient la ligne — le `<id>` de `round_<id>`, c'est-à-dire le
+   * `roundid` de l'ancrage. Les tours se répètent d'une phase à l'autre : sans la poule, le
+   * « Tour 1 » du championnat et celui de la phase finale seraient indiscernables.
+   * Absent des rosters rangés avant qu'il n'existe.
+   */
+  table?: string | null;
   /** `teamid` fédéral de l'adversaire — la clé de son roster. */
   opponentTeamId: string | null;
   /** Nom publié de l'équipe adverse. */
@@ -282,7 +289,7 @@ function parseTies(html: string): TeamTie[] {
   const ties: TeamTie[] = [];
   // Tous les tableaux de calendrier, dans l'ordre de la page. `[\s\S]*?` s'arrête au premier
   // `</table>` : ces tableaux n'en contiennent pas d'imbriqué (vérifié sur la fiche de référence).
-  const TABLES = /<table[^>]*id=["']round_\d+["'][^>]*>[\s\S]*?<\/table>/gi;
+  const TABLES = /<table[^>]*id=["']round_(\d+)["'][^>]*>[\s\S]*?<\/table>/gi;
   let table: RegExpExecArray | null;
   while ((table = TABLES.exec(html)) !== null) {
     TR.lastIndex = 0;
@@ -315,6 +322,7 @@ function parseTies(html: string): TeamTie[] {
           : dateIso(valeur(c, "Date")),
         time: heure(ordre),
         round: txt(valeur(c, "Tour")),
+        table: table[1],
         opponentTeamId: cellAdv ? attr(cellAdv.html, "data-teamid") : null,
         opponentName: txt(texte(cellAdv?.html ?? "")),
         venue: txt(valeur(c, "Lieu")),
