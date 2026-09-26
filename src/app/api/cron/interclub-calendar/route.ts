@@ -5,8 +5,7 @@ import { getFeatures } from "@/lib/features-server";
 import { prisma } from "@/lib/db";
 import { adminUserIds } from "@/lib/admin";
 import {
-  fetchTeamCalendar,
-  ownFixtures,
+  fetchOwnFixtures,
   diffCalendar,
   calendarFingerprint,
   CalendarUnreadableError,
@@ -103,10 +102,7 @@ export async function GET(req: NextRequest) {
   for (const team of teams) {
     let published;
     try {
-      published = ownFixtures(
-        await fetchTeamCalendar(team.snEventId!, team.snRoundId!),
-        team.snTeamId!,
-      );
+      published = await fetchOwnFixtures(team.snEventId!, team.snRoundId!, team.snTeamId!);
     } catch (e) {
       // Un hoquet réseau n'est PAS un calendrier vide. On ne touche à rien — surtout pas à
       // `snCheckedAt`, qui doit continuer de dire « la dernière fois qu'on a vraiment regardé ».

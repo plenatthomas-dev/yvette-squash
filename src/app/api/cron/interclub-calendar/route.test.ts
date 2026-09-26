@@ -45,7 +45,7 @@ vi.mock("@/lib/admin", () => ({
 // mocke le RÉSEAU seulement, et on garde le vrai `diffCalendar` / `calendarFingerprint`.
 vi.mock("@/lib/squashnet/calendar", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/squashnet/calendar")>()),
-  fetchTeamCalendar: vi.fn(async (...args: unknown[]) => {
+  fetchOwnFixtures: vi.fn(async (...args: unknown[]) => {
     if (h.fetchThrows) throw new Error("502");
     if (h.fetchUnreadable) {
       const { CalendarUnreadableError } =
@@ -53,11 +53,9 @@ vi.mock("@/lib/squashnet/calendar", async (importOriginal) => ({
       throw new CalendarUnreadableError("le rendu a changé");
     }
     void args;
-    return [];
+    // Ce que le test veut voir publié, sans reconstruire un fragment HTML dans chaque cas.
+    return h.published;
   }),
-  // `ownFixtures` reçoit le tableau vide ci-dessus : on lui substitue ce que le test veut voir
-  // publié, ce qui évite de reconstruire un fragment HTML dans chaque cas.
-  ownFixtures: vi.fn(() => h.published),
 }));
 vi.mock("@/lib/interclub-notify", () => ({
   notifyCalendarDrift: vi.fn(async (...a: unknown[]) => {

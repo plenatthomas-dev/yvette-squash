@@ -37,7 +37,7 @@ clair (`<a id="players" data-ic_a="393475" …>`).
 | `ic_a`   | Section                     | Paramètres                        | État                        |
 |----------|-----------------------------|-----------------------------------|-----------------------------|
 | `131079` | Classement des joueurs      | `name`, `month`, `gender`, `ligue`… | ✅ lu (`client.ts`)         |
-| `393986` | Calendrier d'une épreuve    | `eventid`, `roundid`              | ✅ lu (`calendar.ts`)       |
+| `393986` | Calendrier d'une épreuve    | `eventid`, `roundid`              | ✅ lu (`calendar.ts`) — dates prises sur `393480` |
 | `394242` | Classement d'une poule      | `eventid`, `drawid`, `roundid`    | ✅ lu (`standings.ts`)      |
 | `393480` | Fiche d'une équipe          | `teamid` **seul**                 | ✅ lu (`roster.ts`)         |
 | `393475` | Joueurs d'une épreuve       | `eventid`                         | ⬜ coquille vide — voir ci-dessous |
@@ -75,7 +75,7 @@ squashnet »**, et les quatre vont ensemble.
 
 **Nos deux équipes sont dans la MÊME poule** (Hommes 4, poule B) — c'est nouveau, et ça n'a
 rien d'un cas limite : elles se rencontrent à **J7** (2026-12-10, l'équipe 2 reçoit) et **J18**
-(2027-03-18, l'équipe 1 reçoit). Chaque rencontre existe deux fois en base, une par équipe, ce
+(2027-04-01 depuis le recalcul du 2026-09, l'équipe 1 reçoit). Chaque rencontre existe deux fois en base, une par équipe, ce
 que la clé `@@unique([teamId, snMatchKey])` autorise sans rien confondre. L'équipe d'en face
 étant la nôtre, son « roster adverse » est celui que la ligue publie pour notre propre club.
 
@@ -88,6 +88,15 @@ conséquences mesurées plus loin dans le code : la profondeur de lecture des ad
 ⚠️ **J20 est publiée hors de l'ordre des dates** : elle tombe le 2027-03-04, donc AVANT J17
 (2027-03-11), J18 et J19. C'est exactement le cas que le rapprochement par JOURNÉE — et non par
 date — existe pour absorber ; il ne demande aucune correction.
+
+⚠️ **LE CALENDRIER DE POULE PEUT ÊTRE FAUX QUAND LA FICHE D'ÉQUIPE EST JUSTE.** Constaté le
+2026-09-26 : l'exemption de Meudon a fait recalculer le calendrier, et `393986` rend 17 de nos
+20 rencontres au **08/06/2027** (date bouchon), alors que la fiche d'équipe `393480` — et
+l'espace capitaine, vérifié à la main — donnent les vraies dates. L'import lit donc **les deux**
+(`fetchOwnFixtures`) : la structure (receveur, `teamid` adverse, lieu, adresse) vient de la
+poule, **la date et l'heure de la fiche**, rapprochées par numéro de journée dans le tableau
+`round_<snRoundId>`. Pas besoin de l'accès capitaine. Fixtures :
+`calendrier-2027-d4-poule-b-bouchon.html`, `equipe-2027-176168-fiche.html`.
 
 - **Sans `roundid`**, le calendrier rend *une* poule au hasard — bien formée, où notre équipe
   ne figure pas. Zéro rencontre importée, aucune erreur.

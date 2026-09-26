@@ -54,15 +54,15 @@ vi.mock("@/lib/interclub-notify", () => ({
   }),
 }));
 
-// Le RÉSEAU seul est simulé : `ownFixtures`, `diffCalendar` et `matchKey` restent les vrais,
-// sinon ce fichier vérifierait un double de la règle et non la règle.
+// Le RÉSEAU seul est simulé : `diffCalendar` et `matchKey` restent les vrais, sinon ce fichier
+// vérifierait un double de la règle et non la règle. La lecture (poule + fiche d'équipe) est
+// éprouvée chez elle, dans `squashnet/calendar.test.ts`.
 vi.mock("@/lib/squashnet/calendar", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/squashnet/calendar")>()),
-  fetchTeamCalendar: vi.fn(async () => {
+  fetchOwnFixtures: vi.fn(async () => {
     if (h.fetchThrows) throw new Error("réseau");
-    return [];
+    return h.published;
   }),
-  ownFixtures: vi.fn(() => h.published),
 }));
 
 vi.mock("@/lib/squashnet/standings", () => ({
