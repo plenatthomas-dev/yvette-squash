@@ -4,8 +4,7 @@ import { requireAdmin } from "@/lib/admin";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
 import { MARQUEURS_A_REARMER } from "@/lib/interclub-availability";
 import {
-  fetchTeamCalendar,
-  ownFixtures,
+  fetchOwnFixtures,
   diffCalendar,
   describeDiff,
   calendarFingerprint,
@@ -218,10 +217,7 @@ export async function POST(req: NextRequest) {
 
   let published: OwnTie[];
   try {
-    published = ownFixtures(
-      await fetchTeamCalendar(team.snEventId, team.snRoundId),
-      team.snTeamId,
-    );
+    published = await fetchOwnFixtures(team.snEventId, team.snRoundId, team.snTeamId);
   } catch (e) {
     // DEUX PANNES, DEUX PHRASES. « Réessaie » sur un rendu qu'on ne sait plus lire enverrait
     // l'admin cliquer dix fois avant d'aller voir le code ; « le format a changé » sur un
