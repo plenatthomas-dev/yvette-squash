@@ -6209,19 +6209,26 @@ body[data-bottombar] .install-banner {
   }
 }
 
-/* NOTRE ligne. Reconnue par l'identifiant fédéral, jamais par le nom. Pas de vert (Règle du
-   Vert Actionnable : être dans le tableau n'est pas une action) et pas de fond de couleur, qui
-   entrerait en concurrence avec le voile « en cours » des rencontres juste en dessous : un
-   simple filet à gauche et l'encre du thème, ce qui reste lisible en niveaux de gris. */
+/* NOS lignes — une par équipe du club dans la poule. Reconnues par l'identifiant fédéral,
+   jamais par le nom. Couleur VIVE, à la demande du club : le filet discret d'avant ne se
+   repérait pas d'un coup d'œil, et avec deux équipes dans la même poule c'est la première
+   chose qu'on cherche. `--accent` et pas le vert (Règle du Vert Actionnable) : être dans le
+   tableau n'est pas une action. Le jeton est thémé dans les trois thèmes ; le texte garde
+   l'encre du thème, le fond n'est qu'un voile, donc le contraste reste celui du texte nu. */
 .ic-standings-table tbody tr.is-us th,
 .ic-standings-table tbody tr.is-us td {
-  background: var(--pico-card-background-color);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
   font-weight: 700;
   color: var(--pico-contrast);
 }
 .ic-standings-table tbody tr.is-us .ic-st-rank {
-  box-shadow: inset 3px 0 0 var(--pico-contrast);
+  box-shadow: inset 4px 0 0 var(--accent);
   color: var(--pico-contrast);
+}
+/* Nos pastilles de rang prennent la même couleur que nos lignes : le lien se fait sans lire. */
+.ic-standings-rank {
+  background: var(--accent);
+  color: var(--accent-fg);
 }
 
 /* Nos chiffres en toutes lettres, pour nous seulement — l'écran les appelle « Nos stats », le

@@ -32,6 +32,7 @@ import {
 } from "@/lib/interclub";
 import { compareRosterOrder, isNC, lineupOrderConflict, type OrderedSlot } from "@/lib/interclub-order";
 import { normalize } from "@/lib/squashnet/match";
+import { estEquipeFictive } from "@/lib/squashnet/fictive";
 import {
   awayAlignmentClash,
   awayLineupConflict,
@@ -308,25 +309,88 @@ function jourCourt(iso: string): string {
 const signe = (n: number) => (n > 0 ? `+${n}` : `${n}`);
 
 /**
+ * Retire les équipes fictives (« EXEMPT », « Non Joue ») d'un classement DÉJÀ en cache, et
+ * resserre les rangs derrière elles : sans quoi « 1, 2, 4 » laisse un trou qui se remarque.
+ * Un rang n'est décalé que du nombre de lignes fictives classées STRICTEMENT devant lui, ce qui
+ * garde les ex æquo publiés par la ligue.
+ */
+function sansFictives(rows: StandingRow[]): StandingRow[] {
+  const fictifs = rows.filter((r) => estEquipeFictive(r.name)).map((r) => r.rank);
+  if (fictifs.length === 0) return rows;
+  return rows
+    .filter((r) => !estEquipeFictive(r.name))
+    .map((r) => ({ ...r, rank: r.rank - fictifs.filter((f) => f < r.rank).length }));
+}
+
+/** Un classement de poule, et celles de NOS équipes qui y figurent. */
+type Poule = {
+  key: string;
+  rows: StandingRow[];
+  standingsAt: string | null;
+  /** Nos équipes présentes dans ce classement : `snTeamId` → nom chez nous (« Équipe 2 »). */
+  ours: Map<string, string>;
+};
+
+/**
+ * Les classements À AFFICHER, UN PAR POULE.
+ *
+ * Deux équipes du club dans la même poule rapportent chacune le même classement : l'afficher
+ * deux fois ne dit rien de plus. On les regroupe sur l'ensemble des identifiants fédéraux du
+ * tableau — deux relevés d'une même poule ont les mêmes équipes, même si l'un date de la veille.
+ *
+ * `ours` recense TOUTES nos équipes présentes dans la poule, pas seulement celles de l'onglet :
+ * sur l'onglet « Équipe 1 », l'Équipe 2 reste surlignée, puisqu'elle est dans le même tableau.
+ */
+function poulesAffichees(teams: Team[], visibles: Team[]): Poule[] {
+  const poules = new Map<string, Poule>();
+  for (const t of visibles) {
+    if (!t.standings?.length) continue;
+    const rows = sansFictives(t.standings);
+    if (rows.length === 0) continue;
+    const key = rows
+      .map((r) => r.snTeamId ?? r.name)
+      .sort()
+      .join("|");
+    const deja = poules.get(key);
+    if (deja) {
+      // Le relevé le plus récent l'emporte : c'est lui qui est à jour.
+      if ((t.standingsAt ?? "") > (deja.standingsAt ?? "")) {
+        deja.rows = rows;
+        deja.standingsAt = t.standingsAt ?? null;
+      }
+      continue;
+    }
+    const ours = new Map<string, string>();
+    for (const e of teams) {
+      if (e.snTeamId && rows.some((r) => r.snTeamId === e.snTeamId)) ours.set(e.snTeamId, e.name);
+    }
+    poules.set(key, { key, rows, standingsAt: t.standingsAt ?? null, ours });
+  }
+  return [...poules.values()];
+}
+
+/**
  * LE CLASSEMENT DE LA POULE.
  *
  * Replié par défaut, et c'est délibéré : c'est de la donnée de RÉFÉRENCE, consultée quand on se
  * demande où on en est, pas à chaque ouverture de l'écran. Le résumé porte déjà la réponse à la
  * question courante — notre rang — pour que l'ouvrir soit un choix et pas un passage obligé.
  *
- * Notre ligne est reconnue par `snTeamId`, JAMAIS par le nom : la ligue écrit « Squash de
+ * Nos lignes sont reconnues par `snTeamId`, JAMAIS par le nom : la ligue écrit « Squash de
  * l'Yvette » là où nous écrivons « Équipe 2 », et deux équipes du club dans la même poule se
  * confondraient. Le jour où l'ancrage manque, aucune ligne n'est surlignée — c'est visible, et
  * c'est mieux qu'une ligne fausse mise en avant.
  *
  * Huit colonnes et pas dix-huit : le tableau fédéral en publie dix-huit, illisibles sur un
  * téléphone. Les averages de jeux et de points — ceux qui départagent un nul — sont donnés en
- * toutes lettres SOUS le tableau, pour notre équipe seulement, là où ils se lisent.
+ * toutes lettres SOUS le tableau, pour nos équipes seulement, là où ils se lisent.
  */
-function StandingsTable({ team }: { team: Team }) {
-  const rows = team.standings;
-  if (!rows || rows.length === 0) return null;
-  const nous = team.snTeamId ? rows.find((r) => r.snTeamId === team.snTeamId) : undefined;
+function StandingsTable({ poule }: { poule: Poule }) {
+  const { rows, standingsAt, ours } = poule;
+  const nous = rows.filter((r) => r.snTeamId && ours.has(r.snTeamId));
+  // Plusieurs de nos équipes dans le tableau : chaque rang, chaque stat porte son nom.
+  const plusieurs = nous.length > 1;
+  const nomDe = (r: StandingRow) => (r.snTeamId && ours.get(r.snTeamId)) || r.name;
 
   return (
     <details className="ic-standings">
@@ -334,12 +398,16 @@ function StandingsTable({ team }: { team: Team }) {
         <span className="ic-standings-title">Classement</span>
         {/* Le rang en PASTILLE : c'est la réponse qu'on vient chercher, et noyée dans la
             phrase elle se lisait comme une précision de plus. */}
-        {nous && <span className="ic-standings-rank">{rangCourt(nous.rank)}</span>}
+        {nous.map((r) => (
+          <span key={r.snTeamId} className="ic-standings-rank">
+            {plusieurs ? `${nomDe(r)} · ${rangCourt(r.rank)}` : rangCourt(r.rank)}
+          </span>
+        ))}
         <span className="ic-standings-sub muted tiny">
-          {nous ? `sur ${rows.length}` : `${rows.length} équipes`}
+          {nous.length > 0 ? `sur ${rows.length}` : `${rows.length} équipes`}
           {/* La date de relevé n'est pas décorative : sans elle, un classement figé depuis
               trois semaines s'affiche exactement comme un classement à jour. */}
-          {team.standingsAt && ` · au ${jourCourt(team.standingsAt)}`}
+          {standingsAt && ` · au ${jourCourt(standingsAt)}`}
         </span>
       </summary>
 
@@ -375,13 +443,17 @@ function StandingsTable({ team }: { team: Team }) {
           </thead>
           <tbody>
             {rows.map((r) => {
-              const cestNous = !!team.snTeamId && r.snTeamId === team.snTeamId;
+              const cestNous = !!r.snTeamId && ours.has(r.snTeamId);
               return (
                 <tr key={`${r.rank}-${r.snTeamId ?? r.name}`} className={cestNous ? "is-us" : ""}>
                   <td className="ic-st-rank">{r.rank}</td>
                   <th scope="row" className="ic-st-team" title={r.name}>
                     {r.name}
-                    {cestNous && <span className="sr-only"> (notre équipe)</span>}
+                    {cestNous && (
+                      <span className="sr-only">
+                        {plusieurs ? ` (notre ${nomDe(r)})` : " (notre équipe)"}
+                      </span>
+                    )}
                   </th>
                   <td>{r.played}</td>
                   <td>{r.won}</td>
@@ -399,14 +471,14 @@ function StandingsTable({ team }: { team: Team }) {
       {/* LES AVERAGES, en toutes lettres et pour nous seulement. Ce sont eux qui départagent
           un nul 2-2 et deux équipes à égalité de points ; les noyer dans dix colonnes de plus
           les rendrait illisibles sur un téléphone, les taire les rendrait introuvables. */}
-      {nous && (
-        <p className="ic-standings-avg muted tiny">
-          Nos stats — matchs {nous.matches.won}&ndash;{nous.matches.lost} (
-          {signe(nous.matches.diff)}) · jeux {nous.games.won}&ndash;{nous.games.lost} (
-          {signe(nous.games.diff)}) · points {nous.rallies.won}&ndash;{nous.rallies.lost} (
-          {signe(nous.rallies.diff)})
+      {nous.map((r) => (
+        <p key={r.snTeamId} className="ic-standings-avg muted tiny">
+          {plusieurs ? `Stats ${nomDe(r)}` : "Nos stats"} — matchs {r.matches.won}&ndash;
+          {r.matches.lost} ({signe(r.matches.diff)}) · jeux {r.games.won}&ndash;{r.games.lost} (
+          {signe(r.games.diff)}) · points {r.rallies.won}&ndash;{r.rallies.lost} (
+          {signe(r.rallies.diff)})
         </p>
-      )}
+      ))}
     </details>
   );
 }
@@ -922,19 +994,23 @@ export default function Interclub({
           qui ne filtre rien est du bruit. Le schéma prévoit la troisième. */}
       {teams.length > 1 && <TeamTabs teams={teams} value={activeTab} onChange={setTab} />}
 
-      {/* LE CLASSEMENT SUIT L'ONGLET. Sur « Toutes », on montre celui de chaque équipe qui en
-          a un : une équipe correspond à une poule, et il n'existe pas de classement « toutes
-          équipes confondues » qui voudrait dire quelque chose. Il se place ICI, entre le
-          filtre et les résultats, parce que c'est exactement la question que la liste de
-          résultats fait naître. */}
-      {teams
-        .filter((t) => (activeTab === "all" || t.id === activeTab) && t.standings?.length)
-        .map((t) => (
-          <div key={t.id} className="ic-standings-wrap">
-            {teams.length > 1 && <p className="ic-standings-team muted tiny">{t.name}</p>}
-            <StandingsTable team={t} />
-          </div>
-        ))}
+      {/* LE CLASSEMENT SUIT L'ONGLET, UN SEUL PAR POULE. Deux équipes du club dans la même
+          poule partagent un même tableau, où leurs deux lignes sont surlignées ; deux poules
+          distinctes donnent deux tableaux. Il se place ICI, entre le filtre et les résultats,
+          parce que c'est exactement la question que la liste de résultats fait naître. */}
+      {poulesAffichees(
+        teams,
+        teams.filter((t) => activeTab === "all" || t.id === activeTab),
+      ).map((p, _i, toutes) => (
+        <div key={p.key} className="ic-standings-wrap">
+          {/* Le nom de l'équipe n'est utile que s'il reste plusieurs tableaux à distinguer ;
+              une poule partagée nomme déjà chaque équipe dans ses pastilles. */}
+          {toutes.length > 1 && p.ours.size === 1 && (
+            <p className="ic-standings-team muted tiny">{[...p.ours.values()][0]}</p>
+          )}
+          <StandingsTable poule={p} />
+        </div>
+      ))}
 
       {/* Le palmarès suit l'onglet comme le classement — il se recharge sur `teamId`, faute de
           `key` qui le remonterait —, et se place juste après lui : les deux

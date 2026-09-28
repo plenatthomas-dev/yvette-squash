@@ -137,4 +137,39 @@ describe("le classement de la poule", () => {
     await waitFor(() => expect(screen.getByText(/Aucune rencontre/)).toBeTruthy());
     expect(screen.queryByText("Classement")).toBeNull();
   });
+
+  it("UN SEUL tableau quand deux équipes du club partagent la poule, les deux surlignées", async () => {
+    const poule = [
+      ...CLASSEMENT,
+      ligne({ rank: 4, name: "Squash de l'Yvette 2", code: "YVETTE 2", snTeamId: "161093", points: 0 }),
+    ];
+    vi.stubGlobal(
+      "fetch",
+      servir([
+        equipe({ id: "t1", name: "Équipe 1", snTeamId: "161092", standings: poule }),
+        equipe({ id: "t2", name: "Équipe 2", snTeamId: "161093", standings: poule }),
+      ]),
+    );
+    monter();
+    await screen.findByText("Squash de l'Yvette 2");
+    expect(screen.getAllByText("Classement")).toHaveLength(1);
+    expect(document.querySelectorAll("tr.is-us")).toHaveLength(2);
+    expect(screen.getByText("Équipe 1 · 2e")).toBeTruthy();
+    expect(screen.getByText("Équipe 2 · 4e")).toBeTruthy();
+  });
+
+  it("écarte l'équipe EXEMPT et resserre les rangs derrière elle", async () => {
+    const poule = [
+      CLASSEMENT[0],
+      ligne({ rank: 2, name: "EXEMPT", code: null, snTeamId: "999", points: 0 }),
+      { ...CLASSEMENT[1], rank: 3 },
+      { ...CLASSEMENT[2], rank: 4 },
+    ];
+    vi.stubGlobal("fetch", servir([equipe({ standings: poule })]));
+    monter();
+    await screen.findByText("Squash de l'Yvette");
+    expect(screen.queryByText("EXEMPT")).toBeNull();
+    expect(screen.getByText("2e")).toBeTruthy();
+    expect(screen.getByText(/sur 3/)).toBeTruthy();
+  });
 });
