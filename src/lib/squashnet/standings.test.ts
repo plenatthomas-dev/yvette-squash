@@ -84,6 +84,14 @@ describe("parseStandings — le classement réel de la poule IVD", () => {
   it("écarte l'équipe fictive « Non Joue » des poules impaires", () => {
     expect(rows.some((r) => /non\s*jou/i.test(r.name))).toBe(false);
   });
+
+  it("écarte l'équipe fictive « EXEMPT »", () => {
+    const html = `<table>
+      <tr><td data-label="#">1</td><td data-label="Equipe"><a data-teamid="1">Chaville 4 (CHVL4)</a></td><td data-label="Pts">0</td></tr>
+      <tr><td data-label="#">2</td><td data-label="Equipe"><a data-teamid="2">EXEMPT</a></td><td data-label="Pts">0</td></tr>
+    </table>`;
+    expect(parseStandings(html).map((r) => r.name)).toEqual(["Chaville 4"]);
+  });
 });
 
 describe("parseStandings — ce qu'il refuse de deviner", () => {

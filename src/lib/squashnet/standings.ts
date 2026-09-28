@@ -1,4 +1,5 @@
 import { postAjax } from "./client";
+import { estEquipeFictive } from "./fictive";
 
 // ============================================================================
 //  CLASSEMENT D'UNE POULE (squashnet.fr), source PUBLIQUE.
@@ -196,7 +197,8 @@ function lignesDe(table: string): StandingRow[] {
 
     // La fédération complète les poules impaires par une équipe fictive « Non Joue », qui
     // occupe un rang et n'a jamais joué. L'afficher ferait croire à un club de plus.
-    if (/^non\s*jou/i.test(name)) continue;
+    // Même chose pour l'équipe fictive « EXEMPT », qui porte l'exemption de la journée.
+    if (estEquipeFictive(name)) continue;
 
     const idm = TEAM_ID.exec(brut);
     rows.push({
