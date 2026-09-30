@@ -270,6 +270,36 @@ describe("link / unlink", () => {
   });
 });
 
+describe("link_names — confirmer les « ✔️ par le nom »", () => {
+  it("⚠️ ÉCRIT les rapprochements par le nom — sans lui, un NC reste sans classement", async () => {
+    // Le cas du 2026-09-30 : fiche relue, « ✔️ par le nom » à l'écran, et rien en base — le
+    // joueur restait grisé à la composition. Le NC reçoit son classement, et AUCUN rang.
+    h.membres = [
+      { id: "u1", displayName: "Eric Doxat", snLicence: null },
+      { id: "u2", displayName: "Emmanuel Launay", snLicence: "1463138W" },
+      { id: "u3", displayName: "Franck Bougardier", snLicence: null },
+      { id: "u4", displayName: "Bougardier Franck", snLicence: null },
+    ];
+    const res = await POST(post({ action: "link_names", teamId: "t1" }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).lies).toBe(1);
+    expect(h.updateUser).toHaveBeenCalledTimes(1);
+    expect(h.updateUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "u1", teamId: "t1" },
+        data: expect.objectContaining({ snRosterClt: "NC", snRosterRangM: null }),
+      }),
+    );
+  });
+
+  it("⚠️ refuse la fiche d'un AUTRE club, sans rien écrire", async () => {
+    h.roster = FICHE_VERRIERES;
+    h.membres = [{ id: "u1", displayName: "Eric Doxat", snLicence: null }];
+    expect((await POST(post({ action: "link_names", teamId: "t1" }))).status).toBe(400);
+    expect(h.updateUser).not.toHaveBeenCalled();
+  });
+});
+
 describe("promote_guest — l'invité qui a désormais un compte", () => {
   beforeEach(() => {
     h.findUser.mockResolvedValue({ id: "u1" });
