@@ -148,6 +148,7 @@ export async function GET(req: NextRequest) {
 // POST /api/admin/interclub-roster
 //   { action: "refresh", teamId, force? }              → retélécharge NOTRE fiche chez la ligue
 //   { action: "link", teamId, licence, kind, id }      → lie une ligne à un membre ou un invité
+//   { action: "link_names", teamId }                   → écrit tous les « ✔️ par le nom »
 //   { action: "unlink", kind, id }                     → défait la liaison
 //   { action: "create_guest", teamId, licence }        → crée l'invité DEPUIS la ligne
 //   { action: "promote_guest", teamId, userId, guestId } → l'invité a maintenant un compte
@@ -272,40 +273,55 @@ export async function POST(req: NextRequest) {
     // --- link -------------------------------------------------------------------------------
     const id = typeof body.id === "string" ? body.id : "";
     if (!id) return NextResponse.json({ error: "Joueur invalide" }, { status: 400 });
-    const donnees = {
-      snLicence: v.licence,
-      rosterClt: v.clt,
-      rosterRangM: v.rangM,
-      rosterAt: new Date(),
-    };
-    if (body.kind === "member") {
-      // `updateMany` avec le `teamId` dans le `where` : un identifiant de membre d'une AUTRE
-      // équipe ne doit pas pouvoir recevoir une ligne de celle-ci. La garde est dans la
-      // requête, pas dans une lecture préalable qu'une écriture concurrente périmerait.
-      const { count } = await prisma.user.updateMany({
-        where: { id, teamId: team.id },
-        data: {
-          snLicence: donnees.snLicence,
-          snRosterClt: donnees.rosterClt,
-          snRosterRangM: donnees.rosterRangM,
-          snRosterAt: donnees.rosterAt,
-        },
-      });
-      if (count === 0) {
-        return NextResponse.json({ error: "Membre introuvable dans cette équipe." }, { status: 404 });
-      }
-    } else if (body.kind === "guest") {
-      const { count } = await prisma.interclubGuest.updateMany({
-        where: { id, teamId: team.id },
-        data: donnees,
-      });
-      if (count === 0) {
-        return NextResponse.json({ error: "Joueur introuvable dans cette équipe." }, { status: 404 });
-      }
-    } else {
+    if (body.kind !== "member" && body.kind !== "guest") {
       return NextResponse.json({ error: "Type de joueur invalide" }, { status: 400 });
     }
+    if (!(await ecrireLiaison(team.id, body.kind, id, v))) {
+      return NextResponse.json(
+        {
+          error:
+            body.kind === "member"
+              ? "Membre introuvable dans cette équipe."
+              : "Joueur introuvable dans cette équipe.",
+        },
+        { status: 404 },
+      );
+    }
     return NextResponse.json({ ok: true, valeurs: v });
+  }
+
+  // ─── Confirmer d'un coup tous les rapprochements PAR LE NOM ──────────────────────────────
+  //
+  // ⚠️ SANS CE GESTE, UN « ✔️ PAR LE NOM » N'EST QU'UN AFFICHAGE. Le GET apparie sans rien
+  // écrire, et le classement effectif ne lit que ce qui est en base (`snRosterClt`). Constaté le
+  // 2026-09-30 : fiche relue, « ✔️ Benjamin Coulmier (par le nom) » à l'écran, et pourtant
+  // toujours sans classement à l'annuaire et grisé à la composition.
+  //
+  // L'APPARIEMENT EST RECALCULÉ ICI, jamais reçu du client : c'est la même règle que l'écran
+  // (`rapprocherRoster`), sur la fiche et l'effectif du moment. Un ambigu reste ambigu — seul un
+  // « lié » est écrit, et c'est l'admin qui a pressé le bouton après l'avoir vu.
+  if (body.action === "link_names") {
+    const chargee = await chargerEquipe(body.teamId);
+    if (!chargee.ok) return chargee.response;
+    const { team } = chargee;
+    const [rosters, joueurs] = await Promise.all([
+      loadRosters([team.snTeamId]),
+      joueursDeLEquipe(team.id),
+    ]);
+    const fiche = notreFiche(rosters.get(team.snTeamId));
+    if (!fiche) {
+      return NextResponse.json(
+        { error: "Aucune fiche d'équipe exploitable. Rafraîchis-la d'abord." },
+        { status: 400 },
+      );
+    }
+    let lies = 0;
+    for (const l of rapprocherRoster(fiche, joueurs)) {
+      const a = l.appariement;
+      if (a.statut !== "lie" || a.par !== "nom") continue;
+      if (await ecrireLiaison(team.id, a.joueur.kind, a.joueur.id, valeursDe(l.player))) lies++;
+    }
+    return NextResponse.json({ ok: true, lies });
   }
 
   // ─── L'invité a maintenant un compte ──────────────────────────────────────────────────────
@@ -322,6 +338,34 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ error: "Action inconnue" }, { status: 400 });
+}
+
+/**
+ * Écrit la ligne fédérale sur un membre ou un invité DE CETTE ÉQUIPE. Faux s'il n'y est pas.
+ *
+ * `updateMany` avec le `teamId` dans le `where` : un identifiant d'une AUTRE équipe ne doit pas
+ * pouvoir recevoir une ligne de celle-ci. La garde est dans la requête, pas dans une lecture
+ * préalable qu'une écriture concurrente périmerait.
+ */
+async function ecrireLiaison(
+  teamId: string,
+  kind: "member" | "guest",
+  id: string,
+  v: ReturnType<typeof valeursDe>,
+): Promise<boolean> {
+  const at = new Date();
+  if (kind === "member") {
+    const { count } = await prisma.user.updateMany({
+      where: { id, teamId },
+      data: { snLicence: v.licence, snRosterClt: v.clt, snRosterRangM: v.rangM, snRosterAt: at },
+    });
+    return count > 0;
+  }
+  const { count } = await prisma.interclubGuest.updateMany({
+    where: { id, teamId },
+    data: { snLicence: v.licence, rosterClt: v.clt, rosterRangM: v.rangM, rosterAt: at },
+  });
+  return count > 0;
 }
 
 /**
