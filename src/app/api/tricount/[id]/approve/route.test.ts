@@ -43,13 +43,13 @@ vi.mock("@/lib/db", () => ({
       fn({
         tricount: { findUnique: async () => h.tricount },
         tricountApproval: {
-          findUnique: async (a: { where: { tricountId_userId: { userId: string } } }) =>
-            h.approvals.has(a.where.tricountId_userId.userId)
-              ? { userId: a.where.tricountId_userId.userId }
-              : null,
-          upsert: async (a: { create: { userId: string } }) => {
-            h.approvals.add(a.create.userId);
-            return a.create;
+          // `ON CONFLICT DO NOTHING` : `count` vaut 1 quand la ligne est neuve, 0 quand elle
+          // était déjà là. C'est SUR CE COMPTE que la route distingue un premier clic d'un
+          // rejeu — le mock doit donc le rendre fidèlement, et non renvoyer 1 à tous les coups.
+          createMany: async (a: { data: { userId: string } }) => {
+            const neuve = !h.approvals.has(a.data.userId);
+            h.approvals.add(a.data.userId);
+            return { count: neuve ? 1 : 0 };
           },
           findMany: async () => [...h.approvals].map((userId) => ({ userId })),
         },
