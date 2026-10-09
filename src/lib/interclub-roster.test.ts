@@ -701,4 +701,94 @@ describe("findOrderConflict", () => {
     await findOrderConflict(client, "f1", "m1", { order: 1, clt: "5A", rangM: 1200, name: "Albert" });
     expect(vu).toEqual({ interclubId: "f1", id: { not: "m1" } });
   });
+
+  // Rencontre du 2026-10-08, Verrières 4 – Équipe 2 : Eric Wanlin (NC, connu par la SEULE fiche
+  // fédérale) au simple 2, et plus rien de composable au 3 — « Eric WANLIN : classement inconnu ».
+  // Les faux clients ci-dessus rendent toutes les colonnes quel que soit le `select` : ils ne
+  // pouvaient pas voir une lecture qui OUBLIAIT la fiche. Celui-ci n'en rend que ce qu'on demande.
+  describe("relit le classement venu de la fiche fédérale", () => {
+    function projette(ligne: Record<string, unknown>, select: Record<string, unknown>) {
+      return Object.fromEntries(
+        Object.keys(select)
+          .filter((k) => k in ligne)
+          .map((k) => [k, ligne[k]]),
+      );
+    }
+
+    function ficheDb(
+      siblings: { order: number; homeDisplayName: string; homeUserId: string | null; homeGuestId: string | null }[],
+      users: Record<string, Record<string, unknown>>,
+      guests: Record<string, Record<string, unknown>> = {},
+    ) {
+      type Args = { where: { id: { in: string[] } }; select: Record<string, unknown> };
+      return {
+        interclubMatch: { findMany: async () => siblings },
+        user: {
+          findMany: async ({ where, select }: Args) =>
+            where.id.in.filter((id) => id in users).map((id) => projette({ id, ...users[id] }, select)),
+        },
+        interclubGuest: {
+          findMany: async ({ where, select }: Args) =>
+            where.id.in.filter((id) => id in guests).map((id) => projette({ id, ...guests[id] }, select)),
+        },
+      } as never;
+    }
+
+    it("un membre NC par la seule fiche, au simple 2, laisse composer le simple 3", async () => {
+      const client = ficheDb(
+        [
+          { order: 1, homeDisplayName: "Bruce Pegot", homeUserId: "bruce", homeGuestId: null },
+          { order: 2, homeDisplayName: "Eric WANLIN", homeUserId: "eric", homeGuestId: null },
+        ],
+        {
+          bruce: {
+            interclubCltOverride: null,
+            interclubRangMOverride: null,
+            squashnetRanking: { clt: "5C", rangM: 6498 },
+            snRosterClt: "5C",
+            snRosterRangM: 6776,
+          },
+          eric: {
+            interclubCltOverride: null,
+            interclubRangMOverride: null,
+            squashnetRanking: null,
+            snRosterClt: "NC",
+            snRosterRangM: null,
+          },
+        },
+      );
+      const pb = await findOrderConflict(client, "f1", "m3", {
+        order: 3,
+        clt: "NC",
+        rangM: null,
+        name: "PIERRE MARIE GIRARD",
+      });
+      expect(pb).toBeNull();
+    });
+
+    it("un invité classé par la seule fiche est relu, et l'ordre se contrôle sur lui", async () => {
+      const client = ficheDb(
+        [{ order: 1, homeDisplayName: "Etienne Herth", homeUserId: null, homeGuestId: "g1" }],
+        {},
+        {
+          g1: {
+            cltOverride: null,
+            rangMOverride: null,
+            snClt: null,
+            snRangM: null,
+            rosterClt: "5D",
+            rosterRangM: 8251,
+          },
+        },
+      );
+      // Relu : un NC derrière lui passe…
+      expect(
+        await findOrderConflict(client, "f1", "m2", { order: 2, clt: "NC", rangM: null, name: "Ben" }),
+      ).toBeNull();
+      // …et un 5C derrière lui est refusé pour la bonne raison, pas pour un classement inconnu.
+      expect(
+        await findOrderConflict(client, "f1", "m2", { order: 2, clt: "5C", rangM: 5762, name: "Thibaut" }),
+      ).toMatch(/mieux classé/);
+    });
+  });
 });
