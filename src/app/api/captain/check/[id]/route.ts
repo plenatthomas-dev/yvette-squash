@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCaptain, requireCaptainOf } from "@/lib/captain-access";
 import { prisma } from "@/lib/db";
-import { loadRosters, refreshRosters } from "@/lib/interclub-roster-db";
+import { fraicheurPour, loadRosters, refreshRosters } from "@/lib/interclub-roster-db";
+import { todayISO } from "@/lib/interclub-gate";
 import { readTieSheet, refreshOwnTieIds, teamCode } from "@/lib/interclub-tie-db";
 import {
   compareOfficial,
@@ -166,6 +167,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     where: { id },
     select: {
       teamId: true,
+      date: true,
       opponent: true,
       snOpponentTeamId: true,
       snTieId: true,
@@ -274,7 +276,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   );
   if (fiches.length) {
     try {
-      await refreshRosters(fiches);
+      // Le lendemain d'une rencontre — le moment où l'on vérifie — la fiche doit dater de moins
+      // d'un jour : un joueur inscrit la veille du match y figure alors (cf. `fraicheurPour`).
+      await refreshRosters(fiches, { fraisJours: fraicheurPour(fixture.date, todayISO()) });
     } catch {
       // Best-effort : une vérification doit pouvoir aboutir sur ce qu'on a déjà. L'échec se
       // verra de toute façon, joueur par joueur, dans les verdicts du rapport.
