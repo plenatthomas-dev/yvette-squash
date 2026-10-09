@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import AuService from "./AuService";
 import { readOk } from "@/lib/apiFetch";
 import { onForeground } from "@/lib/onForeground";
@@ -212,8 +212,11 @@ export default function InterclubLive({
             className={`ic-live-card${f.status === "live" ? " is-live" : ""}`}
           >
             <header className="ic-live-head">
+              {/* L'ÉQUIPE QUI REÇOIT EN PREMIER, partout dans la carte (demande du club,
+                  2026-10-09) : le titre, le score de la rencontre, chaque simple et ses chiffres.
+                  La donnée garde son sens — `home` est toujours NOUS. */}
               <span className="ic-live-who">
-                {f.teamName} {f.home ? "reçoit" : "chez"} {f.opponent}
+                {f.home ? `${f.teamName} reçoit ${f.opponent}` : `${f.opponent} reçoit ${f.teamName}`}
               </span>
               {/* La pastille d'état du reste de l'interclub, reprise telle quelle. Ce panneau
                   montre les rencontres du jour, PAS seulement celles qui ont commencé — c'est
@@ -224,7 +227,7 @@ export default function InterclubLive({
                 {f.status === "live" ? "En cours" : "À venir"}
               </span>
               <span className="ic-live-score">
-                {f.score.home}–{f.score.away}
+                {f.home ? `${f.score.home}–${f.score.away}` : `${f.score.away}–${f.score.home}`}
               </span>
             </header>
             {/* L'AVANCE, sous le score et au-dessus des simples : elle porte sur la rencontre
@@ -237,34 +240,39 @@ export default function InterclubLive({
               {f.matches.map((m) => (
                 <li key={m.id}>
                   <span className="ic-order">#{m.order}</span>
-                  <span className="ic-player">
-                    <Dot color={m.homeColor} />
-                    {m.home}
-                    {/* AU SERVICE. La donnée arrivait déjà — `getLiveFixtures` la met dans la charge
-                      utile, les deux vues la déclaraient dans leur type — et aucune ne
-                      l'affichait. Or « 7–5 » sans savoir qui sert ne se lit pas : c'est
-                      l'information qui transforme un score en cours en score suivi. Coût
-                      serveur nul, elle est déjà payée. */}
-                    {m.live?.serving === "home" && <AuService />}
-                  </span>
-                  <span className="ic-versus" title="contre">
-                    <span className="sr-only">contre</span>
-                    <span aria-hidden="true">c.</span>
-                  </span>
-                  <span className="ic-player">
-                    <Dot color={m.awayColor} />
-                    {m.away}
-                    {m.live?.serving === "away" && <AuService />}
-                  </span>
+                  {(f.home ? (["home", "away"] as const) : (["away", "home"] as const)).map(
+                    (cote, i) => (
+                      <Fragment key={cote}>
+                        {i === 1 && (
+                          <span className="ic-versus" title="contre">
+                            <span className="sr-only">contre</span>
+                            <span aria-hidden="true">c.</span>
+                          </span>
+                        )}
+                        <span className="ic-player">
+                          <Dot color={cote === "home" ? m.homeColor : m.awayColor} />
+                          {cote === "home" ? m.home : m.away}
+                          {/* AU SERVICE. La donnée arrivait déjà — `getLiveFixtures` la met dans
+                            la charge utile, les deux vues la déclaraient dans leur type — et
+                            aucune ne l'affichait. Or « 7–5 » sans savoir qui sert ne se lit pas :
+                            c'est l'information qui transforme un score en cours en score suivi.
+                            Coût serveur nul, elle est déjà payée. */}
+                          {m.live?.serving === cote && <AuService />}
+                        </span>
+                      </Fragment>
+                    ),
+                  )}
                   <span className="ic-games">
                     {m.live ? (
                       <span className="ic-inplay">
-                        {m.live.current.home}–{m.live.current.away}
+                        {f.home
+                          ? `${m.live.current.home}–${m.live.current.away}`
+                          : `${m.live.current.away}–${m.live.current.home}`}
                       </span>
                     ) : null}
                     {m.gamesHome !== null ? (
                       <span className="ic-gamescore">
-                        {m.gamesHome}–{m.gamesAway}
+                        {f.home ? `${m.gamesHome}–${m.gamesAway}` : `${m.gamesAway}–${m.gamesHome}`}
                       </span>
                     ) : !m.live ? (
                       <span className="muted tiny">—</span>

@@ -295,3 +295,35 @@ describe("InterclubLive — le joueur au service", () => {
     });
   });
 });
+
+// ============================================================================
+//  L'ÉQUIPE QUI REÇOIT EN PREMIER (demande du club, 2026-10-09) — le titre, le
+//  score de la rencontre, chaque simple et ses chiffres. `home` reste NOUS.
+// ============================================================================
+
+describe("InterclubLive — l'équipe qui reçoit, en premier", () => {
+  it("chez l'adversaire : son nom, son score, son joueur d'abord", async () => {
+    charge = {
+      fixtures: [{ ...enCours("home"), home: false, score: { home: 1, away: 2 } }],
+    };
+    const { container } = render(<Banc />);
+    await souffle();
+    expect(container.querySelector(".ic-live-who")?.textContent).toBe("Massy reçoit Équipe 1");
+    expect(container.querySelector(".ic-live-score")?.textContent).toBe("2–1");
+    const joueurs = [...container.querySelectorAll(".ic-player")];
+    expect(joueurs[0].textContent).toContain("Gérard");
+    expect(joueurs[1].textContent).toContain("Thomas");
+    // Le jeu en cours suit, et le service reste sur NOTRE joueur, désormais second.
+    expect(container.querySelector(".ic-inplay")?.textContent).toBe("5–7");
+    expect(joueurs[1].querySelector(".ic-au-service")).not.toBeNull();
+  });
+
+  it("à domicile : rien ne bouge", async () => {
+    charge = { fixtures: [{ ...enCours("home"), score: { home: 1, away: 2 } }] };
+    const { container } = render(<Banc />);
+    await souffle();
+    expect(container.querySelector(".ic-live-who")?.textContent).toBe("Équipe 1 reçoit Massy");
+    expect(container.querySelector(".ic-live-score")?.textContent).toBe("1–2");
+    expect(container.querySelectorAll(".ic-player")[0].textContent).toContain("Thomas");
+  });
+});
