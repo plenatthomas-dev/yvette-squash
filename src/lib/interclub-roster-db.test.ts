@@ -25,7 +25,7 @@ const raw = {
 };
 const db = raw as unknown as Parameters<typeof loadRosters>[1];
 
-const { loadRosters, refreshRosters, ROSTER_FRAIS_JOURS, ECHEC_REPOS_MS, oublierEchecs } =
+const { loadRosters, refreshRosters, fraicheurPour, ROSTER_FRAIS_JOURS, ECHEC_REPOS_MS, oublierEchecs } =
   await import("./interclub-roster-db");
 
 const roster = (snTeamId: string, noms: string[]): TeamRoster => ({
@@ -232,5 +232,50 @@ describe("refreshRosters — la mémoire des échecs", () => {
     fetchTeamRoster.mockRejectedValue(new Error("504"));
     await refreshRosters(["1"], { now: MAINTENANT, delaiMs: 0, db });
     expect(fetchTeamRoster).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("fraicheurPour — une fiche fraîche autour du jour J", () => {
+  it("la veille, le jour même et le lendemain : un jour", () => {
+    expect(fraicheurPour("2026-10-08", "2026-10-07")).toBe(1);
+    expect(fraicheurPour("2026-10-08", "2026-10-08")).toBe(1);
+    expect(fraicheurPour("2026-10-08", "2026-10-09")).toBe(1);
+  });
+
+  it("au-delà, dans un sens comme dans l'autre : la semaine", () => {
+    expect(fraicheurPour("2026-10-08", "2026-10-06")).toBe(7);
+    expect(fraicheurPour("2026-10-08", "2026-10-10")).toBe(7);
+    expect(fraicheurPour("2027-03-04", "2026-10-09")).toBe(7);
+  });
+
+  it("compte en JOURS, à travers un changement de mois et d'heure", () => {
+    expect(fraicheurPour("2026-11-01", "2026-10-31")).toBe(1);
+    expect(fraicheurPour("2027-03-29", "2027-03-28")).toBe(1);
+  });
+
+  it("une date illisible ne raccourcit rien", () => {
+    expect(fraicheurPour("", "2026-10-09")).toBe(7);
+  });
+});
+
+describe("refreshRosters — `fraisJours`", () => {
+  it("une fiche de deux jours est fraîche pour la semaine, pas pour le jour J", async () => {
+    const ligne = { snTeamId: "161095", fetchedAt: ilYA(2), rosterJson: JSON.stringify(roster("161095", ["A B"])) };
+    raw.squashnetTeamRoster.findMany.mockResolvedValue([ligne]);
+    expect((await refreshRosters(["161095"], { db, now: MAINTENANT, delaiMs: 0 }))[0].status).toBe("fresh");
+    expect(fetchTeamRoster).not.toHaveBeenCalled();
+
+    fetchTeamRoster.mockResolvedValue(roster("161095", ["A B", "Inscrit La Veille"]));
+    const [o] = await refreshRosters(["161095"], { db, now: MAINTENANT, delaiMs: 0, fraisJours: 1 });
+    expect(o).toEqual({ snTeamId: "161095", status: "fetched", players: 2 });
+  });
+
+  it("une fiche relue il y a quelques heures reste fraîche, même le jour J", async () => {
+    raw.squashnetTeamRoster.findMany.mockResolvedValue([
+      { snTeamId: "161095", fetchedAt: new Date(MAINTENANT.getTime() - 6 * 3_600_000), rosterJson: JSON.stringify(roster("161095", ["A B"])) },
+    ]);
+    const [o] = await refreshRosters(["161095"], { db, now: MAINTENANT, delaiMs: 0, fraisJours: 1 });
+    expect(o.status).toBe("fresh");
+    expect(fetchTeamRoster).not.toHaveBeenCalled();
   });
 });

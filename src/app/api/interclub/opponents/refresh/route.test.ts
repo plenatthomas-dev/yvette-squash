@@ -14,7 +14,7 @@ import type { NextRequest } from "next/server";
 
 const h = vi.hoisted(() => ({
   access: { ok: true } as { ok: boolean; status?: number },
-  fixture: null as null | { snOpponentTeamId: string | null },
+  fixture: null as null | { snOpponentTeamId: string | null; date?: string },
   rencontres: [] as Array<{ snOpponentTeamId: string | null }>,
   findUnique: vi.fn(),
   findMany: vi.fn(),
@@ -36,11 +36,14 @@ vi.mock("@/lib/db", () => ({
     },
   },
 }));
-vi.mock("@/lib/interclub-roster-db", () => ({
+// La RÈGLE de fraîcheur reste la vraie (`fraicheurPour`) : seul le réseau est simulé.
+vi.mock("@/lib/interclub-roster-db", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/interclub-roster-db")>()),
   refreshRosters: (...a: unknown[]) => h.refresh(...a),
 }));
 
 import { POST } from "./route";
+import { todayISO } from "@/lib/interclub-gate";
 import { MAX_RENCONTRES } from "@/lib/interclub-opponents-db";
 
 const req = (qs = "?teamId=t1") =>
@@ -71,21 +74,35 @@ describe("POST /api/interclub/opponents/refresh", () => {
   describe("par rencontre (`fixtureId`) — UNE équipe, pas la poule", () => {
     it("ne rafraîchit que l'adversaire de CETTE rencontre", async () => {
       // Composer contre Verrieres 3 n'a aucune raison d'aller relire les quatre autres clubs.
-      h.fixture = { snOpponentTeamId: "161092" };
+      h.fixture = { snOpponentTeamId: "161092", date: "2027-03-04" };
       h.refresh.mockResolvedValue([{ snTeamId: "161092", status: "fetched", players: 6 }]);
 
       const res = await POST(req("?fixtureId=f1"));
       expect(res.status).toBe(200);
-      expect(h.refresh).toHaveBeenCalledWith(["161092"], { force: false });
+      expect(h.refresh).toHaveBeenCalledWith(["161092"], expect.objectContaining({ force: false }));
       expect(h.findMany).not.toHaveBeenCalled();
       expect(await res.json()).toMatchObject({ ok: true, fetched: 1 });
     });
 
     it("⚠️ l'identifiant fédéral est relu EN BASE, jamais reçu du client", async () => {
       // Sinon n'importe quel membre ferait interroger n'importe quelle équipe de France.
-      h.fixture = { snOpponentTeamId: "161092" };
+      h.fixture = { snOpponentTeamId: "161092", date: "2027-03-04" };
       await POST(req("?fixtureId=f1&snOpponentTeamId=999999"));
-      expect(h.refresh).toHaveBeenCalledWith(["161092"], { force: false });
+      expect(h.refresh).toHaveBeenCalledWith(["161092"], expect.objectContaining({ force: false }));
+    });
+
+    // 2026-10-09 : en début de saison, les clubs inscrivent leurs joueurs juste avant de les
+    // aligner. Une fiche relue le lundi ignorait le joueur inscrit le mercredi pour le jeudi.
+    it("LE JOUR J, exige une fiche de moins d'un jour", async () => {
+      h.fixture = { snOpponentTeamId: "161092", date: todayISO() };
+      await POST(req("?fixtureId=f1"));
+      expect(h.refresh).toHaveBeenCalledWith(["161092"], { force: false, fraisJours: 1 });
+    });
+
+    it("loin de la rencontre, la semaine habituelle suffit", async () => {
+      h.fixture = { snOpponentTeamId: "161092", date: "2027-03-04" };
+      await POST(req("?fixtureId=f1"));
+      expect(h.refresh).toHaveBeenCalledWith(["161092"], { force: false, fraisJours: 7 });
     });
 
     it("une rencontre inconnue ou sans identifiant ne sort pas, et ne se plaint pas", async () => {
