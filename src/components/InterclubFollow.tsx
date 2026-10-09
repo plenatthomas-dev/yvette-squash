@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { readOk } from "@/lib/apiFetch";
+import { BellIcon } from "@/components/icons";
 import { FOLLOW_LABELS, FOLLOW_LEVELS, type FollowLevel } from "@/lib/interclub";
 import { ensurePushSubscribed, pushEnabledOnServer, pushSupported } from "@/lib/pushClient";
 
@@ -141,7 +142,10 @@ export default function InterclubFollow({
 
   return (
     <div className="ic-follow">
-      <h4 className="ic-follow-title">Notifications</h4>
+      <h4 className="ic-follow-title">
+        <BellIcon />
+        Notifications
+      </h4>
       {teams.map((t) => (
         <label key={t.id} className="ic-follow-row">
           <span>{t.name}</span>

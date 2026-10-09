@@ -4284,40 +4284,59 @@ body[data-bottombar] .install-banner {
 .ic-head button { margin: 0; width: auto; }
 
 /* --- Onglets d'équipe ---
-   Un filtre actif est un ÉTAT, pas une action : il se marque au poids et au trait, jamais par
-   l'aplat vert que DESIGN.md réserve à ce qu'on peut toucher. Le trait est posé en `box-shadow`
-   plutôt qu'en `border-bottom` pour ne pas décaler la ligne de base entre l'onglet actif et les
-   autres. */
+   DES PASTILLES QU'ON VOIT CLIQUABLES (demande du club, 2026-10-09). Le soulignement d'onglet,
+   gris sur gris, se lisait comme un intitulé : personne ne devinait qu'on pouvait filtrer.
+   Chaque onglet est désormais un bouton détouré, et l'onglet actif un aplat bleu vif.
+
+   BLEU, et non le vert que DESIGN.md réserve à ce qu'on peut toucher : un filtre actif est un
+   ÉTAT. L'encre des onglets inactifs mêle ce bleu à l'encre du thème : 7,9:1 en clair, 6,6:1
+   en rose, 5,3:1 en sombre — le bleu pur tomberait à 3,4:1 sur la carte sombre. L'aplat actif,
+   lui, est fixe (Règle de la Paire Complète) : blanc sur #2563eb, 5,2:1. */
 .ic-tabs {
   display: flex;
-  gap: 4px;
+  gap: 8px;
   margin: 0 0 14px;
-  border-bottom: 1px solid var(--pico-card-border-color);
+  /* Le cadre qui défile rogne ce qui dépasse : on laisse aux ombres de quoi exister. */
+  padding: 2px 2px 6px;
   overflow-x: auto;
   scrollbar-width: none;
 }
 .ic-tabs::-webkit-scrollbar { display: none; }
 
 .ic-tab {
-  --pico-color: var(--pico-contrast);
+  --ic-tab-ink: color-mix(in srgb, #2563eb 65%, var(--pico-contrast));
   flex: 0 0 auto;
   margin: 0;
   width: auto;
-  padding: 8px 14px;
-  background: none;
-  border: 0;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  color: var(--pico-muted-color);
+  min-height: 40px;
+  padding: 8px 16px;
+  background: var(--pico-card-background-color);
+  border: 1.5px solid color-mix(in srgb, #2563eb 45%, transparent);
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+  color: var(--ic-tab-ink);
   font-size: 0.92rem;
-  font-weight: 500;
+  font-weight: 600;
+  line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
+  transition: background-color 0.15s ease-out, border-color 0.15s ease-out;
 }
-.ic-tab:hover { color: var(--pico-contrast); background: var(--sunken); }
+.ic-tab:hover {
+  background: color-mix(in srgb, #2563eb 12%, var(--pico-card-background-color));
+  border-color: #2563eb;
+  color: var(--ic-tab-ink);
+}
+.ic-tab:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
 .ic-tab.is-on {
-  color: var(--pico-contrast);
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  border-color: transparent;
+  color: #fff;
   font-weight: 700;
-  box-shadow: inset 0 -2px 0 0 var(--pico-contrast);
+  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.4);
 }
 
 .ic-empty-tab {
@@ -5233,17 +5252,32 @@ body[data-bottombar] .install-banner {
 .ic-live-matches .ic-games { margin-left: auto; }
 
 /* Panneau d'abonnement, en TÊTE de la page interclub. Encadré parce qu'il ouvre l'écran sans
-   en être le sujet : c'est un réglage, pas du contenu, et le cadre le dit sans le grossir. */
+   en être le sujet : c'est un réglage, pas du contenu.
+
+   Mais un réglage qu'on ne VOIT pas ne sert à personne (demande du club, 2026-10-09) : son
+   titre devient un bandeau violet, même recette que le bandeau rose des disponibilités. Fond
+   et encre fixes (Règle de la Paire Complète) : blanc sur #9333ea → #6d28d9, 5,4:1 au plus
+   clair. Le cadre prend la teinte du bandeau pour que les deux se lisent comme un seul bloc. */
 .ic-follow {
   margin: 0 0 16px;
-  padding: 10px 14px;
-  border: 1px solid var(--pico-card-border-color);
+  padding: 0 14px 8px;
+  border: 1.5px solid color-mix(in srgb, #9333ea 45%, var(--pico-card-border-color));
   border-radius: var(--radius);
   background: var(--pico-card-background-color);
+  box-shadow: 0 2px 10px rgba(147, 51, 234, 0.18);
+  /* Le bandeau déborde le rembourrage : c'est le cadre qui lui arrondit les coins du haut. */
+  overflow: hidden;
 }
 .ic-follow-title {
-  margin: 0 0 6px;
-  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 -14px 10px;
+  padding: 9px 14px;
+  background: linear-gradient(135deg, #9333ea, #6d28d9);
+  color: #fff;
+  /* 0,90rem : le cran des deux autres en-têtes de bloc de cet écran (Règle du Cran Voisin). */
+  font-size: 0.9rem;
 }
 .ic-follow-row {
   display: flex;
@@ -6093,24 +6127,68 @@ body[data-bottombar] .install-banner {
 .ic-standings > summary {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 4px 8px;
   cursor: pointer;
   font-size: 0.9rem;
-  padding: 8px 10px;
+  /* 30 px à droite : la place du chevron, épinglé au bord (cf. `::after` plus bas). */
+  padding: 8px 30px 8px 10px;
   /* Le résumé déborde le rembourrage du bloc et devient une BARRE : posé nu sur le fond
      enfoncé, il ressemblait à une note de bas de page, et personne n'y voyait un contrôle. */
   margin: -8px -12px;
-  background: var(--pico-card-background-color);
-  border: 1px solid var(--pico-card-border-color);
+  /* Puis la barre devient un BANDEAU OR (demande du club, 2026-10-09), à l'image du bandeau
+     rose des disponibilités : replié par défaut, le classement doit se voir pour être ouvert.
+     Or parce que c'est un classement. Encre brun très sombre et non blanche — le blanc sur l'or
+     ne fait pas 2:1 ; #422006 sur #fde047 → #fbbf24 fait 8,7:1 au plus sombre. Les couleurs
+     sont posées sur les ENFANTS : `details summary:not([role])` de Pico (0,1,2) bat ce
+     sélecteur (0,1,1), et repeint le résumé au focus. */
+  background: linear-gradient(135deg, #fde047, #fbbf24);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
+  box-shadow: 0 2px 10px rgba(245, 158, 11, 0.35);
+}
+.ic-standings > summary .ic-standings-title,
+.ic-standings > summary .ic-standings-sub,
+.ic-standings > summary::after {
+  color: #422006;
 }
 .ic-standings[open] > summary {
   margin-bottom: 0;
 }
-.ic-standings-title {
+.ic-standings-title,
+.ic-stats-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-weight: 700;
   margin-right: auto;
+}
+/* Le chevron gris de Pico (une image de fond) disparaissait sur les bandeaux : un glyphe qui
+   prend l'encre du bandeau, comme celui des disponibilités. ÉPINGLÉ au bord droit, et non posé
+   au fil : avec deux pastilles de rang, la barre passe sur deux lignes et le chevron suivait la
+   date jusqu'au milieu de la seconde (mesuré à 375 px). */
+.ic-standings > summary,
+.ic-stats > summary {
+  position: relative;
+}
+.ic-standings > summary::after,
+.ic-stats > summary::after {
+  content: "▾";
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  width: auto;
+  height: auto;
+  margin: -0.5em 0 0;
+  background-image: none;
+  transform: none;
+  font-size: 1rem;
+  line-height: 1;
+  transition: transform 0.15s ease-out;
+}
+.ic-standings[open] > summary::after,
+.ic-stats[open] > summary::after {
+  transform: rotate(180deg);
 }
 /* Le rang, en pastille pleine : c'est la réponse qu'on vient chercher. Encre du thème et non
    couleur d'issue — être 2e n'est ni une victoire ni une défaite. */
@@ -6127,8 +6205,12 @@ body[data-bottombar] .install-banner {
 }
 /* Le résumé porte déjà la réponse courante — notre rang et la date du relevé — pour que
    déplier soit un choix, pas un passage obligé. */
-.ic-standings-sub {
+.ic-standings-sub,
+.ic-stats-sub {
   font-weight: 400;
+  /* `.tiny` pose 14 px de marge haute : centrée dans la barre, la date tombait 7 px plus bas
+     que le titre, et la barre gagnait 14 px (mesuré). */
+  margin: 0;
 }
 
 /* Huit colonnes ne rentrent pas toujours : le tableau défile DANS son cadre. Une page qui
@@ -6217,18 +6299,19 @@ body[data-bottombar] .install-banner {
    l'encre du thème, le fond n'est qu'un voile, donc le contraste reste celui du texte nu. */
 .ic-standings-table tbody tr.is-us th,
 .ic-standings-table tbody tr.is-us td {
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  background: color-mix(in srgb, #fbbf24 30%, transparent);
   font-weight: 700;
   color: var(--pico-contrast);
 }
 .ic-standings-table tbody tr.is-us .ic-st-rank {
-  box-shadow: inset 4px 0 0 var(--accent);
+  box-shadow: inset 4px 0 0 #f59e0b;
   color: var(--pico-contrast);
 }
-/* Nos pastilles de rang prennent la même couleur que nos lignes : le lien se fait sans lire. */
+/* Nos pastilles de rang : l'or du bandeau en lettres, son encre en fond (11:1) — et nos lignes
+   du tableau prennent ce même or. Le lien se fait sans lire. */
 .ic-standings-rank {
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: #422006;
+  color: #fde047;
 }
 
 /* Nos chiffres en toutes lettres, pour nous seulement — l'écran les appelle « Nos stats », le
@@ -6256,18 +6339,26 @@ body[data-bottombar] .install-banner {
   background: var(--sunken);
   border-radius: var(--radius-sm);
 }
+/* Bandeau SARCELLE (2026-10-09), jumeau du bandeau or du classement : blanc sur #0f766e →
+   #0e7490, 5,4:1 au plus clair. Couleurs posées sur les enfants, pour la même raison. */
 .ic-stats > summary {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 4px 8px;
   cursor: pointer;
   font-size: 0.9rem;
-  padding: 8px 10px;
+  padding: 8px 30px 8px 10px;
   margin: -8px -12px;
-  background: var(--pico-card-background-color);
-  border: 1px solid var(--pico-card-border-color);
+  background: linear-gradient(135deg, #0f766e, #0e7490);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
+  box-shadow: 0 2px 10px rgba(14, 116, 144, 0.35);
+}
+.ic-stats > summary .ic-stats-title,
+.ic-stats > summary .ic-stats-sub,
+.ic-stats > summary::after {
+  color: #fff;
 }
 /* Même correctif que `.ic-standings[open] > summary` : Pico pose
    `details[open] > summary { margin-bottom: var(--pico-spacing) }` en (0,1,2), qui battait la
@@ -6275,10 +6366,6 @@ body[data-bottombar] .install-banner {
    blocs repliables sont jumeaux ; l'un avait le correctif, l'autre pas. */
 .ic-stats[open] > summary {
   margin-bottom: 0;
-}
-.ic-stats-title {
-  font-weight: 700;
-  margin-right: auto;
 }
 .ic-stats-msg,
 .ic-stats-note {
