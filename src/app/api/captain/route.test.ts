@@ -36,6 +36,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import { GET } from "./route";
+import { todayISO } from "@/lib/interclub-gate";
 
 const req = () => ({ cookies: { get: () => undefined } }) as unknown as NextRequest;
 
@@ -87,7 +88,7 @@ describe("GET /api/captain", () => {
       expect.objectContaining({ where: { id: { in: ["t1"] } } }),
     );
     expect(h.fixtureFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { teamId: { in: ["t1"] } } }),
+      expect.objectContaining({ where: expect.objectContaining({ teamId: { in: ["t1"] } }) }),
     );
   });
 
@@ -104,6 +105,21 @@ describe("GET /api/captain", () => {
     expect(h.fixtureFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ orderBy: { date: "desc" } }),
     );
+  });
+
+  // 2026-10-09 : la saison entière importée, la liste s'ouvrait sur juin 2027 et la journée de
+  // la veille finissait tout en bas — puis hors de `take` à la quarante et unième rencontre.
+  it("ne lit que les rencontres jusqu'à AUJOURD'HUI — une rencontre future n'a rien à vérifier", async () => {
+    await GET(req());
+    expect(h.fixtureFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ date: { lte: todayISO() } }) }),
+    );
+  });
+
+  it("écarte les journées d'exemption : ni joueurs ni score", async () => {
+    h.fixtures = [fixture({ id: "f1" }), fixture({ id: "f2", opponent: "EXEMPT" })];
+    const { fixtures } = await (await GET(req())).json();
+    expect(fixtures.map((f: { id: string }) => f.id)).toEqual(["f1"]);
   });
 
   it("jamais vérifiée → `problems` à null, pas à zéro", async () => {

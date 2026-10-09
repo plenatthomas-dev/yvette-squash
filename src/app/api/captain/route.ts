@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCaptain } from "@/lib/captain-access";
 import { prisma } from "@/lib/db";
 import { countProblems, lireRapport } from "@/lib/captain-check";
+import { todayISO } from "@/lib/interclub-gate";
+import { estEquipeFictive } from "@/lib/squashnet/fictive";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,8 +56,13 @@ export async function GET(req: NextRequest) {
     : [];
   const nomFederal = new Map(fiches.map((f) => [f.snTeamId, f.name]));
 
-  const fixtures = await prisma.interclub.findMany({
-    where: { teamId: { in: visibles } },
+  const lues = await prisma.interclub.findMany({
+    // JUSQU'À AUJOURD'HUI SEULEMENT, heure murale du club. On vérifie une rencontre JOUÉE, avant
+    // d'en saisir le score chez la fédération : une rencontre future n'a rien à vérifier. Sans
+    // cette borne, l'import de la saison entière (vingt journées par équipe) ouvrait la liste
+    // sur juin 2027, la journée de la veille tout en bas — et `take` l'aurait coupée dès la
+    // quarante et unième rencontre (constaté le 2026-10-09, deux équipes × vingt journées).
+    where: { teamId: { in: visibles }, date: { lte: todayISO() } },
     // Les plus RÉCENTES d'abord : c'est la rencontre de jeudi dernier qu'on vient saisir, pas
     // celle d'octobre. L'écran n'a pas de tri, cet ordre EST le tri.
     orderBy: { date: "desc" },
@@ -73,6 +80,8 @@ export async function GET(req: NextRequest) {
       official: { select: { checkedAt: true, checkJson: true } },
     },
   });
+  // Les journées d'EXEMPTION n'ont ni joueurs ni score : rien à vérifier, rien à saisir.
+  const fixtures = lues.filter((f) => !estEquipeFictive(f.opponent));
 
   const teamName = new Map(teams.map((t) => [t.id, t.name]));
   const fedName = new Map(
