@@ -2338,6 +2338,35 @@ export default function AdminPage() {
                                         </p>
                                       ))}
 
+                                      {(() => {
+                                        const aConfirmer = icFiche.lignes.filter(
+                                          (l) =>
+                                            l.appariement.statut === "lie" &&
+                                            l.appariement.par === "nom",
+                                        ).length;
+                                        return aConfirmer > 0 ? (
+                                          <p className="muted tiny">
+                                            {aConfirmer} rapprochement{aConfirmer > 1 ? "s" : ""}{" "}
+                                            par le nom à confirmer — tant que ce n&apos;est pas
+                                            fait, ces joueurs restent sans classement.{" "}
+                                            <button
+                                              type="button"
+                                              className="ic-cal-del"
+                                              disabled={icFicheBusy !== null}
+                                              onClick={() =>
+                                                ficheAction(
+                                                  t,
+                                                  { action: "link_names" },
+                                                  `${aConfirmer} rapprochement${aConfirmer > 1 ? "s" : ""} confirmé${aConfirmer > 1 ? "s" : ""}.`,
+                                                )
+                                              }
+                                            >
+                                              Tout confirmer
+                                            </button>
+                                          </p>
+                                        ) : null;
+                                      })()}
+
                                       <ul className="ic-cal-list">
                                         {icFiche.lignes.map((l) => (
                                           <li key={l.player.licence ?? l.player.name}>
@@ -2366,6 +2395,34 @@ export default function AdminPage() {
                                                   ? "la licence"
                                                   : "le nom"}
                                                 ){" "}
+                                                {/* ⚠️ « PAR LE NOM » N'EST QU'UNE PROPOSITION : rien
+                                                    n'est écrit tant qu'on ne confirme pas, et le
+                                                    joueur reste sans classement — donc grisé à la
+                                                    composition. « Défaire » n'aurait rien à
+                                                    défaire : c'est « Confirmer » qu'il faut. */}
+                                                {l.appariement.par === "nom" ? (
+                                                  <button
+                                                    type="button"
+                                                    className="ic-cal-del"
+                                                    disabled={icFicheBusy !== null}
+                                                    onClick={() =>
+                                                      ficheAction(
+                                                        t,
+                                                        {
+                                                          action: "link",
+                                                          licence: l.player.licence,
+                                                          kind: (l.appariement as { joueur: FicheJoueur })
+                                                            .joueur.kind,
+                                                          id: (l.appariement as { joueur: FicheJoueur })
+                                                            .joueur.id,
+                                                        },
+                                                        `${l.player.name} rapproché.`,
+                                                      )
+                                                    }
+                                                  >
+                                                    Confirmer
+                                                  </button>
+                                                ) : (
                                                 <button
                                                   type="button"
                                                   className="secondary ic-cal-del"
@@ -2386,6 +2443,7 @@ export default function AdminPage() {
                                                 >
                                                   Défaire
                                                 </button>
+                                                )}
                                               </span>
                                             ) : (
                                               <span className="ic-fiche-choix">

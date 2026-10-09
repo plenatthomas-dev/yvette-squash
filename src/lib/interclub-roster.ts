@@ -236,8 +236,11 @@ interface MemberRanking {
   interclubCltOverride: string | null;
   interclubRangMOverride: number | null;
   squashnetRanking: { clt: string; rangM?: number | null } | null;
-  snRosterClt?: string | null;
-  snRosterRangM?: number | null;
+  // OBLIGATOIRES, et c'est la garde : optionnels, ils laissaient compiler une lecture qui
+  // oubliait la fiche fédérale — `findOrderConflict` relisait alors un NC de la fiche comme
+  // « classement inconnu » et refusait de composer la suite de la rencontre (2026-10-08).
+  snRosterClt: string | null;
+  snRosterRangM: number | null;
 }
 
 /** La forme minimale que `guestClt`/`guestRangM` savent lire. */
@@ -246,8 +249,9 @@ interface GuestRanking {
   rangMOverride: number | null;
   snClt: string | null;
   snRangM: number | null;
-  rosterClt?: string | null;
-  rosterRangM?: number | null;
+  // Obligatoires, même raison que `MemberRanking.snRosterClt`.
+  rosterClt: string | null;
+  rosterRangM: number | null;
 }
 
 /**
@@ -357,6 +361,8 @@ const GUEST_ENTRY_SELECT = {
   snRangM: true,
   snStatus: true,
   snCheckedAt: true,
+  rosterClt: true,
+  rosterRangM: true,
 } as const;
 
 function toGuestEntry(g: {
@@ -369,6 +375,8 @@ function toGuestEntry(g: {
   snRangM: number | null;
   snStatus: string | null;
   snCheckedAt: Date | null;
+  rosterClt: string | null;
+  rosterRangM: number | null;
 }): TeamGuestEntry {
   return {
     id: g.id,
@@ -661,18 +669,24 @@ export async function findOrderConflict(
     userIds.length
       ? db.user.findMany({
           where: { id: { in: userIds } },
-          select: {
-            id: true,
-            interclubCltOverride: true,
-            interclubRangMOverride: true,
-            squashnetRanking: { select: { clt: true, rangM: true } },
-          },
+          // Les TROIS étages, via la définition partagée : en recopier deux à la main ici
+          // laissait de côté la fiche fédérale, et un NC aligné au simple 2 rendait la suite
+          // de la rencontre incomposable (« classement inconnu »).
+          select: { id: true, ...MEMBER_CLT_SELECT },
         })
       : Promise.resolve([]),
     guestIds.length
       ? db.interclubGuest.findMany({
           where: { id: { in: guestIds } },
-          select: { id: true, cltOverride: true, rangMOverride: true, snClt: true, snRangM: true },
+          select: {
+            id: true,
+            cltOverride: true,
+            rangMOverride: true,
+            snClt: true,
+            snRangM: true,
+            rosterClt: true,
+            rosterRangM: true,
+          },
         })
       : Promise.resolve([]),
   ]);

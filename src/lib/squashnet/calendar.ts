@@ -159,12 +159,33 @@ const MAX_ROUND = 8;
  * 2026 est un jeudi, c'est-à-dire un jour de championnat parfaitement ordinaire.
  */
 export function parseDayHeading(text: string): { round: string; date: string } | null {
-  const m = /^\s*(\S+)\s*-\s*\S+\s+(\d{1,2})(?:er)?\s+([^\s]+)\s+(\d{4})\s*$/.exec(stripTags(text));
+  const m = /^\s*(\S+)\s*-\s*(.+)$/.exec(stripTags(text));
   if (!m) return null;
-  const [, round, day, monthWord, year] = m;
+  const date = parseFrenchDate(m[2]);
+  return date ? { round: m[1].slice(0, MAX_ROUND), date } : null;
+}
+
+/**
+ * « jeudi 08 octobre 2026 » → « 2026-10-08 ». Le jour de la semaine est lu et jeté, « 1er »
+ * est accepté (cf. `parseDayHeading`). Null sur tout le reste : pas de date inventée.
+ */
+export function parseFrenchDate(text: string): string | null {
+  const m = /^\s*\S+\s+(\d{1,2})(?:er)?\s+([^\s]+)\s+(\d{4})\s*$/.exec(stripTags(text));
+  if (!m) return null;
+  const [, day, monthWord, year] = m;
   const month = MONTHS[monthWord.toLowerCase()];
   if (!month) return null;
-  return { round: round.slice(0, MAX_ROUND), date: `${year}-${month}-${day.padStart(2, "0")}` };
+  return `${year}-${month}-${day.padStart(2, "0")}`;
+}
+
+/**
+ * L'en-tête de journée SANS date — « J1 » —, forme publiée depuis le 2026-10-05 : la date est
+ * passée sur chaque rencontre (`<p class="draw">`). Un seul jeton, qui porte un numéro : un
+ * en-tête qu'on ne reconnaît pas ne doit pas devenir une journée.
+ */
+function parseBareRound(text: string): string | null {
+  const t = stripTags(text);
+  return /^\S*\d+$/.test(t) ? t.slice(0, MAX_ROUND) : null;
 }
 
 // --- Lecture des classes : UNE SEULE POLITIQUE, tolérante ------------------
@@ -255,7 +276,17 @@ export function parseTeamCalendar(html: string): CalendarTie[] {
   const days = splitOn(html, "div", "b-day");
   for (const day of days) {
     const heading = /<h2[^>]*>([\s\S]*?)<\/h2>/.exec(day);
-    const parsed = heading ? parseDayHeading(heading[1]) : null;
+    // DEUX FORMES D'EN-TÊTE. Jusqu'au 2026-10-05 : « J1 - mardi 08 juin 2027 », la date pour
+    // toute la journée. Depuis : « J1 » seul, et la date sur CHAQUE rencontre — ce qui permet
+    // enfin à une journée de porter deux dates (l'exemption reste au bouchon quand les autres
+    // rencontres ont leur vraie date). Les deux restent lues : squashnet a déjà changé d'avis.
+    const parsed = heading
+      ? (parseDayHeading(heading[1]) ??
+        (() => {
+          const round = parseBareRound(heading[1]);
+          return round ? { round, date: null as string | null } : null;
+        })())
+      : null;
     if (!parsed) continue;
 
     for (const row of splitOn(day, "div", "row")) {
@@ -272,6 +303,14 @@ export function parseTeamCalendar(html: string): CalendarTie[] {
         // Repli sur le fragment entier si le bloc disparaît du rendu : on retombe alors sur le
         // comportement d'avant, plutôt que de ne plus rien lire du tout.
         const match = classHtml(brut, "players") || brut;
+        // La date de la RENCONTRE (`<p class="draw">`), cherchée AVANT le bloc `players` : le
+        // morceau n'est pas borné à droite, et chercher plus loin lirait la date de la
+        // rencontre suivante quand celle-ci n'en porte pas. À défaut, celle de l'en-tête.
+        const debutPlayers = brut.search(/<div\b[^>]*\bclass=['"][^'"]*\bplayers\b/i);
+        const date =
+          parseFrenchDate(classText(debutPlayers === -1 ? brut : brut.slice(0, debutPlayers), "draw")) ??
+          parsed.date;
+        if (!date) continue;
         // Les deux équipes sont les deux seuls liens porteurs d'un `data-teamid`, dans
         // l'ordre domicile puis extérieur — c'est ce que le rendu garantit, et c'est la seule
         // chose qui distingue « on reçoit » de « on se déplace ».
@@ -290,7 +329,7 @@ export function parseTeamCalendar(html: string): CalendarTie[] {
           .filter(Boolean);
         ties.push({
           round: parsed.round,
-          date: parsed.date,
+          date,
           time,
           homeTeamId: teams[0][1],
           homeTeamName: stripTags(teams[0][2]),

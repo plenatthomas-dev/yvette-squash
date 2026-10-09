@@ -110,15 +110,17 @@ export async function POST(
       }
 
       // Ma validation existait-elle DÉJÀ ? Si oui, ce clic n'ouvre rien.
-      const dejaValide = await tx.tricountApproval.findUnique({
-        where: { tricountId_userId: { tricountId: id, userId: session.userId } },
-        select: { userId: true },
+      //
+      // UN SEUL ALLER-RETOUR POUR LES DEUX QUESTIONS. C'était une lecture puis un `upsert` —
+      // deux ordres là où `ON CONFLICT DO NOTHING` répond aux deux : `count` vaut 1 quand la
+      // ligne est neuve, 0 quand elle était déjà là. Ce n'est pas un gain de style : chaque
+      // ordre de plus allonge la fenêtre pendant laquelle une validation concurrente peut
+      // croiser celle-ci, et c'est ce croisement que Postgres annule en 40001.
+      const { count } = await tx.tricountApproval.createMany({
+        data: { tricountId: id, userId: session.userId },
+        skipDuplicates: true,
       });
-      await tx.tricountApproval.upsert({
-        where: { tricountId_userId: { tricountId: id, userId: session.userId } },
-        update: {},
-        create: { tricountId: id, userId: session.userId },
-      });
+      const dejaValide = count === 0;
       const apres = await tx.tricountApproval.findMany({
         where: { tricountId: id },
         select: { userId: true },
