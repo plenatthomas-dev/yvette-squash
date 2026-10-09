@@ -33,11 +33,20 @@ const h = vi.hoisted(() => ({
   soldeWhere: null as null | Record<string, unknown>,
   /** Comptes desactives, que la route doit refuser comme PAYEUR. */
   disabled: [] as string[],
+  interclubOn: true,
+  /** Joueur sans compte → son invité sur le tricount, tel que `lierJoueurs` le rend. */
+  lier: vi.fn(),
 }));
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
 vi.mock("@/lib/features-server", () => ({
-  getFeatures: async () => ({ tricount: h.tricountOn }),
+  getFeatures: async () => ({ tricount: h.tricountOn, interclub: h.interclubOn }),
+}));
+// Le RATTACHEMENT d'un joueur sans compte à son invité du jour est éprouvé sur vraie base
+// (`tricount-club.pg.test.ts`). Ici, on tient ce que la route en fait.
+vi.mock("@/lib/tricount-club", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tricount-club")>()),
+  lierJoueurs: (...a: unknown[]) => h.lier(...a),
 }));
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -123,6 +132,10 @@ function partsEcrites(): [string, number][] {
 }
 
 beforeEach(() => {
+  h.interclubOn = true;
+  h.lier.mockReset().mockImplementation(async (_t: string, ids: string[]) =>
+    new Map(ids.map((id) => [id, `tg-${id}`])),
+  );
   vi.clearAllMocks();
   h.session = resaUser;
   h.tricountOn = true;
@@ -419,5 +432,67 @@ describe("POST /api/tricount/expenses — ce que la route refuse en amont", () =
     const res = await POST(req({ ...base, payerId: "u1", participantIds: ["u1", "u2"] }));
     expect(res.status).toBe(201);
     expect(partsEcrites().map(([k]) => k)).toEqual(["u:u1", "u:u2"]);
+  });
+});
+
+describe("POST /api/tricount/expenses — les joueurs du club sans compte", () => {
+  beforeEach(() => {
+    h.session = resaUser;
+  });
+
+  it("donne sa part au joueur, sous l'invité que le serveur lui rattache SUR CE tricount", async () => {
+    const res = await POST(req({ ...base, amountCents: 3000, clubGuestIds: ["ig1"] }));
+    expect(res.status).toBe(201);
+    expect(h.lier).toHaveBeenCalledWith("t1", ["ig1"]);
+    expect(partsEcrites()).toEqual([
+      ["u:u1", 1000],
+      ["u:u2", 1000],
+      ["g:tg-ig1", 1000],
+    ]);
+  });
+
+  it("lit ses parts sous l'id ENVOYÉ — celui du joueur, pas celui de son invité", async () => {
+    await POST(
+      req({ ...base, amountCents: 4000, clubGuestIds: ["ig1"], weights: { u1: 1, u2: 1, ig1: 2 } }),
+    );
+    expect(partsEcrites()).toEqual([
+      ["u:u1", 1000],
+      ["u:u2", 1000],
+      ["g:tg-ig1", 2000],
+    ]);
+  });
+
+  it("suffit à faire une dépense : un joueur sans compte est un participant", async () => {
+    const res = await POST(req({ ...base, participantIds: [], clubGuestIds: ["ig1"] }));
+    expect(res.status).toBe(201);
+    expect(partsEcrites()).toEqual([["g:tg-ig1", 3000]]);
+  });
+
+  it("refuse un joueur sans compte quand l'interclub est coupé — il n'est alors proposé nulle part", async () => {
+    h.interclubOn = false;
+    const res = await POST(req({ ...base, clubGuestIds: ["ig1"] }));
+    expect(res.status).toBe(400);
+    expect(h.lier).not.toHaveBeenCalled();
+    expect(h.created).toBeNull();
+  });
+
+  it("refuse la même personne deux fois — par son id d'invité ET par son id de joueur", async () => {
+    h.lier.mockResolvedValue(new Map([["ig1", "g1"]]));
+    const res = await POST(req({ ...base, guestIds: ["g1"], clubGuestIds: ["ig1"] }));
+    expect(res.status).toBe(400);
+    expect(h.created).toBeNull();
+  });
+
+  it("refuse un `clubGuestIds` qui n'est pas une liste d'identifiants", async () => {
+    expect((await POST(req({ ...base, clubGuestIds: "ig1" }))).status).toBe(400);
+    expect((await POST(req({ ...base, clubGuestIds: [1] }))).status).toBe(400);
+  });
+
+  it("relaie le refus du rattachement (homonyme déjà porté) sans rien écrire", async () => {
+    const { HttpError } = await import("@/lib/http-tx");
+    h.lier.mockRejectedValue(new HttpError(409, "« Damien Vicart » figure déjà sous ce nom sur ce tricount."));
+    const res = await POST(req({ ...base, clubGuestIds: ["ig1"] }));
+    expect(res.status).toBe(409);
+    expect(h.created).toBeNull();
   });
 });

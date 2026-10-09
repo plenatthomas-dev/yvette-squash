@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   MAX_COMMENT_LEN,
   MAX_PARTS,
@@ -23,6 +23,16 @@ interface Member {
 // Invité hors asso sur UN tricount (nom déjà suffixé "(ext)" par le serveur) :
 // aucun compte, aucune connexion, jamais payeur d'une vraie dépense.
 interface Guest {
+  id: string;
+  name: string;
+  // Présent quand l'invité porte un joueur du CLUB sans compte (nom sans « (ext) ») : l'écran le
+  // coche alors dans la section « Sans compte », par l'id du joueur.
+  clubGuestId?: string;
+}
+// Joueur du club SANS COMPTE (équipe interclub) : proposé sous les membres, jamais coché d'office,
+// jamais payeur. Identifié par son id de JOUEUR, valable quelle que soit la date de la dépense —
+// c'est le serveur qui le rattache à son invité du jour.
+interface ClubGuest {
   id: string;
   name: string;
 }
@@ -98,6 +108,8 @@ interface TricountData {
   myGlobalCents: number;
   myOwedCount: number;
   members: Member[];
+  // Absent d'un serveur antérieur, ou vide quand l'interclub est coupé.
+  clubGuests?: ClubGuest[];
   tricounts: TricountItem[];
 }
 
@@ -200,6 +212,9 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
   // Invités hors asso cochés (TricountGuest.id) — jamais payeur, cf. selectedGuestIds
   // séparé de `selected` (membres) car ils vivent dans deux tables distinctes.
   const [selectedGuestIds, setSelectedGuestIds] = useState<Set<string>>(new Set());
+  // Joueurs du club sans compte cochés (InterclubGuest.id). Jamais cochés d'office : un oubli
+  // de décocher donnerait une dette à quelqu'un qui ne peut ni la voir ni la contester.
+  const [selectedClubIds, setSelectedClubIds] = useState<Set<string>>(new Set());
   const [guestDraft, setGuestDraft] = useState("");
   // Equal = parts égales ; shares = pondérée ; existing = centimes enregistrés.
   const [splitMode, setSplitMode] = useState<"equal" | "shares" | "existing">("equal");
@@ -265,6 +280,16 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     () => (data ? [...data.members, ...extraMembers] : []),
     [data, extraMembers],
   );
+  const clubGuests = useMemo(() => data?.clubGuests ?? [], [data]);
+  // Le joueur sans compte que porte un invité du tricount — seulement s'il est encore PROPOSÉ.
+  // Sinon (interclub coupé, joueur fusionné dans un membre homonyme…) l'invité reste un invité :
+  // il s'affiche parmi les « (ext) », où il reste décochable, au lieu de disparaître des deux
+  // listes et d'être retiré en douce de la dépense au prochain enregistrement.
+  const clubOf = useCallback(
+    (g: Guest) =>
+      g.clubGuestId && clubGuests.some((c) => c.id === g.clubGuestId) ? g.clubGuestId : null,
+    [clubGuests],
+  );
 
   const openExpense = () => {
     if (!data) return;
@@ -280,6 +305,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
     setExtraMembers([]);
     setSelected(new Set(data.members.map((m) => m.id)));
     setSelectedGuestIds(new Set());
+    setSelectedClubIds(new Set());
     setGuestDraft("");
     setSplitMode("equal");
     setWeights(Object.fromEntries(data.members.map((m) => [m.id, 1])));
@@ -312,8 +338,12 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
       [...new Map(inconnus.map((p) => [p.id, { id: p.id, name: p.name, fullName: p.name }])).values()],
     );
     setSelected(new Set(e.participants.filter((p) => p.kind === "user").map((p) => p.id)));
-    setSelectedGuestIds(
-      new Set(e.participants.filter((p) => p.kind === "guest").map((p) => p.id)),
+    // Un invité qui porte un joueur sans compte se coche dans SA section, par l'id du joueur.
+    const clubDe = new Map(t.guests.map((g) => [g.id, clubOf(g)]));
+    const invites = e.participants.filter((p) => p.kind === "guest");
+    setSelectedGuestIds(new Set(invites.filter((p) => !clubDe.get(p.id)).map((p) => p.id)));
+    setSelectedClubIds(
+      new Set(invites.map((p) => clubDe.get(p.id)).filter((c): c is string => !!c)),
     );
     setGuestDraft("");
     setSplitMode("existing");
@@ -339,6 +369,15 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
 
   const toggleGuest = (id: string) => {
     setSelectedGuestIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleClub = (id: string) => {
+    setSelectedClubIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -392,27 +431,36 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
       toast("err", "Donne un libellé à la dépense.");
       return;
     }
-    if (selected.size + selectedGuestIds.size === 0) {
+    if (selected.size + selectedGuestIds.size + selectedClubIds.size === 0) {
       toast("err", "Choisis au moins un participant.");
       return;
     }
+    // Un participant de la dépense d'origine est-il encore coché ? Un joueur sans compte l'est
+    // dans sa section, par l'id du joueur, et non par celui de son invité.
+    const clubDe = new Map(guestsOfTarget.map((g) => [g.id, clubOf(g)]));
+    const encoreCoche = (p: Participant) => {
+      if (p.kind === "user") return selected.has(p.id);
+      const club = clubDe.get(p.id);
+      return club ? selectedClubIds.has(club) : selectedGuestIds.has(p.id);
+    };
     if (splitMode === "existing" && originalExpense && (
       cents !== originalExpense.amountCents ||
-      selected.size + selectedGuestIds.size !== originalExpense.participants.length ||
-      originalExpense.participants.some((p) => !(p.kind === "user" ? selected : selectedGuestIds).has(p.id))
+      selected.size + selectedGuestIds.size + selectedClubIds.size !== originalExpense.participants.length ||
+      originalExpense.participants.some((p) => !encoreCoche(p))
     )) {
       toast("err", "Choisis une nouvelle répartition après avoir modifié le montant ou les participants.");
       return;
     }
     const participantIds = [...selected];
     const guestIds = [...selectedGuestIds];
-    // En mode « parts », on transmet le poids de chaque participant coché (membre ou
-    // invité) ; le serveur fait la répartition pondérée. En mode « équitable », rien
-    // (partage égal côté serveur).
+    const clubGuestIds = [...selectedClubIds];
+    // En mode « parts », on transmet le poids de chaque participant coché (membre, invité ou
+    // joueur sans compte, keyé par l'id envoyé) ; le serveur fait la répartition pondérée. En
+    // mode « équitable », rien (partage égal côté serveur).
     const weightsPayload =
       splitMode === "shares"
         ? Object.fromEntries(
-            [...participantIds, ...guestIds].map((id) => [id, weights[id] ?? 1]),
+            [...participantIds, ...guestIds, ...clubGuestIds].map((id) => [id, weights[id] ?? 1]),
           )
         : undefined;
     setBusy(true);
@@ -429,6 +477,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
               payerId,
               participantIds,
               guestIds,
+              clubGuestIds,
               ...(weightsPayload ? { weights: weightsPayload } : {}),
             }),
           })
@@ -442,6 +491,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
               payerId,
               participantIds,
               guestIds,
+              clubGuestIds,
               ...(weightsPayload ? { weights: weightsPayload } : {}),
             }),
           });
@@ -669,10 +719,15 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
   }, [data, onOwedChange]);
 
   // Invités déjà créés sur LE TRICOUNT de `targetDate` (existant ou pas encore créé,
-  // auquel cas aucun) — proposés comme lignes cochables, comme les membres.
-  const guestsForDate = useMemo(
+  // auquel cas aucun) — proposés comme lignes cochables, comme les membres. Ceux qui portent un
+  // joueur sans compte se cochent dans la section de ce dernier, pas ici.
+  const guestsOfTarget = useMemo(
     () => data?.tricounts.find((t) => t.date === targetDate)?.guests ?? [],
     [data, targetDate],
+  );
+  const guestsForDate = useMemo(
+    () => guestsOfTarget.filter((g) => !clubOf(g)),
+    [guestsOfTarget, clubOf],
   );
 
   // Répartition affichée en direct dans le formulaire : montant dû par chaque participant
@@ -681,14 +736,19 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
   const shareByMember = useMemo(() => {
     const map = new Map<string, number>();
     if (splitMode === "existing" && originalExpense) {
-      originalExpense.participants.forEach((p) => map.set(p.id, p.amountCents));
+      // Un joueur sans compte se lit sous l'id du JOUEUR, celui de sa ligne.
+      const clubDe = new Map(guestsOfTarget.map((g) => [g.id, clubOf(g)]));
+      originalExpense.participants.forEach((p) =>
+        map.set((p.kind === "guest" && clubDe.get(p.id)) || p.id, p.amountCents),
+      );
       return map;
     }
     const previewCents = parseEuros(amount);
     if (previewCents === null || previewCents === 0 || !data) return map;
     const memberIds = formMembers.filter((m) => selected.has(m.id)).map((m) => m.id);
     const guestIds = guestsForDate.filter((g) => selectedGuestIds.has(g.id)).map((g) => g.id);
-    const selectedIds = [...memberIds, ...guestIds];
+    const clubIds = clubGuests.filter((c) => selectedClubIds.has(c.id)).map((c) => c.id);
+    const selectedIds = [...memberIds, ...guestIds, ...clubIds];
     if (selectedIds.length === 0) return map;
     const parts =
       splitMode === "shares"
@@ -696,7 +756,77 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
         : splitEqually(previewCents, selectedIds.length);
     selectedIds.forEach((id, i) => map.set(id, parts[i]));
     return map;
-  }, [amount, splitMode, weights, data, formMembers, selected, selectedGuestIds, guestsForDate, originalExpense]);
+  }, [
+    amount,
+    splitMode,
+    weights,
+    data,
+    formMembers,
+    selected,
+    selectedGuestIds,
+    selectedClubIds,
+    guestsForDate,
+    guestsOfTarget,
+    clubGuests,
+    clubOf,
+    originalExpense,
+  ]);
+
+  // UNE ligne de « Pour qui ? » — membre, joueur sans compte ou invité : case, parts en mode
+  // « par parts », montant en direct. Trois sections, un seul balisage : les trois copies
+  // divergeaient au premier ajustement de l'une d'elles.
+  const ligne = (
+    id: string,
+    nom: ReactNode,
+    nomComplet: string,
+    checked: boolean,
+    onToggle: () => void,
+  ) => {
+    const share = shareByMember.get(id);
+    const w = weights[id] ?? 1;
+    return (
+      <div key={id} className={"tri-check-row" + (checked ? " on" : "")}>
+        <label className="tri-check">
+          <input type="checkbox" checked={checked} onChange={onToggle} />
+          <span className="tri-check-name">{nom}</span>
+        </label>
+        {checked && splitMode === "shares" && (
+          <span className="tri-parts">
+            <button
+              type="button"
+              className="tri-parts-btn"
+              onClick={() => adjustPart(id, -1)}
+              disabled={w <= 1}
+              aria-label={`Moins de parts pour ${nomComplet}`}
+            >
+              −
+            </button>
+            <span
+              className="tri-parts-value"
+              role="spinbutton"
+              aria-valuenow={w}
+              aria-valuemin={1}
+              aria-valuemax={MAX_PARTS}
+              aria-label={`Parts de ${nomComplet}`}
+            >
+              {w}
+            </span>
+            <button
+              type="button"
+              className="tri-parts-btn"
+              onClick={() => adjustPart(id, 1)}
+              disabled={w >= MAX_PARTS}
+              aria-label={`Plus de parts pour ${nomComplet}`}
+            >
+              +
+            </button>
+            <span className="tri-parts-unit">{w > 1 ? "parts" : "part"}</span>
+          </span>
+        )}
+        {checked && share !== undefined && <span className="tri-share">{fmtEuros(share)}</span>}
+      </div>
+    );
+  };
 
   if (loading && !data) return <p className="muted">Chargement des frais…</p>;
   if (error) return <div className="notice error" role="alert">⚠️ {error}</div>;
@@ -1057,7 +1187,7 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                 </select>
               </label>
               <fieldset className="tri-participants">
-                <legend>Pour qui ? ({selected.size + selectedGuestIds.size})</legend>
+                <legend>Pour qui ? ({selected.size + selectedGuestIds.size + selectedClubIds.size})</legend>
                 <div className="tri-splitmode" role="group" aria-label="Mode de répartition">
                   {editingId && (
                     <button type="button" className={splitMode === "existing" ? "on" : ""}
@@ -1085,111 +1215,37 @@ export default function Tricount({ toast, onExpired, onOwedChange }: Props) {
                 {splitMode === "existing" && (
                   <p className="muted">Les montants de chacun sont conservés. Si tu changes le montant ou les participants, choisis « Équitable » ou « Par parts ».</p>
                 )}
-                {formMembers.map((m) => {
-                  const checked = selected.has(m.id);
-                  const share = shareByMember.get(m.id);
-                  const w = weights[m.id] ?? 1;
-                  return (
-                    <div key={m.id} className={"tri-check-row" + (checked ? " on" : "")}>
-                      <label className="tri-check">
-                        <input type="checkbox" checked={checked} onChange={() => toggle(m.id)} />
-                        <span className="tri-check-name">
-                          {shortName(m.name)}
-                          {m.id === data.me ? " (toi)" : ""}
-                        </span>
-                      </label>
-                      {checked && splitMode === "shares" && (
-                        <span className="tri-parts">
-                          <button
-                            type="button"
-                            className="tri-parts-btn"
-                            onClick={() => adjustPart(m.id, -1)}
-                            disabled={w <= 1}
-                            aria-label={`Moins de parts pour ${m.name}`}
-                          >
-                            −
-                          </button>
-                          <span
-                            className="tri-parts-value"
-                            role="spinbutton"
-                            aria-valuenow={w}
-                            aria-valuemin={1}
-                            aria-valuemax={MAX_PARTS}
-                            aria-label={`Parts de ${m.name}`}
-                          >
-                            {w}
-                          </span>
-                          <button
-                            type="button"
-                            className="tri-parts-btn"
-                            onClick={() => adjustPart(m.id, 1)}
-                            disabled={w >= MAX_PARTS}
-                            aria-label={`Plus de parts pour ${m.name}`}
-                          >
-                            +
-                          </button>
-                          <span className="tri-parts-unit">{w > 1 ? "parts" : "part"}</span>
-                        </span>
-                      )}
-                      {checked && share !== undefined && (
-                        <span className="tri-share">{fmtEuros(share)}</span>
-                      )}
-                    </div>
-                  );
-                })}
-                {guestsForDate.map((g) => {
-                  const checked = selectedGuestIds.has(g.id);
-                  const share = shareByMember.get(g.id);
-                  const w = weights[g.id] ?? 1;
-                  return (
-                    <div key={g.id} className={"tri-check-row" + (checked ? " on" : "")}>
-                      <label className="tri-check">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleGuest(g.id)}
-                        />
-                        <span className="tri-check-name">{g.name}</span>
-                      </label>
-                      {checked && splitMode === "shares" && (
-                        <span className="tri-parts">
-                          <button
-                            type="button"
-                            className="tri-parts-btn"
-                            onClick={() => adjustPart(g.id, -1)}
-                            disabled={w <= 1}
-                            aria-label={`Moins de parts pour ${g.name}`}
-                          >
-                            −
-                          </button>
-                          <span
-                            className="tri-parts-value"
-                            role="spinbutton"
-                            aria-valuenow={w}
-                            aria-valuemin={1}
-                            aria-valuemax={MAX_PARTS}
-                            aria-label={`Parts de ${g.name}`}
-                          >
-                            {w}
-                          </span>
-                          <button
-                            type="button"
-                            className="tri-parts-btn"
-                            onClick={() => adjustPart(g.id, 1)}
-                            disabled={w >= MAX_PARTS}
-                            aria-label={`Plus de parts pour ${g.name}`}
-                          >
-                            +
-                          </button>
-                          <span className="tri-parts-unit">{w > 1 ? "parts" : "part"}</span>
-                        </span>
-                      )}
-                      {checked && share !== undefined && (
-                        <span className="tri-share">{fmtEuros(share)}</span>
-                      )}
-                    </div>
-                  );
-                })}
+                {formMembers.map((m) =>
+                  ligne(
+                    m.id,
+                    <>
+                      {shortName(m.name)}
+                      {m.id === data.me ? " (toi)" : ""}
+                    </>,
+                    m.name,
+                    selected.has(m.id),
+                    () => toggle(m.id),
+                  ),
+                )}
+                {/* LES JOUEURS DU CLUB SANS COMPTE, sous les membres et décochés : ils ne verront
+                    pas leur dette, et ne pourront pas la contester. Ce qu'ils ne peuvent pas
+                    faire non plus — déclarer leur remboursement — se dit ici, au moment où l'on
+                    décide de les compter. */}
+                {clubGuests.length > 0 && (
+                  <div className="tri-sans-compte">
+                    <p className="tri-sans-compte-titre">Sans compte dans l&apos;appli</p>
+                    <p className="tri-sans-compte-aide muted">
+                      Ils ne peuvent rien déclarer : celui qui a avancé l&apos;argent confirmera
+                      leur remboursement.
+                    </p>
+                  </div>
+                )}
+                {clubGuests.map((c) =>
+                  ligne(c.id, c.name, c.name, selectedClubIds.has(c.id), () => toggleClub(c.id)),
+                )}
+                {guestsForDate.map((g) =>
+                  ligne(g.id, g.name, g.name, selectedGuestIds.has(g.id), () => toggleGuest(g.id)),
+                )}
                 <div className="tri-check-row tri-add-guest">
                   <input
                     type="text"

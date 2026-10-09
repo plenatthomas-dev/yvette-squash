@@ -267,6 +267,15 @@ export function PrivacyNotice() {
                   messages y sont visibles de <strong>tous les membres connectés</strong>,
                   avec le <strong>nom réel</strong> (jamais le pseudonyme) — donc qui doit
                   combien à qui. N'y saisis que ce que tu acceptes de partager.
+                  {interclub && (
+                    <>
+                      {" "}Les <strong>joueurs d&apos;équipe qui n&apos;ont pas l&apos;appli</strong>{" "}
+                      peuvent s&apos;y voir compter une part : ils ne la voient pas, et c&apos;est la
+                      personne qui a avancé l&apos;argent qui confirme leur remboursement. N&apos;y
+                      inscris quelqu&apos;un que s&apos;il a bien pris part à la dépense. Le jour où il
+                      crée son compte, ces montants passent sur celui-ci.
+                    </>
+                  )}
                 </p>
               )}
               {tournament && (

@@ -23,13 +23,20 @@ const h = vi.hoisted(() => ({
   whereDemande: null as null | Record<string, unknown>,
   orderByDemande: null as null | Record<string, unknown>,
   summary: { globalCents: 0, owedCount: 0 },
+  interclubOn: false,
+  /** Les joueurs d'équipe sans compte (`InterclubGuest`), tels que la base les rend. */
+  joueurs: [] as { id: string; name: string }[],
+  lireJoueurs: vi.fn(),
 }));
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
-vi.mock("@/lib/features-server", () => ({ getFeatures: async () => ({ tricount: h.tricountOn }) }));
+vi.mock("@/lib/features-server", () => ({
+  getFeatures: async () => ({ tricount: h.tricountOn, interclub: h.interclubOn }),
+}));
 vi.mock("@/lib/tricount-summary", () => ({ tricountSummary: async () => h.summary }));
 vi.mock("@/lib/db", () => ({
   prisma: {
+    interclubGuest: { findMany: (...a: unknown[]) => h.lireJoueurs(...a) },
     // Le mock HONORE un éventuel `where` : la route doit charger TOUS les comptes (pour
     // nommer les parts déjà écrites) et ne filtrer les désactivés qu'à l'affichage des
     // sélecteurs. Filtrer dès la requête ferait afficher « ? » sur l'historique — un mock
@@ -111,7 +118,7 @@ function tricount(o: {
   date: string;
   expenses?: unknown[];
   approvals?: string[];
-  guests?: { id: string; name: string }[];
+  guests?: { id: string; name: string; interclubGuestId?: string | null }[];
   comments?: { id: string; body: string; userId: string; createdAt: Date }[];
 }) {
   return {
@@ -148,6 +155,9 @@ beforeEach(() => {
   h.whereDemande = null;
   h.orderByDemande = null;
   h.summary = { globalCents: 0, owedCount: 0 };
+  h.interclubOn = false;
+  h.joueurs = [];
+  h.lireJoueurs.mockReset().mockImplementation(async () => h.joueurs);
 });
 
 describe("GET /api/tricount — les gardes", () => {
@@ -463,5 +473,60 @@ describe("GET /api/tricount — la fenêtre est CHOISIE, pas seulement triée", 
       "moyen",
     ]);
     expect(c.hasMore).toBe(true);
+  });
+});
+
+describe("GET /api/tricount — les joueurs du club sans compte", () => {
+  beforeEach(() => {
+    h.interclubOn = true;
+  });
+
+  it("les propose, une fois chacun, et jamais en double d'un MEMBRE", async () => {
+    // Le doublon membre / invité est le cycle normal : un joueur inscrit sans compte ouvre un jour
+    // l'appli, et reste invité tant qu'un admin n'a pas fusionné. Le membre l'emporte — c'est lui
+    // qui peut valider ; et un joueur inscrit dans deux équipes ne compte qu'une fois.
+    h.joueurs = [
+      { id: "ig1", name: "Damien Vicart" },
+      { id: "ig2", name: "bob" },
+      { id: "ig3", name: "Vicart Damien" },
+      { id: "ig4", name: "Ben Coulmier" },
+    ];
+    const c = (await corps()) as unknown as { clubGuests: { id: string; name: string }[] };
+    expect(c.clubGuests).toEqual([
+      { id: "ig4", name: "Ben Coulmier" },
+      { id: "ig1", name: "Damien Vicart" },
+    ]);
+  });
+
+  it("n'en lit aucun quand l'interclub est coupé", async () => {
+    h.interclubOn = false;
+    h.joueurs = [{ id: "ig1", name: "Damien Vicart" }];
+    const c = (await corps()) as unknown as { clubGuests: unknown[] };
+    expect(c.clubGuests).toEqual([]);
+    expect(h.lireJoueurs).not.toHaveBeenCalled();
+  });
+
+  it("garde son VRAI nom, sans « (ext) », et dit à l'écran quel joueur porte l'invité", async () => {
+    h.rows = [
+      tricount({
+        id: "t1",
+        date: "2026-09-03",
+        guests: [
+          { id: "g1", name: "Damien Vicart", interclubGuestId: "ig1" },
+          { id: "g2", name: "Marc", interclubGuestId: null },
+        ],
+        expenses: [depense({ payer: "u1", montant: 3000, entre: ["u1", "g1", "g2"] })],
+      }),
+    ];
+    const [t] = (await corps()).tricounts as unknown as {
+      guests: { id: string; name: string; clubGuestId?: string }[];
+      transfers: { fromName: string; fromKind: string }[];
+    }[];
+    expect(t.guests).toEqual([
+      { id: "g1", name: "Damien Vicart", clubGuestId: "ig1" },
+      { id: "g2", name: "Marc (ext)" },
+    ]);
+    // Il reste un INVITÉ pour les remboursements : c'est son créancier qui confirme.
+    expect(t.transfers.find((x) => x.fromName === "Damien Vicart")?.fromKind).toBe("guest");
   });
 });

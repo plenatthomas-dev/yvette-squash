@@ -2297,7 +2297,9 @@ export default function AdminPage() {
                                                 disponibilités déjà saisies avec lui.
                                               </strong>{" "}
                                               Les simples à venir passent au membre ; les
-                                              rencontres jouées gardent le nom d&apos;alors.{" "}
+                                              rencontres jouées gardent le nom d&apos;alors. Ses
+                                              frais partagés (parts et remboursements) passent
+                                              aussi au membre.{" "}
                                               <button
                                                 type="button"
                                                 className="secondary ic-cal-del"

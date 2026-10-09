@@ -14,15 +14,19 @@ import {
 import { getFeatures } from "@/lib/features-server";
 import { httpErrorResponse, readJsonBody, serializableTransaction } from "@/lib/http-tx";
 import { blockEmailOnlyExpenseWrite, refuseSiSolde } from "@/lib/tricount-guard";
+import { lierJoueurs, lireIdsJoueurs } from "@/lib/tricount-club";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // POST /api/tricount/expenses -> ajoute une dépense au tricount du jour choisi.
-// { date: "YYYY-MM-DD", label, amountCents, payerId, participantIds, guestIds?, weights? }
+// { date: "YYYY-MM-DD", label, amountCents, payerId, participantIds, guestIds?, clubGuestIds?, weights? }
 // guestIds référence des TricountGuest déjà créés sur CE tricount (invités hors
 // asso, cf. POST /api/tricount/guests) : ils peuvent porter une part, jamais être
-// payeur. Le tricount de cette date est créé s'il n'existe pas. Toute modification
+// payeur. clubGuestIds désigne des joueurs du club SANS COMPTE (`InterclubGuest.id`) :
+// mêmes règles qu'un invité, leur `TricountGuest` est créé ici au besoin (cf.
+// `lib/tricount-club.ts`). Les parts (`weights`) sont keyées par l'id ENVOYÉ, quel qu'il
+// soit. Le tricount de cette date est créé s'il n'existe pas. Toute modification
 // des dépenses remet à zéro les validations « OK pour rembourser » du tricount.
 //
 // ⚠️ CETTE ROUTE N'ÉCRIT PLUS `Tricount.title`, et le champ n'est plus accepté. Il était
@@ -32,7 +36,8 @@ export const dynamic = "force-dynamic";
 // survit : `/admin/tricounts` la lit, et la retirer coûterait une migration pour rien.
 // Le jour où un titre servira, il faudra l'écrire ici ET l'afficher — les deux, ou aucun.
 export async function POST(req: NextRequest) {
-  if (!(await getFeatures()).tricount) {
+  const features = await getFeatures();
+  if (!features.tricount) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);
@@ -43,7 +48,7 @@ export async function POST(req: NextRequest) {
   if (blocked) return blocked;
 
   const body = await readJsonBody(req);
-  const { date, label, amountCents, payerId, participantIds, guestIds, weights } =
+  const { date, label, amountCents, payerId, participantIds, guestIds, clubGuestIds, weights } =
     body as {
       date?: unknown;
       label?: unknown;
@@ -51,6 +56,7 @@ export async function POST(req: NextRequest) {
       payerId?: unknown;
       participantIds?: unknown;
       guestIds?: unknown;
+      clubGuestIds?: unknown;
       weights?: unknown;
     };
 
@@ -82,18 +88,27 @@ export async function POST(req: NextRequest) {
   const uniqueIds = [...new Set(participantsRaw as string[])];
   // Invités hors asso (TricountGuest.id) : jamais payeur, seulement une part (cf. guestIds).
   const uniqueGuestIds = [...new Set(guestsRaw as string[])];
-  if (uniqueIds.length + uniqueGuestIds.length === 0) {
+  // Joueurs du club sans compte (InterclubGuest.id) : mêmes règles qu'un invité.
+  const uniqueClubIds = lireIdsJoueurs(clubGuestIds);
+  if (uniqueClubIds === null) {
     return NextResponse.json({ error: "Participants invalides" }, { status: 400 });
+  }
+  if (uniqueIds.length + uniqueGuestIds.length + uniqueClubIds.length === 0) {
+    return NextResponse.json({ error: "Participants invalides" }, { status: 400 });
+  }
+  // Les joueurs sans compte n'existent que par l'interclub : fonction coupée, aucun n'est proposé,
+  // donc aucun ne s'accepte.
+  if (uniqueClubIds.length > 0 && !features.interclub) {
+    return NextResponse.json({ error: "Joueur inconnu" }, { status: 400 });
   }
   if (typeof payerId !== "string" || payerId.length === 0) {
     return NextResponse.json({ error: "Payeur invalide" }, { status: 400 });
   }
 
-  // Ordre commun membres puis invités, chacun préfixé (u:/g:) pour ne jamais les
-  // confondre dans la répartition/la mémoire des arrondis (toutes deux génériques
-  // sur des clés string).
-  const rawIdsInOrder = [...uniqueIds, ...uniqueGuestIds];
-  const allKeys = [...uniqueIds.map(userKey), ...uniqueGuestIds.map(guestKey)];
+  // Ordre commun membres, invités, joueurs sans compte — l'ordre des parts (`weights`), keyées
+  // par l'id envoyé. Les clés de répartition (u:/g:) se calculent plus bas, une fois chaque
+  // joueur sans compte rattaché à son `TricountGuest`.
+  const rawIdsInOrder = [...uniqueIds, ...uniqueGuestIds, ...uniqueClubIds];
 
   // Parts optionnelles (mode « par parts ») : un poids entier ≥ 1 par participant
   // (membre ou invité, keyé par son id brut côté payload). Absent → partage égal
@@ -164,6 +179,25 @@ export async function POST(req: NextRequest) {
     update: {},
     create: { date },
   });
+  // Chaque joueur sans compte devient (ou retrouve) son invité sur CE tricount.
+  let lien: Map<string, string>;
+  try {
+    lien = await lierJoueurs(tricount.id, uniqueClubIds);
+  } catch (e) {
+    const res = httpErrorResponse(e);
+    if (res) return res;
+    throw e;
+  }
+  const guestIdsFinal = [...uniqueGuestIds, ...uniqueClubIds.map((id) => lien.get(id) as string)];
+  // Le même invité envoyé deux fois — par son id d'invité ET par son id de joueur. Aucun écran
+  // ne le fait ; l'accepter écrirait deux parts pour une personne.
+  if (new Set(guestIdsFinal).size !== guestIdsFinal.length) {
+    return NextResponse.json({ error: "Participants invalides" }, { status: 400 });
+  }
+  // Membres puis invités, chacun préfixé (u:/g:) pour ne jamais les confondre dans la
+  // répartition/la mémoire des arrondis (toutes deux génériques sur des clés string).
+  const shareIds = [...uniqueIds, ...guestIdsFinal];
+  const allKeys = [...uniqueIds.map(userKey), ...guestIdsFinal.map(guestKey)];
   // Mémoire des arrondis du tricount : qui a déjà « surpayé » d'un centime ? La règle vit
   // dans `roundingCredit` (elle était recopiée ici et dans la route sœur `PATCH`, et les deux
   // copies faussaient le crédit dès qu'une dépense pondérée traînait dans l'historique).
@@ -202,7 +236,7 @@ export async function POST(req: NextRequest) {
           amountCents,
           spentAt: new Date(`${date}T12:00:00`),
           shares: {
-            create: rawIdsInOrder.map((id, i) =>
+            create: shareIds.map((id, i) =>
               i < uniqueIds.length
                 ? { userId: id, amountCents: parts[i] }
                 : { guestId: id, amountCents: parts[i] },

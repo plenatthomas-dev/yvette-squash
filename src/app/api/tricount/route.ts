@@ -13,6 +13,7 @@ import {
 } from "@/lib/tricount";
 import { getFeatures } from "@/lib/features-server";
 import { tricountSummary } from "@/lib/tricount-summary";
+import { joueursSansCompte } from "@/lib/tricount-club";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,7 +23,8 @@ export const dynamic = "force-dynamic";
 // (« OK pour rembourser ») de ses payeurs. Ordre d'affichage : les tricounts EN COURS
 // d'abord (plus récent en tête), puis les tricounts ÉQUILIBRÉS en bas.
 export async function GET(req: NextRequest) {
-  if (!(await getFeatures()).tricount) {
+  const features = await getFeatures();
+  if (!features.tricount) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);
@@ -71,7 +73,7 @@ export async function GET(req: NextRequest) {
           select: { id: true, body: true, userId: true, createdAt: true },
           orderBy: { createdAt: "asc" },
         },
-        guests: { select: { id: true, name: true } },
+        guests: { select: { id: true, name: true, interclubGuestId: true } },
       },
       orderBy: { date: "desc" },
       take: limit + 1, // +1 pour savoir s'il reste des tricounts plus anciens
@@ -90,12 +92,16 @@ export async function GET(req: NextRequest) {
   // pour savoir sans ambiguïté qui a payé quoi et à qui rendre l'argent. Membres et
   // invités hors asso partagent le même Map, sous des clés préfixées (u:/g:) pour ne
   // jamais les confondre ; le nom d'un invité porte le suffixe "(ext)" (jamais stocké).
+  // Un joueur du CLUB sans compte, lui, n'est pas « extérieur » : il garde son nom nu.
   const nameOf = new Map<string, string>();
   for (const u of users) nameOf.set(userKey(u.id), u.displayName);
+  const guestName = (g: { name: string; interclubGuestId: string | null }) =>
+    g.interclubGuestId ? g.name : `${g.name} (ext)`;
   for (const t of tricounts) {
-    for (const g of t.guests) nameOf.set(guestKey(g.id), `${g.name} (ext)`);
+    for (const g of t.guests) nameOf.set(guestKey(g.id), guestName(g));
   }
   const name = (key: string) => nameOf.get(key) ?? "?";
+  const proposables = users.filter((u) => u.disabledAt === null);
 
   return NextResponse.json({
     me: session.userId,
@@ -119,9 +125,13 @@ export async function GET(req: NextRequest) {
     // rendre l'argent. Se retirer de l'annuaire dit « ne me proposez pas aux autres pour
     // jouer », pas « ne partagez plus de frais avec moi ». Les deux finalités sont distinctes,
     // et celle-ci est décrite dans la note de confidentialité (paragraphe « Partage de frais »).
-    members: users
-      .filter((u) => u.disabledAt === null)
-      .map((u) => ({ id: u.id, name: u.displayName, fullName: u.displayName })),
+    members: proposables.map((u) => ({ id: u.id, name: u.displayName, fullName: u.displayName })),
+    // Les joueurs du club SANS COMPTE (équipes interclub), proposés dans « Pour qui ? » sous les
+    // membres, NON cochés (cf. `lib/tricount-club.ts`). Ils n'existent que par l'interclub :
+    // fonction coupée, aucun n'est lu.
+    clubGuests: features.interclub
+      ? await joueursSansCompte(proposables.map((u) => u.displayName))
+      : [],
     tricounts: tricounts
       .map((t) => {
       const keyedExpenses = t.expenses.map(toKeyedExpense);
@@ -149,7 +159,13 @@ export async function GET(req: NextRequest) {
           name: name(userKey(p)),
           approved: approved.has(p),
         })),
-        guests: t.guests.map((g) => ({ id: g.id, name: `${g.name} (ext)` })),
+        // `clubGuestId` : l'invité porte un joueur du club sans compte. L'écran le coche alors
+        // dans sa section à lui, et non parmi les invités « (ext) ».
+        guests: t.guests.map((g) => ({
+          id: g.id,
+          name: guestName(g),
+          ...(g.interclubGuestId ? { clubGuestId: g.interclubGuestId } : {}),
+        })),
         expenses: t.expenses.map((e) => {
           const mine = e.creatorId === session.userId || e.payerId === session.userId;
           const payerKey = e.payerId ? userKey(e.payerId) : guestKey(e.payerGuestId as string);
