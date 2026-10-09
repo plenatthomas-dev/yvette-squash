@@ -14,6 +14,9 @@ const h = vi.hoisted(() => ({
   refreshOwnTieIds: vi.fn(),
   readTieSheet: vi.fn(),
   teamCode: vi.fn(),
+  /** Les fiches d'équipe en cache, par `snTeamId`. */
+  rosters: new Map<string, unknown>(),
+  refreshRosters: vi.fn(),
 }));
 
 vi.mock("@/lib/captain-access", () => ({
@@ -54,6 +57,13 @@ vi.mock("@/lib/interclub-tie-db", () => ({
   refreshOwnTieIds: (...a: unknown[]) => h.refreshOwnTieIds(...a),
   readTieSheet: (...a: unknown[]) => h.readTieSheet(...a),
   teamCode: (...a: unknown[]) => h.teamCode(...a),
+}));
+
+// LES FICHES D'ÉQUIPE : celle d'en face, et la NÔTRE — seule source qui connaisse nos NC.
+vi.mock("@/lib/interclub-roster-db", () => ({
+  refreshRosters: (...a: unknown[]) => h.refreshRosters(...a),
+  loadRosters: async (ids: string[]) =>
+    new Map(ids.filter((i) => h.rosters.has(i)).map((i) => [i, h.rosters.get(i)])),
 }));
 
 import { GET, POST } from "./route";
@@ -112,6 +122,8 @@ beforeEach(() => {
   h.refreshOwnTieIds.mockReset().mockResolvedValue({ status: "noTeamId", posed: 0, missing: 0 });
   h.readTieSheet.mockReset().mockResolvedValue({ sheet: null, error: "failed" });
   h.teamCode.mockReset().mockResolvedValue(null);
+  h.rosters = new Map();
+  h.refreshRosters.mockReset().mockResolvedValue(undefined);
   h.searchRanking.mockReset().mockImplementation(async (q: string) => {
     if (h.searchThrows) throw new Error("squashnet muet");
     return q === "Dupont"
@@ -497,5 +509,110 @@ describe("POST /api/captain/check/{id} — la feuille officielle", () => {
     expect(report.official.status).toBe("unread");
     expect(report.official.home).toBeNull();
     expect(report.official.problems[0]).toMatch(/impossible de reconnaître notre équipe/);
+  });
+});
+
+// ============================================================================
+//  NOS JOUEURS, LUS SUR NOTRE FICHE.
+//
+//  Rencontre du 2026-10-08, Verrières 4 – Équipe 2. La vérification annonçait
+//  « Introuvable chez la fédération » pour Eric Wanlin et Pierre-Marie Girard
+//  — NC, donc absents du classement national — et rattachait « Ben », un
+//  pseudo, à un autre club. Notre fiche les publie tous, licence comprise.
+// ============================================================================
+
+/** Notre fiche fédérale, réduite à ce que la vérification lit. */
+const notreFiche = {
+  snTeamId: "176168",
+  teamName: "Yvette 2",
+  code: "YVET2",
+  club: "Squash de l'Yvette",
+  captain: null,
+  ties: [],
+  players: [
+    { name: "WANLIN ERIC", gender: "Mr.", licence: "0175156", clt: "NC", rang: 9000, rangM: 9373, registeredAt: null },
+    { name: "COULMIER BENJAMIN", gender: "Mr.", licence: "0166842", clt: "NC", rang: 9000, rangM: 9373, registeredAt: null },
+  ],
+};
+
+/** Un simple joué par un de nos membres, sous le nom que l'appli AFFICHE. */
+function simple(order: number, homeDisplayName: string, snLicence: string | null) {
+  return {
+    order,
+    homeDisplayName,
+    awayName: "Paul Martin",
+    homeUser: { snLicence },
+    homeGuest: null,
+    games: [
+      { pointsHome: 11, pointsAway: 5 },
+      { pointsHome: 11, pointsAway: 6 },
+      { pointsHome: 11, pointsAway: 7 },
+    ],
+  };
+}
+
+describe("POST /api/captain/check/{id} — nos joueurs, sur notre fiche", () => {
+  beforeEach(() => {
+    h.rosters.set("176168", notreFiche);
+  });
+
+  it("un NC de notre fiche est TROUVÉ, sans aucune recherche à son nom", async () => {
+    h.fixture = rencontre({
+      team: { snTeamId: "176168" },
+      matches: [simple(1, "Eric WANLIN", "0175156")],
+    });
+    const { report } = await (await POST(req(), ctx())).json();
+    const nous = report.players.find((p: { side: string }) => p.side === "home");
+    expect(nous).toMatchObject({
+      verdict: "found",
+      fedName: "WANLIN ERIC",
+      clt: "NC",
+      licence: "0175156",
+      hint: null,
+    });
+    expect(h.searchRanking).not.toHaveBeenCalledWith("WANLIN", expect.anything());
+    expect(h.searchRanking).not.toHaveBeenCalledWith("Eric", expect.anything());
+    // La fiche est garantie, pas espérée : la nôtre est rafraîchie comme celle d'en face.
+    expect(h.refreshRosters).toHaveBeenCalledWith(["176168"]);
+  });
+
+  it("un PSEUDO (« Ben ») est retrouvé par sa LICENCE — aucun pliage de nom ne le pourrait", async () => {
+    h.fixture = rencontre({
+      team: { snTeamId: "176168" },
+      matches: [simple(1, "Ben", "0166842")],
+    });
+    const { report } = await (await POST(req(), ctx())).json();
+    const nous = report.players.find((p: { side: string }) => p.side === "home");
+    expect(nous).toMatchObject({ verdict: "found", fedName: "COULMIER BENJAMIN" });
+  });
+
+  it("la feuille officielle qui écrit « COULMIER BENJAMIN » n'est PAS un écart avec « Ben »", async () => {
+    h.fixture = rencontre({
+      snTieId: "999",
+      team: { snTeamId: "176168" },
+      matches: [simple(1, "Ben", "0166842")],
+    });
+    h.teamCode.mockResolvedValue("YVET1");
+    h.readTieSheet.mockResolvedValue({
+      sheet: feuille({
+        lines: [
+          {
+            ...feuille().lines[0],
+            a: { name: "COULMIER BENJAMIN", regiid: "1", clt: "NC", rang: 9000, rangM: 9373 },
+          },
+        ],
+      }),
+      error: null,
+    });
+    const { report } = await (await POST(req(), ctx())).json();
+    expect(report.official.status).toBe("match");
+    expect(report.official.problems).toEqual([]);
+  });
+
+  it("absent de notre fiche : retombe sur la recherche par nom, comme avant", async () => {
+    h.fixture = rencontre({ team: { snTeamId: "176168" } });
+    const { report } = await (await POST(req(), ctx())).json();
+    expect(h.searchRanking).toHaveBeenCalledWith("Dupont", expect.anything());
+    expect(report.players.find((p: { side: string }) => p.side === "home").verdict).toBe("found");
   });
 });

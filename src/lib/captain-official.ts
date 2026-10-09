@@ -179,6 +179,12 @@ export function officialAbsent(ours: readonly OurLine[]): OfficialCheck {
 export interface OurLine {
   order: number;
   homeDisplayName: string;
+  /**
+   * Le nom FÉDÉRAL de notre joueur, quand notre fiche nous le donne — null sinon. Le nom affiché
+   * est souvent un pseudo (« Ben ») que la ligue ne connaît pas : sans ce second nom, la feuille
+   * officielle (« COULMIER BENJAMIN ») était déclarée en écart avec un relevé parfaitement juste.
+   */
+  homeFedName?: string | null;
   awayName: string;
   /** Jeux gagnés de chaque côté, tels que `checkScore` les a comptés. */
   gamesHome: number;
@@ -290,7 +296,7 @@ export function compareOfficial(
     }
     const c = cotes(l, side);
 
-    if (!memeJoueur(c.nous?.name, n.homeDisplayName)) {
+    if (!memeJoueur(c.nous?.name, n.homeDisplayName) && !memeJoueur(c.nous?.name, n.homeFedName)) {
       problems.push(
         `Simple n° ${n.order} : la ligue nous fait jouer « ${c.nous?.name ?? "personne"} », ` +
           `notre relevé dit « ${n.homeDisplayName} ».`,
