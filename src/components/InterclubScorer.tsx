@@ -153,10 +153,13 @@ export default function InterclubScorer({
   onClose,
   onExpired,
   toast,
+  recoit = true,
 }: {
   fixtureId: string;
   match: MatchInfo;
   bestOf: number;
+  /** Notre équipe reçoit-elle ? Sinon, le joueur adverse s'affiche en premier (cf. `ScoreBoard`). */
+  recoit?: boolean;
   onClose: () => void;
   onExpired: (status: number) => boolean;
   toast: (type: "ok" | "err" | "info", msg: string) => void;
@@ -497,6 +500,7 @@ export default function InterclubScorer({
       awayName={match.awayName}
       homeColor={match.homeColor}
       awayColor={match.awayColor}
+      first={recoit ? "home" : "away"}
       metaTitle={`Match numéro ${match.order}, ${needed} jeux gagnants`}
       meta={
         <>

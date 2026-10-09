@@ -146,8 +146,8 @@ model User {
   // national, puis fiche d'équipe — cette dernière ne comble donc que le trou.
   snLicence                String? // licence lue sur NOTRE fiche — la clé de tout le reste
   snRosterClt              String? // « NC », « 4D »… tel que la fiche le publie
-  // ⚠️ NULL POUR UN NC, JAMAIS 9311. La fiche porte 9311 pour tous les non-classés : c'est une
-  // sentinelle, pas un rang (cf. `rangMUtile`). L'écrire les placerait au 9311e rang national.
+  // Un NC porte le rang publié pour tous les non-classés (9373 en octobre 2026) : affiché, il
+  // n'ordonne rien (cf. `rangMUtile`). Resynchronisé à chaque rafraîchissement de la fiche.
   snRosterRangM            Int?
   snRosterAt               DateTime? // quand le rapprochement a été fait — « pas regardé » ≠ « rien »
   interclubsCreated        Interclub[]             @relation("InterclubCreator")
@@ -882,7 +882,7 @@ model InterclubGuest {
   // ci-dessus sert de clé aux deux sources : c'est le seul identifiant fédéral, et il ne
   // dépend d'aucune des deux lectures.
   rosterClt      String?
-  rosterRangM    Int? // null pour un NC — la sentinelle 9311 n'est pas un rang
+  rosterRangM    Int? // un NC porte le rang commun des non-classés (cf. `User.snRosterRangM`)
   rosterAt       DateTime?
   createdAt      DateTime                @default(now())
   matches        InterclubMatch[]        @relation("InterclubHomeGuest")

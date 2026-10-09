@@ -64,14 +64,13 @@ describe("cltUtile / rangMUtile — ce qu'on retient d'une ligne", () => {
     expect(rangMUtile(p)).toBe(2296);
   });
 
-  it("⚠️ NE RECOPIE JAMAIS la sentinelle 9311 d'un NC", () => {
-    // Les sept NC de cette fiche portent tous `rang: 9311, rangM: 9311`, à la même seconde. Ce
-    // n'est pas un rang, c'est « non classé ». L'écrire placerait ces joueurs au 9311e rang
-    // national — un nombre qui a l'air d'un fait, qui se trie, et qui s'afficherait.
+  it("GARDE le rang publié d'un NC — décision du club, il s'affiche partout", () => {
+    // Les sept NC de cette fiche portent tous `rangM: 9311` : le dernier rang du moment, le même
+    // pour tous. Il ne départage personne (cf. `isNC`), mais le club veut le voir.
     for (const p of FICHE.players.filter((x) => x.clt === "NC")) {
       expect(p.rangM).toBe(9311);
       expect(cltUtile(p)).toBe("NC");
-      expect(rangMUtile(p)).toBeNull();
+      expect(rangMUtile(p)).toBe(9311);
     }
   });
 

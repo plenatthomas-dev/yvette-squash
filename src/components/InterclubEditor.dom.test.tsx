@@ -273,15 +273,14 @@ describe("Sélecteur de composition — classement ET rang mixte", () => {
     expect(o.textContent).toContain("1200");
   });
 
-  it("tait le rang mixte d'un NC, où il ne veut rien dire", async () => {
+  it("MONTRE le rang d'un NC — décision du club, il n'ordonne rien", async () => {
     fixtureOverride = fixtureAvecRoster([
-      { kind: "member", id: "u1", name: "Thomas", clt: "NC", rangM: 3900 },
+      { kind: "member", id: "u1", name: "Thomas", clt: "NC", rangM: 9373 },
     ]);
     const r = await ouvreSecondSimple();
     const o = option(r, "Thomas");
     if (!o) return;
-    expect(o.textContent).toContain("NC");
-    expect(o.textContent).not.toContain("3900");
+    expect(o.textContent).toContain("(NC #9373)");
   });
 
   it("grise un joueur classé dont le rang mixte est inconnu, et dit pourquoi", async () => {

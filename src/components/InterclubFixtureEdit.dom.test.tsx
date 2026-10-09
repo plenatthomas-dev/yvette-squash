@@ -301,3 +301,100 @@ describe("le joueur au service", () => {
     expect(r.container.querySelectorAll(".ic-au-service")).toHaveLength(0);
   });
 });
+
+// ============================================================================
+//  L'ÉQUIPE QUI REÇOIT EN PREMIER, sur les cartes des simples.
+//
+//  À la demande du club (2026-10-09) : c'est l'ordre du titre de la rencontre
+//  et de la feuille de match. Et tout ce qui se lit sur la carte suit — un
+//  « 11-8 » resté dans notre sens sous « Massy c. Thomas » se lirait comme
+//  une victoire de Massy.
+// ============================================================================
+
+/** Un simple joué : nous (Thomas) gagnons 3-1, dont un 11-8 au premier jeu. */
+const joue = {
+  ...FIXTURE.matches[0],
+  status: "done",
+  gamesHome: 3,
+  gamesAway: 1,
+  games: [
+    { number: 1, home: 11, away: 8 },
+    { number: 2, home: 2, away: 11 },
+    { number: 3, home: 11, away: 7 },
+    { number: 4, home: 11, away: 9 },
+  ],
+};
+
+describe("l'équipe qui reçoit, en premier", () => {
+  it("chez l'adversaire : son joueur d'abord, et les scores dans le même sens", async () => {
+    surcharge = { home: false, matches: [joue] };
+    const r = await ouvre(false);
+    const joueurs = [...r.container.querySelectorAll(".ic-match .ic-player")].map(
+      (e) => e.textContent,
+    );
+    expect(joueurs[0]).toContain("Jérôme Massy");
+    expect(joueurs[1]).toContain("Thomas");
+    expect(r.container.querySelector(".ic-gamelist")?.textContent).toBe("8-11 · 11-2 · 7-11 · 9-11");
+    expect(r.container.querySelector(".ic-gamescore")?.textContent).toBe("1–3");
+    expect(r.container.querySelector(".ic-gamescore")?.getAttribute("aria-label")).toBe(
+      "Jeux gagnés : 1 à 3",
+    );
+  });
+
+  it("à domicile : notre joueur d'abord, rien ne bouge", async () => {
+    surcharge = { home: true, matches: [joue] };
+    const r = await ouvre(false);
+    const joueurs = [...r.container.querySelectorAll(".ic-match .ic-player")].map(
+      (e) => e.textContent,
+    );
+    expect(joueurs[0]).toContain("Thomas");
+    expect(r.container.querySelector(".ic-gamelist")?.textContent).toBe("11-8 · 2-11 · 11-7 · 11-9");
+    expect(r.container.querySelector(".ic-gamescore")?.textContent).toBe("3–1");
+  });
+
+  it("le jeu en cours suit aussi, et le service reste sur le bon joueur", async () => {
+    surcharge = { home: false, ...engage("home") };
+    const r = await ouvre(false);
+    expect(r.container.querySelector(".ic-inplay")?.textContent).toBe("5–7");
+    // Le serveur est NOTRE joueur, désormais affiché en second.
+    const joueurs = [...r.container.querySelectorAll(".ic-match .ic-player")];
+    expect(joueurs[1].querySelector(".ic-au-service")).not.toBeNull();
+    expect(joueurs[1].textContent).toContain("Thomas");
+  });
+});
+
+describe("le formulaire de saisie, l'équipe qui reçoit en premier", () => {
+  it("chez l'adversaire : le champ Adversaire et ses points passent devant", async () => {
+    surcharge = { home: false, matches: [joue] };
+    const r = await ouvre(false);
+    fireEvent.click(r.container.querySelector(".ic-match") as HTMLElement);
+    await souffle();
+    const champs = [...r.container.querySelectorAll(".ic-editor .ic-field")].map((l) =>
+      l.textContent?.trim().slice(0, 10),
+    );
+    expect(champs[0]).toMatch(/^Adversaire/);
+    expect(champs[1]).toMatch(/^Joueur/);
+    // Les cases du premier jeu : celle de l'adversaire d'abord, et chacune garde SA valeur.
+    const cases = [...r.container.querySelectorAll(".ic-game-row")][0].querySelectorAll("input");
+    expect(cases[0].getAttribute("aria-label")).toBe("Jeu 1, points de l'adversaire");
+    expect((cases[0] as HTMLInputElement).value).toBe("8");
+    expect((cases[1] as HTMLInputElement).value).toBe("11");
+  });
+
+  it("une case saisie écrit dans le bon camp, quel que soit l'ordre affiché", async () => {
+    surcharge = { home: false, matches: [joue] };
+    const r = await ouvre(false);
+    fireEvent.click(r.container.querySelector(".ic-match") as HTMLElement);
+    await souffle();
+    const cases = [...r.container.querySelectorAll(".ic-game-row")][0].querySelectorAll("input");
+    fireEvent.change(cases[0], { target: { value: "9" } });
+    // La première case affichée est l'adversaire : c'est SON score qui change.
+    expect(
+      ([...r.container.querySelectorAll(".ic-game-row")][0].querySelectorAll("input")[0] as HTMLInputElement)
+        .value,
+    ).toBe("9");
+    expect(
+      r.container.querySelector<HTMLInputElement>('input[aria-label="Jeu 1, points du joueur"]')?.value,
+    ).toBe("11");
+  });
+});

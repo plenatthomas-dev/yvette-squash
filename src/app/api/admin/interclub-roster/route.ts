@@ -76,8 +76,7 @@ function valeursDe(p: RosterPlayer) {
   return {
     licence: (p.licence ?? "").trim() || null,
     clt: cltUtile(p),
-    // ⚠️ Nul pour un NC : la fédération publie 9311 pour tous les non-classés, une sentinelle
-    // et non un rang (cf. `rangMUtile`).
+    // Un NC a le sien aussi — le même pour tous, qui n'ordonne rien (cf. `rangMUtile`).
     rangM: rangMUtile(p),
   };
 }
@@ -167,7 +166,29 @@ export async function POST(req: NextRequest) {
     // `force` traverse la fraîcheur d'une semaine : c'est le bouton qu'on presse le soir où le
     // capitaine vient d'inscrire quelqu'un chez la fédération.
     const [outcome] = await refreshRosters([chargee.team.snTeamId], { force: body.force === true });
-    return NextResponse.json({ ok: true, outcome });
+
+    // LES JOUEURS DÉJÀ LIÉS SUIVENT LA FICHE. La liaison RECOPIE classement et rang sur le
+    // joueur ; sans cette passe, ils restaient ceux du jour de la liaison — un NC passé 5D
+    // gardait « NC », et le rang commun des non-classés (9311 en septembre, 9373 en octobre)
+    // vieillissait sous les yeux de l'annuaire. Seules les liaisons PAR LICENCE sont réécrites :
+    // ce sont des preuves ; un rapprochement par le nom reste une décision de l'admin.
+    const { team } = chargee;
+    const [rosters, joueurs] = await Promise.all([
+      loadRosters([team.snTeamId]),
+      joueursDeLEquipe(team.id),
+    ]);
+    const fiche = notreFiche(rosters.get(team.snTeamId));
+    let resynchronises = 0;
+    if (fiche) {
+      for (const l of rapprocherRoster(fiche, joueurs)) {
+        const a = l.appariement;
+        if (a.statut !== "lie" || a.par !== "licence") continue;
+        if (await ecrireLiaison(team.id, a.joueur.kind, a.joueur.id, valeursDe(l.player))) {
+          resynchronises++;
+        }
+      }
+    }
+    return NextResponse.json({ ok: true, outcome, resynchronises });
   }
 
   // ─── Défaire une liaison ──────────────────────────────────────────────────────────────────
