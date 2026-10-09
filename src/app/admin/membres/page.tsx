@@ -198,6 +198,8 @@ export default function MembersPage() {
         clt?: string | null;
         rangM?: number | null;
         status?: "matched" | "moved" | "unknown" | "error";
+        /** Rendu par `set_team` : ce membre existe AUSSI comme joueur hors appli dans l'équipe. */
+        doublon?: { invite: { name: string }; par: "licence" | "nom" } | null;
       };
       if (!res.ok) {
         setMsg({ id, text: data.error ?? "Action impossible." });
@@ -214,6 +216,20 @@ export default function MembersPage() {
         setMembers((prev) =>
           prev.map((m) => (m.id === id ? { ...m, teamId: data.teamId ?? null } : m)),
         );
+        // LE DOUBLON, DIT AU MOMENT OÙ IL NAÎT. Le serveur le détectait déjà et le rendait ;
+        // cet écran l'ignorait, si bien qu'un joueur saisi à la main (Damien Vicart, inscrit sur
+        // la fiche avant d'avoir un compte) se retrouvait proposé deux fois à la composition le
+        // jour où il ouvrait l'appli — sans que personne ne le voie avant d'aller fouiller la
+        // fiche fédérale. Rien n'est fondu d'office : deux homonymes existent.
+        if (data.doublon) {
+          setMsg({
+            id,
+            text:
+              `Ce membre figure déjà dans l'équipe comme joueur hors appli (« ${data.doublon.invite.name} », ` +
+              `rapprochés par ${data.doublon.par === "licence" ? "leur licence" : "leur nom"}). ` +
+              "Fonds-les depuis Admin › Équipes interclub › fiche fédérale : « Fondre dans le membre ».",
+          });
+        }
       } else if (action === "set_squashnet_name" || action === "rematch_squashnet") {
         // Le brouillon a fait son office : on le retire pour que les champs repartent de ce que
         // le serveur a réellement retenu (nom normalisé, ou vide si la correction est retirée).
