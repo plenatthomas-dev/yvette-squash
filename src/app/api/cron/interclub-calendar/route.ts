@@ -100,6 +100,36 @@ export async function GET(req: NextRequest) {
   let standingsFailed = 0;
 
   for (const team of teams) {
+    // LE CLASSEMENT, DANS LA MÊME PASSE. Il ne bouge qu'après une journée de championnat :
+    // une fois par semaine suffit, et l'aller chercher à chaque ouverture de l'écran ferait
+    // dépendre l'affichage d'une page quotidienne de la disponibilité de squashnet.
+    //
+    // Isolé dans son propre `try` : un classement indisponible ne doit pas emporter le
+    // contrôle du calendrier, qui est la raison d'être de ce cron. En cas d'échec on ne
+    // touche à RIEN — mieux vaut un classement daté de la semaine dernière, et qui le dit,
+    // qu'un tableau effacé.
+    //
+    // ET LUI AVANT LE CALENDRIER, PAS APRÈS. Placé derrière, il héritait du `continue` d'un
+    // calendrier en échec : le 2026-10-05, les deux calendriers illisibles (dates bouchon de la
+    // poule) ont privé la prod de tout classement, alors que la page du classement — une autre
+    // page — se lisait très bien. La dépendance allait dans les deux sens ; elle n'en a aucun.
+    if (team.snDrawId) {
+      try {
+        const rows = await fetchStandings(team.snEventId!, team.snDrawId, team.snRoundId!);
+        // Zéro ligne n'est pas un classement : c'est une poule non publiée, ou un ancrage
+        // faux. L'écrire écraserait un tableau valide par du vide.
+        if (rows.length > 0) {
+          await prisma.interclubTeam.update({
+            where: { id: team.id },
+            data: { snStandingsJson: JSON.stringify(rows), snStandingsAt: new Date() },
+          });
+          standings++;
+        }
+      } catch {
+        standingsFailed++;
+      }
+    }
+
     let published;
     try {
       published = await fetchOwnFixtures(team.snEventId!, team.snRoundId!, team.snTeamId!);
@@ -120,31 +150,6 @@ export async function GET(req: NextRequest) {
       continue;
     }
     checked++;
-
-    // LE CLASSEMENT, DANS LA MÊME PASSE. Il ne bouge qu'après une journée de championnat :
-    // une fois par semaine suffit, et l'aller chercher à chaque ouverture de l'écran ferait
-    // dépendre l'affichage d'une page quotidienne de la disponibilité de squashnet.
-    //
-    // Isolé dans son propre `try` : un classement indisponible ne doit pas emporter le
-    // contrôle du calendrier, qui est la raison d'être de ce cron. En cas d'échec on ne
-    // touche à RIEN — mieux vaut un classement daté de la semaine dernière, et qui le dit,
-    // qu'un tableau effacé.
-    if (team.snDrawId) {
-      try {
-        const rows = await fetchStandings(team.snEventId!, team.snDrawId, team.snRoundId!);
-        // Zéro ligne n'est pas un classement : c'est une poule non publiée, ou un ancrage
-        // faux. L'écrire écraserait un tableau valide par du vide.
-        if (rows.length > 0) {
-          await prisma.interclubTeam.update({
-            where: { id: team.id },
-            data: { snStandingsJson: JSON.stringify(rows), snStandingsAt: new Date() },
-          });
-          standings++;
-        }
-      } catch {
-        standingsFailed++;
-      }
-    }
 
     // CE CRON N'ÉCRIT JAMAIS L'EMPREINTE — seule l'application le fait, comme l'annoncent
     // l'en-tête ci-dessus et `calendarFingerprint`.

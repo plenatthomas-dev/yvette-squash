@@ -261,7 +261,8 @@ describe("contrôle de dérive", () => {
     h.fetchThrows = true;
     const body = await (await GET(req())).json();
     expect(body).toMatchObject({ checked: 0, failed: 1, drifted: 0 });
-    expect(h.teamUpdates).toEqual([]);
+    // Seul le classement, page distincte, a pu s'écrire — rien qui parle du calendrier.
+    expect(h.teamUpdates.some((d) => "snCheckedAt" in d || "snCalendarHash" in d)).toBe(false);
     expect(h.drifts).toEqual([]);
   });
 
@@ -334,10 +335,22 @@ describe("le classement, rafraîchi dans la même passe", () => {
     expect(h.teamUpdates.some((d) => d.snStandingsJson)).toBe(false);
   });
 
-  it("ne tente rien quand le calendrier lui-même n'a pas répondu", async () => {
+  // 2026-10-05 : les deux calendriers illisibles, et aucun classement en prod — il héritait de
+  // l'échec du calendrier alors que sa page, distincte, se lisait très bien.
+  it("un calendrier ILLISIBLE n'emporte PAS le classement", async () => {
+    h.fetchUnreadable = true;
+    const body = await (await GET(req())).json();
+    expect(body.failed).toBe(1);
+    expect(body.standings).toBe(1);
+    expect(h.teamUpdates.some((d) => d.snStandingsJson)).toBe(true);
+    // Le calendrier, lui, n'a pas été regardé : `snCheckedAt` ne bouge pas.
+    expect(h.teamUpdates.some((d) => d.snCheckedAt)).toBe(false);
+  });
+
+  it("un calendrier qui n'a pas répondu non plus", async () => {
     h.fetchThrows = true;
     const body = await (await GET(req())).json();
     expect(body.failed).toBe(1);
-    expect(body.standings).toBe(0);
+    expect(body.standings).toBe(1);
   });
 });
