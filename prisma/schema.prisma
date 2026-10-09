@@ -458,17 +458,31 @@ model Tricount {
 // n'entre donc jamais dans le circuit d'approbation des payeurs, qui suppose
 // un compte connecté. Supprimé uniquement via la suppression admin du
 // tricount entier (cascade), jamais isolément.
+//
+// JOUEUR DU CLUB SANS COMPTE (`interclubGuestId`, migration 57). Un joueur d'équipe interclub
+// qui n'a pas l'appli est proposé dans « Pour qui ? » au même titre qu'un membre ; sur un
+// tricount, il est porté par CETTE table — mêmes règles qu'un invité (une part, jamais payeur,
+// remboursement confirmé par son créancier), mais il garde son vrai nom, sans « (ext) », et la
+// même personne est reconnue d'une date à l'autre. Le jour où il crée son compte, la fusion
+// admin (`promote_guest`) fait passer ses parts et ses remboursements sur le membre.
+// SetNull : un joueur retiré de l'équipe redevient un invité ordinaire, sa dette survit.
 model TricountGuest {
-  id          String         @id @default(cuid())
-  tricount    Tricount       @relation(fields: [tricountId], references: [id], onDelete: Cascade)
-  tricountId  String
-  name        String // prénom libre ; le suffixe "(ext)" est ajouté à l'affichage, jamais stocké
-  createdAt   DateTime       @default(now())
-  shares      ExpenseShare[]
-  refundsPaid Expense[]      @relation("ExpenseGuestPayer")
+  id               String          @id @default(cuid())
+  tricount         Tricount        @relation(fields: [tricountId], references: [id], onDelete: Cascade)
+  tricountId       String
+  name             String // prénom libre ; le suffixe "(ext)" est ajouté à l'affichage, jamais stocké
+  interclubGuest   InterclubGuest? @relation(fields: [interclubGuestId], references: [id], onDelete: SetNull)
+  interclubGuestId String?
+  createdAt        DateTime        @default(now())
+  shares           ExpenseShare[]
+  refundsPaid      Expense[]       @relation("ExpenseGuestPayer")
 
   @@unique([tricountId, name])
+  // Un joueur du club n'est porté qu'UNE fois par tricount. Postgres tient les NULL pour
+  // distincts : les invités ordinaires, eux, restent aussi nombreux qu'on veut.
+  @@unique([tricountId, interclubGuestId])
   @@index([tricountId])
+  @@index([interclubGuestId])
 }
 
 // Fil de commentaires attaché à UN tricount (idée 5a) : entraide sur le partage de frais
@@ -889,6 +903,7 @@ model InterclubGuest {
   availability   InterclubAvailability[]
   rankingHistory SquashnetRankingPoint[]
   rankingProbes  SquashnetRankingProbe[]
+  tricountGuests TricountGuest[]
 
   // Deux fois le même nom dans la même équipe est une faute de saisie, pas un cas d'usage.
   @@unique([teamId, name])

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { transfererAuMembre } from "@/lib/tricount-club";
 import { requireAdmin } from "@/lib/admin";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
 import { readJsonBody } from "@/lib/http-tx";
@@ -451,11 +452,15 @@ async function promouvoir(teamId: string, userId: string, guestId: string) {
         snRosterAt: invite.rosterAt ?? new Date(),
       },
     });
+    // SES FRAIS PARTAGÉS le suivent : parts et remboursements passent sur le membre, qui peut
+    // désormais voir sa dette et la déclarer lui-même. AVANT la suppression : le lien de ses
+    // invités est en SetNull, et une fois rompu plus rien ne dirait à qui ces dettes reviennent.
+    const frais = await transfererAuMembre(tx, invite.id, membre.id);
     // Les rencontres passées survivent : `homeGuestId` est en SetNull et `homeDisplayName`
     // porte le nom figé. C'est déjà ce que fait `remove_guest`.
     await tx.interclubGuest.delete({ where: { id: invite.id } });
-    return count;
+    return { count, frais };
   });
 
-  return NextResponse.json({ ok: true, deplaces });
+  return NextResponse.json({ ok: true, deplaces: deplaces.count, frais: deplaces.frais });
 }
