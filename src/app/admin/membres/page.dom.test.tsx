@@ -168,3 +168,51 @@ describe("/admin/membres — nom de recherche squashnet", () => {
     expect(posts()).toEqual([{ id: "u1", action: "rematch_squashnet" }]);
   });
 });
+
+// LE DOUBLON, DIT AU MOMENT OÙ IL NAÎT (2026-10-09). Un joueur saisi à la main ouvre l'appli des
+// mois plus tard ; l'admin le rattache à son équipe, et l'équipe le porte deux fois. Le serveur
+// le détectait et le rendait — cet écran l'ignorait.
+describe("/admin/membres — rattacher un membre qui existe déjà comme joueur hors appli", () => {
+  it("le dit tout de suite, et dit où le fondre", async () => {
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (!init || init.method !== "POST") {
+        return json({
+          members: [membre({ teamId: null })],
+          teams: [{ id: "t1", name: "Équipe 1" }],
+        });
+      }
+      return json({
+        ok: true,
+        teamId: "t1",
+        doublon: { membre: { name: "Matthieu Soisier" }, invite: { name: "SOISIER MATTHIEU" }, par: "licence" },
+      });
+    });
+    render(<Membres />);
+    await souffle();
+    const groupe = screen.getByRole("group", { name: "Équipe interclub de Matthieu Soisier" });
+    await act(async () => {
+      fireEvent.click(groupe.querySelectorAll("button")[1]);
+      await souffle();
+    });
+    expect(screen.getByText(/figure déjà dans l'équipe comme joueur hors appli/)).toBeTruthy();
+    expect(screen.getByText(/SOISIER MATTHIEU/)).toBeTruthy();
+    expect(screen.getByText(/Fondre dans le membre/)).toBeTruthy();
+  });
+
+  it("ne dit rien quand il n'y a pas de doublon", async () => {
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (!init || init.method !== "POST") {
+        return json({ members: [membre({ teamId: null })], teams: [{ id: "t1", name: "Équipe 1" }] });
+      }
+      return json({ ok: true, teamId: "t1", doublon: null });
+    });
+    render(<Membres />);
+    await souffle();
+    const groupe = screen.getByRole("group", { name: "Équipe interclub de Matthieu Soisier" });
+    await act(async () => {
+      fireEvent.click(groupe.querySelectorAll("button")[1]);
+      await souffle();
+    });
+    expect(screen.queryByText(/joueur hors appli/)).toBeNull();
+  });
+});

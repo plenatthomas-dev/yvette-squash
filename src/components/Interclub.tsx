@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import AuService from "./AuService";
 import ColorPicker from "./ColorPicker";
 import { Dialog } from "@/components/Dialog";
@@ -303,6 +303,14 @@ function jourCourt(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+}
+
+/**
+ * Deux valeurs d'un simple, L'ÉQUIPE QUI REÇOIT D'ABORD. `nous` et `eux` sont dans le sens de la
+ * donnée (`home` = notre joueur) ; `recoit` dit si c'est nous qui recevons.
+ */
+function dansLOrdre(recoit: boolean, nous: number, eux: number, sep = "–"): string {
+  return recoit ? `${nous}${sep}${eux}` : `${eux}${sep}${nous}`;
 }
 
 /** Un écart signé, « +20 » / « -14 ». Le signe est l'information ; sans lui, tout se vaut. */
@@ -1139,6 +1147,7 @@ export default function Interclub({
           fixtureId={fixture.id}
           match={scoringMatch}
           bestOf={fixture.bestOf}
+          recoit={fixture.home}
           onClose={() => stopScoring(scoringMatch.id)}
           onExpired={stableExpired}
           toast={stableToast}
@@ -1589,6 +1598,7 @@ function FixtureDialog({
                 awayLines={awayLines}
                 opponentTeamName={fixture.opponent}
                 teamName={fixture.team.name}
+                recoit={fixture.home}
                 busy={busy}
                 onCancel={() => setEditing(null)}
                 onSave={(body) => {
@@ -1605,47 +1615,61 @@ function FixtureDialog({
                     {MATCH_STATUS_LABEL[m.status] ?? m.status}
                   </span>
                 </span>
+                {/* L'ÉQUIPE QUI REÇOIT EN PREMIER, à la demande du club : c'est l'ordre de la
+                    feuille de match et du titre de la rencontre (« Verrieres 4 – Équipe 2 »).
+                    Chez l'adversaire, son joueur passe donc devant le nôtre — et TOUT ce qui se
+                    lit sur la carte suit (jeux, jeu en cours, total) : un « 11-8 » sous
+                    « FAUVEAU c. Pegot » qui serait resté dans notre sens se lirait comme une
+                    victoire de Fauveau. La donnée, elle, ne bouge pas : `home` reste NOUS. */}
                 <span className="ic-players">
-                  <span className="ic-player">
-                    <ColorDot color={m.homeColor} size="lg" />
-                    <span className={m.homeDisplayName === UNSET_PLAYER ? "muted" : undefined}>
-                      {m.homeDisplayName}
-                    </span>
-                    {/* AU SERVICE. La donnée arrivait déjà — `getLiveFixtures` la met dans la
-                        charge utile, cet écran la déclarait dans son type — et il ne l'affichait
-                        pas. Or « 7–5 » sans savoir qui sert ne se lit pas : au squash le service
-                        change de main à chaque échange perdu, et c'est lui qui dit si le meneur
-                        conclut ou subit. Coût serveur nul, elle est déjà payée. */}
-                    {m.live?.serving === "home" && <AuService />}
-                  </span>
-                  <span className="ic-versus" title="contre">
-                    <span className="sr-only">contre</span>
-                    <span aria-hidden="true">c.</span>
-                  </span>
-                  <span className="ic-player">
-                    <ColorDot color={m.awayColor} size="lg" />
-                    <span className={m.awayName === UNSET_PLAYER ? "muted" : undefined}>{m.awayName}</span>
-                    {m.live?.serving === "away" && <AuService />}
-                  </span>
+                  {(fixture.home ? (["home", "away"] as const) : (["away", "home"] as const)).map(
+                    (cote, i) => {
+                      const nom = cote === "home" ? m.homeDisplayName : m.awayName;
+                      return (
+                        <Fragment key={cote}>
+                          {i === 1 && (
+                            <span className="ic-versus" title="contre">
+                              <span className="sr-only">contre</span>
+                              <span aria-hidden="true">c.</span>
+                            </span>
+                          )}
+                          <span className="ic-player">
+                            <ColorDot
+                              color={cote === "home" ? m.homeColor : m.awayColor}
+                              size="lg"
+                            />
+                            <span className={nom === UNSET_PLAYER ? "muted" : undefined}>{nom}</span>
+                            {/* AU SERVICE. La donnée arrivait déjà — `getLiveFixtures` la met dans
+                                la charge utile, cet écran la déclarait dans son type — et il ne
+                                l'affichait pas. Or « 7–5 » sans savoir qui sert ne se lit pas : au
+                                squash le service change de main à chaque échange perdu, et c'est
+                                lui qui dit si le meneur conclut ou subit. Coût serveur nul, elle
+                                est déjà payée. */}
+                            {m.live?.serving === cote && <AuService />}
+                          </span>
+                        </Fragment>
+                      );
+                    },
+                  )}
                 </span>
                 {(m.live || m.gamesHome !== null) && (
                   <span className="ic-games">
                     {m.games.length > 0 && (
                       <span className="ic-gamelist">
-                        {m.games.map((g) => `${g.home}-${g.away}`).join(" · ")}
+                        {m.games.map((g) => dansLOrdre(fixture.home, g.home, g.away, "-")).join(" · ")}
                       </span>
                     )}
                     {m.live && (
                       <span className="ic-inplay" title="Jeu en cours">
-                        {m.live.current.home}–{m.live.current.away}
+                        {dansLOrdre(fixture.home, m.live.current.home, m.live.current.away)}
                       </span>
                     )}
                     {m.gamesHome !== null && (
                       <span
                         className="ic-gamescore"
-                        aria-label={`Jeux gagnés : ${m.gamesHome} à ${m.gamesAway}`}
+                        aria-label={`Jeux gagnés : ${dansLOrdre(fixture.home, m.gamesHome, m.gamesAway ?? 0, " à ")}`}
                       >
-                        {m.gamesHome}–{m.gamesAway}
+                        {dansLOrdre(fixture.home, m.gamesHome, m.gamesAway ?? 0)}
                       </span>
                     )}
                   </span>
@@ -1909,6 +1933,7 @@ function MatchEditor({
   awayLines,
   opponentTeamName,
   teamName,
+  recoit,
   busy,
   onCancel,
   onSave,
@@ -1926,6 +1951,8 @@ function MatchEditor({
   awayLines: { order: number; awayName: string }[];
   opponentTeamName: string;
   teamName: string;
+  /** Notre équipe reçoit-elle ? Sinon, l'adversaire passe en premier dans le formulaire. */
+  recoit: boolean;
   busy: boolean;
   onCancel: () => void;
   onSave: (body: Record<string, unknown>) => void;
@@ -2017,171 +2044,184 @@ function MatchEditor({
   // liste, et il change à chaque frappe de `pick`.
   const sortedRoster = [...roster].sort(compareRosterOrder);
 
+  // L'ÉQUIPE QUI REÇOIT EN PREMIER, comme sur la carte du simple (demande du club, 2026-10-09).
+  // Les deux blocs sont des VARIABLES et non deux positions CSS : l'ordre de tabulation et celui
+  // de la lecture d'écran doivent suivre ce qu'on voit.
+  const blocNous = (
+    <>
+          <label className="ic-field">
+            Joueur
+            <span className="ic-field-row">
+              <select value={pick} onChange={(e) => setPick(e.target.value)}>
+                <option value="">— à désigner —</option>
+                {sortedRoster.map((r) => {
+                  const key = `${r.kind}:${r.id}`;
+                  // Comparé au NUMÉRO du simple et non au choix courant : le joueur que ce
+                  // simple-ci retient doit rester sélectionnable ici (sinon on ne pourrait plus
+                  // revenir en arrière après avoir changé d'avis), mais nulle part ailleurs.
+                  const at = takenBy.get(key);
+                  const taken = at !== undefined && at !== match.order;
+                  // Sans classement connu, un joueur ne peut disputer AUCUN simple — pas seulement
+                  // ceux où une comparaison d'ordre est possible. Même logique que `taken` : on
+                  // grise plutôt que de laisser composer pour se faire refuser par le serveur.
+                  const noClt = r.clt == null;
+                  // Sans RANG MIXTE non plus, depuis qu'il départage les joueurs de même classement.
+                  // Les NC en sont dispensés : la fédération ne les ordonne pas entre eux.
+                  const noRang = !noClt && !isNC(r.clt as string) && r.rangM == null;
+                  // Romprait-il l'ordre des simples s'il jouait CELUI-CI ? Même logique que `taken` :
+                  // on grise plutôt que de laisser composer pour rien.
+                  const orderProblem =
+                    taken || noClt || noRang
+                      ? null
+                      : lineupOrderConflict([
+                          ...otherOrderSlots,
+                          { order: match.order, name: r.name, clt: r.clt, rangM: r.rangM },
+                        ]);
+                  const blocked = taken || noClt || noRang || !!orderProblem;
+                  return (
+                    <option key={key} value={key} disabled={blocked}>
+                      {r.name}
+                      {/* Le classement ET le rang : ce sont les deux critères qui décident de
+                          l'ordre, et le second est le seul moyen de comprendre pourquoi deux « 5A »
+                          ne sont pas interchangeables. Un NC montre aussi le sien, à la demande
+                          du club : le même pour tous les non-classés, il n'ordonne rien.
+
+                          Noté « 5A #1200 » : le dièse dit « numéro » sans le mot, et une option de
+                          `<select>` ne se met pas sur deux lignes — sur un téléphone, « · rang »
+                          coûtait quatre caractères par joueur pour ne rien apprendre à personne. */}
+                      {r.clt ? ` (${r.clt}${r.rangM != null ? ` #${r.rangM}` : ""})` : ""}
+                      {taken
+                        ? ` — joue déjà le match n° ${at}`
+                        : noClt
+                          ? " — classement inconnu"
+                          : noRang
+                            ? " — rang mixte inconnu"
+                            : orderProblem
+                              ? " — hors ordre de classement"
+                              : ""}
+                    </option>
+                  );
+                })}
+              </select>
+              <ColorPicker value={homeColor} onChange={setHomeColor} label="Maillot du joueur" />
+            </span>
+          </label>
+
+          {roster.length === 0 && (
+            <p className="notice tiny" role="status">
+              Aucun joueur n&apos;est rattaché à {teamName}. Un administrateur compose le roster de
+              l&apos;équipe depuis l&apos;espace admin — les membres inscrits sur la page Membres,
+              les joueurs sans compte dans la section « Équipes interclub ».
+            </p>
+          )}
+    </>
+  );
+  const blocEux = (
+    <>
+          <label className="ic-field">
+            Adversaire
+            <span className="ic-field-row">
+              {awayLibre ? (
+                <input
+                  value={awayName}
+                  onChange={(e) => setAwayName(e.target.value)}
+                  placeholder="Nom de l'adversaire"
+                  maxLength={40}
+                />
+              ) : (
+                <select
+                  value={awayName}
+                  onChange={(e) => {
+                    if (e.target.value === AUTRE_CLUB) {
+                      setAwayLibre(true);
+                      setAwayName("");
+                    } else {
+                      setAwayName(e.target.value);
+                    }
+                  }}
+                >
+                  <option value="">— à désigner —</option>
+                  {clubOpponents.map((o) => {
+                    // UN ADVERSAIRE NE DISPUTE QU'UN SIMPLE, exactement comme nos joueurs. Comparé
+                    // au NUMÉRO du simple et non au choix courant : celui que ce simple-ci retient
+                    // doit rester sélectionnable ici — sinon on ne pourrait plus revenir en arrière
+                    // après avoir changé d'avis — mais nulle part ailleurs.
+                    const dejaA = awayAlignmentClash(awayLines, {
+                      order: match.order,
+                      awayName: o.name,
+                    });
+                    // LA MÊME RÈGLE QUE POUR NOUS, appliquée aux joueurs d'en face : le mieux classé
+                    // dispute le simple n° 1. On grise ici ce que le serveur refuserait, plutôt que
+                    // de laisser composer pour se faire refuser à l'enregistrement — même logique
+                    // que `takenBy` et `orderProblem` sur le sélecteur juste au-dessus.
+                    //
+                    // `awayLineupConflict` se tait dès qu'un des désignés nous est inconnu : rien
+                    // n'est donc grisé tant que la composition d'en face n'est pas entièrement faite
+                    // de joueurs classés. C'est voulu — on ne refuse que ce qu'on sait. Depuis que
+                    // le ROSTER fédéral alimente cette liste, ce cas est devenu l'exception plutôt
+                    // que la règle : il ne reste que les joueurs qu'aucune inscription ne couvre.
+                    //
+                    // Inutile de l'évaluer sur un joueur déjà grisé pour doublon : le motif est
+                    // acquis, et le message d'ordre le recouvrirait d'une explication moins claire.
+                    const conflit =
+                      dejaA !== null
+                        ? null
+                        : awayLineupConflict(
+                            awayLines.map((l) =>
+                              l.order === match.order ? { order: match.order, awayName: o.name } : l,
+                            ),
+                            clubOpponents,
+                            // `clubOpponents` est déjà filtré sur ce club (cf. plus haut), mais
+                            // l'équipe se passe quand même : c'est la MÊME signature que celle du
+                            // serveur, et c'est ce qui garantit que l'écran grise exactement ce que
+                            // la route refuserait.
+                            opponentTeamName,
+                          );
+                    return (
+                      <option
+                        key={`${o.team}|${o.name}`}
+                        value={o.name}
+                        disabled={dejaA !== null || !!conflit}
+                      >
+                        {o.name}
+                        {/* Classement et rang mixte, notés comme pour nous (« 5A #1200 ») : ce sont
+                            les deux critères qui décident de l'ordre. Ils viennent du ROSTER publié
+                            par la ligue quand on l'a, sinon d'une vérification de capitaine ; à
+                            défaut des deux, le joueur reste proposable mais son ordre incontrôlable. */}
+                        {o.clt ? ` (${o.clt}${o.rangM != null ? ` #${o.rangM}` : ""})` : ""}
+                        {dejaA !== null
+                          ? ` — joue déjà le match n° ${dejaA}`
+                          : conflit
+                            ? " — hors ordre de classement"
+                            : ""}
+                      </option>
+                    );
+                  })}
+                  <option value={AUTRE_CLUB}>— un autre joueur —</option>
+                </select>
+              )}
+              <ColorPicker value={awayColor} onChange={setAwayColor} label="Maillot de l'adversaire" />
+            </span>
+          </label>
+          {awayLibre && clubOpponents.length > 0 && (
+            <button className="ic-linkish" onClick={() => { setAwayLibre(false); setAwayName(""); }}>
+              Revenir aux joueurs connus à {opponentTeamName}
+            </button>
+          )}
+          {!awayLibre && clubOpponents.length > 0 && (
+            <p className="tiny muted">
+              Les joueurs inscrits à {opponentTeamName} chez la ligue, et ceux qu&apos;on a déjà
+              rencontrés. Sans classement affiché, le joueur reste proposable, mais l&apos;ordre des
+              simples d&apos;en face ne peut pas être contrôlé sur lui.
+            </p>
+          )}
+    </>
+  );
+
   return (
     <div className="ic-editor">
-      <label className="ic-field">
-        Joueur
-        <span className="ic-field-row">
-          <select value={pick} onChange={(e) => setPick(e.target.value)}>
-            <option value="">— à désigner —</option>
-            {sortedRoster.map((r) => {
-              const key = `${r.kind}:${r.id}`;
-              // Comparé au NUMÉRO du simple et non au choix courant : le joueur que ce
-              // simple-ci retient doit rester sélectionnable ici (sinon on ne pourrait plus
-              // revenir en arrière après avoir changé d'avis), mais nulle part ailleurs.
-              const at = takenBy.get(key);
-              const taken = at !== undefined && at !== match.order;
-              // Sans classement connu, un joueur ne peut disputer AUCUN simple — pas seulement
-              // ceux où une comparaison d'ordre est possible. Même logique que `taken` : on
-              // grise plutôt que de laisser composer pour se faire refuser par le serveur.
-              const noClt = r.clt == null;
-              // Sans RANG MIXTE non plus, depuis qu'il départage les joueurs de même classement.
-              // Les NC en sont dispensés : la fédération ne les ordonne pas entre eux.
-              const noRang = !noClt && !isNC(r.clt as string) && r.rangM == null;
-              // Romprait-il l'ordre des simples s'il jouait CELUI-CI ? Même logique que `taken` :
-              // on grise plutôt que de laisser composer pour rien.
-              const orderProblem =
-                taken || noClt || noRang
-                  ? null
-                  : lineupOrderConflict([
-                      ...otherOrderSlots,
-                      { order: match.order, name: r.name, clt: r.clt, rangM: r.rangM },
-                    ]);
-              const blocked = taken || noClt || noRang || !!orderProblem;
-              return (
-                <option key={key} value={key} disabled={blocked}>
-                  {r.name}
-                  {/* Le classement ET le rang : ce sont les deux critères qui décident de
-                      l'ordre, et le second est le seul moyen de comprendre pourquoi deux « 5A »
-                      ne sont pas interchangeables. Le rang est tu pour un NC, où il ne veut
-                      rien dire.
-
-                      Noté « 5A #1200 » : le dièse dit « numéro » sans le mot, et une option de
-                      `<select>` ne se met pas sur deux lignes — sur un téléphone, « · rang »
-                      coûtait quatre caractères par joueur pour ne rien apprendre à personne. */}
-                  {r.clt ? ` (${r.clt}${r.rangM != null && !isNC(r.clt) ? ` #${r.rangM}` : ""})` : ""}
-                  {taken
-                    ? ` — joue déjà le match n° ${at}`
-                    : noClt
-                      ? " — classement inconnu"
-                      : noRang
-                        ? " — rang mixte inconnu"
-                        : orderProblem
-                          ? " — hors ordre de classement"
-                          : ""}
-                </option>
-              );
-            })}
-          </select>
-          <ColorPicker value={homeColor} onChange={setHomeColor} label="Maillot du joueur" />
-        </span>
-      </label>
-
-      {roster.length === 0 && (
-        <p className="notice tiny" role="status">
-          Aucun joueur n&apos;est rattaché à {teamName}. Un administrateur compose le roster de
-          l&apos;équipe depuis l&apos;espace admin — les membres inscrits sur la page Membres,
-          les joueurs sans compte dans la section « Équipes interclub ».
-        </p>
-      )}
-
-      <label className="ic-field">
-        Adversaire
-        <span className="ic-field-row">
-          {awayLibre ? (
-            <input
-              value={awayName}
-              onChange={(e) => setAwayName(e.target.value)}
-              placeholder="Nom de l'adversaire"
-              maxLength={40}
-            />
-          ) : (
-            <select
-              value={awayName}
-              onChange={(e) => {
-                if (e.target.value === AUTRE_CLUB) {
-                  setAwayLibre(true);
-                  setAwayName("");
-                } else {
-                  setAwayName(e.target.value);
-                }
-              }}
-            >
-              <option value="">— à désigner —</option>
-              {clubOpponents.map((o) => {
-                // UN ADVERSAIRE NE DISPUTE QU'UN SIMPLE, exactement comme nos joueurs. Comparé
-                // au NUMÉRO du simple et non au choix courant : celui que ce simple-ci retient
-                // doit rester sélectionnable ici — sinon on ne pourrait plus revenir en arrière
-                // après avoir changé d'avis — mais nulle part ailleurs.
-                const dejaA = awayAlignmentClash(awayLines, {
-                  order: match.order,
-                  awayName: o.name,
-                });
-                // LA MÊME RÈGLE QUE POUR NOUS, appliquée aux joueurs d'en face : le mieux classé
-                // dispute le simple n° 1. On grise ici ce que le serveur refuserait, plutôt que
-                // de laisser composer pour se faire refuser à l'enregistrement — même logique
-                // que `takenBy` et `orderProblem` sur le sélecteur juste au-dessus.
-                //
-                // `awayLineupConflict` se tait dès qu'un des désignés nous est inconnu : rien
-                // n'est donc grisé tant que la composition d'en face n'est pas entièrement faite
-                // de joueurs classés. C'est voulu — on ne refuse que ce qu'on sait. Depuis que
-                // le ROSTER fédéral alimente cette liste, ce cas est devenu l'exception plutôt
-                // que la règle : il ne reste que les joueurs qu'aucune inscription ne couvre.
-                //
-                // Inutile de l'évaluer sur un joueur déjà grisé pour doublon : le motif est
-                // acquis, et le message d'ordre le recouvrirait d'une explication moins claire.
-                const conflit =
-                  dejaA !== null
-                    ? null
-                    : awayLineupConflict(
-                        awayLines.map((l) =>
-                          l.order === match.order ? { order: match.order, awayName: o.name } : l,
-                        ),
-                        clubOpponents,
-                        // `clubOpponents` est déjà filtré sur ce club (cf. plus haut), mais
-                        // l'équipe se passe quand même : c'est la MÊME signature que celle du
-                        // serveur, et c'est ce qui garantit que l'écran grise exactement ce que
-                        // la route refuserait.
-                        opponentTeamName,
-                      );
-                return (
-                  <option
-                    key={`${o.team}|${o.name}`}
-                    value={o.name}
-                    disabled={dejaA !== null || !!conflit}
-                  >
-                    {o.name}
-                    {/* Classement et rang mixte, notés comme pour nous (« 5A #1200 ») : ce sont
-                        les deux critères qui décident de l'ordre. Ils viennent du ROSTER publié
-                        par la ligue quand on l'a, sinon d'une vérification de capitaine ; à
-                        défaut des deux, le joueur reste proposable mais son ordre incontrôlable. */}
-                    {o.clt ? ` (${o.clt}${o.rangM != null && !isNC(o.clt) ? ` #${o.rangM}` : ""})` : ""}
-                    {dejaA !== null
-                      ? ` — joue déjà le match n° ${dejaA}`
-                      : conflit
-                        ? " — hors ordre de classement"
-                        : ""}
-                  </option>
-                );
-              })}
-              <option value={AUTRE_CLUB}>— un autre joueur —</option>
-            </select>
-          )}
-          <ColorPicker value={awayColor} onChange={setAwayColor} label="Maillot de l'adversaire" />
-        </span>
-      </label>
-      {awayLibre && clubOpponents.length > 0 && (
-        <button className="ic-linkish" onClick={() => { setAwayLibre(false); setAwayName(""); }}>
-          Revenir aux joueurs connus à {opponentTeamName}
-        </button>
-      )}
-      {!awayLibre && clubOpponents.length > 0 && (
-        <p className="tiny muted">
-          Les joueurs inscrits à {opponentTeamName} chez la ligue, et ceux qu&apos;on a déjà
-          rencontrés. Sans classement affiché, le joueur reste proposable, mais l&apos;ordre des
-          simples d&apos;en face ne peut pas être contrôlé sur lui.
-        </p>
-      )}
+      {recoit ? blocNous : blocEux}
+      {recoit ? blocEux : blocNous}
 
       <p className="tiny muted ic-games-hint">
         Jeux, dans l&apos;ordre. {winGamesFor(bestOf)} jeux gagnants.
@@ -2189,23 +2229,19 @@ function MatchEditor({
       {games.map((g, i) => (
         <div className="ic-game-row" key={i}>
           <span className="tiny muted">Jeu {i + 1}</span>
-          <input
-            type="number"
-            min={0}
-            inputMode="numeric"
-            value={g.home}
-            aria-label={`Jeu ${i + 1}, points du joueur`}
-            onChange={(e) => setGame(i, "home", e.target.value)}
-          />
-          <span aria-hidden="true">–</span>
-          <input
-            type="number"
-            min={0}
-            inputMode="numeric"
-            value={g.away}
-            aria-label={`Jeu ${i + 1}, points de l'adversaire`}
-            onChange={(e) => setGame(i, "away", e.target.value)}
-          />
+          {(recoit ? (["home", "away"] as const) : (["away", "home"] as const)).map((cote, k) => (
+            <Fragment key={cote}>
+              {k === 1 && <span aria-hidden="true">–</span>}
+              <input
+                type="number"
+                min={0}
+                inputMode="numeric"
+                value={g[cote]}
+                aria-label={`Jeu ${i + 1}, points ${cote === "home" ? "du joueur" : "de l'adversaire"}`}
+                onChange={(e) => setGame(i, cote, e.target.value)}
+              />
+            </Fragment>
+          ))}
           <button
             type="button"
             className="secondary ic-game-del"

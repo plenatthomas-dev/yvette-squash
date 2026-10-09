@@ -137,13 +137,13 @@ describe("GET — la fiche appariée", () => {
     expect(body.lignes.filter((l: { appariement: { statut: string } }) => l.appariement.statut === "inconnu")).toHaveLength(7);
   });
 
-  it("⚠️ ne rend AUCUN rang mixte pour un NC — la sentinelle 9311 n'est pas un rang", async () => {
+  it("rend le rang publié d'un NC — le club veut le voir, il n'ordonne rien", async () => {
     const body = await (await GET(get())).json();
     const nc = body.lignes.filter((l: { player: { clt: string } }) => l.player.clt === "NC");
     expect(nc).toHaveLength(7);
     for (const l of nc) {
       expect(l.player.rangM).toBe(9311);
-      expect(l.valeurs).toMatchObject({ clt: "NC", rangM: null });
+      expect(l.valeurs).toMatchObject({ clt: "NC", rangM: 9311 });
     }
   });
 
@@ -198,7 +198,8 @@ describe("create_guest — l'invité né de la fiche", () => {
           name: "DOXAT ERIC",
           snLicence: "1528030W",
           rosterClt: "NC",
-          rosterRangM: null,
+          // Le rang commun des non-classés : affiché, il n'ordonne rien (décision du club).
+          rosterRangM: 9311,
         }),
       }),
     );
@@ -273,7 +274,8 @@ describe("link / unlink", () => {
 describe("link_names — confirmer les « ✔️ par le nom »", () => {
   it("⚠️ ÉCRIT les rapprochements par le nom — sans lui, un NC reste sans classement", async () => {
     // Le cas du 2026-09-30 : fiche relue, « ✔️ par le nom » à l'écran, et rien en base — le
-    // joueur restait grisé à la composition. Le NC reçoit son classement, et AUCUN rang.
+    // joueur restait grisé à la composition. Le NC reçoit son classement, et le rang commun des
+    // non-classés (décision du club, 2026-10-09).
     h.membres = [
       { id: "u1", displayName: "Eric Doxat", snLicence: null },
       { id: "u2", displayName: "Emmanuel Launay", snLicence: "1463138W" },
@@ -287,7 +289,7 @@ describe("link_names — confirmer les « ✔️ par le nom »", () => {
     expect(h.updateUser).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "u1", teamId: "t1" },
-        data: expect.objectContaining({ snRosterClt: "NC", snRosterRangM: null }),
+        data: expect.objectContaining({ snRosterClt: "NC", snRosterRangM: 9311 }),
       }),
     );
   });
@@ -375,5 +377,32 @@ describe("refresh", () => {
     const body = await (await POST(post({ action: "refresh", teamId: "t1", force: true }))).json();
     expect(h.refreshRosters).toHaveBeenCalledWith(["176168"], { force: true });
     expect(body.outcome.status).toBe("unreadable");
+  });
+
+  it("RESYNCHRONISE les joueurs déjà liés par licence — la liaison recopie, elle vieillirait", async () => {
+    // Doxat lié par licence le jour où la fiche publiait autre chose : la relecture le remet à
+    // jour. Bougardier n'est rapproché que par le NOM : c'est à l'admin de le confirmer.
+    h.refreshRosters.mockResolvedValue([{ snTeamId: "176168", status: "fetched" }]);
+    h.membres = [
+      { id: "u1", displayName: "Eric Doxat", snLicence: "1528030W" },
+      { id: "u3", displayName: "Franck Bougardier", snLicence: null },
+    ];
+    const body = await (await POST(post({ action: "refresh", teamId: "t1" }))).json();
+    expect(body.resynchronises).toBe(1);
+    expect(h.updateUser).toHaveBeenCalledTimes(1);
+    expect(h.updateUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "u1", teamId: "t1" },
+        data: expect.objectContaining({ snRosterClt: "NC", snRosterRangM: 9311 }),
+      }),
+    );
+  });
+
+  it("ne resynchronise RIEN depuis la fiche d'un autre club", async () => {
+    h.roster = FICHE_VERRIERES;
+    h.membres = [{ id: "u1", displayName: "Eric Doxat", snLicence: "1528030W" }];
+    const body = await (await POST(post({ action: "refresh", teamId: "t1" }))).json();
+    expect(body.resynchronises).toBe(0);
+    expect(h.updateUser).not.toHaveBeenCalled();
   });
 });

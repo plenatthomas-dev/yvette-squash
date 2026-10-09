@@ -132,7 +132,7 @@ type CalTie = {
 type FicheJoueur = { kind: "member" | "guest"; id: string; name: string; licence: string | null };
 type FicheLigne = {
   player: { name: string; licence: string | null; clt: string | null; rangM: number | null };
-  /** Ce qui serait écrit : `rangM` est NUL pour un NC (la fédération publie 9311, une sentinelle). */
+  /** Ce qui serait écrit — un NC porte le rang commun des non-classés (cf. `rangMUtile`). */
   valeurs: { licence: string | null; clt: string | null; rangM: number | null };
   appariement:
     | { statut: "lie"; joueur: FicheJoueur; par: "licence" | "nom" }

@@ -75,6 +75,7 @@ export default function ScoreBoard({
   onFinish,
   finishLabel = "Terminer",
   finishBusy = false,
+  first = "home",
 }: {
   state: MatchState;
   bestOf: number;
@@ -97,7 +98,20 @@ export default function ScoreBoard({
   onFinish: () => void;
   finishLabel?: string;
   finishBusy?: boolean;
+  /**
+   * Le côté AFFICHÉ en premier — case de gauche (ou du haut), premier chiffre de chaque jeu,
+   * première ligne de « Qui engage ? ». `home` par défaut.
+   *
+   * L'interclub y met L'ÉQUIPE QUI REÇOIT, à la demande du club (2026-10-09) : c'est l'ordre de
+   * la feuille de match. Seul l'AFFICHAGE bouge — les rappels gardent le sens de la donnée
+   * (`onPoint("home")` est toujours notre joueur), si bien que le journal des points, la synchro
+   * et l'annulation ignorent tout de cet ordre.
+   */
+  first?: Side;
 }) {
+  const second: Side = first === "home" ? "away" : "home";
+  /** Une paire de valeurs d'un jeu, dans l'ordre affiché. */
+  const paire = (g: { home: number; away: number }) => (first === "home" ? [g.home, g.away] : [g.away, g.home]);
   const homeC = resolveColor(homeColor);
   const awayC = resolveColor(awayColor);
 
@@ -195,29 +209,30 @@ export default function ScoreBoard({
       <p className="ics-history">
         {state.games.map((g: GameScore, i: number) => (
           <span key={i}>
-            {g.home}-{g.away}
+            {paire(g)[0]}-{paire(g)[1]}
             {i < state.games.length - 1 ? " · " : ""}
           </span>
         ))}
       </p>
 
       <div className="ics-board">
-        {side("home")}
-        {side("away")}
+        {side(first)}
+        {side(second)}
       </div>
 
       {/* Premier service du match : il faut désigner qui sert ET de quel carré. */}
       {state.serving === null && state.status !== "done" && (
         <div className="ics-ask">
           <p>Qui engage&nbsp;?</p>
-          <div className="ics-ask-row">
-            <button onClick={() => onFirstServe("home", "left")}>{homeName} · gauche</button>
-            <button onClick={() => onFirstServe("home", "right")}>{homeName} · droite</button>
-          </div>
-          <div className="ics-ask-row">
-            <button onClick={() => onFirstServe("away", "left")}>{awayName} · gauche</button>
-            <button onClick={() => onFirstServe("away", "right")}>{awayName} · droite</button>
-          </div>
+          {[first, second].map((who) => {
+            const nom = who === "home" ? homeName : awayName;
+            return (
+              <div className="ics-ask-row" key={who}>
+                <button onClick={() => onFirstServe(who, "left")}>{nom} · gauche</button>
+                <button onClick={() => onFirstServe(who, "right")}>{nom} · droite</button>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -248,8 +263,11 @@ export default function ScoreBoard({
       {state.status === "done" && (
         <div className="ics-ask">
           <p className="ics-done">
+            {/* Les jeux du VAINQUEUR d'abord : « l'emporte 1–3 » se lisait comme une défaite
+                dès que le vainqueur était le second joueur. */}
             {state.winner === "home" ? homeName : awayName} l&apos;emporte{" "}
-            {state.gamesWon.home}–{state.gamesWon.away}
+            {Math.max(state.gamesWon.home, state.gamesWon.away)}–
+            {Math.min(state.gamesWon.home, state.gamesWon.away)}
           </p>
           <div className="ics-ask-row">
             <button onClick={onFinish} disabled={finishBusy} aria-busy={finishBusy || undefined}>
