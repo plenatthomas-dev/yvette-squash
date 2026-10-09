@@ -14,6 +14,7 @@ import {
 import { getFeatures } from "@/lib/features-server";
 import { HttpError, httpErrorResponse, readJsonBody, serializableTransaction } from "@/lib/http-tx";
 import { blockEmailOnlyExpenseWrite, refuseSiSolde } from "@/lib/tricount-guard";
+import { lierJoueurs, lireIdsJoueurs } from "@/lib/tricount-club";
 
 export const runtime = "nodejs";
 
@@ -81,7 +82,8 @@ export async function DELETE(
 }
 
 // PATCH /api/tricount/expenses/{id} -> modifie une VRAIE dépense (jamais un
-// remboursement). { label, amountCents, payerId, participantIds, guestIds?, weights?, preserveSplit? }.
+// remboursement). { label, amountCents, payerId, participantIds, guestIds?, clubGuestIds?, weights?, preserveSplit? }.
+// clubGuestIds : joueurs du club sans compte, comme à la création (cf. `lib/tricount-club.ts`).
 // Même droit que la suppression (celui qui a saisi la ligne ou le payeur). La date
 // (donc le tricount) ne change pas ici. Les parts sont recalculées et les
 // validations « OK pour rembourser » remises à zéro (les montants ont bougé).
@@ -89,7 +91,8 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  if (!(await getFeatures()).tricount) {
+  const features = await getFeatures();
+  if (!features.tricount) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
   const session = await getSession(req.cookies.get("sid")?.value);
@@ -121,12 +124,13 @@ export async function PATCH(
   if (clos) return clos;
 
   const body = await readJsonBody(req);
-  const { label, amountCents, payerId, participantIds, guestIds, weights } = body as {
+  const { label, amountCents, payerId, participantIds, guestIds, clubGuestIds, weights } = body as {
     label?: unknown;
     amountCents?: unknown;
     payerId?: unknown;
     participantIds?: unknown;
     guestIds?: unknown;
+    clubGuestIds?: unknown;
     weights?: unknown;
   };
 
@@ -155,16 +159,23 @@ export async function PATCH(
   const uniqueIds = [...new Set(participantsRaw as string[])];
   // Invités hors asso (TricountGuest.id) : jamais payeur, seulement une part.
   const uniqueGuestIds = [...new Set(guestsRaw as string[])];
-  if (uniqueIds.length + uniqueGuestIds.length === 0) {
+  // Joueurs du club sans compte (InterclubGuest.id) : comme à la création.
+  const uniqueClubIds = lireIdsJoueurs(clubGuestIds);
+  if (uniqueClubIds === null) {
     return NextResponse.json({ error: "Participants invalides" }, { status: 400 });
+  }
+  if (uniqueIds.length + uniqueGuestIds.length + uniqueClubIds.length === 0) {
+    return NextResponse.json({ error: "Participants invalides" }, { status: 400 });
+  }
+  if (uniqueClubIds.length > 0 && !features.interclub) {
+    return NextResponse.json({ error: "Joueur inconnu" }, { status: 400 });
   }
   if (typeof payerId !== "string" || payerId.length === 0) {
     return NextResponse.json({ error: "Payeur invalide" }, { status: 400 });
   }
 
-  // Ordre commun membres puis invités, chacun préfixé (u:/g:) — comme à la création.
-  const rawIdsInOrder = [...uniqueIds, ...uniqueGuestIds];
-  const allKeys = [...uniqueIds.map(userKey), ...uniqueGuestIds.map(guestKey)];
+  // Ordre des parts (`weights`, keyées par l'id envoyé) — comme à la création.
+  const rawIdsInOrder = [...uniqueIds, ...uniqueGuestIds, ...uniqueClubIds];
 
   // Parts optionnelles (mode « par parts ») : identique à la création.
   let weightArr: number[] | null = null;
@@ -212,6 +223,24 @@ export async function PATCH(
     }
   }
 
+  // Chaque joueur sans compte retrouve (ou reçoit) son invité sur CE tricount — le même qu'à la
+  // création : `preserveSplit` compare les clés enregistrées à celles-ci.
+  let lien: Map<string, string>;
+  try {
+    lien = await lierJoueurs(existingExpense.tricountId, uniqueClubIds);
+  } catch (e) {
+    const res = httpErrorResponse(e);
+    if (res) return res;
+    throw e;
+  }
+  const guestIdsFinal = [...uniqueGuestIds, ...uniqueClubIds.map((cid) => lien.get(cid) as string)];
+  if (new Set(guestIdsFinal).size !== guestIdsFinal.length) {
+    return NextResponse.json({ error: "Participants invalides" }, { status: 400 });
+  }
+  // Membres puis invités, chacun préfixé (u:/g:) — comme à la création.
+  const shareIds = [...uniqueIds, ...guestIdsFinal];
+  const allKeys = [...uniqueIds.map(userKey), ...guestIdsFinal.map(guestKey)];
+
   // Mémoire des arrondis : calculée sur les AUTRES vraies dépenses du tricount
   // (on exclut la ligne éditée pour ne pas se compenser avec son ancienne valeur).
   const others = await prisma.expense.findMany({
@@ -257,7 +286,7 @@ export async function PATCH(
           amountCents,
           payerId,
           shares: {
-            create: rawIdsInOrder.map((pid, i) =>
+            create: shareIds.map((pid, i) =>
               i < uniqueIds.length
                 ? { userId: pid, amountCents: parts[i] }
                 : { guestId: pid, amountCents: parts[i] },

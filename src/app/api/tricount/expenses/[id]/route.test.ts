@@ -26,6 +26,8 @@ const h = vi.hoisted(() => ({
   sharesDeleted: vi.fn(),
   updated: null as null | Record<string, unknown>,
   tricountEtat: null as null | Record<string, unknown>,
+  interclub: true,
+  lier: vi.fn(),
 }));
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
@@ -37,6 +39,7 @@ vi.mock("@/lib/features-server", () => ({
     delegation: false,
     tournament: false,
     ranking: false,
+    interclub: h.interclub,
   }),
 }));
 vi.mock("@/lib/db", () => ({
@@ -95,6 +98,11 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+vi.mock("@/lib/tricount-club", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tricount-club")>()),
+  lierJoueurs: (...a: unknown[]) => h.lier(...a),
+}));
+
 import { DELETE, PATCH } from "./route";
 
 const req = () => ({ cookies: { get: () => ({ value: "sid" }) } }) as unknown as NextRequest;
@@ -150,6 +158,10 @@ beforeEach(() => {
   h.others = [];
   h.othersWhere = null;
   h.updated = null;
+  h.interclub = true;
+  h.lier.mockReset().mockImplementation(async (_t: string, ids: string[]) =>
+    new Map(ids.map((id) => [id, `tg-${id}`])),
+  );
 });
 
 describe("DELETE /api/tricount/expenses/[id] — compte « email seul »", () => {
@@ -337,6 +349,26 @@ describe("PATCH /api/tricount/expenses/[id] — ce qui est réécrit", () => {
       ["u:u1", 1000],
       ["g:g1", 2000],
     ]);
+  });
+
+  it("rattache un joueur sans compte à son invité SUR LE TRICOUNT DE LA DÉPENSE", async () => {
+    const res = await PATCH(
+      reqBody({ ...corps, amountCents: 3000, participantIds: ["u1"], clubGuestIds: ["ig1"], weights: { u1: 1, ig1: 2 } }),
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    expect(h.lier).toHaveBeenCalledWith("t1", ["ig1"]);
+    expect(partsPatchees()).toEqual([
+      ["u:u1", 1000],
+      ["g:tg-ig1", 2000],
+    ]);
+  });
+
+  it("refuse un joueur sans compte quand l'interclub est coupé", async () => {
+    h.interclub = false;
+    const res = await PATCH(reqBody({ ...corps, clubGuestIds: ["ig1"] }), ctx);
+    expect(res.status).toBe(400);
+    expect(h.lier).not.toHaveBeenCalled();
   });
 
   it("refuse un invité inconnu", async () => {

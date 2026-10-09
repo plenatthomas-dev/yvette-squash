@@ -41,9 +41,16 @@ const h = vi.hoisted(() => ({
   findGuest: vi.fn(),
   findUser: vi.fn(),
   refreshRosters: vi.fn(),
+  transferer: vi.fn(),
+  ordre: [] as string[],
 }));
 
 vi.mock("@/lib/admin", () => ({ requireAdmin: vi.fn(async () => h.admin) }));
+// Le transfert lui-même est éprouvé sur vraie base (`tricount-club.pg.test.ts`) : ici, on tient
+// QU'IL a lieu, dans la transaction de la fusion, et AVANT la suppression de l'invité.
+vi.mock("@/lib/tricount-club", () => ({
+  transfererAuMembre: (...a: unknown[]) => h.transferer(...a),
+}));
 vi.mock("@/lib/interclub-access", () => ({ interclubDisabledResponse: vi.fn(async () => null) }));
 vi.mock("@/lib/interclub-roster", () => ({ teamGuest: vi.fn(async (id: string) => ({ id })) }));
 vi.mock("@/lib/interclub-roster-db", () => ({
@@ -77,7 +84,13 @@ vi.mock("@/lib/db", () => ({
       fn({
         interclubMatch: { updateMany: (...a: unknown[]) => h.updateMatches(...a) },
         user: { updateMany: (...a: unknown[]) => h.updateUser(...a) },
-        interclubGuest: { delete: (...a: unknown[]) => h.deleteGuest(...a) },
+        interclubGuest: {
+          delete: (...a: unknown[]) => {
+            h.ordre.push("suppression");
+            return h.deleteGuest(...a);
+          },
+        },
+        marqueur: "tx",
       }),
     ),
   },
@@ -97,6 +110,11 @@ beforeEach(() => {
   h.invites = [];
   h.guestCount = 0;
   h.createGuest.mockReset().mockResolvedValue({ id: "g-new" });
+  h.ordre = [];
+  h.transferer.mockReset().mockImplementation(async () => {
+    h.ordre.push("frais");
+    return 0;
+  });
   h.updateUser.mockReset().mockResolvedValue({ count: 1 });
   h.updateGuest.mockReset().mockResolvedValue({ count: 1 });
   h.deleteGuest.mockReset().mockResolvedValue({});
@@ -358,6 +376,19 @@ describe("promote_guest — l'invité qui a désormais un compte", () => {
     // La correction admin de l'invité ne suit pas : elle a été posée pour un joueur sans
     // compte, et le membre a la sienne, qui peut déjà dire autre chose.
     expect(Object.keys(data)).not.toContain("interclubCltOverride");
+  });
+
+  it("⚠️ FAIT PASSER SES FRAIS PARTAGÉS sur le membre, dans la transaction, AVANT de le supprimer", async () => {
+    // Après la suppression, ses invités de tricount ne diraient plus à qui ces dettes reviennent
+    // (le lien est en SetNull) : le membre ne verrait jamais ce qu'il doit.
+    h.transferer.mockImplementation(async () => {
+      h.ordre.push("frais");
+      return 3;
+    });
+    const res = await POST(post({ action: "promote_guest", teamId: "t1", userId: "u1", guestId: "g1" }));
+    expect(await res.json()).toMatchObject({ ok: true, frais: 3 });
+    expect(h.transferer).toHaveBeenCalledWith(expect.objectContaining({ marqueur: "tx" }), "g1", "u1");
+    expect(h.ordre).toEqual(["frais", "suppression"]);
   });
 
   it("404 sans rien supprimer si l'un des deux n'est pas dans l'équipe", async () => {

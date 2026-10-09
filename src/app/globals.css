@@ -3531,6 +3531,22 @@ body[data-bottombar] .install-banner {
   flex: none;
   margin: 0;
 }
+/* Les joueurs du club SANS COMPTE : un intertitre dans « Pour qui ? », et la phrase qui dit ce
+   qu'ils ne pourront pas faire — au moment où l'on décide de les compter, pas après. */
+.tri-sans-compte {
+  margin: 8px 0 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--pico-muted-border-color);
+}
+.tri-sans-compte-titre {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.tri-sans-compte-aide {
+  margin: 2px 0 0;
+  font-size: 0.75rem;
+}
 .tri-parts {
   display: inline-flex;
   align-items: center;

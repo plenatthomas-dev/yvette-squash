@@ -218,3 +218,85 @@ it("conserve les centimes pondérés enregistrés quand on retouche le libellé"
   const [, init] = fetcher.mock.calls.find((args) => String(args[0]).includes("/expenses/"))!;
   expect(JSON.parse(String(init?.body))).toMatchObject({ label: "Diner", amountCents: 3000, preserveSplit: true });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LES JOUEURS DU CLUB SANS COMPTE, DANS « POUR QUI ? ».
+//
+// Ils sont proposés sous les membres, mais JAMAIS cochés d'office : un oubli de décocher
+// donnerait une dette à quelqu'un qui ne peut ni la voir ni la contester. Et ils voyagent par
+// leur id de JOUEUR — c'est le serveur qui les rattache à leur invité du jour.
+
+describe("Tricount — les joueurs du club sans compte", () => {
+  it("les propose DÉCOCHÉS, sous les membres, et les envoie par leur id de joueur", async () => {
+    const data = { ...charge({ emailOnly: false, settled: false }), clubGuests: [{ id: "ig1", name: "Damien Vicart" }] };
+    const fetcher = vitest.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, status: 200, json: async () => data }) as Response);
+    vitest.stubGlobal("fetch", fetcher);
+    render(<Tricount toast={() => {}} onExpired={() => false} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Nouvelle dépense/ }));
+
+    expect(screen.getByText("Sans compte dans l'appli")).toBeTruthy();
+    const damien = screen.getByLabelText("Damien Vicart") as HTMLInputElement;
+    expect(damien.checked).toBe(false);
+    expect((screen.getByLabelText(/Bob/) as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.click(damien);
+    expect(screen.getByText("Pour qui ? (3)")).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText(/Libellé \(balles/), { target: { value: "Balles" } });
+    fireEvent.change(screen.getByPlaceholderText(/Montant en €/), { target: { value: "30" } });
+    // L'aperçu compte le joueur sans compte comme un participant à part entière.
+    expect(screen.getAllByText("10,00 €")).toHaveLength(3);
+    fireEvent.submit(screen.getByDisplayValue("Balles").closest("form")!);
+
+    await waitFor(() =>
+      expect(fetcher.mock.calls.some((args) => String(args[0]) === "/api/tricount/expenses")).toBe(true),
+    );
+    const [, init] = fetcher.mock.calls.find((args) => String(args[0]) === "/api/tricount/expenses")!;
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      participantIds: ["moi", "u2"],
+      guestIds: [],
+      clubGuestIds: ["ig1"],
+    });
+  });
+
+  it("à l'édition, le coche dans SA section — une seule fois, et pas parmi les « (ext) »", async () => {
+    const data = { ...charge({ emailOnly: false, settled: false }), clubGuests: [{ id: "ig1", name: "Damien Vicart" }] };
+    const t = data.tricounts[0] as unknown as { guests: unknown[] };
+    t.guests = [{ id: "g1", name: "Damien Vicart", clubGuestId: "ig1" }];
+    const expense = data.tricounts[0].expenses[0];
+    expense.participants = [
+      { id: "u2", kind: "user", name: "Bob", amountCents: 1000 },
+      { id: "g1", kind: "guest", name: "Damien Vicart", amountCents: 500 },
+    ];
+    const fetcher = vitest.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, status: 200, json: async () => data }) as Response);
+    vitest.stubGlobal("fetch", fetcher);
+    render(<Tricount toast={() => {}} onExpired={() => false} />);
+    fireEvent.click(await screen.findByLabelText(/Modifier.*Repas/));
+
+    const lignes = screen.getAllByLabelText("Damien Vicart") as HTMLInputElement[];
+    expect(lignes).toHaveLength(1);
+    expect(lignes[0].checked).toBe(true);
+    // « Conserver la répartition » relit SES centimes sous l'id du joueur.
+    expect(screen.getByText("5,00 €")).toBeTruthy();
+
+    fireEvent.change(screen.getByDisplayValue("Repas"), { target: { value: "Dîner" } });
+    fireEvent.submit(screen.getByDisplayValue("Dîner").closest("form")!);
+    await waitFor(() => expect(fetcher.mock.calls.some((args) => String(args[0]).includes("/expenses/"))).toBe(true));
+    const [, init] = fetcher.mock.calls.find((args) => String(args[0]).includes("/expenses/"))!;
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      preserveSplit: true,
+      participantIds: ["u2"],
+      guestIds: [],
+      clubGuestIds: ["ig1"],
+    });
+  });
+
+  it("sans joueur sans compte à proposer, pas de section", async () => {
+    vitest.stubGlobal(
+      "fetch",
+      vitest.fn(async () => ({ ok: true, status: 200, json: async () => charge({ emailOnly: false, settled: false }) }) as Response),
+    );
+    render(<Tricount toast={() => {}} onExpired={() => false} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Nouvelle dépense/ }));
+    expect(screen.queryByText("Sans compte dans l'appli")).toBeNull();
+  });
+});
