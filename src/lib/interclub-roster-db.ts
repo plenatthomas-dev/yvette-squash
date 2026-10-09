@@ -37,6 +37,34 @@ type Db = {
  */
 export const ROSTER_FRAIS_JOURS = 7;
 
+/**
+ * La fraîcheur exigée AUTOUR D'UNE RENCONTRE : la veille, le jour même et le lendemain.
+ *
+ * POURQUOI. En début de saison les clubs inscrivent leurs joueurs au fil de l'eau, souvent juste
+ * avant de les aligner. Avec sept jours, une fiche relue le lundi ignorait le joueur inscrit le
+ * mercredi pour le jeudi : absent du menu « Adversaire », son ordre incontrôlable, et la
+ * vérification du lendemain le cherchait au classement national (où un NC est introuvable).
+ *
+ * Un jour, et pas zéro : l'écran de la rencontre s'ouvre des dizaines de fois un soir de match, et
+ * chaque ouverture relirait la fiche. Une relecture par jour et par équipe adverse reste invisible
+ * chez la ligue — c'est la condition pour que tout ceci continue d'exister.
+ */
+export const ROSTER_FRAIS_JOURS_JOUR_J = 1;
+
+/**
+ * Combien de jours une fiche reste « fraîche » pour une rencontre à cette date.
+ *
+ * La VEILLE (composer), le JOUR J (composer, marquer) et le LENDEMAIN (vérifier avant de saisir
+ * chez la fédération) : un jour. Le reste du temps : sept. Les deux dates sont des jours
+ * « YYYY-MM-DD » en heure murale du club (`todayISO`) — comparer des instants ferait basculer la
+ * fenêtre à minuit UTC, soit deux heures trop tôt l'été.
+ */
+export function fraicheurPour(dateRencontre: string, aujourdhui: string): number {
+  const jour = (iso: string) => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10));
+  const ecart = Math.round((jour(dateRencontre) - jour(aujourdhui)) / 86_400_000);
+  return Number.isFinite(ecart) && Math.abs(ecart) <= 1 ? ROSTER_FRAIS_JOURS_JOUR_J : ROSTER_FRAIS_JOURS;
+}
+
 /** Espacement entre deux requêtes fédérales, en millisecondes (cf. `backfill.ts`, `DELAI_MS`). */
 export const DELAI_MS = 800;
 
@@ -154,7 +182,14 @@ export interface RosterOutcome {
  */
 export async function refreshRosters(
   snTeamIds: readonly string[],
-  opts: { force?: boolean; now?: Date; db?: Db; delaiMs?: number } = {},
+  opts: {
+    force?: boolean;
+    now?: Date;
+    db?: Db;
+    delaiMs?: number;
+    /** Âge maximal d'une fiche « fraîche », en jours. Sept par défaut ; cf. `fraicheurPour`. */
+    fraisJours?: number;
+  } = {},
 ): Promise<RosterOutcome[]> {
   const db = opts.db ?? prisma;
   const now = opts.now ?? new Date();
@@ -167,7 +202,7 @@ export async function refreshRosters(
     select: { snTeamId: true, fetchedAt: true, rosterJson: true },
   });
   const parId = new Map(connus.map((r) => [r.snTeamId, r]));
-  const seuil = now.getTime() - ROSTER_FRAIS_JOURS * 86_400_000;
+  const seuil = now.getTime() - (opts.fraisJours ?? ROSTER_FRAIS_JOURS) * 86_400_000;
 
   const outcomes: RosterOutcome[] = [];
   let premier = true;

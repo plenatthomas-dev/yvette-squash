@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
 import { prisma } from "@/lib/db";
 import { MAX_RENCONTRES } from "@/lib/interclub-opponents-db";
-import { refreshRosters } from "@/lib/interclub-roster-db";
+import { fraicheurPour, refreshRosters } from "@/lib/interclub-roster-db";
+import { todayISO } from "@/lib/interclub-gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,10 +53,15 @@ export async function POST(req: NextRequest) {
   if (fixtureId) {
     const f = await prisma.interclub.findUnique({
       where: { id: fixtureId },
-      select: { snOpponentTeamId: true },
+      select: { snOpponentTeamId: true, date: true },
     });
+    // AUTOUR DU JOUR J, la fiche d'en face doit dater de moins d'un jour (cf. `fraicheurPour`) :
+    // c'est le moment où les clubs inscrivent les joueurs qu'ils vont aligner.
     const outcomes = f?.snOpponentTeamId
-      ? await refreshRosters([f.snOpponentTeamId], { force })
+      ? await refreshRosters([f.snOpponentTeamId], {
+          force,
+          fraisJours: fraicheurPour(f.date, todayISO()),
+        })
       : [];
     return NextResponse.json({
       ok: true,

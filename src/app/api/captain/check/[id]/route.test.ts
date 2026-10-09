@@ -60,13 +60,16 @@ vi.mock("@/lib/interclub-tie-db", () => ({
 }));
 
 // LES FICHES D'ÉQUIPE : celle d'en face, et la NÔTRE — seule source qui connaisse nos NC.
-vi.mock("@/lib/interclub-roster-db", () => ({
+vi.mock("@/lib/interclub-roster-db", async (importOriginal) => ({
+  // La RÈGLE de fraîcheur reste la vraie (`fraicheurPour`) : seul le réseau est simulé.
+  ...(await importOriginal<typeof import("@/lib/interclub-roster-db")>()),
   refreshRosters: (...a: unknown[]) => h.refreshRosters(...a),
   loadRosters: async (ids: string[]) =>
     new Map(ids.filter((i) => h.rosters.has(i)).map((i) => [i, h.rosters.get(i)])),
 }));
 
 import { GET, POST } from "./route";
+import { todayISO } from "@/lib/interclub-gate";
 
 const req = () => ({ cookies: { get: () => undefined } }) as unknown as NextRequest;
 const ctx = (id = "f1") => ({ params: Promise.resolve({ id }) });
@@ -89,6 +92,7 @@ const ligne = (name: string, club = "Squash de l yvette") => ({
 function rencontre(over: Record<string, unknown> = {}) {
   return {
     teamId: "t1",
+    date: "2026-09-04",
     opponent: "Squash Club de Rennes",
     snOpponentTeamId: null,
     snTieId: null,
@@ -573,7 +577,7 @@ describe("POST /api/captain/check/{id} — nos joueurs, sur notre fiche", () => 
     expect(h.searchRanking).not.toHaveBeenCalledWith("WANLIN", expect.anything());
     expect(h.searchRanking).not.toHaveBeenCalledWith("Eric", expect.anything());
     // La fiche est garantie, pas espérée : la nôtre est rafraîchie comme celle d'en face.
-    expect(h.refreshRosters).toHaveBeenCalledWith(["176168"]);
+    expect(h.refreshRosters).toHaveBeenCalledWith(["176168"], expect.anything());
   });
 
   it("un PSEUDO (« Ben ») est retrouvé par sa LICENCE — aucun pliage de nom ne le pourrait", async () => {
@@ -614,5 +618,27 @@ describe("POST /api/captain/check/{id} — nos joueurs, sur notre fiche", () => 
     const { report } = await (await POST(req(), ctx())).json();
     expect(h.searchRanking).toHaveBeenCalledWith("Dupont", expect.anything());
     expect(report.players.find((p: { side: string }) => p.side === "home").verdict).toBe("found");
+  });
+});
+
+describe("POST /api/captain/check/{id} — des fiches fraîches le lendemain", () => {
+  // On vérifie le LENDEMAIN de la rencontre : un joueur inscrit la veille du match doit figurer
+  // sur la fiche relue, sinon il retombe sur le classement national — où un NC est introuvable.
+  it("le lendemain, exige des fiches de moins d'un jour", async () => {
+    const hier = new Date(`${todayISO()}T12:00:00Z`);
+    hier.setUTCDate(hier.getUTCDate() - 1);
+    h.fixture = rencontre({
+      date: hier.toISOString().slice(0, 10),
+      snOpponentTeamId: "176173",
+      team: { snTeamId: "176168" },
+    });
+    await POST(req(), ctx());
+    expect(h.refreshRosters).toHaveBeenCalledWith(["176173", "176168"], { fraisJours: 1 });
+  });
+
+  it("une vieille rencontre se contente de la semaine habituelle", async () => {
+    h.fixture = rencontre({ snOpponentTeamId: "176173", team: { snTeamId: "176168" } });
+    await POST(req(), ctx());
+    expect(h.refreshRosters).toHaveBeenCalledWith(["176173", "176168"], { fraisJours: 7 });
   });
 });
