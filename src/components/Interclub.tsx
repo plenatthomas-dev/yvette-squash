@@ -381,9 +381,10 @@ function poulesAffichees(teams: Team[], visibles: Team[]): Poule[] {
  * confondraient. Le jour où l'ancrage manque, aucune ligne n'est surlignée — c'est visible, et
  * c'est mieux qu'une ligne fausse mise en avant.
  *
- * Huit colonnes et pas dix-huit : le tableau fédéral en publie dix-huit, illisibles sur un
- * téléphone. Les averages de jeux et de points — ceux qui départagent un nul — sont donnés en
- * toutes lettres SOUS le tableau, pour nos équipes seulement, là où ils se lisent.
+ * Onze colonnes et pas dix-huit : le tableau fédéral en publie dix-huit, illisibles sur un
+ * téléphone. Les trois ÉCARTS (matchs, jeux, points) y figurent pour toutes les équipes — ce
+ * sont eux qui départagent une égalité de points ; le détail gagnés–perdus est donné en toutes
+ * lettres SOUS le tableau, pour nos équipes seulement, là où il se lit.
  */
 function StandingsTable({ poule }: { poule: Poule }) {
   const { rows, standingsAt, ours } = poule;
@@ -439,6 +440,19 @@ function StandingsTable({ poule }: { poule: Poule }) {
               <th scope="col" className="ic-st-pts">
                 Pts
               </th>
+              {/* LES TROIS ÉCARTS, À LA DEMANDE DU CLUB : ce sont eux qui départagent deux équipes
+                  à égalité de points, et la ligue les publie pour toutes. APRÈS « Pts » et pas
+                  avant : sur un téléphone, le tableau défile, et les points doivent rester dans
+                  le premier écran. Le détail gagnés–perdus reste sous le tableau, pour nous. */}
+              <th scope="col" className="ic-st-diff" title="Différence de matchs (simples) gagnés et perdus">
+                M±
+              </th>
+              <th scope="col" className="ic-st-diff" title="Différence de jeux gagnés et perdus">
+                J±
+              </th>
+              <th scope="col" className="ic-st-diff" title="Différence de points gagnés et perdus">
+                P±
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -461,6 +475,9 @@ function StandingsTable({ poule }: { poule: Poule }) {
                   <td>{r.drawLost}</td>
                   <td>{r.lost}</td>
                   <td className="ic-st-pts">{r.points}</td>
+                  <td className="ic-st-diff">{signe(r.matches.diff)}</td>
+                  <td className="ic-st-diff">{signe(r.games.diff)}</td>
+                  <td className="ic-st-diff">{signe(r.rallies.diff)}</td>
                 </tr>
               );
             })}

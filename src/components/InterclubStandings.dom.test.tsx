@@ -131,6 +131,38 @@ describe("le classement de la poule", () => {
     expect(screen.getByText("E-")).toBeTruthy();
   });
 
+  it("montre les trois écarts M± J± P± pour TOUTES les équipes, signés, après les points", async () => {
+    monter();
+    await screen.findByText("Classement");
+    const entetes = [...document.querySelectorAll(".ic-standings-table thead th")].map(
+      (th) => th.textContent,
+    );
+    // Après « Pts » : sur un téléphone le tableau défile, les points restent dans le premier écran.
+    expect(entetes.slice(-4)).toEqual(["Pts", "M±", "J±", "P±"]);
+    // Une ligne qui n'est PAS la nôtre : les écarts départagent tout le monde, pas seulement nous.
+    const premiere = document.querySelector(".ic-standings-table tbody tr") as HTMLElement;
+    const cellules = [...premiere.querySelectorAll("td")].map((td) => td.textContent);
+    expect(cellules.slice(-3)).toEqual(["+12", "+34", "+291"]);
+  });
+
+  it("un écart négatif garde son signe, un écart nul n'en prend pas", async () => {
+    vi.stubGlobal(
+      "fetch",
+      servir([
+        equipe({
+          standings: [
+            ligne({ matches: { won: 2, lost: 6, diff: -4 }, games: { won: 10, lost: 10, diff: 0 } }),
+          ],
+        }),
+      ]),
+    );
+    monter();
+    await screen.findByText("Classement");
+    const ligneUnique = document.querySelector(".ic-standings-table tbody tr") as HTMLElement;
+    const cellules = [...ligneUnique.querySelectorAll("td")].map((td) => td.textContent);
+    expect(cellules.slice(-3)).toEqual(["-4", "0", "+291"]);
+  });
+
   it("n'affiche RIEN quand la poule n'a pas de classement publié", async () => {
     vi.stubGlobal("fetch", servir([equipe({ standings: null, standingsAt: null })]));
     monter();
