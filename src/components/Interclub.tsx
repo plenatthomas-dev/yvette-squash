@@ -16,6 +16,7 @@ import { CLUB_TZ } from "@/lib/time";
 import { downloadFixtureIcs } from "@/lib/ics";
 import type { TieOutcome } from "@/lib/interclub-db";
 import { InterclubStats } from "@/components/InterclubStats";
+import { TrophyIcon } from "@/components/icons";
 import {
   colorsTooClose,
   describeSequenceProblem,
@@ -404,7 +405,10 @@ function StandingsTable({ poule }: { poule: Poule }) {
   return (
     <details className="ic-standings">
       <summary>
-        <span className="ic-standings-title">Classement</span>
+        <span className="ic-standings-title">
+          <TrophyIcon />
+          Classement
+        </span>
         {/* Le rang en PASTILLE : c'est la réponse qu'on vient chercher, et noyée dans la
             phrase elle se lisait comme une précision de plus. */}
         {nous.map((r) => (

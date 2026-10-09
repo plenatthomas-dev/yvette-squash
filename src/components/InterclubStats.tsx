@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readOk } from "@/lib/apiFetch";
+import { TrendIcon } from "@/components/icons";
 import type { PlayerStatRow } from "@/lib/interclub-stats";
 
 // ============================================================================
@@ -87,7 +88,10 @@ export function InterclubStats({
       }}
     >
       <summary>
-        <span className="ic-stats-title">Statistiques des joueurs</span>
+        <span className="ic-stats-title">
+          <TrendIcon />
+          Statistiques des joueurs
+        </span>
         <span className="ic-stats-sub muted tiny">
           {data ? `${data.rows.length} joueur${data.rows.length > 1 ? "s" : ""}` : "à ouvrir"}
         </span>
