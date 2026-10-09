@@ -572,7 +572,10 @@ export function lireRapport(json: string | null): CheckReport | null {
 }
 
 /**
- * Le verdict d'un joueur ADVERSE, lu dans le roster de son équipe — sans aucune recherche.
+ * Le verdict d'un joueur, lu dans le roster de son équipe — sans aucune recherche. Écrit pour
+ * l'ADVERSAIRE ; vaut aussi pour NOUS depuis le 2026-10-09 (`opts.side`, `opts.licence`) : nos
+ * NC n'existent pas au classement national, et la recherche par nom les déclarait
+ * « introuvables » alors que notre propre fiche les publie, licence comprise.
  *
  * ⚠️ CE CHEMIN EXISTE PARCE QUE L'AUTRE SE TROMPE. Le rapprochement par le nom
  * (`checkPlayer`) interroge le classement NATIONAL et retient une ligne si une seule colle au
@@ -596,17 +599,26 @@ export function playerFromRoster(
   order: number,
   name: string,
   roster: TeamRoster | null | undefined,
+  opts: { side?: Side; licence?: string | null } = {},
 ): PlayerCheck | null {
   if (!roster) return null;
-  const cle = nameKey(name);
-  if (!cle) return null;
+  const side = opts.side ?? "away";
 
-  const p = roster.players.find((j) => nameKey(j.name) === cle);
+  // LA LICENCE D'ABORD, quand on la connaît — c'est le cas de NOS joueurs, rapprochés de notre
+  // fiche (`User.snLicence`). Elle seule relie « Ben », le pseudo affiché, à « COULMIER
+  // BENJAMIN » : aucun pliage de nom ne le peut. Le nom reste le repli, et le seul chemin pour
+  // un adversaire, dont on ne connaît que ce que la feuille de match a saisi.
+  const licence = (opts.licence ?? "").trim().toUpperCase();
+  const cle = nameKey(name);
+  const p =
+    (licence
+      ? roster.players.find((j) => (j.licence ?? "").trim().toUpperCase() === licence)
+      : undefined) ?? (cle ? roster.players.find((j) => nameKey(j.name) === cle) : undefined);
   if (!p) return null;
 
   return {
     order,
-    side: "away",
+    side,
     name,
     verdict: "found",
     fedName: p.name,

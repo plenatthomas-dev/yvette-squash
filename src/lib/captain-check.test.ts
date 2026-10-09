@@ -433,6 +433,19 @@ describe("playerFromRoster", () => {
     });
   });
 
+  it("NOTRE côté : la LICENCE retrouve un pseudo qu'aucun nom ne relie à la fiche", () => {
+    // « Ben » n'a rien de « COULMIER BENJAMIN » ; la licence rapprochée, si.
+    const p = playerFromRoster(4, "Florentin", rosterVerrieres, { side: "home", licence: " 1404133h " });
+    expect(p).toMatchObject({ order: 4, side: "home", name: "Florentin", fedName: "LOUVEAU FLORENT" });
+  });
+
+  it("une licence inconnue de la fiche retombe sur le nom, sans rien inventer", () => {
+    expect(
+      playerFromRoster(1, "Florent Louveau", rosterVerrieres, { licence: "9999999Z" })?.licence,
+    ).toBe("1404133H");
+    expect(playerFromRoster(1, "Personne", rosterVerrieres, { licence: "9999999Z" })).toBeNull();
+  });
+
   it("ne peut PAS confondre avec l'homonyme d'un autre club", () => {
     // Le roster ne contient que les joueurs que CE club a inscrits dans CETTE équipe : il n'y a
     // aucune sélection à faire, donc aucune mauvaise sélection possible. C'est toute la

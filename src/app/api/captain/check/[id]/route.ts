@@ -112,7 +112,9 @@ async function lireFeuilleOfficielle(
   const côté = ourSide(sheet, {
     ourCode: await teamCode(fixture.team.snTeamId),
     opponentCode: await teamCode(fixture.snOpponentTeamId),
-    ourNames: nôtres.map((l) => l.homeDisplayName),
+    // Les deux noms de chacun : le pseudo affiché ne se retrouve pas sur la feuille, le nom
+    // fédéral si.
+    ourNames: nôtres.flatMap((l) => (l.homeFedName ? [l.homeDisplayName, l.homeFedName] : [l.homeDisplayName])),
   });
   return compareOfficial(nôtres, sheet, côté, fixture.matchCount);
 }
@@ -176,6 +178,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
           order: true,
           homeDisplayName: true,
           awayName: true,
+          // La LICENCE de notre joueur, rapprochée de notre fiche : c'est elle qui le retrouve
+          // sur cette fiche quand son nom affiché est un pseudo.
+          homeUser: { select: { snLicence: true } },
+          homeGuest: { select: { snLicence: true } },
           games: { orderBy: { number: "asc" }, select: { pointsHome: true, pointsAway: true } },
         },
       },
@@ -257,34 +263,49 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // Le coût est nul à l'échelle de ce que fait déjà ce verbe : `refreshRosters` ne sort que si
   // le roster manque ou date de plus d'une semaine, et quand il sort il ÉCONOMISE les quatre
   // recherches qu'il remplace. Une vérification est plus rapide avec lui que sans.
-  if (fixture.snOpponentTeamId) {
+  //
+  // NOTRE FICHE AUSSI, POUR LA MÊME RAISON ET UNE DE PLUS. Le classement national ne contient
+  // QUE les joueurs classés : nos NC y sont introuvables, et la vérification du 2026-10-08
+  // annonçait « Introuvable chez la fédération » pour Eric Wanlin et Pierre-Marie Girard,
+  // licenciés et inscrits. Pire, « Ben » — un pseudo — tombait sur un homonyme d'un autre club.
+  // Notre fiche les publie tous, et la licence rapprochée (`snLicence`) les y retrouve.
+  const fiches = [fixture.snOpponentTeamId, fixture.team.snTeamId].filter(
+    (v): v is string => !!v,
+  );
+  if (fiches.length) {
     try {
-      await refreshRosters([fixture.snOpponentTeamId]);
+      await refreshRosters(fiches);
     } catch {
       // Best-effort : une vérification doit pouvoir aboutir sur ce qu'on a déjà. L'échec se
       // verra de toute façon, joueur par joueur, dans les verdicts du rapport.
     }
   }
-  const rosters = fixture.snOpponentTeamId
-    ? await loadRosters([fixture.snOpponentTeamId])
-    : new Map();
+  const rosters = fiches.length ? await loadRosters(fiches) : new Map();
   const rosterAdverse = fixture.snOpponentTeamId
     ? (rosters.get(fixture.snOpponentTeamId) ?? null)
     : null;
+  const notreFiche = fixture.team.snTeamId ? (rosters.get(fixture.team.snTeamId) ?? null) : null;
+  const licenceDe = new Map(
+    fixture.matches.map((m) => [m.order, m.homeUser?.snLicence ?? m.homeGuest?.snLicence ?? null]),
+  );
 
   const players: PlayerCheck[] = [];
   for (const m of entrees) {
     for (const side of ["home", "away"] as const) {
       const name = side === "home" ? m.homeDisplayName : m.awayName;
 
-      // Inscrit dans l'équipe d'en face : la ligue l'a nommé elle-même, il n'y a rien à
-      // chercher — et une requête de moins à leur coûter.
-      if (side === "away") {
-        const duRoster = playerFromRoster(m.order, name, rosterAdverse);
-        if (duRoster) {
-          players.push(duRoster);
-          continue;
-        }
+      // Inscrit dans l'équipe (la sienne, d'un côté ou de l'autre) : la ligue l'a nommé
+      // elle-même, il n'y a rien à chercher — et une requête de moins à leur coûter.
+      const duRoster =
+        side === "away"
+          ? playerFromRoster(m.order, name, rosterAdverse)
+          : playerFromRoster(m.order, name, notreFiche, {
+              side: "home",
+              licence: licenceDe.get(m.order) ?? null,
+            });
+      if (duRoster) {
+        players.push(duRoster);
+        continue;
       }
 
       const club = clubAttendu(side, fixture.opponent, rosterAdverse?.club ?? null);
@@ -363,6 +384,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const nôtres: OurLine[] = entrees.map((m, i) => ({
     order: m.order,
     homeDisplayName: m.homeDisplayName,
+    homeFedName:
+      players.find((p) => p.order === m.order && p.side === "home" && p.verdict === "found")
+        ?.fedName ?? null,
     awayName: m.awayName,
     gamesHome: scores[i].gamesHome,
     gamesAway: scores[i].gamesAway,
