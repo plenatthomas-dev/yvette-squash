@@ -24,7 +24,7 @@
 //  lecture) — l'écran importe la règle, jamais la requête.
 // ============================================================================
 
-import { classementPower, isNC } from "./interclub-order";
+import { classementPower } from "./interclub-order";
 import { nameKey } from "./squashnet/roster";
 import type { RosterPlayer, TeamRoster } from "./squashnet/roster";
 
@@ -82,19 +82,21 @@ export function cltUtile(p: RosterPlayer): string | null {
 /**
  * Le rang mixte à retenir, ou null.
  *
- * ⚠️ TOUS LES NC PORTENT 9311, ET CE N'EST PAS UN RANG. C'est une SENTINELLE « non classé » :
- * vérifié sur les sept NC de la fiche de Verrieres 4, tous à la même valeur, au même moment.
- * L'écrire comme un rang placerait ces joueurs au 9311e rang national — un nombre qui a l'air
- * d'un fait, qui se trie, et qui s'afficherait à l'annuaire.
+ * LES NC EN ONT UN, ET ON LE GARDE — décision du club, 2026-10-09. La fédération publie le même
+ * rang pour tous les non-classés (9311 en septembre, 9373 en octobre : le dernier rang du
+ * moment). Ce module le jetait comme une « sentinelle » ; le club préfère le voir, à l'annuaire
+ * comme en composition, pour ses joueurs comme pour ceux d'en face — c'est ce que la ligue
+ * affiche aussi.
  *
- * On ne teste pas 9311 : on teste `isNC`, qui est la RAISON. La fédération n'ordonne pas les NC
- * entre eux (cf. `interclub-order.ts`), et un NC est alignable sans rang — la sentinelle n'a donc
- * rien à remplacer. Un classement inconnu ne rend pas de rang non plus : sans classement, le
- * joueur n'est de toute façon pas ordonnable, et un rang seul ne ferait que le laisser croire.
+ * ⚠️ IL N'ORDONNE TOUJOURS PAS LES NC ENTRE EUX. Identique pour tous, il ne départagerait rien ;
+ * et `lineupOrderConflict` ne compare pas les rangs de deux NC (cf. `isNC`). Le montrer ne
+ * change donc aucune composition permise ou refusée.
+ *
+ * Un classement inconnu ne rend pas de rang : sans classement, le joueur n'est de toute façon
+ * pas ordonnable, et un rang seul ne ferait que le laisser croire.
  */
 export function rangMUtile(p: RosterPlayer): number | null {
-  const clt = cltUtile(p);
-  if (clt === null || isNC(clt)) return null;
+  if (cltUtile(p) === null) return null;
   return typeof p.rangM === "number" && p.rangM > 0 ? p.rangM : null;
 }
 

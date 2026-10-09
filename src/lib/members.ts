@@ -156,7 +156,7 @@ export async function listMembers(): Promise<MemberRow[]> {
     // « squashnet » seulement si le rapprochement porte RÉELLEMENT un rang : contrairement au
     // classement, `SquashnetRanking.rangM` est nullable — une ligne rapprochée sans rang ne
     // doit pas faire croire à l'admin qu'une valeur existe quelque part. Même prudence pour la
-    // fiche d'équipe, qui rend NULL pour tous les NC (la sentinelle 9311 n'est pas un rang).
+    // fiche d'équipe, dont le rang peut manquer sur une ligne.
     rangMSource: u.interclubRangMOverride
       ? "override"
       : u.squashnetRanking?.rangM != null

@@ -276,9 +276,9 @@ export function memberClt(u: MemberRanking): string | null {
  * pas le rang, et réciproquement. Un membre dont le rapprochement squashnet est bon mais le
  * classement fraîchement monté garde ainsi son rang rapproché, sans qu'un admin le recopie.
  *
- * ⚠️ `snRosterRangM` EST NUL POUR UN NC, et c'est voulu : la fédération publie 9311 pour tous
- * les non-classés, une sentinelle que `rangMUtile` (`interclub-federal.ts`) refuse d'écrire. Un
- * NC est alignable sans rang mixte (cf. `isNC`), donc ce nul ne coûte rien.
+ * Un NC porte le rang que la fédération publie pour tous les non-classés (9373 en octobre 2026,
+ * cf. `rangMUtile`) : il s'affiche, il n'ordonne rien — un NC reste alignable sans rang connu
+ * (cf. `isNC`), et deux NC ne se comparent pas.
  *
  * EXPORTÉ pour la même raison que `memberClt`.
  */

@@ -195,13 +195,19 @@ Deux règles tiennent le reste, et ce sont elles qui empêchent un mauvais rappr
   conclurait « lié », et la même personne serait appariée deux fois. Un appariement par nom n'est
   retenu que si sa cible n'est convoitée par aucune autre ligne.
 
-#### ⚠️ `rangM = 9311` est une SENTINELLE, pas un rang
+#### Le rang des NC : le même pour tous, affiché, sans rien ordonner
 
-Les sept NC de la fiche portent tous `rang: 9311, rangM: 9311`, à la même seconde. L'écrire les
-placerait au 9311e rang national — un nombre qui a l'air d'un fait, qui se trie, et qui
-s'afficherait à l'annuaire. `rangMUtile` rend donc `null` dès que le classement est `NC`, ce que
-l'ordre des simples accepte sans broncher : la fédération n'ordonne pas les NC entre eux
-(cf. `isNC`, `interclub-order.ts`).
+Les NC de la fiche portent tous le même rang (`9311` mesuré le 2026-09-24, `9373` le 2026-10-09) :
+le dernier rang du moment. Il a d'abord été écarté comme une « sentinelle » ; depuis le
+2026-10-09, **à la demande du club**, `rangMUtile` le garde, et il s'affiche à l'annuaire, en
+composition et chez les adversaires — comme la ligue l'affiche.
+
+Il n'ordonne toujours rien : la fédération n'ordonne pas les NC entre eux, et
+`lineupOrderConflict` ne compare pas les rangs de deux NC (cf. `isNC`, `interclub-order.ts`).
+
+Les valeurs de la fiche étant **recopiées** sur le joueur à la liaison, elles vieilliraient : le
+rafraîchissement de la fiche (`action: "refresh"`) **resynchronise** désormais tous les joueurs
+déjà liés par licence.
 
 #### ⚠️ La garde de club, et pourquoi elle n'est pas décorative
 
