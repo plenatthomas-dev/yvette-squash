@@ -191,7 +191,9 @@ export default function InterclubFollow({
       "Les notifications ne sont pas configurées sur cet environnement (clés VAPID absentes). L'abonnement est enregistré et servira dès qu'elles le seront.",
     denied:
       "Les notifications sont bloquées pour ce site dans les réglages du navigateur. L'abonnement est enregistré et servira une fois l'autorisation donnée.",
-    off: "Cet appareil ne reçoit pas les notifications : tes abonnements n'y arriveront pas.",
+    // Pas « n'arriveront pas » : `pushToUsers` journalise pour tous les abonnés d'équipe, avec
+    // ou sans appareil abonné — la cloche les reçoit quoi qu'il arrive. Seul le push manque.
+    off: "Cet appareil ne reçoit pas les notifications : tes suivis n'arrivent que dans la cloche de l'appli.",
   };
 
   // Aucune équipe : rien à suivre, et un panneau vide en tête de page n'apprendrait rien.
