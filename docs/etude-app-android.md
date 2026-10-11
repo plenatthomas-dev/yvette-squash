@@ -1,7 +1,8 @@
 # Étude — passer à une vraie application Android ?
 
-**Date :** 2026-10-11 · **Branche :** `docs/etude-app-android` · **Statut :** étude, rien
-d'implémenté.
+**Date :** 2026-10-11 · **Branche :** `docs/etude-app-android` · **Statut :** mise en œuvre
+commencée. La TWA se construit et se signe (`android/`, cf. [android/README.md](../android/README.md)) ;
+il reste à trancher le domaine, à corriger le bouton retour et à préparer la publication.
 
 Question posée : que manque-t-il pour faire de l'appli une **application Android complète** ?
 Quels logiciels, comment embarquer l'appli web actuelle, faut-il changer de base, comment
@@ -158,13 +159,22 @@ L'adresse `squash-yvette.vercel.app` va être **gravée dans l'appli** :
 Passer plus tard à un domaine à nous (`squash-yvette.fr`, par exemple) imposerait de publier une
 nouvelle version de l'appli, déconnecterait tout le monde et **invaliderait tous les passkeys**.
 
-Deux choix tenables :
+Les choix possibles :
 
-- **garder `vercel.app` pour de bon** : gratuit, mais l'adresse dépend de Vercel ;
-- **passer à un domaine perso d'abord** (≈ 10-15 €/an), laisser tout le monde migrer, et
-  publier l'appli **ensuite**.
+| | Coût | Pour | Contre |
+|---|---|---|---|
+| **A. Domaine perso** (ex. `squash-yvette.fr`, chez OVH, Gandi ou Vercel Domains) | ≈ 7-12 €/an | l'adresse ne dépend plus de Vercel ; permet d'envoyer les e-mails depuis `@squash-yvette.fr` (SPF/DKIM, moins de spam) | une reconnexion pour chacun lors de la bascule ; passkeys à refaire (aucun si la biométrie est restée coupée en prod) |
+| **B. Garder `squash-yvette.vercel.app`** | 0 € | rien à faire | « vercel » dans l'adresse ; elle change si le projet Vercel est renommé ou transféré (au club, par exemple), ce qui imposerait une nouvelle version de l'appli |
+| **C. Sous-domaine du site du club** (ex. `app.<site-du-club>.fr`) | 0 € | institutionnel | il faut que la personne qui gère le domaine du club ajoute une entrée DNS ; on dépend d'elle |
 
-Ce qu'il faut éviter, c'est publier maintenant et changer de domaine dans six mois.
+**Recommandation : A, ou C si l'association a déjà un domaine.** Dans les deux cas : brancher le
+domaine sur Vercel, rediriger l'ancienne adresse vers la nouvelle, laisser passer quelques
+semaines, et seulement **ensuite** publier l'appli.
+
+**Décision au 11/10/2026 : reportée.** La TWA est construite sur `squash-yvette.vercel.app`.
+Changer d'adresse reste gratuit tant que l'appli n'est pas sur le Play Store : un champ de
+`android/twa-manifest.json` et une régénération (cf. `android/README.md`). Ce qu'il faut
+éviter, c'est publier maintenant et changer de domaine dans six mois.
 
 ---
 

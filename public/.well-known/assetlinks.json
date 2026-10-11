@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "fr.squashyvette.app",
+      "sha256_cert_fingerprints": [
+        "E5:57:DE:AB:26:6D:EA:2F:60:A9:0C:68:70:A2:D4:DA:14:36:AD:93:B3:D0:9E:F4:34:FA:FC:9C:5C:B0:38:D6"
+      ]
+    }
+  }
+]
