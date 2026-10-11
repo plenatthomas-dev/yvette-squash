@@ -53,6 +53,14 @@ export default function manifest(): MetadataRoute.Manifest {
         type: "image/png",
         purpose: "maskable",
       },
+      // Silhouette blanche sur fond transparent : icônes « thématiques » d'Android 13+, et
+      // source de l'icône de notification de l'appli Android (cf. android/twa-manifest.json).
+      {
+        src: "/icon-monochrome-512.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "monochrome",
+      },
     ],
   };
 }

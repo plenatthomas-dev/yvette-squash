@@ -53,3 +53,15 @@ yvette-squash-analyse-securite.md
 
 # fil de travail local (notes de session, jamais un livrable)
 fil.md
+
+# Application Android (TWA, cf. android/README.md) — sorties de compilation. La clé d'upload
+# vit HORS du dépôt (~/.android-keys) : les deux dernières lignes ne sont qu'un filet.
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/local.properties
+/android/*.apk
+/android/*.aab
+/android/*.idsig
+*.jks
+*.keystore

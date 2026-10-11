@@ -5,10 +5,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { InfoIcon } from "@/components/PrivacyNotice";
+import { useCloseRequest } from "@/lib/useCloseRequest";
 
 export function LegendInfo() {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
+  // Le retour d'Android referme la légende plutôt que l'appli.
+  useCloseRequest(() => setOpen(false), open);
 
   // `role="dialog"` promet une fermeture au clavier ; sans elle, un utilisateur au clavier
   // n'avait aucune sortie documentée (le seul chemin était de CLIQUER le fond). Un rôle ARIA
