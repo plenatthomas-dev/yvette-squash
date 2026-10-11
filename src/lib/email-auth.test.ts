@@ -27,7 +27,7 @@ vi.mock("./db", () => {
   };
   return { prisma: { ...db, $transaction: async (run: (tx: typeof db) => Promise<unknown>) => run(db) } };
 });
-import { emailSendRateLimited, createEmailToken } from "./email-auth";
+import { emailSendRateLimited, createEmailToken, EMAIL_RE } from "./email-auth";
 
 beforeEach(() => { vi.useFakeTimers(); h.attempts = []; h.tokens = []; });
 afterEach(() => vi.useRealTimers());
@@ -50,4 +50,14 @@ it("plafonne une IP sur plusieurs adresses, et rouvre la fenêtre au bout de dix
   await vi.advanceTimersByTimeAsync(600_001);
   expect(await emailSendRateLimited("six@example.fr", "ip")).toBe(false);
   expect(h.attempts).toHaveLength(1);
+});
+
+it("EMAIL_RE : 254 caractères au plus, la limite d'une adresse", () => {
+  const local = "a".repeat(64);
+  const ok = `${local}@${"b".repeat(254 - 64 - 1 - 3)}.fr`;
+  expect(ok).toHaveLength(254);
+  expect(EMAIL_RE.test(ok)).toBe(true);
+  expect(EMAIL_RE.test(`a${ok}`)).toBe(false);
+  expect(EMAIL_RE.test(`${"x".repeat(100_000)}@ex.fr`)).toBe(false);
+  expect(EMAIL_RE.test("joueur@squash.fr")).toBe(true);
 });
