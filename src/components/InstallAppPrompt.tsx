@@ -13,6 +13,7 @@
 // (mémorisé en local : elle vit hors connexion, écran de login inclus).
 
 import { useEffect, useState } from "react";
+import { isAndroidApp } from "@/lib/androidApp";
 
 const SNOOZE_KEY = "installPromptSnooze";
 const SNOOZE_MS = 14 * 24 * 60 * 60 * 1000; // 14 jours
@@ -55,21 +56,6 @@ function isStandalone(): boolean {
   );
 }
 
-// Lancée par l'appli Android (TWA, cf. android/README.md) ? Chrome y donne pour référent
-// `android-app://<package>/`, mais au PREMIER chargement seulement : on le retient pour la
-// session, sinon la bannière reviendrait au premier rechargement. Proposer d'« installer
-// l'appli » à quelqu'un qui est dedans n'a pas de sens.
-const ANDROID_APP_KEY = "launchedFromAndroidApp";
-function isAndroidApp(): boolean {
-  const fromApp = document.referrer.startsWith("android-app://");
-  try {
-    if (fromApp) sessionStorage.setItem(ANDROID_APP_KEY, "1");
-    return fromApp || sessionStorage.getItem(ANDROID_APP_KEY) === "1";
-  } catch {
-    return fromApp;
-  }
-}
-
 function isIosSafari(): boolean {
   const ua = navigator.userAgent;
   const ios = /iphone|ipad|ipod/i.test(ua) || (ua.includes("Macintosh") && navigator.maxTouchPoints > 1);
@@ -88,6 +74,8 @@ export default function InstallAppPrompt() {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
+    // `isAndroidApp` : dans l'appli Android (TWA), proposer d'« installer l'appli » à
+    // quelqu'un qui est dedans n'a pas de sens.
     if (isStandalone() || isAndroidApp() || snoozed()) return;
 
     // Le service worker n'était enregistré qu'à l'activation des notifications push. Or Chrome

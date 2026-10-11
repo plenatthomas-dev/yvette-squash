@@ -15,6 +15,7 @@
   "startUrl": "/",
   "iconUrl": "https://squash-yvette.vercel.app/icon-512.png",
   "maskableIconUrl": "https://squash-yvette.vercel.app/icon-maskable-512.png",
+  "monochromeIconUrl": "https://squash-yvette.vercel.app/icon-monochrome-512.png",
   "splashScreenFadeOutDuration": 300,
   "signingKey": {
     "path": "C:\\Users\\thomas_local\\.android-keys\\squash-yvette-upload.jks",

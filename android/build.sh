@@ -8,7 +8,7 @@
 # sortie.
 #
 # Usage (Git Bash) :  android/build.sh
-# Mot de passe : $ANDROID_KEY_PASSWORD, sinon le fichier ~/.android-keys/…password.txt.
+# Mot de passe : $ANDROID_KEY_PASSWORD, sinon demandé au clavier (sans écho).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -17,8 +17,19 @@ KEYSTORE="${ANDROID_KEYSTORE:-$HOME/.android-keys/squash-yvette-upload.jks}"
 ALIAS="upload"
 TOOLS="$BW/android_sdk/build-tools/36.1.0"
 
+# Le mot de passe vit dans un gestionnaire de mots de passe, pas sur le disque : on le demande,
+# sans écho. Le fichier n'est lu que s'il existe encore (premier poste, avant rangement).
 if [ -z "${ANDROID_KEY_PASSWORD:-}" ]; then
-  ANDROID_KEY_PASSWORD="$(cat "$HOME/.android-keys/squash-yvette-upload.password.txt")"
+  PW_FILE="$HOME/.android-keys/squash-yvette-upload.password.txt"
+  if [ -f "$PW_FILE" ]; then
+    ANDROID_KEY_PASSWORD="$(cat "$PW_FILE")"
+  elif [ -t 0 ]; then
+    read -rsp "Mot de passe de la clé d'upload : " ANDROID_KEY_PASSWORD
+    echo
+  else
+    echo "Mot de passe de la clé introuvable : lancer le script dans un terminal, ou définir ANDROID_KEY_PASSWORD." >&2
+    exit 1
+  fi
 fi
 export ANDROID_KEY_PASSWORD
 export JAVA_HOME="$(cygpath -w "$BW/jdk")"

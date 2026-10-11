@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useCloseRequest } from "@/lib/useCloseRequest";
 
 // Éléments naturellement focusables à l'intérieur d'une modale.
 const FOCUSABLE =
@@ -23,6 +24,9 @@ export function useDialog<T extends HTMLElement>(onClose: () => void, autoFocus 
   onCloseRef.current = onClose;
   // Capté à l'ouverture (valeur stable par modale) → hors deps de l'effet.
   const autoFocusRef = useRef(autoFocus);
+  // Le retour d'Android ferme la modale au lieu de l'appli. Échap reste traité ci-dessous : son
+  // `preventDefault()` annule la demande de fermeture, la modale ne se ferme donc qu'une fois.
+  useCloseRequest(onClose);
 
   useEffect(() => {
     const node = ref.current;

@@ -66,8 +66,11 @@ marche mais affiche la barre d'adresse.
 ## Construire
 
 ```bash
-android/build.sh      # Git Bash ; mot de passe lu dans $ANDROID_KEY_PASSWORD, sinon dans le fichier
+android/build.sh      # Git Bash ; demande le mot de passe de la clé (sans écho)
 ```
+
+Le mot de passe vient du gestionnaire de mots de passe : le script le demande au clavier, ou le
+lit dans `$ANDROID_KEY_PASSWORD`. Ne jamais le coller dans une conversation ni dans une commande.
 
 Sorties (ignorées par git) :
 
@@ -86,6 +89,17 @@ jarsigner) en lisant le mot de passe dans l'environnement.
 2. Brancher en USB, accepter l'empreinte de l'ordinateur sur le téléphone.
 3. `~/.bubblewrap/android_sdk/platform-tools/adb install -r app-release-signed.apk`
 4. Déboguer la page : `chrome://inspect` dans Chrome sur l'ordinateur.
+
+## L'icône de notification
+
+`ic_notification_icon.png` est une silhouette blanche sur fond transparent : Android n'affiche
+que la transparence de cette icône, et le logo couleur y devenait un carré blanc. Sa source est
+`public/icon-monochrome.svg`, déclinée en `public/icon-monochrome-512.png` (lue par Bubblewrap
+via `monochromeIconUrl`) et en `public/icon-monochrome-96.png` (badge des notifications web,
+`public/sw.js`).
+
+⚠️ `bubblewrap update` **télécharge** `monochromeIconUrl` depuis la production : il échouera
+tant que `icon-monochrome-512.png` n'y est pas déployé.
 
 ## Modifier l'appli Android
 

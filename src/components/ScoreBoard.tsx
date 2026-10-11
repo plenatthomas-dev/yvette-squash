@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useCloseRequest } from "@/lib/useCloseRequest";
 import {
   ballPoint,
   resolveColor,
@@ -109,6 +110,8 @@ export default function ScoreBoard({
    */
   first?: Side;
 }) {
+  // Le retour d'Android fait ce que fait « ← Retour » : l'appelant enregistre, puis quitte.
+  useCloseRequest(onBack);
   const second: Side = first === "home" ? "away" : "home";
   /** Une paire de valeurs d'un jeu, dans l'ordre affiché. */
   const paire = (g: { home: number; away: number }) => (first === "home" ? [g.home, g.away] : [g.away, g.home]);

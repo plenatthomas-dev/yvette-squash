@@ -33,7 +33,10 @@ self.addEventListener("push", (event) => {
   const options = {
     body: data.body || "",
     icon: "/logo_squash.jpeg",
-    badge: "/logo_squash.jpeg",
+    // Le badge, c'est la petite icône de la barre d'état : Android n'en garde QUE la
+    // transparence. Le logo (JPEG, fond blanc) y devenait un carré blanc ; il faut une
+    // silhouette blanche sur fond transparent (source : icon-monochrome.svg).
+    badge: "/icon-monochrome-96.png",
     tag: data.tag || undefined, // remplace une notif de même tag plutôt que d'empiler
     // Sans `renotify`, une notification qui en REMPLACE une autre de même tag échange son
     // contenu SANS alerter : ni son, ni vibration. Un suivi en direct qui partage un tag
