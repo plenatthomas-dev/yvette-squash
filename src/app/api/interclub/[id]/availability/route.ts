@@ -10,6 +10,7 @@ import {
   type AvailabilityStatus,
   needsOverrideConfirm,
 } from "@/lib/interclub-availability";
+import { otherAccountResponse } from "@/lib/notification-actions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -174,7 +175,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 // PUT /api/interclub/{id}/availability — poser une réponse, la sienne ou celle d'un autre.
-//   { status, comment?, userId? | guestId?, confirmOverride? }
+//   { status, comment?, userId? | guestId?, confirmOverride?, forUserId? }
 // Sans `userId` ni `guestId` : c'est la sienne. `status: null` ANNULE la réponse (retour à
 // « pas répondu ») — mêmes contrôles d'équipe qu'une écriture, sans confirmation.
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -184,6 +185,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const { session, fixture } = ctx;
 
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  // « Dispo » / « Pas dispo » depuis une notification (public/sw.js) : l'appareil a pu changer
+  // de compte depuis l'envoi, et la réponse serait alors posée au nom du mauvais joueur.
+  const autreCompte = otherAccountResponse(body.forUserId, session.userId);
+  if (autreCompte) return autreCompte;
   // `null` = ANNULER. Un clic de travers sur « Pas dispo » ne doit pas laisser une réponse
   // qu'on ne peut que remplacer par une autre : « je ne sais pas encore » se dit en ne répondant
   // pas, et c'est ce qui fait revenir la personne dans la liste des relances.

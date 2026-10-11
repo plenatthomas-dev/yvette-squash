@@ -6,7 +6,8 @@
 // un `tag` unique par rencontre pour que l'écran verrouillé n'accumule jamais plus d'une ligne.
 
 import { prisma } from "./db";
-import { pushToUsers } from "./push";
+import { pushToUsers, type PushPayload } from "./push";
+import { AVAILABILITY_ACTIONS } from "./notification-actions";
 import { FOLLOW_LEVELS, notifiesAt, type FollowLevel } from "./interclub";
 
 /**
@@ -208,6 +209,8 @@ async function sendTo(
    * différents ; ils cohabitent.
    */
   tagSuffix = "",
+  /** Boutons de la notification et ce qu'il leur faut (cf. `PushPayload`). */
+  extra: Pick<PushPayload, "actions" | "data"> = {},
 ): Promise<void> {
   if (userIds.length === 0) return;
   try {
@@ -217,6 +220,7 @@ async function sendTo(
       url: "/?view=interclub",
       tag: `interclub-${ctx.fixtureId}${tagSuffix}`,
       renotify: true,
+      ...extra,
     });
   } catch {
     /* best-effort : une notification perdue ne doit rien faire échouer */
@@ -265,6 +269,15 @@ function whereWhen(home: boolean, opponent: string, time: string | null): string
 }
 
 /**
+ * « Dispo » / « Pas dispo » sous la question : répondre devient un geste sur l'écran
+ * verrouillé, sans ouvrir l'appli. Le service worker (public/sw.js) pose la réponse par la
+ * même route que l'écran, puis remplace la notification par la confirmation.
+ */
+function availabilityButtons(ctx: Ctx): Pick<PushPayload, "actions" | "data"> {
+  return { actions: AVAILABILITY_ACTIONS, data: { fixtureId: ctx.fixtureId } };
+}
+
+/**
  * « Dis si tu es dispo » — à TOUTE L'ÉQUIPE, une fois par rencontre.
  *
  * Cette notification est la seule raison pour laquelle le reste existe : sans elle, personne
@@ -281,6 +294,8 @@ export async function notifyAvailabilityCall(
     ctx,
     `${ctx.teamName} – ${ctx.opponent}`,
     `Rencontre le ${frenchDate(fixture.date)} ${whereWhen(fixture.home, ctx.opponent, fixture.time)}. Dis si tu es disponible.`,
+    "",
+    availabilityButtons(ctx),
   );
 }
 
@@ -300,6 +315,8 @@ export async function notifyAvailabilityReminder(
     ctx,
     `${ctx.teamName} – ${ctx.opponent}`,
     `Rencontre le ${frenchDate(fixture.date)} : tu n'as pas encore dit si tu étais disponible.`,
+    "",
+    availabilityButtons(ctx),
   );
 }
 

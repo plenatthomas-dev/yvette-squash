@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96">
+  <!-- Raccourci « Frais partagés » (appui long sur l'icône). Plein cadre, dessin dans la zone sûre d'une icône maskable. -->
+  <rect width="96" height="96" fill="#2f6fe0"/>
+  <g fill="none" stroke="#fff" stroke-linecap="round">
+    <path d="M64 35 A17 17 0 1 0 64 61" stroke-width="6"/>
+    <path d="M30 44 H53 M30 53 H53" stroke-width="5"/>
+  </g>
+</svg>

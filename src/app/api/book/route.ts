@@ -8,6 +8,7 @@ import { resolveActingContext } from "@/lib/delegation";
 import { refreshSnapshotFromResa } from "@/lib/planning-snapshot";
 import { appBlockForUserId, appBlockedResponse } from "@/lib/app-block";
 import { readJsonBody } from "@/lib/http-tx";
+import { otherAccountResponse } from "@/lib/notification-actions";
 
 export const runtime = "nodejs";
 
@@ -17,8 +18,9 @@ function isSlotTimestamp(value: unknown): value is string {
     isRealDateISO(value.slice(0, 10)) && Number.isFinite(Date.parse(value));
 }
 
-// POST /api/book { classEventId, courtName, startsAt, endsAt, onBehalfOf? }
+// POST /api/book { classEventId, courtName, startsAt, endsAt, onBehalfOf?, forUserId? }
 // onBehalfOf (idée 4) : userId du délégant, si on réserve en son nom (délégation active).
+// forUserId : envoyé par le bouton « Réserver » d'une notification, cf. notification-actions.ts.
 //
 // ⚠️ `courtName`, `startsAt` et `endsAt` NE FONT PAS AUTORITÉ. Le navigateur exprime une
 // intention — « ce créneau-là, et je crois qu'il est ce jour-là » — et le serveur va lire le
@@ -36,7 +38,10 @@ export async function POST(req: NextRequest) {
   // plus lus : ils ne servaient qu'à alimenter le journal, ce que fait désormais le planning.
   // Ils ne sont pas non plus validés — une garde sur un champ ignoré ne prouve rien et ferait
   // croire au prochain lecteur que le champ compte encore.
-  const { classEventId, startsAt, onBehalfOf } = await readJsonBody(req);
+  const { classEventId, startsAt, onBehalfOf, forUserId } = await readJsonBody(req);
+  // « Réserver » depuis une notification (public/sw.js) : l'appareil a pu changer de compte.
+  const autreCompte = otherAccountResponse(forUserId, session.userId);
+  if (autreCompte) return autreCompte;
 
   if (!isClassEventId(classEventId)) {
     return NextResponse.json({ error: "classEventId invalide" }, { status: 400 });

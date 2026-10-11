@@ -16,6 +16,7 @@ vi.mock("./db", () => ({
         return h.follows;
       }),
     },
+    user: { findMany: vi.fn(async () => [{ id: "u1" }, { id: "u2" }]) },
   },
 }));
 vi.mock("./push", () => ({
@@ -29,6 +30,7 @@ import {
   frenchDate,
   notifyCalendarDrift,
   notifyEveReminder,
+  notifyAvailabilityCall,
   notifyAvailabilityReminder,
   notifyCaptainDigest,
   notifyFixtureDone,
@@ -296,5 +298,29 @@ describe("le rappel de la veille", () => {
   it("n'envoie RIEN quand personne n'est aligné", async () => {
     await notifyEveReminder([], ctx, deplacement);
     expect(h.sent).toEqual([]);
+  });
+});
+
+describe("les boutons « Dispo » / « Pas dispo »", () => {
+  const boutons = [
+    { action: "avail-yes", title: "Dispo" },
+    { action: "avail-no", title: "Pas dispo" },
+  ];
+
+  it("accompagnent l'appel aux disponibilités, avec la rencontre visée", async () => {
+    await notifyAvailabilityCall(ctx, { date: "2026-10-09", time: "20:00", home: true });
+    expect(h.sent[0].ids).toEqual(["u1", "u2"]);
+    expect(h.sent[0].payload).toMatchObject({ actions: boutons, data: { fixtureId: "f1" }, tag: "interclub-f1" });
+  });
+
+  it("accompagnent la relance", async () => {
+    await notifyAvailabilityReminder(["u9"], ctx, { date: "2026-10-09" });
+    expect(h.sent[0].payload).toMatchObject({ actions: boutons, data: { fixtureId: "f1" } });
+  });
+
+  it("ne s'ajoutent pas aux notifications qui ne posent pas la question", async () => {
+    await notifyFixtureDone(ctx, { home: 3, away: 1 });
+    await notifyEveReminder(["u1"], ctx, { date: "2026-10-09", time: "20:00", home: true, venue: null, venueAddress: null });
+    expect(h.sent.every((s) => s.payload.actions === undefined)).toBe(true);
   });
 });
