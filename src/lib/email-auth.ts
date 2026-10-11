@@ -17,7 +17,11 @@ import { sendEmail } from "./email";
 import { logRequestDecision } from "./moderation";
 import { serializableTransaction } from "./http-tx";
 
-export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// 254 caractères au plus : la limite d'une adresse (RFC 5321), et une borne au coût de l'analyse
+// que nodemailer fait de chaque destinataire — son `addressparser` a déjà été quadratique
+// (GHSA-2x7j-588g-ccc2, GHSA-v53p-9fqp-m79j), et l'inscription lui passe ce qu'un visiteur ANONYME
+// a saisi.
+export const EMAIL_RE = /^(?=.{1,254}$)[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const MIN_PASSWORD_LEN = 8;
 export const MAX_PASSWORD_LEN = 200; // borne le coût scrypt (anti-DoS)
 
