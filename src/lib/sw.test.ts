@@ -1,4 +1,4 @@
-// Les boutons des notifications, côté service worker (public/sw.js).
+// Le service worker (public/sw.js) : boutons des notifications et page hors ligne.
 //
 // Le worker est un fichier statique, chargé tel quel par le navigateur : on l'exécute ici dans
 // un bac à sable `vm` avec un faux `self`, pour verrouiller ce que les boutons ENVOIENT aux
@@ -38,7 +38,7 @@ function charger(reponses: Reponse[]) {
     clients: { matchAll: async () => [], openWindow, claim: async () => {} },
     skipWaiting: () => {},
   };
-  vm.runInNewContext(SOURCE, { self, fetch: fetchMock, console });
+  vm.runInNewContext(SOURCE, { self, fetch: fetchMock, Response, console });
 }
 
 /** Déclenche `notificationclick` et attend tout ce que le worker a confié à `waitUntil`. */
@@ -206,5 +206,45 @@ describe("sw.js — toucher la notification elle-même", () => {
     await cliquer("", { book, to: "u1", url: "/?date=2026-10-14&view=day" });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(openWindow).toHaveBeenCalledWith("/?date=2026-10-14&view=day");
+  });
+});
+
+describe("sw.js — navigations et page hors ligne", () => {
+  async function naviguer(mode = "navigate") {
+    let reponse: unknown;
+    let repondu = false;
+    handlers.fetch({
+      request: { mode, url: "https://x/?view=day" },
+      respondWith: (p: Promise<unknown>) => {
+        repondu = true;
+        reponse = p;
+      },
+    });
+    return { repondu, reponse: await reponse };
+  }
+
+  it("laisse passer la navigation telle quelle quand le réseau répond", async () => {
+    charger([{ status: 200 }]);
+    const { reponse } = await naviguer();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((reponse as { status: number }).status).toBe(200);
+  });
+
+  it("montre sa propre page, en 200, quand le réseau manque", async () => {
+    charger([]);
+    const { reponse } = await naviguer();
+    const r = reponse as Response;
+    expect(r.status).toBe(200);
+    expect(r.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
+    const html = await r.text();
+    expect(html).toContain("Pas de connexion");
+    expect(html).toContain("location.reload()");
+    // Rien d'externe : hors réseau, une feuille de style ou une image ne se chargerait pas.
+    expect(html).not.toMatch(/<link|<img|src=/);
+  });
+
+  it("ne touche pas aux autres requêtes (API, images…)", async () => {
+    const { repondu } = await naviguer("cors");
+    expect(repondu).toBe(false);
   });
 });
