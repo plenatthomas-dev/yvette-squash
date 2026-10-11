@@ -241,6 +241,22 @@ describe("PUT /api/interclub/{id}/availability", () => {
     });
   });
 
+  it("accepte le bouton d'une notification adressée au compte connecté", async () => {
+    const res = await PUT(req({ status: "no", forUserId: "u1" }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.created).toMatchObject({ userId: "u1", status: "no", setById: "u1" });
+  });
+
+  it("⚠️ refuse le bouton d'une notification adressée à un AUTRE compte, sans rien écrire", async () => {
+    // L'abonnement survit au changement de compte sur l'appareil : sans ce refus, Bob, connecté
+    // sur le téléphone qu'utilisait Alice, répondrait pour lui-même à la question posée à Alice.
+    const res = await PUT(req({ status: "yes", forUserId: "u2" }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("other_account");
+    expect(h.created).toBeNull();
+    expect(h.updated).toBeNull();
+  });
+
   it("rend `me`, comme le GET — deux verbes, une seule forme", async () => {
     // L'écran remplace tout son état par ce corps. Sans `me`, plus aucune ligne n'était « moi » :
     // le repère disparaissait et le lien « Ajouter une précision » avec lui, dès la première

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { NextRequest } from "next/server";
+import type { PushPayload } from "@/lib/push";
 
 // Régression de sécurité : ce cron avait sa PROPRE copie de la récupération du jeton ResaMania.
 // Elle passait la chaîne CHIFFRÉE en Bearer (→ 401, alerte perdue en silence) et réécrivait le
@@ -103,6 +104,30 @@ describe("GET /api/cron/check-alerts — jeton ResaMania", () => {
     });
     await GET(req());
     expect(h.pushToUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("joint le bouton « Réserver » et TOUS les terrains libres à cet horaire", async () => {
+    const at = `${tomorrow()}T18:00:00+02:00`;
+    h.getPlanning.mockResolvedValue({
+      slots: [
+        { id: "/c/class_events/1", courtName: "Terrain 1", startsAt: at, bookable: true },
+        { id: "/c/class_events/2", courtName: "Terrain 2", startsAt: at, bookable: false },
+        { id: "/c/class_events/3", courtName: "Terrain 3", startsAt: at, bookable: true },
+        // Libre, mais à une autre heure : ce n'est pas ce que l'alerte attend.
+        { id: "/c/class_events/4", courtName: "Terrain 1", startsAt: `${tomorrow()}T18:40:00+02:00`, bookable: true },
+      ],
+    });
+    await GET(req());
+    const [, payload] = h.pushToUser.mock.calls[0] as unknown as [string, PushPayload];
+    expect(payload.actions).toEqual([{ action: "book", title: "Réserver" }]);
+    expect(payload.data?.book).toEqual({
+      quand: expect.stringContaining("à 18:00"),
+      startsAt: at,
+      courts: [
+        { id: "/c/class_events/1", name: "Terrain 1" },
+        { id: "/c/class_events/3", name: "Terrain 3" },
+      ],
+    });
   });
 
   it("refuse un appel non autorisé", async () => {
