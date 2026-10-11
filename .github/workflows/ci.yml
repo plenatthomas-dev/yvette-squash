@@ -22,6 +22,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Les deux travaux ne font que LIRE le dépôt : le jeton n'a besoin de rien d'autre. Sans ce bloc,
+# il hérite des droits par défaut du dépôt, qui peuvent aller jusqu'à l'écriture.
+permissions:
+  contents: read
+
 jobs:
   verif:
     name: types, style, tests
