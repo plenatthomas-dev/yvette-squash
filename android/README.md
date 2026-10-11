@@ -90,6 +90,32 @@ jarsigner) en lisant le mot de passe dans l'environnement.
 3. `~/.bubblewrap/android_sdk/platform-tools/adb install -r app-release-signed.apk`
 4. Déboguer la page : `chrome://inspect` dans Chrome sur l'ordinateur.
 
+**Plein écran sans déployer `assetlinks.json`.** Sur le téléphone, `chrome://flags` → « Enable
+command line on non-rooted devices », puis :
+
+```bash
+adb shell "echo '_ --disable-digital-asset-link-verification-for-url=\"https://squash-yvette.vercel.app\"' > /data/local/tmp/chrome-command-line"
+adb shell am force-stop com.android.chrome
+```
+
+(Depuis Git Bash, préfixer par `MSYS_NO_PATHCONV=1`, sinon `/data/…` devient un chemin Windows.)
+Désactiver le flag après les tests.
+
+### Les notifications ne passent pas par l'appli si la PWA est installée
+
+Constaté le 11/10/2026 sur un Pixel 8a : la notification « Tester » est arrivée par la **PWA**
+(`org.chromium.webapk…`) installée depuis Chrome, pas par l'appli. Chrome confie les
+notifications d'un site à la WebAPK qui le couvre. Deux conséquences :
+
+- pour tester l'icône et le nom de l'appli dans une notification, **désinstaller la PWA** et
+  attendre que `assetlinks.json` soit en production. Le flag de test ne suffit pas à enregistrer
+  la délégation des notifications ;
+- un membre qui a déjà la PWA et installe l'appli du Store continuera de recevoir les
+  notifications par la PWA tant qu'il ne l'a pas désinstallée. Il faudra le lui dire.
+
+Chrome affiche aussi une notification silencieuse « En cours d'exécution dans Chrome » : c'est
+l'avertissement standard des TWA, on ne peut pas le retirer.
+
 ## L'icône de notification
 
 `ic_notification_icon.png` est une silhouette blanche sur fond transparent : Android n'affiche
