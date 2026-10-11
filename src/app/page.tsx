@@ -58,6 +58,8 @@ import {
   clearSystemNotifications,
 } from "@/lib/pushClient";
 import { useFeatures, useFeaturesReady } from "@/components/FeatureProvider";
+import { runsAsInstalledAndroidApp } from "@/lib/androidApp";
+import { useCloseRequest } from "@/lib/useCloseRequest";
 import { recheckBanner } from "@/components/AnnouncementBanner";
 import { reportMaintenance } from "@/lib/apiFetch";
 import { unlockAudio, playSuccessJingle, playError, playAlert } from "@/lib/sound";
@@ -234,6 +236,13 @@ export default function Home() {
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
   const [view, setView] = useState<View>("day");
   const isSpecial = isSpecialView(view);
+  // Appli installée sur Android : le retour du système, seule navigation arrière disponible,
+  // ramène d'un onglet secondaire (Interclub, Frais…) au planning au lieu de fermer l'appli.
+  // Pas dans un onglet de navigateur : Échap, qui déclenche la même demande sur ordinateur, ne
+  // doit pas changer d'onglet. Lu après le montage — `window` n'existe pas au rendu serveur.
+  const [installedAndroid, setInstalledAndroid] = useState(false);
+  useEffect(() => setInstalledAndroid(runsAsInstalledAndroidApp()), []);
+  useCloseRequest(() => setView("day"), installedAndroid && isSpecial);
   const [week, setWeek] = useState<{ date: string; planning: PlanningDay }[]>([]);
   const [busy, setBusy] = useState(false);
   // Retour visuel de `busy` DANS la grille. `busy` seul ne se voit nulle part : entre le tap

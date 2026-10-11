@@ -80,6 +80,21 @@ describe("POST /api/book (délégation)", () => {
     expect((await POST(postReq(BODY))).status).toBe(401);
   });
 
+  it("⚠️ refuse « Réserver » depuis une notification adressée à un AUTRE compte", async () => {
+    // Le bouton agit avec la session ouverte sur l'appareil ; l'abonnement, lui, a pu rester
+    // au nom du compte précédent. Rien ne doit partir chez ResaMania.
+    const res = await POST(postReq({ ...BODY, forUserId: "quelqu-un-d-autre" }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("other_account");
+    expect(h.getPlanning).not.toHaveBeenCalled();
+    expect(h.book).not.toHaveBeenCalled();
+  });
+
+  it("accepte « Réserver » depuis une notification adressée au compte connecté", async () => {
+    expect((await POST(postReq({ ...BODY, forUserId: "me" }))).status).toBe(200);
+    expect(h.book).toHaveBeenCalledTimes(1);
+  });
+
   it("relaie tel quel le refus du contexte d'action (statut + message)", async () => {
     h.acting = { ok: false, status: 403, error: "Délégation introuvable, expirée ou révoquée." };
     const res = await POST(postReq(BODY));

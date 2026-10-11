@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
+import { isAdminEmail } from "@/lib/admin";
 import { prisma } from "@/lib/db";
 import {
   computeBalances,
@@ -31,6 +32,8 @@ export async function GET(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
+  // L'admin a sur chaque ligne les droits de son auteur, comme les routes d'écriture.
+  const admin = isAdminEmail(session.email);
 
   // Pagination : on ne renvoie jamais TOUT l'historique d'un coup (il grossit sans fin).
   // ?limit borne le nombre de tricounts (les plus récents d'abord) ; le client demande
@@ -167,7 +170,7 @@ export async function GET(req: NextRequest) {
           ...(g.interclubGuestId ? { clubGuestId: g.interclubGuestId } : {}),
         })),
         expenses: t.expenses.map((e) => {
-          const mine = e.creatorId === session.userId || e.payerId === session.userId;
+          const mine = e.creatorId === session.userId || e.payerId === session.userId || admin;
           const payerKey = e.payerId ? userKey(e.payerId) : guestKey(e.payerGuestId as string);
           return {
             id: e.id,
@@ -208,14 +211,14 @@ export async function GET(req: NextRequest) {
           };
         }),
         // Fil de commentaires (idée 5a). On affiche le nom réel (comme le reste du tricount),
-        // jamais le pseudo ; chacun ne peut supprimer que ses propres messages.
+        // jamais le pseudo ; chacun ne peut supprimer que ses propres messages (l'admin, tous).
         comments: t.comments.map((c) => ({
           id: c.id,
           body: c.body,
           userId: c.userId,
           userName: name(userKey(c.userId)),
           createdAt: c.createdAt.toISOString(),
-          canDelete: c.userId === session.userId,
+          canDelete: c.userId === session.userId || admin,
         })),
       };
       })

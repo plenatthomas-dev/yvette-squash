@@ -73,6 +73,14 @@ export type PushPayload = {
    * signalerait que le premier. Sans effet en l'absence de `tag`.
    */
   renotify?: boolean;
+  /**
+   * Boutons de la notification, exécutés par le service worker SANS ouvrir l'appli (cf.
+   * `notificationclick` dans public/sw.js). Android en affiche deux au plus ; iOS et Firefox
+   * les ignorent : le texte et le lien doivent donc suffire sans eux.
+   */
+  actions?: { action: string; title: string }[];
+  /** Ce dont ces boutons ont besoin pour agir (créneau à réserver, rencontre…). Hors journal. */
+  data?: Record<string, unknown>;
 };
 
 // Envoie une notif à TOUS les membres (annonce club, cf. espace admin). Un envoi par joueur
@@ -218,9 +226,13 @@ async function envoyerA(
   payload: PushPayload,
 ): Promise<boolean> {
   try {
+    // `to` : le DESTINATAIRE, que le service worker renvoie avec les gestes faits depuis la
+    // notification (« Réserver », « Dispo »). Ces gestes agissent avec la session ouverte sur
+    // l'appareil, et un abonnement survit à un changement de compte (cf. pushClient.ts,
+    // `syncPushSubscription`) : sans lui, on réserverait au nom de celui qui tient le téléphone.
     await webpush.sendNotification(
       { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-      JSON.stringify(payload),
+      JSON.stringify({ ...payload, to: s.userId }),
     );
     return true;
   } catch (e) {

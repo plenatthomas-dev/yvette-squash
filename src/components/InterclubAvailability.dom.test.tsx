@@ -488,6 +488,18 @@ describe("le bloc se replie, et son résumé dit l'essentiel", () => {
     expect(details().open).toBe(true);
   });
 
+  it("pas de « à répondre » pour un admin HORS de l'équipe — il lit et relaie, sans réponse à lui", async () => {
+    // Le serveur laisse passer l'admin, mais il n'est pas dans le roster : aucune ligne n'est
+    // la sienne. La pastille l'enverrait chercher un bouton qui n'existe pas.
+    await monte([entree({ key: "u2", name: "Léa" }), entree({ key: "u3", name: "Marc" })]);
+    expect(document.querySelector(".ic-dispo-mine")).toBeNull();
+    expect(screen.getByText(/0\/4 dispo/)).toBeTruthy();
+
+    fireEvent.click(within(boutonsDe("Léa")).getByRole("button", { name: "Dispo" }));
+    await souffle();
+    expect(puts()[0]).toMatchObject({ status: "yes", userId: "u2" });
+  });
+
   it("garde le compte de l'équipe visible même replié", async () => {
     await monte([
       entree({ key: "u1", name: "Thomas", status: "yes" }),

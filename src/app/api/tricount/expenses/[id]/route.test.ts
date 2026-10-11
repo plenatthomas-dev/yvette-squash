@@ -6,7 +6,7 @@ import type { NextRequest } from "next/server";
 // vraies dépenses lui restent interdites.
 
 const h = vi.hoisted(() => ({
-  session: null as null | { userId: string; displayName: string; resa: unknown },
+  session: null as null | { userId: string; displayName: string; resa: unknown; email?: string },
   expense: null as null | Record<string, unknown>,
   del: vi.fn(),
   approvalsDeleteMany: vi.fn(),
@@ -30,7 +30,11 @@ const h = vi.hoisted(() => ({
   lier: vi.fn(),
 }));
 
-vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
+// Le module RÉEL autour de `getSession` : `isAdminEmail` en tire `normalizeEmail`.
+vi.mock("@/lib/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/session")>()),
+  getSession: vi.fn(async () => h.session),
+}));
 vi.mock("@/lib/features-server", () => ({
   getFeatures: async () => ({
     tricount: true,
@@ -110,6 +114,8 @@ const ctx = { params: Promise.resolve({ id: "e1" }) };
 /** Session « email seul » = aucun jeton ResaMania (resa null). */
 const emailOnly = { userId: "u1", displayName: "Membre", resa: null };
 const resaUser = { userId: "u1", displayName: "Membre", resa: { accessToken: "t" } };
+/** Un admin ResaMania qui n'a ni saisi ni payé les lignes qu'on lui fait toucher. */
+const admin = { userId: "adm", displayName: "Chef", resa: { accessToken: "t" }, email: "chef@example.com" };
 
 /** Une part portée par un membre. */
 const part = (userId: string, amountCents: number) => ({ userId, guestId: null, amountCents });
@@ -151,6 +157,7 @@ beforeEach(() => {
   h.countWhere = null;
   h.tricountEtat = EN_COURS;
   h.session = emailOnly;
+  process.env.ADMIN_EMAILS = "chef@example.com";
   h.expense = { tricountId: "t1", isRefund: true, creatorId: "u1", payerId: "u1" };
   h.users = ["u1", "u2", "u3"];
   h.guests = ["g1"];
@@ -183,6 +190,15 @@ describe("DELETE /api/tricount/expenses/[id] — compte « email seul »", () =>
     const res = await DELETE(req(), ctx);
     expect(res.status).toBe(404);
     expect(h.del).not.toHaveBeenCalled();
+  });
+});
+
+describe("DELETE /api/tricount/expenses/[id] — admin", () => {
+  it("supprime la dépense d'un autre", async () => {
+    h.session = admin;
+    h.expense = { tricountId: "t1", isRefund: false, creatorId: "u2", payerId: "u3" };
+    expect((await DELETE(req(), ctx)).status).toBe(200);
+    expect(h.del).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -287,6 +303,13 @@ describe("PATCH /api/tricount/expenses/[id] — qui a le droit", () => {
   it("autorise le PAYEUR même s'il n'a pas saisi la ligne", async () => {
     h.expense = { tricountId: "t1", isRefund: false, creatorId: "u2", payerId: "u1" };
     expect((await PATCH(reqBody(corps), ctx)).status).toBe(200);
+  });
+
+  it("autorise un ADMIN qui n'a ni saisi ni payé", async () => {
+    h.session = admin;
+    h.expense = { tricountId: "t1", isRefund: false, creatorId: "u2", payerId: "u3" };
+    expect((await PATCH(reqBody(corps), ctx)).status).toBe(200);
+    expect(h.updated).not.toBeNull();
   });
 
   it("refuse en 400 la modification d'un REMBOURSEMENT, avec la marche à suivre", async () => {

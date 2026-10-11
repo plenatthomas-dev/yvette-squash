@@ -1,0 +1,67 @@
+{
+  "packageId": "fr.squashyvette.app",
+  "host": "squash-yvette.vercel.app",
+  "name": "Squash de l'Yvette",
+  "launcherName": "Squash Yvette",
+  "display": "standalone",
+  "themeColor": "#0f1115",
+  "themeColorDark": "#0f1115",
+  "navigationColor": "#0f1115",
+  "navigationColorDark": "#0f1115",
+  "navigationDividerColor": "#0f1115",
+  "navigationDividerColorDark": "#0f1115",
+  "backgroundColor": "#ffffff",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "https://squash-yvette.vercel.app/icon-512.png",
+  "maskableIconUrl": "https://squash-yvette.vercel.app/icon-maskable-512.png",
+  "monochromeIconUrl": "https://squash-yvette.vercel.app/icon-monochrome-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "C:\\Users\\thomas_local\\.android-keys\\squash-yvette-upload.jks",
+    "alias": "upload"
+  },
+  "appVersionCode": 1,
+  "appVersion": "1.0.0",
+  "shortcuts": [
+    {
+      "name": "Planning",
+      "shortName": "Planning",
+      "url": "https://squash-yvette.vercel.app/?view=day",
+      "chosenIconUrl": "https://squash-yvette.vercel.app/shortcut-planning-192.png",
+      "chosenMaskableIconUrl": "https://squash-yvette.vercel.app/shortcut-planning-192.png"
+    },
+    {
+      "name": "Interclub",
+      "shortName": "Interclub",
+      "url": "https://squash-yvette.vercel.app/?view=interclub",
+      "chosenIconUrl": "https://squash-yvette.vercel.app/shortcut-interclub-192.png",
+      "chosenMaskableIconUrl": "https://squash-yvette.vercel.app/shortcut-interclub-192.png"
+    },
+    {
+      "name": "Frais",
+      "shortName": "Frais",
+      "url": "https://squash-yvette.vercel.app/?view=money",
+      "chosenIconUrl": "https://squash-yvette.vercel.app/shortcut-frais-192.png",
+      "chosenMaskableIconUrl": "https://squash-yvette.vercel.app/shortcut-frais-192.png"
+    }
+  ],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://squash-yvette.vercel.app/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://squash-yvette.vercel.app/",
+  "minSdkVersion": 24,
+  "orientation": "default",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "protocolHandlers": [],
+  "fileHandlers": []
+}

@@ -1,0 +1,4 @@
+# Scripts shell : toujours en LF. Avec core.autocrlf=true, une copie Windows les recevrait en
+# CRLF, et bash échoue alors sur « $'\r': command not found ».
+*.sh            text eol=lf
+android/gradlew text eol=lf

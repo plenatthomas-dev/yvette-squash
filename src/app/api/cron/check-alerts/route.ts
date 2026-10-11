@@ -7,6 +7,7 @@ import { cronAuthorized } from "@/lib/cron-auth";
 import { recordCronRun } from "@/lib/cron-run";
 import { alertsPending, alertsChanged, alertHorizonISO, noteCronAlive } from "@/lib/alerts-gate";
 import { fmtTime, toInstant } from "@/lib/time";
+import { BOOK_ACTION } from "@/lib/notification-actions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -111,27 +112,49 @@ export async function GET(req: NextRequest) {
     const resa = await getResaTokenForUser(userId);
     if (!resa) continue;
 
-    let freeHm: Set<string>;
+    // Les terrains libres, par horaire : TOUS, et pas seulement le fait qu'il y en ait un. Le
+    // bouton « Réserver » de la notification les essaie dans l'ordre — entre l'envoi et le
+    // geste, le premier a pu être pris par quelqu'un d'autre.
+    let freeByHm: Map<string, { id: string; courtName: string; startsAt: string }[]>;
     try {
       const planning = await getPlanning(date, resa.accessToken);
-      freeHm = new Set<string>();
+      freeByHm = new Map();
       for (const slot of planning.slots) {
+        if (!slot.bookable) continue;
         // Heure du club (Europe/Paris), comme la clé `hm` stockée à la création de l'alerte
         // (cf. page.tsx onWatch / WeekGrid). Un slice UTC brut décalerait de +2 h l'été et
         // ne matcherait jamais les alertes créées depuis la vue Semaine.
-        if (slot.bookable) freeHm.add(fmtTime(slot.startsAt));
+        const hm = fmtTime(slot.startsAt);
+        const libre = { id: slot.id, courtName: slot.courtName, startsAt: slot.startsAt };
+        const deja = freeByHm.get(hm);
+        if (deja) deja.push(libre);
+        else freeByHm.set(hm, [libre]);
       }
     } catch {
       continue;
     }
 
     for (const a of group) {
-      if (!freeHm.has(a.hm)) continue;
+      const libres = freeByHm.get(a.hm);
+      if (!libres) continue;
+      const quand = `${prettyDate(a.date)} à ${a.hm}`;
       const sent = await pushToUser(userId, {
         title: "Un terrain s'est libéré 🎾",
-        body: `${prettyDate(a.date)} à ${a.hm} — tu étais en liste d'attente, file réserver !`,
+        body: `${quand} — tu étais en liste d'attente, file réserver !`,
         url: `/?date=${a.date}&view=day`,
         tag: `alert-${a.id}`,
+        // « Réserver » réserve SANS ouvrir l'appli ni redemander confirmation : c'est le geste
+        // que la notification réclame, et chaque seconde compte face aux autres membres. Le
+        // service worker (public/sw.js) poste à /api/book, qui relit le planning comme pour
+        // une réservation faite à l'écran, puis remplace cette notification par le résultat.
+        actions: [BOOK_ACTION],
+        data: {
+          book: {
+            quand,
+            startsAt: libres[0].startsAt,
+            courts: libres.map((s) => ({ id: s.id, name: s.courtName })),
+          },
+        },
       });
       await prisma.slotAlert.update({
         where: { id: a.id },

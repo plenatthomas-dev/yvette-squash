@@ -134,6 +134,7 @@ testées sur la branche `Recette` avant activation en prod.
 - **Flux de branches & promotion** : [docs/flux-branches.md](docs/flux-branches.md)
 - **Interclub** (rencontres par équipes, marquage en direct) : [docs/interclub.md](docs/interclub.md)
 - **squashnet.fr** (carte des points d'entrée fédéraux, ce qu'on lit et ce qu'on pourrait lire) : [docs/squashnet.md](docs/squashnet.md)
+- **Application Android** (TWA, Play Store, coûts — étude) : [docs/etude-app-android.md](docs/etude-app-android.md)
 
 ---
 

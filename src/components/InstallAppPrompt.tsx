@@ -13,6 +13,7 @@
 // (mémorisé en local : elle vit hors connexion, écran de login inclus).
 
 import { useEffect, useState } from "react";
+import { isAndroidApp } from "@/lib/androidApp";
 
 const SNOOZE_KEY = "installPromptSnooze";
 const SNOOZE_MS = 14 * 24 * 60 * 60 * 1000; // 14 jours
@@ -73,7 +74,9 @@ export default function InstallAppPrompt() {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
-    if (isStandalone() || snoozed()) return;
+    // `isAndroidApp` : dans l'appli Android (TWA), proposer d'« installer l'appli » à
+    // quelqu'un qui est dedans n'a pas de sens.
+    if (isStandalone() || isAndroidApp() || snoozed()) return;
 
     // Le service worker n'était enregistré qu'à l'activation des notifications push. Or Chrome
     // conditionne `beforeinstallprompt` à un SW actif AVEC un handler `fetch` (ajouté dans

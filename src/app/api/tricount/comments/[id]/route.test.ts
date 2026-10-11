@@ -13,13 +13,17 @@ import type { NextRequest } from "next/server";
 // existe à cet identifiant.
 
 const h = vi.hoisted(() => ({
-  session: null as null | { userId: string; displayName: string; resa: unknown },
+  session: null as null | { userId: string; displayName: string; resa: unknown; email?: string },
   tricountOn: true,
   comment: null as null | { userId: string },
   del: vi.fn(async () => ({})),
 }));
 
-vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
+// Le module RÉEL autour de `getSession` : `isAdminEmail` en tire `normalizeEmail`.
+vi.mock("@/lib/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/session")>()),
+  getSession: vi.fn(async () => h.session),
+}));
 vi.mock("@/lib/features-server", () => ({ getFeatures: async () => ({ tricount: h.tricountOn }) }));
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -37,6 +41,7 @@ beforeEach(() => {
   h.session = { userId: "u1", displayName: "Alice", resa: { accessToken: "t" } };
   h.tricountOn = true;
   h.comment = { userId: "u1" };
+  process.env.ADMIN_EMAILS = "chef@example.com";
 });
 
 describe("DELETE /api/tricount/comments/[id]", () => {
@@ -51,6 +56,14 @@ describe("DELETE /api/tricount/comments/[id]", () => {
     const res = await DELETE(req(), ctx);
     expect(res.status).toBe(404);
     expect(h.del).not.toHaveBeenCalled();
+  });
+
+  it("l'ADMIN supprime le message d'un autre, comme sur le forum", async () => {
+    h.session = { userId: "adm", displayName: "Chef", resa: { accessToken: "t" }, email: "chef@example.com" };
+    h.comment = { userId: "u2" };
+    const res = await DELETE(req(), ctx);
+    expect(res.status).toBe(200);
+    expect(h.del).toHaveBeenCalledWith({ where: { id: "c1" } });
   });
 
   it("répond 404 — le même — sur un message inexistant", async () => {

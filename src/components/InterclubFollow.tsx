@@ -15,13 +15,23 @@ import { useCallback, useEffect, useState } from "react";
 import { readOk } from "@/lib/apiFetch";
 import { BellIcon } from "@/components/icons";
 import { FOLLOW_LABELS, FOLLOW_LEVELS, type FollowLevel } from "@/lib/interclub";
-import { ensurePushSubscribed, pushEnabledOnServer, pushSupported } from "@/lib/pushClient";
+import {
+  ensurePushSubscribed,
+  pushEnabledOnServer,
+  pushSubscriptionState,
+  pushSupported,
+} from "@/lib/pushClient";
 
 type Team = { id: string; name: string };
 type Follow = { teamId: string; level: FollowLevel };
+type DeviceState = Awaited<ReturnType<typeof pushSubscriptionState>>;
 
-/** Pourquoi les notifications ne peuvent pas arriver, le cas échéant. */
-type PushBlock = null | "unsupported" | "server" | "denied";
+/**
+ * Pourquoi les notifications ne peuvent pas arriver, le cas échéant. `off` : rien ne l'empêche,
+ * mais CET appareil n'est pas abonné — « Ne plus recevoir » pressé dans les Paramètres, ou
+ * abonnement pris depuis un autre appareil. L'abonnement d'équipe existe et n'arrive nulle part.
+ */
+type PushBlock = null | "unsupported" | "server" | "denied" | "off";
 
 export default function InterclubFollow({
   teams,
@@ -44,6 +54,19 @@ export default function InterclubFollow({
   const [followsFailed, setFollowsFailed] = useState(false);
   const [pushReady, setPushReady] = useState<boolean | null>(null);
   const [denied, setDenied] = useState(false);
+  /** Où en est CET appareil (permission, abonnement) — `null` tant qu'on ne l'a pas lu. */
+  const [device, setDevice] = useState<DeviceState | null>(null);
+  const [activating, setActivating] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    pushSubscriptionState().then((st) => {
+      if (!cancelled) setDevice(st);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadFollows = useCallback(async () => {
     try {
@@ -69,10 +92,14 @@ export default function InterclubFollow({
     // Le refus constaté À L'INSTANT, et non `block`, qui date du rendu courant : `setDenied`
     // ci-dessous ne sera visible que du rendu SUIVANT, et l'interaction qui découvre le refus
     // annonçait donc « Abonnement enregistré » sans la réserve qu'elle venait pourtant d'établir.
-    let blockedNow = block !== null;
+    let blockedNow = block !== null && block !== "off";
+    /** L'appareil vient d'être abonné PAR CE GESTE : le membre doit l'apprendre, et savoir où
+     *  revenir dessus. `device === null` (pas encore lu) : on ne sait pas, on ne promet rien. */
+    let activatedNow = false;
     // S'abonner sans avoir autorisé les notifications ne produirait rien : on demande la
     // permission au moment où le geste a du sens, pas au chargement de la page.
     if (level && pushSupported() && pushEnabledOnServer()) {
+      const wasOff = device !== null && !(device.permission === "granted" && device.subscribed);
       // ⚠️ `ensurePushSubscribed` PEUT JETER, et son échec ne doit pas emporter l'écriture.
       //
       // `serviceWorker.register`, `pushManager.subscribe` (`InvalidStateError` sur un
@@ -88,10 +115,14 @@ export default function InterclubFollow({
       // d'être posée, elle servira dès que l'obstacle sera levé.
       const ok = await ensurePushSubscribed().catch(() => false);
       setDenied(!ok);
+      if (ok) setDevice({ permission: "granted", subscribed: true });
       // Un seul toast par geste : le refus se dit dans le message de fin, qui porte déjà la
       // réserve, et l'encart persistant sous la liste (`block`) le rappelle ensuite tant qu'il
       // dure. Deux toasts coup sur coup pour un même fait n'apprenaient rien de plus.
-      if (!ok) blockedNow = true;
+      // Recalculé ici plutôt que cumulé : un refus d'un geste précédent, levé depuis dans le
+      // navigateur, ne doit pas réserver un abonnement qui vient de réussir.
+      blockedNow = !ok || pushReady === false;
+      activatedNow = ok && wasOff;
     }
     try {
       const res = await fetch("/api/interclub/follows", {
@@ -110,13 +141,36 @@ export default function InterclubFollow({
       // dire sans réserve laissait attendre des notifications qui ne viendraient jamais.
       if (!level) toast("ok", "Abonnement retiré");
       else if (blockedNow) toast("info", "Abonnement enregistré, mais les notifications ne peuvent pas encore arriver.");
+      else if (activatedNow)
+        toast(
+          "ok",
+          "Abonnement enregistré — notifications activées sur cet appareil. Tu peux les couper dans les Paramètres.",
+        );
       else toast("ok", "Abonnement enregistré");
     } catch (e) {
       toast("err", (e as Error).message);
     }
   }
 
+  /** Le bouton de l'encart `off` : même geste que dans les Paramètres, sans aller les chercher. */
+  async function activate() {
+    setActivating(true);
+    const ok = await ensurePushSubscribed().catch(() => false);
+    setDenied(!ok);
+    setDevice(ok ? { permission: "granted", subscribed: true } : await pushSubscriptionState());
+    setActivating(false);
+    toast(
+      ok ? "ok" : "err",
+      ok
+        ? "Notifications activées sur cet appareil. Tu peux les couper dans les Paramètres."
+        : "Autorisation refusée — rien ne sera envoyé sur cet appareil.",
+    );
+  }
+
   const levelOf = (teamId: string) => (follows ?? []).find((f) => f.teamId === teamId)?.level ?? "";
+  // Les obstacles lus AU CHARGEMENT ne valent d'être dits qu'à qui suit une équipe : sans
+  // abonnement, « cet appareil ne reçoit rien » n'est pas un problème, c'est l'état voulu.
+  const hasFollows = (follows ?? []).length > 0;
 
   // Un seul obstacle est signalé à la fois, du plus général au plus personnel : inutile de
   // parler de permission navigateur si le serveur n'a de toute façon pas de quoi envoyer.
@@ -124,9 +178,11 @@ export default function InterclubFollow({
     ? "unsupported"
     : pushReady === false
       ? "server"
-      : denied
+      : denied || (hasFollows && device?.permission === "denied")
         ? "denied"
-        : null;
+        : hasFollows && pushEnabledOnServer() && device !== null && !device.subscribed
+          ? "off"
+          : null;
 
   const BLOCK_TEXT: Record<NonNullable<PushBlock>, string> = {
     unsupported:
@@ -135,6 +191,9 @@ export default function InterclubFollow({
       "Les notifications ne sont pas configurées sur cet environnement (clés VAPID absentes). L'abonnement est enregistré et servira dès qu'elles le seront.",
     denied:
       "Les notifications sont bloquées pour ce site dans les réglages du navigateur. L'abonnement est enregistré et servira une fois l'autorisation donnée.",
+    // Pas « n'arriveront pas » : `pushToUsers` journalise pour tous les abonnés d'équipe, avec
+    // ou sans appareil abonné — la cloche les reçoit quoi qu'il arrive. Seul le push manque.
+    off: "Cet appareil ne reçoit pas les notifications : tes suivis n'arrivent que dans la cloche de l'appli.",
   };
 
   // Aucune équipe : rien à suivre, et un panneau vide en tête de page n'apprendrait rien.
@@ -181,6 +240,19 @@ export default function InterclubFollow({
       {block && (
         <p className="notice tiny" role="status">
           {BLOCK_TEXT[block]}
+          {block === "off" && (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="secondary ic-follow-retry"
+                disabled={activating}
+                onClick={activate}
+              >
+                {activating ? "…" : "Activer ici"}
+              </button>
+            </>
+          )}
         </p>
       )}
     </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCloseRequest } from "@/lib/useCloseRequest";
 
 // Icône « plus d'options » (trois points) pour le menu déroulant du header.
 function MoreIcon() {
@@ -31,6 +32,8 @@ export interface HeaderMenuItem {
 export function HeaderMenu({ items }: { items: HeaderMenuItem[] }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // Le retour d'Android referme le menu plutôt que l'appli.
+  useCloseRequest(() => setOpen(false), open);
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
@@ -38,6 +41,8 @@ export function HeaderMenu({ items }: { items: HeaderMenuItem[] }) {
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // Annule la demande de fermeture qu'Échap déclenche aussi (cf. useCloseRequest).
+      e.preventDefault();
       setOpen(false);
       // Rend le focus au déclencheur : sans ça il repart au début du document et
       // l'utilisateur au clavier doit retraverser tout l'en-tête.

@@ -136,6 +136,9 @@ const detail = (over: Corps = {}) => ({
   canGenerateFinals: false,
   champion: null,
   ...over,
+  // Le serveur rend `canManage` = créateur OU admin. Par défaut il suit `isCreator` ; un test
+  // d'admin le pose seul, sans `isCreator`.
+  canManage: over.canManage ?? over.isCreator ?? false,
 });
 
 let reponse: Corps = detail();
@@ -187,6 +190,12 @@ describe("« Générer la phase finale » — un bouton pour une seule personne"
     expect(screen.getByText(/Générer la phase finale/)).toBeTruthy();
   });
 
+  it("l'ADMIN le voit aussi, sans être le créateur", async () => {
+    await ouvrir(detail({ isCreator: false, canManage: true, canGenerateFinals: true }));
+    expect(screen.getByText(/Générer la phase finale/)).toBeTruthy();
+    expect(screen.queryByText(/le créateur doit lancer/i)).toBeNull();
+  });
+
   it("un participant ne le voit PAS — on lui dit qui doit cliquer", async () => {
     // Le serveur refuserait en 403 ; ce qu'on vérifie ici, c'est qu'on ne lui tend pas un
     // bouton condamné, et qu'on lui explique l'attente au lieu de ne rien afficher.
@@ -218,6 +227,12 @@ describe("saisir un score — qui a le droit, et sur quel match", () => {
     expect(screen.getByText("0–2")).toBeTruthy();
     // Le libellé accessible nomme les deux joueurs dans le bon ordre.
     expect(screen.getByLabelText("Marc 2 - 0 Léa")).toBeTruthy();
+  });
+
+  it("l'ADMIN spectateur saisit quand même — et voit « Supprimer »", async () => {
+    await ouvrir(detail({ isParticipant: false, isCreator: false, canManage: true }));
+    expect(screen.getByText("2–0")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Supprimer" })).toBeTruthy();
   });
 
   it("un spectateur (ni participant ni créateur) n'en voit aucun", async () => {
