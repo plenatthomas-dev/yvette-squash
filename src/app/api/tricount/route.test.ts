@@ -15,7 +15,7 @@ import type { NextRequest } from "next/server";
 // dans `tricount.test.ts`.
 
 const h = vi.hoisted(() => ({
-  session: null as null | { userId: string; displayName: string; resa: unknown },
+  session: null as null | { userId: string; displayName: string; resa: unknown; email?: string },
   tricountOn: true,
   users: [] as { id: string; displayName: string; disabledAt: Date | null }[],
   rows: [] as Record<string, unknown>[],
@@ -29,7 +29,11 @@ const h = vi.hoisted(() => ({
   lireJoueurs: vi.fn(),
 }));
 
-vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
+// Le module RÉEL autour de `getSession` : `isAdminEmail` en tire `normalizeEmail`.
+vi.mock("@/lib/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/session")>()),
+  getSession: vi.fn(async () => h.session),
+}));
 vi.mock("@/lib/features-server", () => ({
   getFeatures: async () => ({ tricount: h.tricountOn, interclub: h.interclubOn }),
 }));
@@ -146,6 +150,7 @@ async function corps(query = "") {
 beforeEach(() => {
   vi.clearAllMocks();
   h.session = resaUser;
+  process.env.ADMIN_EMAILS = "chef@example.com";
   h.tricountOn = true;
   h.users = [
     { id: "u1", displayName: "Alice", disabledAt: null },
@@ -320,6 +325,29 @@ describe("GET /api/tricount — ce que la vue décide", () => {
     // contrôle par mutation l'a dit.
     expect(par.payee.canDelete).toBe(true);
     expect(par.autre.canDelete).toBe(false); // ni l'un ni l'autre
+  });
+
+  it("ouvre à l'ADMIN les lignes et les messages des autres — sauf l'édition d'un remboursement", async () => {
+    h.session = { ...resaUser, email: "chef@example.com" };
+    h.rows = [
+      tricount({
+        id: "t1",
+        date: "2026-09-03",
+        expenses: [
+          depense({ id: "autre", payer: "u2", montant: 1000, entre: ["u1", "u2"], creatorId: "u2" }),
+          depense({ id: "r", payer: "u2", montant: 500, entre: ["u1"], creatorId: "u2", isRefund: true }),
+        ],
+        comments: [{ id: "c2", body: "à l'autre", userId: "u2", createdAt: new Date("2026-09-03") }],
+      }),
+    ];
+    const [t] = (await corps()).tricounts as unknown as {
+      expenses: { id: string; canDelete: boolean; canEdit: boolean }[];
+      comments: { canDelete: boolean }[];
+    }[];
+    const par = Object.fromEntries(t.expenses.map((e) => [e.id, e]));
+    expect(par.autre).toMatchObject({ canDelete: true, canEdit: true });
+    expect(par.r).toMatchObject({ canDelete: true, canEdit: false });
+    expect(t.comments[0].canDelete).toBe(true);
   });
 
   it("n'offre JAMAIS l'édition d'un remboursement, même au sien", async () => {

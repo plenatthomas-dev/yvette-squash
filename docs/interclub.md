@@ -754,6 +754,12 @@ plus. `InterclubAvailability.setById` porte **qui a saisi** ; différent du suje
 affiche « relayé par … ». Pas de booléen `relayed` en plus : il serait déductible, donc capable
 de mentir.
 
+**L'admin passe, rattaché à l'équipe ou non.** Il lit les réponses de toutes les rencontres et
+relaie pour n'importe quel joueur du roster — c'est lui qui pose les équipes, et jouer en 2 (ou
+nulle part) ne doit pas lui cacher qu'il manque quelqu'un en 1. Le passe-droit ouvre la
+**rencontre**, pas l'équipe : le sujet d'une réponse doit toujours en être, et un admin hors
+roster n'a donc pas de réponse à lui (l'écran ne lui montre pas « à répondre »).
+
 **Écraser une réponse de première main se confirme.** Si la réponse existante a été posée par
 l'intéressé lui-même, le `PUT` répond **409** avec ce qu'elle disait ; l'écran l'affiche et
 redemande, et le relais n'aboutit qu'avec `confirmOverride: true`. Le capitaine qui a eu la

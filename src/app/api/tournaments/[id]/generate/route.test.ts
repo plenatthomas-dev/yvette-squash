@@ -10,7 +10,7 @@ import type { NextRequest } from "next/server";
 
 const h = vi.hoisted(() => ({
   featureOn: true,
-  session: null as null | { userId: string },
+  session: null as null | { userId: string; email?: string },
   tournament: null as null | Record<string, unknown>,
   /** Non nul = on force ce que `proposeFormats` renvoie, pour éprouver le repli. */
   propositions: null as null | unknown[],
@@ -31,7 +31,11 @@ vi.mock("@/lib/features-server", () => ({
     ranking: false,
   }),
 }));
-vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
+// Le module RÉEL autour de `getSession` : `isAdminEmail` en tire `normalizeEmail`.
+vi.mock("@/lib/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/session")>()),
+  getSession: vi.fn(async () => h.session),
+}));
 vi.mock("@/lib/db", () => ({
   prisma: {
     // On RETIENT les options : c'est la seule chose qui distingue ici une transaction
@@ -81,6 +85,7 @@ const tailles = () => h.materialize.mock.calls[0][4] as number[];
 beforeEach(() => {
   h.featureOn = true;
   h.session = { userId: "u1" };
+  process.env.ADMIN_EMAILS = "chef@example.com";
   h.tournament = brouillon();
   h.propositions = null;
   h.txOptions = undefined;
@@ -138,6 +143,12 @@ describe("POST /api/tournaments/[id]/generate — qui, et quand", () => {
       error: "Seul le créateur peut générer le tableau",
     });
     expect(h.materialize).not.toHaveBeenCalled();
+  });
+
+  it("génère pour un ADMIN qui n'est pas le créateur", async () => {
+    h.session = { userId: "adm", email: "chef@example.com" };
+    expect((await POST(req({ kind: "pools" }), params)).status).toBe(200);
+    expect(h.materialize).toHaveBeenCalledTimes(1);
   });
 
   it.each([["running"], ["done"]])("409 si le tournoi est déjà en « %s »", async (status) => {

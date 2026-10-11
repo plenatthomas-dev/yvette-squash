@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
+import { isAdminEmail } from "@/lib/admin";
 import { HttpError, httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
 import { getFeatures } from "@/lib/features-server";
 import { serializeTournament, tournamentInclude, validScore } from "@/lib/tournament-db";
@@ -8,9 +9,9 @@ import { bracketDescendants } from "@/lib/tournament";
 export const runtime = "nodejs";
 
 // PATCH /api/tournaments/{id}/matches/{mid} : saisit un score (en JEUX). Réservé aux
-// PARTICIPANTS du tournoi (et au créateur). { score1, score2 } alignés sur p1/p2 renvoyés
+// PARTICIPANTS du tournoi (et au créateur, et aux admins). { score1, score2 } alignés sur p1/p2 renvoyés
 // par GET. Pour le tableau, les participants du match sont figés à cet instant (résolus au
-// fur et à mesure). Un match déjà joué n'est ré-éditable que par le créateur.
+// fur et à mesure). Un match déjà joué n'est ré-éditable que par le créateur ou un admin.
 //
 // Tout est ATOMIQUE (Serializable + retry P2034) : la relecture de l'état, la saisie, la
 // CASCADE d'invalidation (corriger un match de tableau qui change le vainqueur périme les
@@ -39,8 +40,8 @@ export async function PATCH(
       const t = await tx.tournament.findUnique({ where: { id }, include: tournamentInclude });
       if (!t) throw new HttpError(404, "Tournoi introuvable");
 
-      const view = serializeTournament(t, session.userId);
-      if (!view.isParticipant && !view.isCreator) {
+      const view = serializeTournament(t, session.userId, isAdminEmail(session.email));
+      if (!view.isParticipant && !view.canManage) {
         throw new HttpError(403, "Réservé aux participants du tournoi");
       }
       if (!validScore(score1, score2, t.bestOf)) {
@@ -60,7 +61,7 @@ export async function PATCH(
       if (m.status === "bye") {
         throw new HttpError(400, "Ce match est un passage direct (bye)");
       }
-      if (m.status === "done" && !view.isCreator) {
+      if (m.status === "done" && !view.canManage) {
         throw new HttpError(409, "Match déjà saisi — seul le créateur peut le corriger");
       }
 

@@ -187,8 +187,12 @@ function serializeFinals(
  * Sérialise un tournoi pour l'API : joueurs, poules + classements, ou tableau « en direct »
  * (participants courants + classement final), plus la liste des matchs planifiés (terrains).
  * La logique de classement/tableau vient du moteur pur ; ici on ne fait que brancher la base.
+ *
+ * `canManage` = créateur OU admin : c'est lui, et non `isCreator`, qui ouvre les gestes du
+ * créateur (générer, phase finale, corriger un score, supprimer). `isCreator` reste la vérité
+ * sur l'identité — un admin n'est pas le créateur, il en a seulement les droits.
  */
-export function serializeTournament(t: FullTournament, userId: string) {
+export function serializeTournament(t: FullTournament, userId: string, isAdmin = false) {
   const players = [...t.players].sort((a, b) => (a.seed ?? 0) - (b.seed ?? 0));
   const nameById = new Map(players.map((p) => [p.id, p.displayName]));
   const seedById = new Map(players.map((p) => [p.id, p.seed ?? 0]));
@@ -199,6 +203,7 @@ export function serializeTournament(t: FullTournament, userId: string) {
 
   const isCreator = t.createdById === userId;
   const isParticipant = players.some((p) => p.userId === userId);
+  const canManage = isCreator || isAdmin;
 
   const base = {
     id: t.id,
@@ -211,6 +216,7 @@ export function serializeTournament(t: FullTournament, userId: string) {
     courts: t.courts,
     isCreator,
     isParticipant,
+    canManage,
     players: players.map((p) => ({ id: p.id, name: p.displayName, seed: p.seed ?? 0 })),
   };
 

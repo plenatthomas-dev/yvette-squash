@@ -14,7 +14,7 @@ type View = {
 
 const h = vi.hoisted(() => ({
   featureOn: true,
-  session: null as null | { userId: string },
+  session: null as null | { userId: string; email?: string },
   tournament: null as null | Record<string, unknown>,
   view: {} as View,
   matchUpdate: vi.fn(async (_args: { where: { id: string }; data: Record<string, unknown> }) => ({})),
@@ -38,7 +38,11 @@ vi.mock("@/lib/features-server", () => ({
     ranking: false,
   }),
 }));
-vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
+// Le module RÉEL autour de `getSession` : `isAdminEmail` en tire `normalizeEmail`.
+vi.mock("@/lib/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/session")>()),
+  getSession: vi.fn(async () => h.session),
+}));
 vi.mock("@/lib/db", () => ({
   prisma: {
     // Exécute la callback de transaction avec un faux tx (propage les throws → catch route).
@@ -63,9 +67,17 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 // On garde validScore/tournamentInclude RÉELS ; on ne contrôle que serializeTournament.
+// `canManage` suit la règle réelle (créateur OU admin) : c'est la route qui dit si l'appelant est
+// admin, et le faux doit l'écouter pour que ce passage soit éprouvé.
 vi.mock("@/lib/tournament-db", async () => {
   const actual = await vi.importActual<typeof import("@/lib/tournament-db")>("@/lib/tournament-db");
-  return { ...actual, serializeTournament: () => h.view };
+  return {
+    ...actual,
+    serializeTournament: (_t: unknown, _userId: string, isAdmin = false) => ({
+      ...h.view,
+      canManage: h.view.isCreator || isAdmin,
+    }),
+  };
 });
 
 import { PATCH } from "./route";
@@ -96,6 +108,7 @@ function poolView(over: Partial<View> = {}, match: Match = {}): View {
 beforeEach(() => {
   h.featureOn = true;
   h.session = { userId: "u1" };
+  process.env.ADMIN_EMAILS = "chef@example.com";
   h.tournament = { bestOf: 3, status: "running", matches: [] };
   h.view = poolView();
   h.txOptions = undefined;
@@ -172,6 +185,23 @@ describe("PATCH /api/tournaments/[id]/matches/[mid]", () => {
     const res = await PATCH(req({ score1: 0, score2: 2 }), { params });
     expect(res.status).toBe(200);
     expect(h.matchUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("un participant NON créateur ne corrige pas un match déjà saisi", async () => {
+    h.view = poolView({}, { status: "done", winnerId: "p1" });
+    const res = await PATCH(req({ score1: 0, score2: 2 }), { params });
+    expect(res.status).toBe(409);
+    expect(h.matchUpdate).not.toHaveBeenCalled();
+  });
+
+  it("l'ADMIN, ni créateur ni participant, saisit ET corrige", async () => {
+    h.session = { userId: "adm", email: "chef@example.com" };
+    h.view = poolView({ isParticipant: false, isCreator: false });
+    expect((await PATCH(req({ score1: 2, score2: 0 }), { params })).status).toBe(200);
+
+    h.view = poolView({ isParticipant: false, isCreator: false }, { status: "done", winnerId: "p1" });
+    expect((await PATCH(req({ score1: 0, score2: 2 }), { params })).status).toBe(200);
+    expect(h.matchUpdate).toHaveBeenCalledTimes(2);
   });
 });
 

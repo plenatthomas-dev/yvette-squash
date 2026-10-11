@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { isAdminEmail } from "@/lib/admin";
 import { requireInterclubMember } from "@/lib/interclub-access";
 import { httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
 import {
@@ -23,6 +24,13 @@ export const dynamic = "force-dynamic";
 //  montrer à qui ne joue pas cette rencontre n'apporte rien. Pas le seul
 //  capitaine non plus : voir « on n'est que trois » est ce qui fait répondre
 //  les autres, et c'est tout l'intérêt par rapport à un fil de discussion.
+//
+//  L'ADMIN PASSE, rattaché à une équipe ou non, comme partout ailleurs
+//  (`isAdminEmail`). C'est lui qui pose les rosters : lui fermer les réponses
+//  de l'équipe 1 parce qu'il joue en 2 — ou ne joue pas — l'empêchait de voir
+//  qu'il manque un joueur, et de relayer la réponse de quelqu'un qui l'a appelé.
+//  Ce qu'il écrit reste borné par le ROSTER (le sujet doit être de l'équipe) et
+//  tracé comme tout relais (`setById`).
 //
 //  ⚠️ ON PEUT RÉPONDRE POUR QUELQU'UN D'AUTRE. Une partie de l'équipe ne verra
 //  jamais l'appel : les joueurs sans compte, et les membres qui n'ont pas
@@ -60,6 +68,8 @@ async function loadContext(req: NextRequest, id: string): Promise<Context> {
   if (!fixture) {
     return { ok: false, response: NextResponse.json({ error: "Rencontre introuvable" }, { status: 404 }) };
   }
+
+  if (isAdminEmail(session.email)) return { ok: true, session, fixture };
 
   const me = await prisma.user.findUnique({
     where: { id: session.userId },

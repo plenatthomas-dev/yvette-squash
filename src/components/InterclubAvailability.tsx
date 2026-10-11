@@ -250,7 +250,8 @@ export function InterclubAvailability({
   if (!data) return null;
   const { entries, counts, matchCount } = data;
   const manque = counts.yes < matchCount;
-  const maReponse = entries.find((e) => e.key === data.me)?.status ?? null;
+  const maLigne = entries.find((e) => e.key === data.me);
+  const maReponse = maLigne?.status ?? null;
   const deplie = ouvert ?? false;
 
   return (
@@ -262,10 +263,14 @@ export function InterclubAvailability({
       <summary className="ic-dispo-head">
         <h4>Disponibilités</h4>
         {/* MA réponse, dans le résumé : c'est la seule chose que je cherche quand le bloc est
-            replié, et l'y montrer évite d'avoir à déplier pour vérifier que j'ai bien répondu. */}
-        <span className={`ic-dispo-mine${maReponse ? ` is-${maReponse}` : " is-none"}`}>
-          {maReponse ? AVAILABILITY_LABELS[maReponse] : "à répondre"}
-        </span>
+            replié, et l'y montrer évite d'avoir à déplier pour vérifier que j'ai bien répondu.
+            Absente pour un admin hors de cette équipe : il lit et relaie, mais n'a rien à
+            répondre pour lui-même — « à répondre » l'enverrait chercher un bouton qui n'existe pas. */}
+        {maLigne && (
+          <span className={`ic-dispo-mine${maReponse ? ` is-${maReponse}` : " is-none"}`}>
+            {maReponse ? AVAILABILITY_LABELS[maReponse] : "à répondre"}
+          </span>
+        )}
         {/* Le compte parle en SIMPLES À COUVRIR, pas en pourcentage de réponses : c'est la
             seule question que le capitaine se pose. Les « incertain » sont dits à part —
             les additionner aux présents ferait taire l'alerte le jour où elle est utile. */}
