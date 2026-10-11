@@ -6,6 +6,8 @@
 //  `div-rank-*` sont stables). Le parsing est isolé + testé sur fixture réelle.
 // ============================================================================
 
+import { BALISE } from "./html";
+
 // Point d'entrée AJAX unique de squashnet : toutes les sections passent par cette URL, seul
 // `ic_a` dit laquelle. D'où un nom qui ne parle pas du classement.
 const AJAX_URL = "https://www.squashnet.fr/index.php";
@@ -38,10 +40,10 @@ export interface RankingRow {
 
 // --- Parsing (PUR, exporté pour les tests) ---------------------------------
 
-/** Retire les balises et normalise les espaces. */
+/** Retire les balises (cf. `BALISE` pour la balise jamais refermée) et normalise les espaces. */
 function stripTags(s: string): string {
   return s
-    .replace(/<[^>]*>/g, "")
+    .replace(BALISE, "")
     .replace(/&nbsp;/g, " ")
     .replace(/\s+/g, " ")
     .trim();

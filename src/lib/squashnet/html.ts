@@ -24,13 +24,25 @@ const TD_BRUT = /<td([^>]*)>([\s\S]*?)<\/td>/gi;
 /** Les lignes d'un tableau. `[\s\S]*?` s'arrête au premier `</tr>` — pas de ligne imbriquée. */
 export const TR = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
 
-/** Retire les balises, déplie les entités courantes, et normalise les espaces. */
+/**
+ * Les balises, y compris une balise ouverte et jamais refermée en fin de fragment. Avec
+ * `<[^>]*>` seul, un `<script` sans `>` traversait intact : chaque `<` ouvre désormais une
+ * correspondance qui aboutit toujours (au premier `>`, ou à la fin), donc aucun `<` ne survit.
+ */
+export const BALISE = /<[^>]*(?:>|$)/g;
+
+/**
+ * Retire les balises, déplie les entités courantes, et normalise les espaces.
+ *
+ * `&amp;` SE DÉPLIE EN DERNIER. Avant les autres, il fabriquait des entités qu'on dépliait
+ * ensuite une seconde fois : « &amp;#39; » (le texte littéral « &#39; ») ressortait en « ' ».
+ */
 export function texte(html: string): string {
   return html
-    .replace(/<[^>]*>/g, "")
+    .replace(BALISE, "")
     .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
     .replace(/&#39;|&apos;/g, "'")
+    .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ")
     .trim();
 }

@@ -1,4 +1,5 @@
 import { postAjax } from "./client";
+import { texte } from "./html";
 import { fetchTeamRoster, RosterUnreadableError, type TeamTie } from "./roster";
 
 // ============================================================================
@@ -110,21 +111,14 @@ const MONTHS: Record<string, string> = {
 /**
  * Retire les balises et normalise les espaces. `<br>` devient une espace, pas rien.
  *
- * Les entités décodées sont les MÊMES que celles du classement (`standings.texte`), apostrophe
- * comprise. Les deux modules lisent les mêmes noms d'équipe : deux politiques de décodage, et
- * ils cesseraient de les normaliser pareil le jour où squashnet arrêterait de servir de l'UTF-8
- * brut — « Squash de l'Yvette » d'un côté, « Squash de &#39;Yvette » de l'autre, et un
- * rapprochement qui échoue sans rien dire.
+ * Le décodage est CELUI du classement — la même fonction (`html.texte`), pas une copie. Les deux
+ * modules lisent les mêmes noms d'équipe : deux politiques de décodage, et ils cesseraient de les
+ * normaliser pareil le jour où squashnet arrêterait de servir de l'UTF-8 brut — « Squash de
+ * l'Yvette » d'un côté, « Squash de &#39;Yvette » de l'autre, et un rapprochement qui échoue
+ * sans rien dire.
  */
 function stripTags(s: string): string {
-  return s
-    .replace(/<br\s*\/?>/gi, " ")
-    .replace(/<[^>]*>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
+  return texte(s.replace(/<br\s*\/?>/gi, " "));
 }
 
 /**
