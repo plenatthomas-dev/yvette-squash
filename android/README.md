@@ -127,6 +127,16 @@ via `monochromeIconUrl`) et en `public/icon-monochrome-96.png` (badge des notifi
 ⚠️ `bubblewrap update` **télécharge** `monochromeIconUrl` depuis la production : il échouera
 tant que `icon-monochrome-512.png` n'y est pas déployé.
 
+## Les raccourcis (appui long sur l'icône)
+
+Planning, Interclub et Frais ouvrent directement leur vue (`/?view=…`). Ils sont déclarés deux
+fois : dans `src/app/manifest.ts` pour la PWA, et dans `twa-manifest.json` (`shortcuts`) pour
+l'appli. `src/app/manifest.test.ts` échoue si les deux divergent. Les icônes viennent de
+`public/shortcut-*.svg`, rendues en `public/shortcut-*-192.png`.
+
+⚠️ Comme pour l'icône de notification, `bubblewrap update` **télécharge** ces PNG depuis la
+production : déployer d'abord, régénérer ensuite.
+
 ## Modifier l'appli Android
 
 Seulement pour ce qui vit dans l'APK : nom, icône, couleurs, raccourcis, adresse. Le contenu,
