@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 
 const h = vi.hoisted(() => ({
   featureOn: true,
-  session: null as null | { userId: string },
+  session: null as null | { userId: string; email?: string },
   tournament: null as null | Record<string, unknown>,
   view: { status: "running" } as { status: string },
   updateSpy: vi.fn(async () => ({})),
@@ -21,7 +21,11 @@ vi.mock("@/lib/features-server", () => ({
     ranking: false,
   }),
 }));
-vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
+// Le module RÉEL autour de `getSession` : `isAdminEmail` en tire `normalizeEmail`.
+vi.mock("@/lib/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/session")>()),
+  getSession: vi.fn(async () => h.session),
+}));
 vi.mock("@/lib/db", () => ({
   prisma: {
     tournament: {
@@ -45,6 +49,7 @@ const params = Promise.resolve({ id: "t1" });
 beforeEach(() => {
   h.featureOn = true;
   h.session = { userId: "u1" };
+  process.env.ADMIN_EMAILS = "chef@example.com";
   h.tournament = null;
   h.view = { status: "running" };
   h.updateSpy.mockClear();
@@ -100,6 +105,13 @@ describe("DELETE /api/tournaments/[id]", () => {
   });
   it("supprime si l'utilisateur est le créateur", async () => {
     h.tournament = { createdById: "u1" };
+    const res = await DELETE(req(), { params });
+    expect(res.status).toBe(200);
+    expect(h.deleteSpy).toHaveBeenCalledWith({ where: { id: "t1" } });
+  });
+  it("supprime aussi pour un ADMIN qui n'est pas le créateur", async () => {
+    h.session = { userId: "adm", email: "chef@example.com" };
+    h.tournament = { createdById: "autre" };
     const res = await DELETE(req(), { params });
     expect(res.status).toBe(200);
     expect(h.deleteSpy).toHaveBeenCalledWith({ where: { id: "t1" } });

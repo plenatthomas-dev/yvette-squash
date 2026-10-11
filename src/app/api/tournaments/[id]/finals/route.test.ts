@@ -15,7 +15,7 @@ import type { NextRequest } from "next/server";
 
 const h = vi.hoisted(() => ({
   featureOn: true,
-  session: null as null | { userId: string },
+  session: null as null | { userId: string; email?: string },
   tournament: null as null | { createdById: string; format: string },
   txOptions: undefined as unknown,
   appels: 0,
@@ -32,7 +32,11 @@ vi.mock("@/lib/features-server", () => ({
     ranking: false,
   }),
 }));
-vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
+// Le module RÉEL autour de `getSession` : `isAdminEmail` en tire `normalizeEmail`.
+vi.mock("@/lib/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/session")>()),
+  getSession: vi.fn(async () => h.session),
+}));
 vi.mock("@/lib/db", () => ({
   prisma: {
     tournament: { findUnique: async () => h.tournament },
@@ -59,6 +63,7 @@ const erreurDb = (code: string, message: string) =>
 beforeEach(() => {
   h.featureOn = true;
   h.session = { userId: "u1" };
+  process.env.ADMIN_EMAILS = "chef@example.com";
   h.tournament = { createdById: "u1", format: "pools_bracket" };
   h.txOptions = undefined;
   h.appels = 0;
@@ -94,6 +99,12 @@ describe("POST /api/tournaments/[id]/finals — qui a le droit", () => {
       error: "Seul le créateur peut générer la phase finale",
     });
     expect(h.appels).toBe(0);
+  });
+
+  it("200 pour un ADMIN qui n'est pas le créateur", async () => {
+    h.session = { userId: "adm", email: "chef@example.com" };
+    expect((await POST(req(), params)).status).toBe(200);
+    expect(h.materializeFinals).toHaveBeenCalledTimes(1);
   });
 
   it.each([["pools"], ["bracket"]])("400 sur un tournoi en « %s »", async (format) => {

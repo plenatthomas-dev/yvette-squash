@@ -79,6 +79,8 @@ interface Detail {
   courts: number;
   isCreator: boolean;
   isParticipant: boolean;
+  /** Créateur OU admin : ouvre les gestes du créateur (cf. `serializeTournament`). */
+  canManage: boolean;
   players: { id: string; name: string; seed: number }[];
   pools: PoolView[] | null;
   bracket: {
@@ -488,11 +490,11 @@ export default function Tournament({ toast, onExpired }: Props) {
   };
 
   // --- Rendu d'un match (corps réutilisé en liste ET dans l'arbre) ---
-  const canScore = !!detail && (detail.isParticipant || detail.isCreator);
+  const canScore = !!detail && (detail.isParticipant || detail.canManage);
 
   // Contrôles de saisie d'un match, partagés liste/arbre :
   //  - match À JOUER : boutons de score (tout participant) ;
-  //  - match DÉJÀ SAISI : bouton « ✏️ Corriger » (créateur seulement, comme le backend) qui
+  //  - match DÉJÀ SAISI : bouton « ✏️ Corriger » (créateur ou admin, comme le backend) qui
   //    ré-ouvre les boutons de score → permet de rattraper une faute de frappe.
   /**
    * Ouvre le marqueur sur un match à jouer, en reprenant son journal s'il en a un.
@@ -541,7 +543,7 @@ export default function Tournament({ toast, onExpired }: Props) {
   const scoreControls = (m: MatchView) => {
     if (!m.p1 || !m.p2 || !detail) return null;
     const done = m.status === "done";
-    const canEnter = done ? detail.isCreator : m.status === "pending" && canScore;
+    const canEnter = done ? detail.canManage : m.status === "pending" && canScore;
     if (!canEnter) return null;
     const open = m.status === "pending" || editing === m.id;
     const canLive = scorer && !done && !!m.id && isValidBestOf(detail.bestOf);
@@ -786,7 +788,7 @@ export default function Tournament({ toast, onExpired }: Props) {
             >
               ← Tournois
             </button>
-            {detail.isCreator && (
+            {detail.canManage && (
               <button className="cancel" onClick={() => setConfirmDelete(true)} disabled={busy}>
                 Supprimer
               </button>
@@ -867,7 +869,7 @@ export default function Tournament({ toast, onExpired }: Props) {
           ))}
 
           {/* Phase finale (pools_bracket) : bouton créateur puis un tableau par rang de poule. */}
-          {detail.canGenerateFinals && detail.isCreator && (
+          {detail.canGenerateFinals && detail.canManage && (
             <section className="trn-block">
               <button onClick={generateFinals} disabled={busy}>
                 🏆 Générer la phase finale
@@ -878,7 +880,7 @@ export default function Tournament({ toast, onExpired }: Props) {
               </p>
             </section>
           )}
-          {detail.canGenerateFinals && !detail.isCreator && (
+          {detail.canGenerateFinals && !detail.canManage && (
             <p className="muted tiny">
               Poules terminées — le créateur doit lancer la phase finale.
             </p>

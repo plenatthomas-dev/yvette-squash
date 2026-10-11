@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
+import { isAdminEmail } from "@/lib/admin";
 import { getFeatures } from "@/lib/features-server";
 import { HttpError, httpErrorResponse, readJsonBody, serializableTransaction } from "@/lib/http-tx";
 import { proposeFormats } from "@/lib/tournament";
@@ -8,7 +9,7 @@ import { materialize } from "@/lib/tournament-db";
 export const runtime = "nodejs";
 
 // POST /api/tournaments/{id}/generate : fige la formule choisie et crée poules + matchs.
-// { kind: "pools" | "bracket" | "pools_bracket", poolSizes?: number[] }. Créateur seulement.
+// { kind: "pools" | "bracket" | "pools_bracket", poolSizes?: number[] }. Créateur ou admin.
 //
 // Tout ce qui touche à la base est ATOMIQUE (Serializable + réessai), et c'est la garde
 // « Tournoi déjà généré » qui l'exige. Elle lisait `status !== "draft"` HORS transaction, puis
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         include: { players: true },
       });
       if (!tournament) throw new HttpError(404, "Tournoi introuvable");
-      if (tournament.createdById !== session.userId) {
+      if (tournament.createdById !== session.userId && !isAdminEmail(session.email)) {
         throw new HttpError(403, "Seul le créateur peut générer le tableau");
       }
       if (tournament.status !== "draft") throw new HttpError(409, "Tournoi déjà généré");

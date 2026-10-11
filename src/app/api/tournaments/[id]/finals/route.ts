@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { getSession } from "@/lib/session";
+import { isAdminEmail } from "@/lib/admin";
 import { prisma } from "@/lib/db";
 import { getFeatures } from "@/lib/features-server";
 import { httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
@@ -9,7 +10,7 @@ import { materializeFinals } from "@/lib/tournament-db";
 export const runtime = "nodejs";
 
 // POST /api/tournaments/{id}/finals : génère la PHASE FINALE d'un pools_bracket (un tableau
-// par rang de poule) une fois toutes les poules terminées. Créateur seulement. Les
+// par rang de poule) une fois toutes les poules terminées. Créateur ou admin. Les
 // participants sont figés au clic à partir des classements de poules du moment.
 //
 // La garde « phase finale déjà générée » de `materializeFinals` est un lire-puis-écrire : elle
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!t) {
     return NextResponse.json({ error: "Tournoi introuvable" }, { status: 404 });
   }
-  if (t.createdById !== session.userId) {
+  if (t.createdById !== session.userId && !isAdminEmail(session.email)) {
     return NextResponse.json(
       { error: "Seul le créateur peut générer la phase finale" },
       { status: 403 },

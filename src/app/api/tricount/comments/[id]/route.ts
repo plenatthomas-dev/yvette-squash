@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
+import { isAdminEmail } from "@/lib/admin";
 import { prisma } from "@/lib/db";
 import { getFeatures } from "@/lib/features-server";
 
 export const runtime = "nodejs";
 
-// DELETE /api/tricount/comments/{id} -> supprime SON propre commentaire (idée 5a).
+// DELETE /api/tricount/comments/{id} -> supprime SON propre commentaire (idée 5a) — ou
+// n'importe lequel pour un admin, comme sur le forum.
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -22,7 +24,7 @@ export async function DELETE(
     where: { id },
     select: { userId: true },
   });
-  if (!comment || comment.userId !== session.userId) {
+  if (!comment || (comment.userId !== session.userId && !isAdminEmail(session.email))) {
     return NextResponse.json({ error: "Commentaire introuvable ou non autorisé" }, { status: 404 });
   }
   await prisma.tricountComment.delete({ where: { id } });

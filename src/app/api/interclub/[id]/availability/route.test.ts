@@ -120,6 +120,7 @@ const membre = (id: string, name: string, joignable = true) => ({
 beforeEach(() => {
   h.interclub = true;
   h.session = { userId: "u1", email: "alice@ex.com" };
+  process.env.ADMIN_EMAILS = "chef@ex.com";
   h.fixture = { id: "f1", teamId: "t1", matchCount: 4, date: "2026-10-09" };
   h.members = [membre("u1", "Alice"), membre("u2", "Bob")];
   h.guests = [];
@@ -171,6 +172,24 @@ describe("GET /api/interclub/{id}/availability", () => {
   it("403 pour un membre rattaché à aucune équipe", async () => {
     h.users.u1 = { teamId: null };
     expect((await GET(req(), ctx)).status).toBe(403);
+  });
+
+  it("l'ADMIN lit les réponses d'une équipe qui n'est pas la sienne", async () => {
+    // C'est lui qui pose les rosters : jouer en équipe 2 — ou ne jouer nulle part — ne doit pas
+    // lui cacher qu'il manque un joueur en équipe 1.
+    h.session = { userId: "adm", email: "chef@ex.com" };
+    h.users.adm = { teamId: "t2" };
+    const res = await GET(req(), ctx);
+    expect(res.status).toBe(200);
+    const { entries, me } = await res.json();
+    expect(entries.map((e: { key: string }) => e.key)).toEqual(["u1", "u2"]);
+    expect(me).toBe("adm");
+  });
+
+  it("l'ADMIN rattaché à AUCUNE équipe lit aussi", async () => {
+    h.session = { userId: "adm", email: "chef@ex.com" };
+    h.users.adm = { teamId: null };
+    expect((await GET(req(), ctx)).status).toBe(200);
   });
 
   it("liste TOUT le roster, y compris ceux qui n'ont rien répondu", async () => {
@@ -440,6 +459,23 @@ describe("PUT /api/interclub/{id}/availability", () => {
   it("403 pour un membre d'une autre équipe, comme en lecture", async () => {
     h.users.u1 = { teamId: "t2" };
     expect((await PUT(req({ status: "yes" }), ctx)).status).toBe(403);
+    expect(h.created).toBeNull();
+  });
+
+  it("l'ADMIN hors de l'équipe relaie une réponse, et le relais porte SA signature", async () => {
+    h.session = { userId: "adm", email: "chef@ex.com" };
+    h.users.adm = { teamId: "t2" };
+    const res = await PUT(req({ status: "yes", userId: "u2" }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.created).toMatchObject({ userId: "u2", setById: "adm", status: "yes" });
+  });
+
+  it("l'ADMIN reste borné au ROSTER : pas de réponse pour lui-même hors de l'équipe", async () => {
+    // Le passe-droit ouvre la rencontre, pas l'équipe : on ne consigne la disponibilité que de
+    // ceux qui peuvent la jouer.
+    h.session = { userId: "adm", email: "chef@ex.com" };
+    h.users.adm = { teamId: "t2" };
+    expect((await PUT(req({ status: "yes" }), ctx)).status).toBe(400);
     expect(h.created).toBeNull();
   });
 });

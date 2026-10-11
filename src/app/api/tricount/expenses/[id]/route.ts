@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
+import { isAdminEmail } from "@/lib/admin";
 import { prisma } from "@/lib/db";
 import {
   splitWithCredits,
@@ -20,7 +21,7 @@ export const runtime = "nodejs";
 
 
 // DELETE /api/tricount/expenses/{id} -> supprime une dépense (ou un remboursement).
-// Autorisé seulement à celui qui l'a saisie ou au payeur. Supprimer une vraie
+// Autorisé seulement à celui qui l'a saisie, au payeur ou à un admin. Supprimer une vraie
 // dépense remet à zéro les validations du tricount ; supprimer la dernière ligne
 // supprime le tricount lui-même (plus de coquille vide dans l'historique).
 export async function DELETE(
@@ -39,14 +40,20 @@ export async function DELETE(
     where: { id },
     select: { tricountId: true, isRefund: true, creatorId: true, payerId: true },
   });
-  if (!expense || (expense.creatorId !== session.userId && expense.payerId !== session.userId)) {
+  if (
+    !expense ||
+    (expense.creatorId !== session.userId &&
+      expense.payerId !== session.userId &&
+      !isAdminEmail(session.email))
+  ) {
     return NextResponse.json({ error: "Dépense introuvable ou non autorisée" }, { status: 404 });
   }
   // Le garde « email seul » ne vaut que pour les vraies DÉPENSES. Un remboursement, ces comptes
   // ont le droit de le déclarer (cf. tricount-guard + route refunds) : leur interdire de le
   // supprimer les enfermait dans leur erreur, d'autant que PATCH renvoie « un remboursement ne se
   // modifie pas, supprime-le et refais-le » — une consigne qu'ils ne pouvaient pas suivre.
-  // L'ownership est déjà vérifié ci-dessus : on ne peut défaire que SON propre remboursement.
+  // L'ownership est déjà vérifié ci-dessus : on ne peut défaire que SON propre remboursement
+  // (ou n'importe lequel pour un admin).
   if (!expense.isRefund) {
     const blocked = blockEmailOnlyExpenseWrite(session);
     if (blocked) return blocked;
@@ -84,7 +91,7 @@ export async function DELETE(
 // PATCH /api/tricount/expenses/{id} -> modifie une VRAIE dépense (jamais un
 // remboursement). { label, amountCents, payerId, participantIds, guestIds?, clubGuestIds?, weights?, preserveSplit? }.
 // clubGuestIds : joueurs du club sans compte, comme à la création (cf. `lib/tricount-club.ts`).
-// Même droit que la suppression (celui qui a saisi la ligne ou le payeur). La date
+// Même droit que la suppression (celui qui a saisi la ligne, le payeur ou un admin). La date
 // (donc le tricount) ne change pas ici. Les parts sont recalculées et les
 // validations « OK pour rembourser » remises à zéro (les montants ont bougé).
 export async function PATCH(
@@ -110,7 +117,8 @@ export async function PATCH(
   if (
     !existingExpense ||
     (existingExpense.creatorId !== session.userId &&
-      existingExpense.payerId !== session.userId)
+      existingExpense.payerId !== session.userId &&
+      !isAdminEmail(session.email))
   ) {
     return NextResponse.json({ error: "Dépense introuvable ou non autorisée" }, { status: 404 });
   }

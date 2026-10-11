@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
+import { isAdminEmail } from "@/lib/admin";
 import { prisma } from "@/lib/db";
 import { getFeatures } from "@/lib/features-server";
 import { serializeTournament, tournamentInclude } from "@/lib/tournament-db";
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!t) {
     return NextResponse.json({ error: "Tournoi introuvable" }, { status: 404 });
   }
-  const view = serializeTournament(t, session.userId);
+  const view = serializeTournament(t, session.userId, isAdminEmail(session.email));
   // Auto-cicatrisation : si le tournoi est en fait terminé mais encore "running" en base
   // (dernier score saisi ailleurs, etc.), on fige le statut pour que la LISTE soit juste.
   if (view.status === "done" && t.status !== "done") {
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   return NextResponse.json(view);
 }
 
-// DELETE /api/tournaments/{id} : créateur seulement (supprime tout en cascade).
+// DELETE /api/tournaments/{id} : créateur ou admin (supprime tout en cascade).
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!(await getFeatures()).tournament) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
@@ -44,7 +45,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!t) {
     return NextResponse.json({ error: "Tournoi introuvable" }, { status: 404 });
   }
-  if (t.createdById !== session.userId) {
+  if (t.createdById !== session.userId && !isAdminEmail(session.email)) {
     return NextResponse.json({ error: "Seul le créateur peut supprimer le tournoi" }, { status: 403 });
   }
   await prisma.tournament.delete({ where: { id } });
