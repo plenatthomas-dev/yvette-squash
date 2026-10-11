@@ -15,7 +15,7 @@ vi.mock("@/lib/moderation", () => ({
   removeBlock: h.removeBlock,
 }));
 // EMAIL_RE réel (email-auth n'importe rien de lourd pour cette constante).
-vi.mock("@/lib/email-auth", () => ({ EMAIL_RE: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ }));
+vi.mock("@/lib/email-auth", () => ({ EMAIL_RE: /^(?=.{1,254}$)[^\s@]+@[^\s@]+\.[^\s@]+$/ }));
 
 import { GET, POST } from "./route";
 
