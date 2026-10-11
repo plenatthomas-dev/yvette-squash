@@ -16,11 +16,66 @@ self.addEventListener("activate", (event) => {
 // et ignoré (donc pas de prompt) — il doit faire quelque chose de réel. On se contente donc
 // d'un passthrough réseau sur les navigations : comportement identique à sans SW, mais le
 // handler est « réel » aux yeux de Chrome.
+//
+// Seule exception : la navigation échoue faute de réseau. Sans ce `catch`, l'appli installée
+// affichait la page d'erreur de Chrome (le dinosaure) ; elle affiche désormais la sienne.
 self.addEventListener("fetch", (event) => {
   if (event.request.mode === "navigate") {
-    event.respondWith(fetch(event.request));
+    event.respondWith(fetch(event.request).catch(() => pageHorsLigne()));
   }
 });
+
+// Construite ICI plutôt que mise en cache : rien à installer ni à invalider, elle ne peut pas
+// être périmée. Tout y est en ligne (styles, dessin) : hors réseau, rien d'autre ne se charge.
+// Statut 200 : c'est ce que Chrome attend d'une appli Android (TWA) hors ligne, ses critères
+// de qualité comptant un 5xx sur la page de démarrage comme une appli cassée.
+function pageHorsLigne() {
+  return new Response(PAGE_HORS_LIGNE, {
+    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+  });
+}
+
+const PAGE_HORS_LIGNE = `<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<title>Pas de connexion · Squash de l'Yvette</title>
+<style>
+  :root { color-scheme: light dark; --fond: #ffffff; --encre: #0f1115; --doux: #5b6170; --accent: #2f6fe0; --accent-fg: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fond: #0f1115; --encre: #e8eaf0; --doux: #9aa1b2; --accent: #4f8cff; --accent-fg: #0e1116; }
+  }
+  body { margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; box-sizing: border-box;
+    background: var(--fond); color: var(--encre); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; text-align: center; }
+  main { max-width: 22rem; }
+  svg { width: 80px; height: 80px; color: var(--doux); }
+  h1 { font-size: clamp(1.25rem, 5vw, 1.5rem); font-weight: 700; line-height: 1.15; margin: 12px 0 12px; }
+  p { margin: 0 0 24px; color: var(--doux); }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 12px; padding: 12px 32px;
+    background: var(--accent); color: var(--accent-fg); cursor: pointer; }
+</style>
+</head>
+<body>
+<main>
+  <svg viewBox="0 0 96 96" aria-hidden="true">
+    <defs><clipPath id="tete"><ellipse cx="48" cy="29" rx="15" ry="21"/></clipPath></defs>
+    <g transform="translate(-9 3) rotate(38 48 50)" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <g clip-path="url(#tete)" stroke-width="2.6"><path d="M41 4 V56 M48 4 V56 M55 4 V56 M28 21 H68 M28 29 H68 M28 37 H68"/></g>
+      <ellipse cx="48" cy="29" rx="17" ry="23" stroke-width="6"/>
+      <path d="M38 47 L48 62 L58 47" stroke-width="5"/>
+      <path d="M48 62 V91" stroke-width="9"/>
+    </g>
+    <circle cx="84" cy="54" r="9" fill="currentColor"/>
+  </svg>
+  <h1>Pas de connexion</h1>
+  <p>Le planning se lit en direct : l'appli a besoin d'internet pour l'afficher. Elle se recharge toute seule dès que le réseau revient.</p>
+  <button type="button" onclick="location.reload()">Réessayer</button>
+</main>
+<script>addEventListener("online", () => location.reload());</script>
+</body>
+</html>`;
 
 self.addEventListener("push", (event) => {
   let data = {};
