@@ -39,7 +39,7 @@ def twaManifest = [
     // - short_name: Shorter string used if |name| is too long.
     // - url: Absolute path of the URL to launch the app with (e.g '/create').
     // - icon: Name of the resource in the drawable folder to use as an icon.
-    shortcuts: [],
+    shortcuts: [[name:'Planning', short_name:'Planning', url:'https://squash-yvette.vercel.app/?view=day', icon:'shortcut_0'],[name:'Interclub', short_name:'Interclub', url:'https://squash-yvette.vercel.app/?view=interclub', icon:'shortcut_1'],[name:'Frais', short_name:'Frais', url:'https://squash-yvette.vercel.app/?view=money', icon:'shortcut_2']],
     // The duration of fade out animation in milliseconds to be played when removing splash screen.
     splashScreenFadeOutDuration: 300,
     generatorApp: 'bubblewrap-cli', // Application that generated the Android Project
