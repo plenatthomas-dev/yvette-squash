@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildIcs, buildFixtureIcs, CLUB_LOCATION } from "./ics";
+import { buildIcs, buildFixtureIcs } from "./ics";
 
 // L'EXPORT VERS L'AGENDA, ÉPROUVÉ SUR LE TEXTE QU'IL PRODUIT.
 //
@@ -61,7 +61,9 @@ describe("une rencontre d'interclub", () => {
     expect(ligne(ics, "SUMMARY")).toBe("SUMMARY:Interclub — Équipe 1 reçoit Massy");
     // Mieux que pas de lieu du tout : un évènement sans `LOCATION` n'est géocodable par aucun
     // agenda, et à domicile on sait parfaitement où l'on joue.
-    expect(ligne(ics, "LOCATION")).toBe(`LOCATION:${CLUB_LOCATION.replace(/,/g, "\\,")}`);
+    expect(ligne(ics, "LOCATION")).toBe(
+      "LOCATION:Le Complexe\\, 9 rue de la Vierge\\, 91440 Bures-sur-Yvette",
+    );
   });
 
   // L'HEURE EST FLOTTANTE, ET C'EST LE POINT. Tout le module interclub raisonne en heure

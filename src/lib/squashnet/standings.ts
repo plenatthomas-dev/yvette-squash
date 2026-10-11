@@ -1,5 +1,6 @@
 import { postAjax } from "./client";
 import { estEquipeFictive } from "./fictive";
+import { texte } from "./html";
 
 // ============================================================================
 //  CLASSEMENT D'UNE POULE (squashnet.fr), source PUBLIQUE.
@@ -117,16 +118,6 @@ export function estLigneClassement(v: unknown): boolean {
 const TR = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
 const TD = /<td[^>]*data-label=["']([^"']*)["'][^>]*>([\s\S]*?)<\/td>/gi;
 const TEAM_ID = /data-teamid=["'](\d+)["']/i;
-
-function texte(html: string): string {
-  return html
-    .replace(/<[^>]*>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 /**
  * Un entier, ou 0. Les écarts sont signés (« -495 » existe).
