@@ -20,7 +20,10 @@ import {
   pushEnabledOnServer,
   pushSubscriptionState,
   pushSupported,
+  resumeUnblockedPush,
 } from "@/lib/pushClient";
+import { onForeground } from "@/lib/onForeground";
+import NotifUnblockHelp from "@/components/NotifUnblockHelp";
 
 type Team = { id: string; name: string };
 type Follow = { teamId: string; level: FollowLevel };
@@ -58,15 +61,30 @@ export default function InterclubFollow({
   const [device, setDevice] = useState<DeviceState | null>(null);
   const [activating, setActivating] = useState(false);
 
+  /** Relit l'appareil. Un refus levé depuis (réglages du téléphone) efface l'encart. */
+  const refreshDevice = useCallback(async () => {
+    const st = await pushSubscriptionState();
+    setDevice(st);
+    setDenied(st.permission === "denied");
+    return st;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     pushSubscriptionState().then((st) => {
       if (!cancelled) setDevice(st);
     });
+    // Retour des réglages du téléphone : un blocage tout juste levé se termine sans nouveau
+    // geste (cf. `resumeUnblockedPush`), et l'encart suit.
+    const stop = onForeground(async () => {
+      await resumeUnblockedPush();
+      if (!cancelled) await refreshDevice();
+    });
     return () => {
       cancelled = true;
+      stop();
     };
-  }, []);
+  }, [refreshDevice]);
 
   const loadFollows = useCallback(async () => {
     try {
@@ -114,8 +132,13 @@ export default function InterclubFollow({
       // comme un `false`, et l'écriture serveur suit son cours — la ligne d'abonnement vaut
       // d'être posée, elle servira dès que l'obstacle sera levé.
       const ok = await ensurePushSubscribed().catch(() => false);
-      setDenied(!ok);
-      if (ok) setDevice({ permission: "granted", subscribed: true });
+      // Échec : on RELIT l'appareil plutôt que de conclure au refus. Une demande fermée sans
+      // réponse ou une erreur passagère n'est pas un blocage, et envoyer dans les réglages
+      // quelqu'un à qui un nouvel appui suffisait, c'était le perdre.
+      if (ok) {
+        setDenied(false);
+        setDevice({ permission: "granted", subscribed: true });
+      } else await refreshDevice().catch(() => null);
       // Un seul toast par geste : le refus se dit dans le message de fin, qui porte déjà la
       // réserve, et l'encart persistant sous la liste (`block`) le rappelle ensuite tant qu'il
       // dure. Deux toasts coup sur coup pour un même fait n'apprenaient rien de plus.
@@ -152,19 +175,33 @@ export default function InterclubFollow({
     }
   }
 
+  /** « C'est fait, vérifier » du guide de déblocage. */
+  async function recheck() {
+    setActivating(true);
+    const st = await refreshDevice();
+    if (st.permission === "granted" && !st.subscribed) {
+      setActivating(false);
+      return activate();
+    }
+    setActivating(false);
+    if (st.permission === "denied")
+      toast("err", "Toujours bloquées. Si tu viens de les autoriser, ferme complètement l'appli puis rouvre-la.");
+  }
+
   /** Le bouton de l'encart `off` : même geste que dans les Paramètres, sans aller les chercher. */
   async function activate() {
     setActivating(true);
     const ok = await ensurePushSubscribed().catch(() => false);
-    setDenied(!ok);
-    setDevice(ok ? { permission: "granted", subscribed: true } : await pushSubscriptionState());
+    let st: DeviceState | null = null;
+    if (ok) {
+      setDenied(false);
+      setDevice({ permission: "granted", subscribed: true });
+    } else st = await refreshDevice().catch(() => null);
     setActivating(false);
-    toast(
-      ok ? "ok" : "err",
-      ok
-        ? "Notifications activées sur cet appareil. Tu peux les couper dans les Paramètres."
-        : "Autorisation refusée — rien ne sera envoyé sur cet appareil.",
-    );
+    if (ok) toast("ok", "Notifications activées sur cet appareil. Tu peux les couper dans les Paramètres.");
+    // Refus : l'encart passe au guide de déblocage, qui dit la suite mieux qu'un toast.
+    else if (st?.permission !== "denied")
+      toast("err", "Demande fermée sans réponse — réessaie et choisis « Autoriser ».");
   }
 
   const levelOf = (teamId: string) => (follows ?? []).find((f) => f.teamId === teamId)?.level ?? "";
@@ -190,7 +227,7 @@ export default function InterclubFollow({
     server:
       "Les notifications ne sont pas configurées sur cet environnement (clés VAPID absentes). L'abonnement est enregistré et servira dès qu'elles le seront.",
     denied:
-      "Les notifications sont bloquées pour ce site dans les réglages du navigateur. L'abonnement est enregistré et servira une fois l'autorisation donnée.",
+      "Les notifications sont bloquées sur cet appareil. L'abonnement est enregistré et servira dès qu'elles seront rétablies :",
     // Pas « n'arriveront pas » : `pushToUsers` journalise pour tous les abonnés d'équipe, avec
     // ou sans appareil abonné — la cloche les reçoit quoi qu'il arrive. Seul le push manque.
     off: "Cet appareil ne reçoit pas les notifications : tes suivis n'arrivent que dans la cloche de l'appli.",
@@ -237,7 +274,12 @@ export default function InterclubFollow({
           </button>
         </p>
       )}
-      {block && (
+      {block === "denied" && (
+        <div className="notice tiny" role="status">
+          <NotifUnblockHelp intro={BLOCK_TEXT.denied} busy={activating} onRecheck={recheck} />
+        </div>
+      )}
+      {block && block !== "denied" && (
         <p className="notice tiny" role="status">
           {BLOCK_TEXT[block]}
           {block === "off" && (

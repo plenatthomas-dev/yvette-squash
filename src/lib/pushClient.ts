@@ -28,12 +28,26 @@ export function pushEnabledOnServer(): boolean {
   return !!process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 }
 
+/**
+ * Issue d'une demande d'activation. `dismissed` et `denied` ne se traitent PAS pareil :
+ * une demande fermée sans réponse (croix, appui à côté, demande « discrète » de Chrome) peut
+ * être reposée d'un simple nouvel appui ; un refus, lui, ne se lève plus que dans les
+ * réglages (cf. `notif-unblock.ts`). Les confondre envoyait dans les réglages quelqu'un à qui
+ * un appui suffisait.
+ */
+export type PushOutcome = "ok" | "denied" | "dismissed" | "failed";
+
 // Renvoie true si l'appareil est abonné aux notifications à la sortie.
 // La demande de permission n'a lieu que sur geste utilisateur (à appeler depuis un onClick).
 export async function ensurePushSubscribed(): Promise<boolean> {
-  if (!pushSupported()) return false;
+  return (await requestPush()) === "ok";
+}
+
+/** `ensurePushSubscribed`, en disant POURQUOI ça n'a pas marché. Peut jeter, comme elle. */
+export async function requestPush(): Promise<PushOutcome> {
+  if (!pushSupported()) return "failed";
   const key = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-  if (!key) return false;
+  if (!key) return "failed";
 
   // `updateViaCache: "none"` : sans cela le navigateur peut resservir un sw.js mis en cache
   // lorsqu'il vérifie les mises à jour, et une correction du service worker — l'ajout de
@@ -43,10 +57,11 @@ export async function ensurePushSubscribed(): Promise<boolean> {
   reg.update().catch(() => {});
   await navigator.serviceWorker.ready;
 
-  if (Notification.permission === "denied") return false;
+  if (Notification.permission === "denied") return "denied";
   if (Notification.permission === "default") {
     const perm = await Notification.requestPermission();
-    if (perm !== "granted") return false;
+    if (perm === "denied") return "denied";
+    if (perm !== "granted") return "dismissed";
   }
 
   let sub = await reg.pushManager.getSubscription();
@@ -57,7 +72,67 @@ export async function ensurePushSubscribed(): Promise<boolean> {
     });
   }
 
-  return declarerAuServeur(sub);
+  if (!(await declarerAuServeur(sub))) return "failed";
+  // Abonné, par quelque chemin que ce soit : plus rien à terminer au prochain retour.
+  try {
+    localStorage.removeItem(UNBLOCK_KEY);
+  } catch {
+    /* stockage indisponible : `resumeUnblockedPush` verra l'abonnement et s'arrêtera */
+  }
+  return "ok";
+}
+
+const UNBLOCK_KEY = "notifUnblockPending";
+
+/**
+ * Le membre a sous les yeux le guide de déblocage : on retient qu'il VEUT les notifications,
+ * pour terminer l'activation tout seul dès que l'autorisation revient (`resumeUnblockedPush`).
+ */
+export function markUnblockPending(): void {
+  try {
+    localStorage.setItem(UNBLOCK_KEY, "1");
+  } catch {
+    /* stockage indisponible : il restera le bouton « C'est fait » */
+  }
+}
+
+let resuming: Promise<boolean> | null = null;
+
+/**
+ * Termine l'activation d'un appareil dont le membre vient de lever le blocage dans les
+ * réglages — SANS lui redemander de geste. Renvoie true si l'appareil vient d'être abonné.
+ *
+ * Pourquoi un drapeau persistant et pas seulement l'écran ouvert : dans l'appli Android, la
+ * permission se règle dans les réglages d'Android, et Chrome ne relit souvent la nouvelle
+ * valeur qu'au relancement de l'appli. L'écran qui affichait le guide n'existe alors plus ;
+ * le drapeau, lui, survit, et le prochain chargement finit le travail.
+ *
+ * Silencieuse hors de ce cas : sans drapeau (aucun guide vu) elle ne fait rien — un membre
+ * qui a pressé « Ne plus recevoir » garde la permission accordée et ne doit pas être
+ * réabonné derrière son dos. Les appels simultanés (page + panneau au même retour) partagent
+ * la même promesse.
+ */
+export function resumeUnblockedPush(): Promise<boolean> {
+  resuming ??= (async () => {
+    try {
+      if (!pushSupported()) return false;
+      if (localStorage.getItem(UNBLOCK_KEY) !== "1") return false;
+      const perm = Notification.permission;
+      // Toujours bloqué : on garde le drapeau pour le prochain retour.
+      if (perm === "denied") return false;
+      localStorage.removeItem(UNBLOCK_KEY);
+      // Remise à « demander » (Firefox ✕, « Réinitialiser » de Chrome) : la demande exige un
+      // geste, le bouton « Activer » réapparaît de lui-même.
+      if (perm !== "granted") return false;
+      if ((await pushSubscriptionState()).subscribed) return false;
+      return (await requestPush()) === "ok";
+    } catch {
+      return false;
+    }
+  })().finally(() => {
+    resuming = null;
+  });
+  return resuming;
 }
 
 /**

@@ -51,12 +51,14 @@ import { fmtTime, slotMinutes, stampFR, isRealDateISO } from "@/lib/time";
 import { NOTIFICATION_RETENTION_DAYS } from "@/lib/notifications-shared";
 import { downloadIcs } from "@/lib/ics";
 import {
-  ensurePushSubscribed,
+  requestPush,
+  resumeUnblockedPush,
   syncPushSubscription,
   pushSupported,
   pushEnabledOnServer,
   clearSystemNotifications,
 } from "@/lib/pushClient";
+import { onForeground } from "@/lib/onForeground";
 import { useFeatures, useFeaturesReady } from "@/components/FeatureProvider";
 import { runsAsInstalledAndroidApp } from "@/lib/androidApp";
 import { useCloseRequest } from "@/lib/useCloseRequest";
@@ -386,6 +388,19 @@ export default function Home() {
     if (!myId) return;
     void syncPushSubscription();
   }, [myId]);
+
+  // NOTIFICATIONS DÉBLOQUÉES DANS LES RÉGLAGES DU TÉLÉPHONE. Le membre a suivi le guide des
+  // Paramètres et revient : on termine l'activation sans lui demander un geste de plus. Au
+  // chargement aussi — l'appli Android ne voit souvent la permission rendue qu'au relancement.
+  useEffect(() => {
+    if (!myId) return;
+    const resume = () =>
+      resumeUnblockedPush().then((ok) => {
+        if (ok) toast("ok", "Notifications activées sur cet appareil ✓");
+      });
+    void resume();
+    return onForeground(resume);
+  }, [myId, toast]);
 
   // Plancher anti-flash de l'écran de chargement : au bout de SPLASH_MIN_MS, on autorise le
   // passage à l'appli (le rendu attend AUSSI que /api/auth/me ait répondu — cf. `me`).
@@ -1111,9 +1126,16 @@ export default function Home() {
       confirmLabel: "M'inscrire 🕒",
     });
     if (!ok) return;
-    const subscribed = await ensurePushSubscribed();
-    if (!subscribed) {
-      toast("err", "Autorise les notifications pour recevoir l'alerte.");
+    const outcome = await requestPush().catch(() => "failed" as const);
+    if (outcome !== "ok") {
+      toast(
+        "err",
+        outcome === "denied"
+          ? "Notifications bloquées sur cet appareil — Paramètres → Notifications pour les rétablir."
+          : outcome === "dismissed"
+            ? "Choisis « Autoriser » pour recevoir l'alerte."
+            : "Activation des notifications impossible — réessaie dans un instant.",
+      );
       return;
     }
     try {

@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   ensurePushSubscribed,
+  markUnblockPending,
+  requestPush,
+  resumeUnblockedPush,
   syncPushSubscription,
   pushSubscriptionState,
   pushSupported,
@@ -88,6 +91,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  localStorage.clear();
   delete process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   Reflect.deleteProperty(navigator, "serviceWorker");
 });
@@ -284,5 +288,80 @@ describe("unsubscribePush", () => {
     navigateurCapable({ abonnement: abonnement() });
     fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
     expect(await unsubscribePush()).toBe(false);
+  });
+});
+
+// REFUSÉ ou SIMPLEMENT FERMÉ : deux issues qui ne se rattrapent pas pareil. Une demande fermée
+// se repose d'un appui ; un refus ne se lève plus que dans les réglages de l'appareil. Les
+// confondre envoyait dans les réglages quelqu'un à qui un nouvel appui suffisait.
+describe("requestPush", () => {
+  it("distingue la demande fermée sans réponse…", async () => {
+    navigateurCapable({ permission: "default" });
+    requestPermission.mockResolvedValue("default");
+    expect(await requestPush()).toBe("dismissed");
+  });
+
+  it("…du refus, qu'il vienne d'arriver ou qu'il date", async () => {
+    navigateurCapable({ permission: "default" });
+    requestPermission.mockResolvedValue("denied");
+    expect(await requestPush()).toBe("denied");
+
+    navigateurCapable({ permission: "denied" });
+    expect(await requestPush()).toBe("denied");
+  });
+
+  it("efface le déblocage en attente une fois l'appareil abonné", async () => {
+    navigateurCapable({ abonnement: null });
+    markUnblockPending();
+    expect(await requestPush()).toBe("ok");
+    expect(localStorage.getItem("notifUnblockPending")).toBeNull();
+  });
+});
+
+// LE RETOUR DES RÉGLAGES. Le membre a suivi le guide de déblocage et revient : l'activation
+// doit se terminer sans geste de plus. Mais SEULEMENT dans ce cas — quelqu'un qui a pressé
+// « Ne plus recevoir » garde la permission accordée et ne doit pas être réabonné en douce.
+describe("resumeUnblockedPush", () => {
+  it("ne fait RIEN sans guide vu, même permission accordée et appareil désabonné", async () => {
+    navigateurCapable({ permission: "granted", abonnement: null });
+    expect(await resumeUnblockedPush()).toBe(false);
+    expect(registre.subscribe).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("termine l'activation au retour, sans redemander la permission", async () => {
+    navigateurCapable({ permission: "granted", abonnement: null });
+    markUnblockPending();
+    expect(await resumeUnblockedPush()).toBe(true);
+    expect(requestPermission).not.toHaveBeenCalled();
+    expect(registre.subscribe).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem("notifUnblockPending")).toBeNull();
+  });
+
+  it("garde l'attente tant que c'est toujours bloqué — l'appli Android ne relit qu'au relancement", async () => {
+    navigateurCapable({ permission: "denied", abonnement: null });
+    markUnblockPending();
+    expect(await resumeUnblockedPush()).toBe(false);
+    expect(localStorage.getItem("notifUnblockPending")).toBe("1");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rend la main sans popup quand l'autorisation a été remise à « demander »", async () => {
+    // Firefox (✕) ou Chrome (« Réinitialiser ») : la demande exige un geste, c'est le bouton
+    // « Activer » qui le recueillera.
+    navigateurCapable({ permission: "default", abonnement: null });
+    markUnblockPending();
+    expect(await resumeUnblockedPush()).toBe(false);
+    expect(requestPermission).not.toHaveBeenCalled();
+    expect(localStorage.getItem("notifUnblockPending")).toBeNull();
+  });
+
+  it("partage un seul passage entre deux appels simultanés (page + panneau au même retour)", async () => {
+    navigateurCapable({ permission: "granted", abonnement: null });
+    markUnblockPending();
+    const [a, b] = await Promise.all([resumeUnblockedPush(), resumeUnblockedPush()]);
+    expect(a).toBe(true);
+    expect(b).toBe(true);
+    expect(registre.subscribe).toHaveBeenCalledTimes(1);
   });
 });
