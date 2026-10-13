@@ -165,3 +165,53 @@ describe("/admin — les options sont rangées en groupes", () => {
     );
   });
 });
+
+// QUI NE REÇOIT PAS LES NOTIFICATIONS. La tuile « Bloquées » est celle pour laquelle la mesure
+// existe : elle doit dire combien de membres, et sur quels appareils.
+describe("/admin — tableau de bord des notifications", () => {
+  it("affiche les membres par situation, et où sont les blocages", async () => {
+    const avant = { ...dashboard };
+    Object.assign(dashboard, {
+      notifs: {
+        members: 9,
+        devices: 12,
+        byMember: { receiving: 5, denied: 2, off: 0, notAsked: 1, unsupported: 1 },
+        deniedByPlatform: { "android-app": 2, desktop: 1 },
+        unsupportedByPlatform: { ios: 1 },
+      },
+    });
+    try {
+      await monte();
+      const titre = screen.getByRole("heading", { level: 3, name: /Notifications/ });
+      const bloc = titre.parentElement!;
+      expect(bloc.textContent).toContain("9 membres relevés sur 140");
+      const bloquees = within(bloc).getByText("Bloquées").parentElement!;
+      expect(bloquees.textContent).toContain("2");
+      expect(bloquees.textContent).toContain("2 appli Android · 1 Chrome/Edge PC");
+    } finally {
+      Object.keys(dashboard).forEach((k) => delete (dashboard as Record<string, unknown>)[k]);
+      Object.assign(dashboard, avant);
+    }
+  });
+
+  it("dit qu'il n'y a encore rien de relevé, plutôt que d'afficher des zéros", async () => {
+    const avant = { ...dashboard };
+    Object.assign(dashboard, {
+      notifs: {
+        members: 0,
+        devices: 0,
+        byMember: { receiving: 0, denied: 0, off: 0, notAsked: 0, unsupported: 0 },
+        deniedByPlatform: {},
+        unsupportedByPlatform: {},
+      },
+    });
+    try {
+      await monte();
+      expect(screen.getByText(/Aucun appareil relevé/)).toBeTruthy();
+      expect(screen.queryByText("Bloquées")).toBeNull();
+    } finally {
+      Object.keys(dashboard).forEach((k) => delete (dashboard as Record<string, unknown>)[k]);
+      Object.assign(dashboard, avant);
+    }
+  });
+});

@@ -163,6 +163,7 @@ model User {
   interclubAvailability    InterclubAvailability[] @relation("AvailabilitySubject")
   interclubAvailabilitySet InterclubAvailability[] @relation("AvailabilitySetter")
   notifications            AppNotification[]
+  notifDeviceStates        NotifDeviceState[]
 }
 
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
@@ -392,6 +393,31 @@ model PushSubscription {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+// ÉTAT DES NOTIFICATIONS, APPAREIL PAR APPAREIL — pour MESURER, pas pour envoyer.
+//
+// `PushSubscription` ne connaît que les appareils abonnés : ceux qui ont refusé, ou à qui la
+// question n'a jamais été posée, n'y laissent aucune trace. Impossible donc de dire combien de
+// membres ne reçoivent rien, ni pourquoi. Cette table le dit : chaque appareil déclare, à
+// l'ouverture de l'appli (au plus une fois par jour s'il n'a pas changé), où il en est.
+//
+// `deviceId` est un identifiant ALÉATOIRE tiré par le navigateur (localStorage) : il ne dit rien
+// de l'appareil, il sert seulement à ne pas compter deux fois le même. Un appareil qui change de
+// compte change de ligne de propriétaire, comme un abonnement push.
+//
+// Purgée après NOTIF_STATE_RETENTION_DAYS sans nouvelle (cf. lib/retention.ts).
+model NotifDeviceState {
+  deviceId   String   @id
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  permission String // "granted" | "denied" | "default" (jamais demandé) | "unsupported"
+  subscribed Boolean // abonnement push présent sur l'appareil
+  platform   String // cf. NotifPlatform (lib/notif-unblock.ts)
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+  @@index([updatedAt])
 }
 
 // Alerte « préviens-moi si un terrain se libère » pour une date + un horaire (HH:MM).

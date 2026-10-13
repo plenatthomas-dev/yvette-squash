@@ -59,6 +59,7 @@ import {
   clearSystemNotifications,
 } from "@/lib/pushClient";
 import { onForeground } from "@/lib/onForeground";
+import { reportNotifState } from "@/lib/notif-report";
 import { useFeatures, useFeaturesReady } from "@/components/FeatureProvider";
 import { runsAsInstalledAndroidApp } from "@/lib/androidApp";
 import { useCloseRequest } from "@/lib/useCloseRequest";
@@ -392,12 +393,15 @@ export default function Home() {
   // NOTIFICATIONS DÉBLOQUÉES DANS LES RÉGLAGES DU TÉLÉPHONE. Le membre a suivi le guide des
   // Paramètres et revient : on termine l'activation sans lui demander un geste de plus. Au
   // chargement aussi — l'appli Android ne voit souvent la permission rendue qu'au relancement.
+  // Puis on relève l'état de l'appareil pour le tableau de bord admin (au plus une écriture
+  // par jour si rien n'a changé, cf. `reportNotifState`) — APRÈS la reprise, pour relever
+  // l'état qui en sort.
   useEffect(() => {
     if (!myId) return;
-    const resume = () =>
-      resumeUnblockedPush().then((ok) => {
-        if (ok) toast("ok", "Notifications activées sur cet appareil ✓");
-      });
+    const resume = async () => {
+      if (await resumeUnblockedPush()) toast("ok", "Notifications activées sur cet appareil ✓");
+      await reportNotifState(myId);
+    };
     void resume();
     return onForeground(resume);
   }, [myId, toast]);

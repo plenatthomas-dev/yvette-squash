@@ -4,10 +4,12 @@
 import { prisma } from "./db";
 import { listCronRuns } from "./cron-run";
 import { getFeatures } from "./features-server";
+import { NOTIF_STATE_WINDOW_DAYS, summarizeNotifStates } from "./notif-state";
 
 export async function getDashboard() {
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 864e5);
+  const notifSince = new Date(now.getTime() - NOTIF_STATE_WINDOW_DAYS * 864e5);
 
   const [
     members,
@@ -22,6 +24,7 @@ export async function getDashboard() {
     bookingsApp,
     bookingsResa,
     features,
+    notifRows,
   ] = await Promise.all([
     prisma.user.count(),
     prisma.user.count({ where: { disabledAt: { not: null } } }),
@@ -45,6 +48,12 @@ export async function getDashboard() {
       where: { status: "booked", source: "resamania", startsAt: { gte: thirtyDaysAgo } },
     }),
     getFeatures(),
+    // État des notifications des appareils ouverts récemment (comptes actifs seulement) :
+    // quelques dizaines de lignes pour un club, agrégées ici plutôt qu'en SQL.
+    prisma.notifDeviceState.findMany({
+      where: { updatedAt: { gte: notifSince }, user: { disabledAt: null } },
+      select: { userId: true, permission: true, subscribed: true, platform: true },
+    }),
   ]);
 
   return {
@@ -62,6 +71,7 @@ export async function getDashboard() {
     // `bookingsResa` vaut alors 0 par construction. L'UI doit le dire, sinon un admin lirait
     // « 100 % via l'appli » là où la question n'a simplement jamais été posée.
     externalDetection: features.externalBookings,
+    notifs: summarizeNotifStates(notifRows),
     crons: crons.map((c) => ({
       name: c.name,
       lastRunAt: c.lastRunAt.toISOString(),

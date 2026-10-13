@@ -9,15 +9,9 @@
 // l'appli termine elle-même l'activation au retour (cf. `resumeUnblockedPush`).
 
 import { isAndroidApp } from "@/lib/androidApp";
-
-export type NotifPlatform =
-  | "android-app" // appli du Play Store (TWA) : notifications déléguées à l'appli Android
-  | "android-pwa" // PWA ajoutée à l'écran d'accueil depuis Chrome
-  | "android" // onglet Chrome (ou autre navigateur) sur Android
-  | "ios" // iPhone / iPad (seule la PWA reçoit des notifications)
-  | "firefox"
-  | "safari" // Safari sur Mac
-  | "desktop"; // Chrome, Edge et autres Chromium sur ordinateur
+// La liste vit dans le module pur : la route serveur qui valide les relevés s'en sert aussi.
+import type { NotifPlatform } from "@/lib/notif-state";
+export type { NotifPlatform };
 
 export type UnblockGuide = { steps: string[]; hint?: string };
 

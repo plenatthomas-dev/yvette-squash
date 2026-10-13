@@ -7,6 +7,7 @@ import {
   MODERATION_RETENTION_LABEL,
   SNAPSHOT_RETENTION_LABEL,
   FORUM_RETENTION_LABEL,
+  NOTIF_STATE_RETENTION_LABEL,
 } from "@/lib/retention";
 
 // Responsable du traitement (art. 13 RGPD) : son identité ET ses coordonnées doivent figurer
@@ -252,6 +253,15 @@ export function PrivacyNotice() {
                 annonces de l'asso. Les membres voient le
                 <strong> nombre d'inscrits</strong> et <strong>ta position</strong> —
                 <strong> jamais les noms</strong>.
+              </p>
+              <p>
+                <strong>État des notifications.</strong> À l&apos;ouverture de l&apos;appli,
+                chaque appareil indique si ses notifications sont autorisées, bloquées ou
+                jamais demandées, et son type (appli Android, iPhone, ordinateur…). Il est
+                repéré par un <strong>identifiant tiré au hasard</strong>, qui ne dit rien de
+                lui. Seuls les administrateurs en voient le <strong>total</strong>, pour savoir
+                combien de membres ne reçoivent rien et les aider. Effacé après{" "}
+                <strong>{NOTIF_STATE_RETENTION_LABEL}</strong> sans ouverture de l&apos;appli.
               </p>
               <p>
                 <strong>La cloche.</strong> Chaque notification qui t&apos;est destinée laisse

@@ -40,3 +40,14 @@ export const FORUM_RETENTION_DAYS = 365;
 export const FORUM_RETENTION_MS = FORUM_RETENTION_DAYS * 24 * 60 * 60_000;
 /** Formulation affichée aux membres. Doit décrire la constante ci-dessus. */
 export const FORUM_RETENTION_LABEL = "12 mois";
+
+/**
+ * État des notifications par appareil (`NotifDeviceState`) : 3 mois sans nouvelle.
+ *
+ * Un appareil qui ne s'est pas ouvert depuis trois mois n'est plus un membre à aider, et sa
+ * ligne ne ferait que fausser la mesure. Purge OPPORTUNISTE à l'écriture (api/push/state).
+ */
+export const NOTIF_STATE_RETENTION_DAYS = 90;
+export const NOTIF_STATE_RETENTION_MS = NOTIF_STATE_RETENTION_DAYS * 24 * 60 * 60_000;
+/** Formulation affichée aux membres. Doit décrire la constante ci-dessus. */
+export const NOTIF_STATE_RETENTION_LABEL = "3 mois";
