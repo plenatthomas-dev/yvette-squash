@@ -20,7 +20,7 @@ import {
   pushEnabledOnServer,
   pushSubscriptionState,
   pushSupported,
-  resumeUnblockedPush,
+  restoreWantedPush,
 } from "@/lib/pushClient";
 import { onForeground } from "@/lib/onForeground";
 import NotifUnblockHelp from "@/components/NotifUnblockHelp";
@@ -75,9 +75,9 @@ export default function InterclubFollow({
       if (!cancelled) setDevice(st);
     });
     // Retour des réglages du téléphone : un blocage tout juste levé se termine sans nouveau
-    // geste (cf. `resumeUnblockedPush`), et l'encart suit.
+    // geste (cf. `restoreWantedPush`), et l'encart suit.
     const stop = onForeground(async () => {
-      await resumeUnblockedPush();
+      await restoreWantedPush();
       if (!cancelled) await refreshDevice();
     });
     return () => {

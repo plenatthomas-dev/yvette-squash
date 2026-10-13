@@ -6,14 +6,14 @@
 // les réglages du navigateur » à quelqu'un qui, dans l'appli Android, n'a même pas de
 // navigateur sous les yeux : sur la TWA, l'autorisation se règle dans les réglages ANDROID de
 // l'appli, pas dans Chrome. On donne donc le chemin de CET appareil, en trois gestes, et
-// l'appli termine elle-même l'activation au retour (cf. `resumeUnblockedPush`).
+// l'appli termine elle-même l'activation au retour (cf. `restoreWantedPush`).
 
 import { isAndroidApp } from "@/lib/androidApp";
 // La liste vit dans le module pur : la route serveur qui valide les relevés s'en sert aussi.
 import type { NotifPlatform } from "@/lib/notif-state";
 export type { NotifPlatform };
 
-export type UnblockGuide = { steps: string[]; hint?: string };
+export type UnblockGuide = { steps: string[]; hints?: string[] };
 
 /** Pur, pour être testé sans navigateur. Voir `currentNotifPlatform` pour la version branchée. */
 export function detectNotifPlatform(
@@ -44,7 +44,8 @@ export function unblockGuide(platform: NotifPlatform, host: string): UnblockGuid
           "Notifications → active-les.",
           RETOUR_AUTO,
         ],
-        hint: "Rien ne change au retour ? Ferme complètement l'appli et rouvre-la.",
+        // Chrome ne relit le réglage d'Android qu'au LANCEMENT de l'appli.
+        hints: ["Rien ne change au retour ? Ferme complètement l'appli (écran des applis récentes) et rouvre-la depuis son icône."],
       };
     case "android-pwa":
       return {
@@ -53,7 +54,7 @@ export function unblockGuide(platform: NotifPlatform, host: string): UnblockGuid
           "Notifications → active-les.",
           RETOUR_AUTO,
         ],
-        hint: `Toujours bloqué ? Chrome → ⋮ → Paramètres → Paramètres des sites → Notifications → ${host} → Autoriser.`,
+        hints: [`Toujours bloqué ? Chrome → ⋮ → Paramètres → Paramètres des sites → Notifications → ${host} → Autoriser.`],
       };
     case "android":
       return {
@@ -62,7 +63,15 @@ export function unblockGuide(platform: NotifPlatform, host: string): UnblockGuid
           "Autorisations → Notifications → active-les.",
           RETOUR_AUTO,
         ],
-        hint: "Toujours bloqué ? Réglages Android → Applis → Chrome → Notifications → active-les.",
+        hints: [
+          // LE PIÈGE DE L'APPLI INSTALLÉE (Pixel 8a, 14/10/2026). Une fois l'appli Android
+          // installée, c'est ELLE qui décide des notifications du site, onglets Chrome compris —
+          // et Chrome ne relit son réglage qu'au lancement de l'appli. Rétablies dans les
+          // réglages d'Android, elles restaient donc « bloquées » ici, et la page Chrome du site
+          // renvoyait vers un réglage déjà actif.
+          "Tu as installé l'appli Squash Yvette ? C'est elle qui décide : active ses notifications (appui long sur l'icône → ⓘ → Notifications), puis ouvre l'appli depuis son icône — Chrome ne relit ce réglage qu'à son lancement.",
+          "Toujours bloqué ? Réglages Android → Applis → Chrome → Notifications → active-les.",
+        ],
       };
     case "ios":
       return {
@@ -95,7 +104,7 @@ export function unblockGuide(platform: NotifPlatform, host: string): UnblockGuid
           "Active « Notifications » (ou « Réinitialiser l'autorisation »).",
           RETOUR_AUTO,
         ],
-        hint: "Toujours rien ? Le système peut couper le navigateur entier : Paramètres de Windows / macOS → Notifications.",
+        hints: ["Toujours rien ? Le système peut couper le navigateur entier : Paramètres de Windows / macOS → Notifications."],
       };
   }
 }

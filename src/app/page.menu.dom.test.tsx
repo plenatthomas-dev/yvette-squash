@@ -23,7 +23,7 @@ vi.mock("@/lib/apiFetch", () => ({ reportMaintenance: vi.fn() }));
 vi.mock("@/lib/sound", () => ({ unlockAudio: vi.fn(), playSuccessJingle: vi.fn(), playError: vi.fn(), playAlert: vi.fn() }));
 vi.mock("@/lib/notif-report", () => ({ reportNotifState: vi.fn(async () => {}) }));
 vi.mock("@/lib/pushClient", () => ({
-  requestPush: vi.fn(), resumeUnblockedPush: vi.fn(async () => false), syncPushSubscription: vi.fn(), pushSupported: () => false, pushEnabledOnServer: () => false,
+  requestPush: vi.fn(), restoreWantedPush: vi.fn(async () => false), syncPushSubscription: vi.fn(), pushSupported: () => false, pushEnabledOnServer: () => false,
 }));
 vi.mock("@/components/PlanningGrid", () => ({ PlanningGrid: () => <div data-testid="planning" /> }));
 vi.mock("@/components/WeekGrid", () => ({ WeekGrid: () => null }));

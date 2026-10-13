@@ -73,66 +73,58 @@ export async function requestPush(): Promise<PushOutcome> {
   }
 
   if (!(await declarerAuServeur(sub))) return "failed";
-  // Abonné, par quelque chemin que ce soit : plus rien à terminer au prochain retour.
-  try {
-    localStorage.removeItem(UNBLOCK_KEY);
-  } catch {
-    /* stockage indisponible : `resumeUnblockedPush` verra l'abonnement et s'arrêtera */
-  }
+  markPushWanted();
   return "ok";
 }
 
-const UNBLOCK_KEY = "notifUnblockPending";
+const WANTED_KEY = "notifWanted";
 
 /**
- * Le membre a sous les yeux le guide de déblocage : on retient qu'il VEUT les notifications,
- * pour terminer l'activation tout seul dès que l'autorisation revient (`resumeUnblockedPush`).
+ * Le membre VEUT les notifications sur cet appareil : abonnement réussi, abonnement existant
+ * constaté à l'ouverture, ou guide de déblocage affiché. Seul « Ne plus recevoir » l'efface.
+ * C'est ce souhait — et lui seul — qui autorise `restoreWantedPush` à réabonner sans geste.
  */
-export function markUnblockPending(): void {
+export function markPushWanted(): void {
   try {
-    localStorage.setItem(UNBLOCK_KEY, "1");
+    localStorage.setItem(WANTED_KEY, "1");
   } catch {
-    /* stockage indisponible : il restera le bouton « C'est fait » */
+    /* stockage indisponible : il restera les boutons « Activer » et « C'est fait » */
   }
 }
 
-let resuming: Promise<boolean> | null = null;
+let restoring: Promise<boolean> | null = null;
 
 /**
- * Termine l'activation d'un appareil dont le membre vient de lever le blocage dans les
- * réglages — SANS lui redemander de geste. Renvoie true si l'appareil vient d'être abonné.
+ * Rétablit, SANS GESTE, l'abonnement d'un appareil qui l'a perdu alors que le membre le
+ * voulait. Renvoie true si l'appareil vient d'être (ré)abonné.
  *
- * Pourquoi un drapeau persistant et pas seulement l'écran ouvert : dans l'appli Android, la
- * permission se règle dans les réglages d'Android, et Chrome ne relit souvent la nouvelle
- * valeur qu'au relancement de l'appli. L'écran qui affichait le guide n'existe alors plus ;
- * le drapeau, lui, survit, et le prochain chargement finit le travail.
+ * LE CAS QUI L'A FAIT ÉCRIRE (Pixel 8a, 14/10/2026). Couper puis rétablir les notifications de
+ * l'appli dans les réglages d'Android : Chrome ne relit ce réglage qu'au LANCEMENT de l'appli
+ * (un onglet Chrome sur le même site reste « bloqué » d'ici là), et il résilie l'abonnement
+ * push dès que l'autorisation tombe. L'appareil revenait donc « autorisé mais non abonné » :
+ * plus rien n'arrivait, sans que rien ne le dise. Même issue après le guide de déblocage.
  *
- * Silencieuse hors de ce cas : sans drapeau (aucun guide vu) elle ne fait rien — un membre
- * qui a pressé « Ne plus recevoir » garde la permission accordée et ne doit pas être
- * réabonné derrière son dos. Les appels simultanés (page + panneau au même retour) partagent
- * la même promesse.
+ * Silencieuse hors de ce cas : sans souhait enregistré, elle ne fait rien — un membre qui a
+ * pressé « Ne plus recevoir » garde la permission accordée et ne doit pas être réabonné derrière
+ * son dos. Les appels simultanés (page + panneau au même retour) partagent la même promesse.
  */
-export function resumeUnblockedPush(): Promise<boolean> {
-  resuming ??= (async () => {
+export function restoreWantedPush(): Promise<boolean> {
+  restoring ??= (async () => {
     try {
       if (!pushSupported()) return false;
-      if (localStorage.getItem(UNBLOCK_KEY) !== "1") return false;
-      const perm = Notification.permission;
-      // Toujours bloqué : on garde le drapeau pour le prochain retour.
-      if (perm === "denied") return false;
-      localStorage.removeItem(UNBLOCK_KEY);
-      // Remise à « demander » (Firefox ✕, « Réinitialiser » de Chrome) : la demande exige un
-      // geste, le bouton « Activer » réapparaît de lui-même.
-      if (perm !== "granted") return false;
+      if (localStorage.getItem(WANTED_KEY) !== "1") return false;
+      // Bloqué : le souhait reste, pour le prochain retour. Remis à « demander » : la demande
+      // exige un geste, c'est le bouton « Activer » qui le recueillera.
+      if (Notification.permission !== "granted") return false;
       if ((await pushSubscriptionState()).subscribed) return false;
       return (await requestPush()) === "ok";
     } catch {
       return false;
     }
   })().finally(() => {
-    resuming = null;
+    restoring = null;
   });
-  return resuming;
+  return restoring;
 }
 
 /**
@@ -181,6 +173,9 @@ export async function syncPushSubscription(): Promise<boolean> {
     const reg = await navigator.serviceWorker.getRegistration();
     const sub = reg ? await reg.pushManager.getSubscription() : null;
     if (!sub) return false;
+    // Abonné d'avant ce drapeau : on retient qu'il veut les notifications, pour que
+    // `restoreWantedPush` le réabonne si l'abonnement venait à se perdre.
+    markPushWanted();
     return await declarerAuServeur(sub);
   } catch {
     // Aucune conséquence visible : au pire la ligne reste au nom de l'ancien compte jusqu'au
@@ -217,6 +212,12 @@ export async function pushSubscriptionState(): Promise<{
  * abonnement fantôme que rien ne viendrait purger avant sa première erreur 410.
  */
 export async function unsubscribePush(): Promise<boolean> {
+  // Choix explicite : plus aucun réabonnement automatique sur cet appareil.
+  try {
+    localStorage.removeItem(WANTED_KEY);
+  } catch {
+    /* stockage indisponible : aucun souhait n'a pu être enregistré non plus */
+  }
   let endpoint: string | undefined;
   try {
     const reg = await navigator.serviceWorker.getRegistration();

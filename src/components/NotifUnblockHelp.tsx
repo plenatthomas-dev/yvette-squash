@@ -7,7 +7,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { currentNotifPlatform, unblockGuide, type UnblockGuide } from "@/lib/notif-unblock";
-import { markUnblockPending } from "@/lib/pushClient";
+import { markPushWanted } from "@/lib/pushClient";
 
 export default function NotifUnblockHelp({
   intro,
@@ -23,7 +23,7 @@ export default function NotifUnblockHelp({
 
   useEffect(() => {
     setGuide(unblockGuide(currentNotifPlatform(), window.location.host));
-    markUnblockPending();
+    markPushWanted();
   }, []);
 
   return (
@@ -36,7 +36,11 @@ export default function NotifUnblockHelp({
               <li key={s}>{s}</li>
             ))}
           </ol>
-          {guide.hint && <p className="muted">{guide.hint}</p>}
+          {guide.hints?.map((h) => (
+            <p key={h} className="muted">
+              {h}
+            </p>
+          ))}
         </>
       )}
       <button type="button" className="secondary notif-unblock-check" disabled={busy} onClick={onRecheck}>

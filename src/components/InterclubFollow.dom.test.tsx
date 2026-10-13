@@ -25,8 +25,8 @@ vi.mock("@/lib/pushClient", () => ({
   pushSubscriptionState: () => pushSubscriptionState(),
   pushSupported: () => true,
   pushEnabledOnServer: () => true,
-  resumeUnblockedPush: async () => false,
-  markUnblockPending: () => {},
+  restoreWantedPush: async () => false,
+  markPushWanted: () => {},
 }));
 
 const InterclubFollow = (await import("@/components/InterclubFollow")).default;

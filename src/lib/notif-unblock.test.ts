@@ -55,6 +55,13 @@ describe("unblockGuide", () => {
     expect(g.steps.join(" ")).not.toMatch(/navigateur|adresse/i);
   });
 
+  it("dans un onglet Chrome, rappelle que l'appli installée décide — et qu'il faut la LANCER", () => {
+    // Pixel 8a, 14/10/2026 : notifications rétablies dans les réglages de l'appli, toujours
+    // « bloquées » dans l'onglet, parce que Chrome ne relit ce réglage qu'au lancement.
+    const g = unblockGuide("android", "squash.test");
+    expect(g.hints?.[0]).toMatch(/appli Squash Yvette.*ouvre l'appli depuis son icône/);
+  });
+
   it("nomme le site là où il faut le retrouver dans une liste", () => {
     expect(unblockGuide("safari", "squash.test").steps.join(" ")).toContain("squash.test");
   });

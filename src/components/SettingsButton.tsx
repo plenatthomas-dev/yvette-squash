@@ -19,7 +19,7 @@ import {
   pushSubscriptionState,
   pushSupported,
   requestPush,
-  resumeUnblockedPush,
+  restoreWantedPush,
   unsubscribePush,
 } from "@/lib/pushClient";
 import { onForeground } from "@/lib/onForeground";
@@ -238,9 +238,9 @@ export function SettingsButton({
       if (!cancelled) setPushState(st);
     });
     // Retour des réglages du téléphone avec le panneau ouvert : l'état affiché doit suivre, et
-    // un blocage tout juste levé se termine sans nouveau geste (cf. `resumeUnblockedPush`).
+    // un blocage tout juste levé se termine sans nouveau geste (cf. `restoreWantedPush`).
     const stop = onForeground(async () => {
-      await resumeUnblockedPush();
+      await restoreWantedPush();
       const st = await pushSubscriptionState();
       if (!cancelled) setPushState(st);
     });

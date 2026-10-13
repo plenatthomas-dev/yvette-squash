@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   ensurePushSubscribed,
-  markUnblockPending,
+  markPushWanted,
   requestPush,
-  resumeUnblockedPush,
+  restoreWantedPush,
   syncPushSubscription,
   pushSubscriptionState,
   pushSupported,
@@ -310,39 +310,46 @@ describe("requestPush", () => {
     expect(await requestPush()).toBe("denied");
   });
 
-  it("efface le déblocage en attente une fois l'appareil abonné", async () => {
+  it("retient que le membre VEUT les notifications une fois l'appareil abonné", async () => {
     navigateurCapable({ abonnement: null });
-    markUnblockPending();
     expect(await requestPush()).toBe("ok");
-    expect(localStorage.getItem("notifUnblockPending")).toBeNull();
+    expect(localStorage.getItem("notifWanted")).toBe("1");
   });
 });
 
-// LE RETOUR DES RÉGLAGES. Le membre a suivi le guide de déblocage et revient : l'activation
-// doit se terminer sans geste de plus. Mais SEULEMENT dans ce cas — quelqu'un qui a pressé
-// « Ne plus recevoir » garde la permission accordée et ne doit pas être réabonné en douce.
-describe("resumeUnblockedPush", () => {
-  it("ne fait RIEN sans guide vu, même permission accordée et appareil désabonné", async () => {
+// L'ABONNEMENT PERDU. Couper puis rétablir les notifications de l'appli dans les réglages
+// d'Android (Pixel 8a, 14/10/2026) : Chrome résilie l'abonnement push quand l'autorisation
+// tombe, et l'appareil revenait « autorisé mais non abonné » — plus rien n'arrivait. On le
+// rétablit sans geste, mais SEULEMENT pour qui l'a voulu : quelqu'un qui a pressé « Ne plus
+// recevoir » garde la permission accordée et ne doit pas être réabonné en douce.
+describe("restoreWantedPush", () => {
+  it("ne fait RIEN sans souhait enregistré, même permission accordée et appareil désabonné", async () => {
     navigateurCapable({ permission: "granted", abonnement: null });
-    expect(await resumeUnblockedPush()).toBe(false);
+    expect(await restoreWantedPush()).toBe(false);
     expect(registre.subscribe).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("termine l'activation au retour, sans redemander la permission", async () => {
+  it("rétablit l'abonnement perdu, sans redemander la permission", async () => {
     navigateurCapable({ permission: "granted", abonnement: null });
-    markUnblockPending();
-    expect(await resumeUnblockedPush()).toBe(true);
+    markPushWanted();
+    expect(await restoreWantedPush()).toBe(true);
     expect(requestPermission).not.toHaveBeenCalled();
     expect(registre.subscribe).toHaveBeenCalledTimes(1);
-    expect(localStorage.getItem("notifUnblockPending")).toBeNull();
   });
 
-  it("garde l'attente tant que c'est toujours bloqué — l'appli Android ne relit qu'au relancement", async () => {
+  it("ne réabonne pas un appareil qui l'est déjà", async () => {
+    navigateurCapable({ permission: "granted", abonnement: abonnement() });
+    markPushWanted();
+    expect(await restoreWantedPush()).toBe(false);
+    expect(registre.subscribe).not.toHaveBeenCalled();
+  });
+
+  it("garde le souhait tant que c'est bloqué — Chrome ne relit le réglage qu'au lancement de l'appli", async () => {
     navigateurCapable({ permission: "denied", abonnement: null });
-    markUnblockPending();
-    expect(await resumeUnblockedPush()).toBe(false);
-    expect(localStorage.getItem("notifUnblockPending")).toBe("1");
+    markPushWanted();
+    expect(await restoreWantedPush()).toBe(false);
+    expect(localStorage.getItem("notifWanted")).toBe("1");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -350,16 +357,32 @@ describe("resumeUnblockedPush", () => {
     // Firefox (✕) ou Chrome (« Réinitialiser ») : la demande exige un geste, c'est le bouton
     // « Activer » qui le recueillera.
     navigateurCapable({ permission: "default", abonnement: null });
-    markUnblockPending();
-    expect(await resumeUnblockedPush()).toBe(false);
+    markPushWanted();
+    expect(await restoreWantedPush()).toBe(false);
     expect(requestPermission).not.toHaveBeenCalled();
-    expect(localStorage.getItem("notifUnblockPending")).toBeNull();
+  });
+
+  it("« Ne plus recevoir » efface le souhait : plus aucun réabonnement", async () => {
+    navigateurCapable({ permission: "granted", abonnement: abonnement() });
+    markPushWanted();
+    await unsubscribePush();
+    expect(localStorage.getItem("notifWanted")).toBeNull();
+
+    navigateurCapable({ permission: "granted", abonnement: null });
+    expect(await restoreWantedPush()).toBe(false);
+    expect(registre.subscribe).not.toHaveBeenCalled();
+  });
+
+  it("un abonné d'avant ce drapeau est reconnu à sa prochaine ouverture", async () => {
+    navigateurCapable({ permission: "granted", abonnement: abonnement() });
+    await syncPushSubscription();
+    expect(localStorage.getItem("notifWanted")).toBe("1");
   });
 
   it("partage un seul passage entre deux appels simultanés (page + panneau au même retour)", async () => {
     navigateurCapable({ permission: "granted", abonnement: null });
-    markUnblockPending();
-    const [a, b] = await Promise.all([resumeUnblockedPush(), resumeUnblockedPush()]);
+    markPushWanted();
+    const [a, b] = await Promise.all([restoreWantedPush(), restoreWantedPush()]);
     expect(a).toBe(true);
     expect(b).toBe(true);
     expect(registre.subscribe).toHaveBeenCalledTimes(1);

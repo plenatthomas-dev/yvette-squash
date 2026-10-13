@@ -52,7 +52,7 @@ import { NOTIFICATION_RETENTION_DAYS } from "@/lib/notifications-shared";
 import { downloadIcs } from "@/lib/ics";
 import {
   requestPush,
-  resumeUnblockedPush,
+  restoreWantedPush,
   syncPushSubscription,
   pushSupported,
   pushEnabledOnServer,
@@ -390,16 +390,17 @@ export default function Home() {
     void syncPushSubscription();
   }, [myId]);
 
-  // NOTIFICATIONS DÉBLOQUÉES DANS LES RÉGLAGES DU TÉLÉPHONE. Le membre a suivi le guide des
-  // Paramètres et revient : on termine l'activation sans lui demander un geste de plus. Au
-  // chargement aussi — l'appli Android ne voit souvent la permission rendue qu'au relancement.
+  // ABONNEMENT PERDU, OU DÉBLOQUÉ DANS LES RÉGLAGES DU TÉLÉPHONE. Notifications coupées puis
+  // rétablies dans Android, ou guide des Paramètres suivi : l'appareil revient autorisé mais
+  // non abonné. On le réabonne sans geste — s'il l'a voulu (cf. `restoreWantedPush`). Au
+  // chargement aussi : Chrome ne relit le réglage de l'appli Android qu'à son lancement.
   // Puis on relève l'état de l'appareil pour le tableau de bord admin (au plus une écriture
   // par jour si rien n'a changé, cf. `reportNotifState`) — APRÈS la reprise, pour relever
   // l'état qui en sort.
   useEffect(() => {
     if (!myId) return;
     const resume = async () => {
-      if (await resumeUnblockedPush()) toast("ok", "Notifications activées sur cet appareil ✓");
+      if (await restoreWantedPush()) toast("ok", "Notifications activées sur cet appareil ✓");
       await reportNotifState(myId);
     };
     void resume();
