@@ -10,10 +10,11 @@ import { BALISE } from "./html";
 
 // Point d'entrée AJAX unique de squashnet : toutes les sections passent par cette URL, seul
 // `ic_a` dit laquelle. D'où un nom qui ne parle pas du classement.
-const AJAX_URL = "https://www.squashnet.fr/index.php";
+export const AJAX_URL = "https://www.squashnet.fr/index.php";
 const RANKING_ACTION = "131079";
-const UA = "Mozilla/5.0 (compatible; YvetteSquash/1.0; +https://squash-yvette.vercel.app)";
-const TIMEOUT_MS = 10_000;
+// Exportés pour la session authentifiée (`session.ts`) : un seul en-tête, une seule patience.
+export const UA = "Mozilla/5.0 (compatible; YvetteSquash/1.0; +https://squash-yvette.vercel.app)";
+export const TIMEOUT_MS = 10_000;
 
 // Une ligne de classement telle que squashnet l'affiche. `name` est au format « NOM PRÉNOM ».
 export interface RankingRow {

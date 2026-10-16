@@ -7,6 +7,7 @@ import { countProblems, type CheckReport, type PlayerCheck } from "@/lib/captain
 // ce que le serveur a conclu. Deux formulations finiraient par diverger, et c'est l'écran qu'on
 // croirait.
 import { describeOfficial } from "@/lib/captain-official";
+import CaptainSquashnet from "@/components/CaptainSquashnet";
 
 // ============================================================================
 //  L'ESPACE CAPITAINE — vérifier une rencontre avant de la saisir chez la ligue.
@@ -106,6 +107,7 @@ export default function Captain({
   const [ouverte, setOuverte] = useState<Fixture | null>(null);
   const [rapport, setRapport] = useState<CheckReport | null>(null);
   const [busy, setBusy] = useState(false);
+  const [envoi, setEnvoi] = useState(false);
 
   const charger = useCallback(async () => {
     try {
@@ -207,10 +209,11 @@ export default function Captain({
           relevé.{" "}
           {/* ⚠️ LA PHRASE EXACTE COMPTE. Elle disait « aucune donnée n'est envoyée », ce qui
               était faux : chercher un joueur consiste précisément à envoyer son nom à squashnet.
-              Ce qu'on veut promettre est autre chose, et c'est tenu — cet écran ne PUBLIE rien
-              chez la fédération : il ne saisit aucun score, ne valide aucune feuille. */}
-          Rien n&apos;est saisi ni publié chez la fédération&nbsp;: cet écran lit, il n&apos;écrit
-          pas.
+              Ce qu'on promet est autre chose, et c'est tenu — la VÉRIFICATION ne publie rien
+              chez la fédération. Seul « Envoyer sur squashnet » y écrit, sur un geste à part,
+              après avoir montré ce qui part. */}
+          La vérification ne saisit rien chez la fédération&nbsp;: elle lit. Seul le bouton
+          «&nbsp;Envoyer sur squashnet&nbsp;» y écrit, après t&apos;avoir montré ce qui part.
         </p>
 
         {rapport === null ? (
@@ -227,6 +230,18 @@ export default function Captain({
               )}
               <span className="muted tiny cap-quand"> Vérifiée le {quand(rapport.checkedAt)}</span>
             </div>
+
+            {/* L'ENVOI CHEZ LA LIGUE, proposé dès que ce qui partirait est complet : scores
+                cohérents et chaque joueur identifié chez la fédération. Le reste du rapport
+                (ordre d'en face, feuille déjà publiée) informe mais n'empêche pas — c'est
+                squashnet qui dira si la saisie est encore ouverte. */}
+            {rapport.tie.ok &&
+              rapport.scores.every((s) => s.ok) &&
+              rapport.players.every((p) => p.fedName) && (
+                <button type="button" className="cap-envoyer" onClick={() => setEnvoi(true)}>
+                  Envoyer sur squashnet…
+                </button>
+              )}
 
             {/* LE COMPTE DE LA RENCONTRE en premier : c'est le chiffre que la fédération
                 attend, et celui qu'on relit en dernier avant de valider. */}
@@ -402,6 +417,15 @@ export default function Captain({
               })}
             </ul>
           </>
+        )}
+
+        {envoi && (
+          <CaptainSquashnet
+            fixtureId={ouverte.id}
+            onClose={() => setEnvoi(false)}
+            toast={toast}
+            onExpired={onExpired}
+          />
         )}
       </section>
     );
