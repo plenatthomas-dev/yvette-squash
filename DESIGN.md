@@ -521,6 +521,10 @@ niveaux de gris.
   documentée plus haut. Seul état à peindre aussi la ligne entière (voile `--live-wash`).
 - **Terminée :** gris plein, la paire `passe`/`passe-encre` — celle du créneau écoulé, dont
   c'est exactement le sens. Sans bordure, pour se distinguer du contour de « à venir ».
+- **Non complétée** (rencontre seulement) : contour en TIRETS à l'encre `--warn-fg`, sans aplat.
+  Commencée, jamais finie, date passée de plus de quatre jours : ni « en cours » (personne ne la
+  joue, l'ambre mentirait) ni « terminée » (il manque des scores). Quatrième forme, pas une
+  nuance des trois autres — le tiret se lit aussi en niveaux de gris.
 
 **La Règle des Trois Traitements.** Deux états qui partagent le même traitement visuel ne sont
 pas deux états. « À venir » et « terminée » ont longtemps porté la même pastille sourdine : la

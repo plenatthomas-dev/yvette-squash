@@ -112,13 +112,20 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** Écarte les lignes de la liste des rencontres, qui restent sous la fiche ouverte. */
+function horsListe(boutons: HTMLElement[]): HTMLElement[] {
+  return boutons.filter((b) => !b.classList.contains("ic-row"));
+}
+
 /** Ouvre la rencontre puis le formulaire de saisie du premier simple. */
 async function ouvreEditeur() {
   const r = render(<Interclub toast={vi.fn()} onExpired={() => false} />);
   await souffle();
   fireEvent.click(r.getByText(/Massy/));
   await souffle();
-  const saisir = r.queryByRole("button", { name: /Saisir|Corriger|Modifier/i });
+  // Les lignes de la LISTE sont écartées : celle de la rencontre porte désormais la pastille
+  // « À saisir » (date passée, rien de saisi), et c'est un bouton, elle aussi.
+  const saisir = horsListe(r.queryAllByRole("button", { name: /Saisir|Corriger|Modifier/i }))[0];
   if (saisir) {
     fireEvent.click(saisir);
     await souffle();
@@ -248,7 +255,9 @@ describe("Sélecteur de composition — classement ET rang mixte", () => {
     await souffle();
     fireEvent.click(r.getByText(/Massy/));
     await souffle();
-    const boutons = r.queryAllByRole("button", { name: /Saisir|Corriger|Modifier|désigner/i });
+    const boutons = horsListe(
+      r.queryAllByRole("button", { name: /Saisir|Corriger|Modifier|désigner/i }),
+    );
     if (boutons.length === 0) return r;
     fireEvent.click(boutons[boutons.length - 1]);
     await souffle();

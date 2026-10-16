@@ -20,6 +20,8 @@ import { TrophyIcon } from "@/components/icons";
 import {
   colorsTooClose,
   describeSequenceProblem,
+  FIXTURE_STATUS_LABEL,
+  fixtureDisplayStatus,
   isValidBestOf,
   lineupComplete,
   playedGames,
@@ -199,11 +201,6 @@ type Fixture = FixtureRow & {
   roster: RosterEntry[];
 };
 
-const STATUS_LABEL: Record<FixtureRow["status"], string> = {
-  scheduled: "À venir",
-  live: "En cours",
-  done: "Terminée",
-};
 
 /**
  * Le RÉSULTAT au sens de la ligue, en toutes lettres.
@@ -1017,7 +1014,9 @@ export default function Interclub({
         </button>
       </div>
 
-      <InterclubLive onExpired={stableExpired} />
+      {/* La carte du haut OUVRE la fiche : c'est le chemin court vers la rencontre de ce soir
+          (ou d'hier, à finir de saisir), au lieu de la chercher dans le calendrier. */}
+      <InterclubLive onExpired={stableExpired} onOpen={setOpenId} />
 
       {/* Les onglets ne s'affichent qu'à partir de DEUX équipes : avec une seule, un filtre
           qui ne filtre rien est du bruit. Le schéma prévoit la troisième. */}
@@ -1080,59 +1079,66 @@ export default function Interclub({
               anciennes ne figurent pas dans cette liste.
             </li>
           )}
-          {visibleRows.map((f) => (
-            <li key={f.id}>
-              {/* L'issue de la rencontre passe DANS la classe de la ligne : « 2-2 » sans
-                  couleur ne dit pas si la soirée a été bonne, et on parcourt une saison à
-                  l'œil, pas en lisant chaque ligne. Le voile pleine ligne reste réservé à
-                  « en cours » (DESIGN.md) : ici c'est un filet et le score, pas un fond. */}
-              <button
-                className={`ic-row ic-row-${f.status}${
-                  f.outcome ? ` ic-issue-${issueClass(f.outcome.result)}` : ""
-                }`}
-                onClick={() => setOpenId(f.id)}
-              >
-                <span className="ic-row-head">
-                  <span className="ic-date" title={`Date de la rencontre : ${shortDate(f.date)}`}>
-                    {f.round && <span className="ic-round">{f.round}</span>}
-                    {shortDate(f.date)}
-                    {f.time && <span className="ic-hour">{f.time}</span>}
-                    {/* Une date prévisionnelle porte sa mention SUR LA LIGNE : c'est là qu'on
-                        la lit quand on planifie sa semaine, pas dans la fiche qu'on n'ouvrira
-                        peut-être jamais. */}
-                    {!f.dateConfirmed && (
-                      <span className="ic-provisoire-tag" title="La ligue n'a pas encore fixé cette date">
-                        prévisionnelle
+          {visibleRows.map((f) => {
+            // L'état AFFICHÉ, qui tient compte de la date : une rencontre commencée il y a plus
+            // de `RECENT_FIXTURE_DAYS` jours et jamais finie n'est plus « en cours », elle est
+            // « non complétée » (cf. `fixtureDisplayStatus`). Le voile de ligne suit, puisqu'il
+            // est réservé à ce qui se joue MAINTENANT.
+            const etat = fixtureDisplayStatus(f, aujourdhui);
+            return (
+              <li key={f.id}>
+                {/* L'issue de la rencontre passe DANS la classe de la ligne : « 2-2 » sans
+                    couleur ne dit pas si la soirée a été bonne, et on parcourt une saison à
+                    l'œil, pas en lisant chaque ligne. Le voile pleine ligne reste réservé à
+                    « en cours » (DESIGN.md) : ici c'est un filet et le score, pas un fond. */}
+                <button
+                  className={`ic-row ic-row-${etat}${
+                    f.outcome ? ` ic-issue-${issueClass(f.outcome.result)}` : ""
+                  }`}
+                  onClick={() => setOpenId(f.id)}
+                >
+                  <span className="ic-row-head">
+                    <span className="ic-date" title={`Date de la rencontre : ${shortDate(f.date)}`}>
+                      {f.round && <span className="ic-round">{f.round}</span>}
+                      {shortDate(f.date)}
+                      {f.time && <span className="ic-hour">{f.time}</span>}
+                      {/* Une date prévisionnelle porte sa mention SUR LA LIGNE : c'est là qu'on
+                          la lit quand on planifie sa semaine, pas dans la fiche qu'on n'ouvrira
+                          peut-être jamais. */}
+                      {!f.dateConfirmed && (
+                        <span className="ic-provisoire-tag" title="La ligue n'a pas encore fixé cette date">
+                          prévisionnelle
+                        </span>
+                      )}
+                    </span>
+                    <span className={`ic-status ic-${etat}`}>
+                      <span className="sr-only">État : </span>
+                      {FIXTURE_STATUS_LABEL[etat]}
+                    </span>
+                  </span>
+                  <span className="ic-row-main">
+                    <span className="ic-opponent">
+                      {f.team.name}{" "}
+                      <span className="ic-vs-word">{f.home ? "reçoit" : "se déplace à"}</span>{" "}
+                      {f.opponent}
+                    </span>
+                    {/* Une rencontre pas encore commencée n'a pas de score : afficher « 0–0 »
+                        annonçait un nul là où il n'y a rien eu. */}
+                    {f.status === "scheduled" ? (
+                      <span className="ic-score ic-score-none" aria-label="Pas encore jouée">
+                        <span aria-hidden="true">–</span>
+                      </span>
+                    ) : (
+                      <span className="ic-score" aria-label={`Score ${f.score.home} à ${f.score.away}`}>
+                        {f.score.home}–{f.score.away}
                       </span>
                     )}
                   </span>
-                  <span className={`ic-status ic-${f.status}`}>
-                    <span className="sr-only">État : </span>
-                    {STATUS_LABEL[f.status]}
-                  </span>
-                </span>
-                <span className="ic-row-main">
-                  <span className="ic-opponent">
-                    {f.team.name}{" "}
-                    <span className="ic-vs-word">{f.home ? "reçoit" : "se déplace à"}</span>{" "}
-                    {f.opponent}
-                  </span>
-                  {/* Une rencontre pas encore commencée n'a pas de score : afficher « 0–0 »
-                      annonçait un nul là où il n'y a rien eu. */}
-                  {f.status === "scheduled" ? (
-                    <span className="ic-score ic-score-none" aria-label="Pas encore jouée">
-                      <span aria-hidden="true">–</span>
-                    </span>
-                  ) : (
-                    <span className="ic-score" aria-label={`Score ${f.score.home} à ${f.score.away}`}>
-                      {f.score.home}–{f.score.away}
-                    </span>
-                  )}
-                </span>
-                {f.outcome && <TieOutcomeLine outcome={f.outcome} />}
-              </button>
-            </li>
-          ))}
+                  {f.outcome && <TieOutcomeLine outcome={f.outcome} />}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -1556,7 +1562,9 @@ function FixtureDialog({
       )}
       <p className="ic-total">
         {fixture.score.home}–{fixture.score.away}{" "}
-        <span className="muted tiny">{STATUS_LABEL[fixture.status]}</span>
+        <span className="muted tiny">
+          {FIXTURE_STATUS_LABEL[fixtureDisplayStatus(fixture, todayISO())]}
+        </span>
       </p>
       {/* La fiche dit la MÊME chose que la carte, calculée par la même fonction : deux écrans
           qui annonceraient des points de classement différents sur la même rencontre seraient

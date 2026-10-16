@@ -133,15 +133,24 @@ describe("todayISO", () => {
 });
 
 describe("getLiveFixtures — bornes de la requête", () => {
-  it("borne le nombre de rencontres et pose un plancher de date", async () => {
+  it("borne le nombre de rencontres, et la fenêtre aux quatre derniers jours sans futur", async () => {
     await getLiveFixtures();
     const args = h.dernierFindMany as Record<string, unknown>;
-    expect(args.take).toBe(6);
-    const where = args.where as { date: { gte: string }; OR: unknown[] };
-    // Le plancher est deux jours en arrière : une soirée qui déborde après minuit reste
-    // visible, une rencontre oubliée en « live » depuis trois semaines ne l'est plus.
-    expect(where.date.gte < todayISO()).toBe(true);
-    expect(where.OR).toHaveLength(2);
+    expect(args.take).toBe(8);
+    const where = args.where as { date: { gte: string; lte: string }; OR: unknown[] };
+    // Quatre jours en arrière : le temps de finir de saisir les scores sans chercher la
+    // rencontre dans la liste. Une rencontre oubliée depuis trois semaines n'y est plus.
+    const d = new Date(`${todayISO()}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - 4);
+    expect(where.date.gte).toBe(d.toISOString().slice(0, 10));
+    // Rien de futur : le calendrier est dans la liste.
+    expect(where.date.lte).toBe(todayISO());
+    // Une date passée PRÉVISIONNELLE n'entre que si quelque chose y a été saisi.
+    expect(where.OR).toEqual([
+      { date: todayISO() },
+      { dateConfirmed: true },
+      { status: { not: "scheduled" } },
+    ]);
   });
 });
 

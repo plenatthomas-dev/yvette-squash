@@ -84,10 +84,16 @@ function Banc() {
   );
 }
 
+/** « Aujourd'hui » pour tout ce fichier : le soir de la rencontre de `rencontre()`. */
+const SOIR = new Date("2026-09-03T18:00:00Z");
+
 beforeEach(() => {
   calls = [];
   charge = { fixtures: [] };
   vi.useFakeTimers();
+  // Le panneau lit la DATE pour savoir ce qui se joue : sans horloge fixée, la rencontre du
+  // 3 septembre serait « il y a six semaines » et rien ne se sonderait.
+  vi.setSystemTime(SOIR);
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
@@ -325,5 +331,79 @@ describe("InterclubLive — l'équipe qui reçoit, en premier", () => {
     expect(container.querySelector(".ic-live-who")?.textContent).toBe("Équipe 1 reçoit Massy");
     expect(container.querySelector(".ic-live-score")?.textContent).toBe("1–2");
     expect(container.querySelectorAll(".ic-player")[0].textContent).toContain("Thomas");
+  });
+});
+
+// ============================================================================
+//  LA CARTE MÈNE À LA RENCONTRE, ET LES JOURS PRÉCÉDENTS RESTENT EN HAUT
+//  (demande du club, 2026-10-16)
+// ============================================================================
+
+/** La même rencontre, `jours` jours plus tôt que `SOIR`. */
+function passee(statut: string, jours: number, matches: unknown[] = []) {
+  const d = new Date(SOIR);
+  d.setUTCDate(d.getUTCDate() - jours);
+  return { ...rencontre(statut), id: `f-${statut}-${jours}`, date: d.toISOString().slice(0, 10), matches };
+}
+
+/** Un simple terminé, et un simple jamais commencé : la soirée d'hier, à moitié saisie. */
+const moitie = [
+  { id: "m1", order: 1, home: "Thomas", away: "Gérard", homeColor: null, awayColor: null, status: "done", gamesHome: 3, gamesAway: 0, games: [], live: null },
+  { id: "m2", order: 2, home: "À désigner", away: "À désigner", homeColor: null, awayColor: null, status: "pending", gamesHome: null, gamesAway: null, games: [], live: null },
+];
+
+describe("InterclubLive — la carte ouvre la rencontre", () => {
+  it("un appui n'importe où sur la carte ouvre la fiche de CETTE rencontre", async () => {
+    charge = { fixtures: [enCours("home")] };
+    const onOpen = vi.fn();
+    const { getByRole } = render(<InterclubLive onExpired={() => false} onOpen={onOpen} />);
+    await souffle();
+    fireEvent.click(getByRole("button", { name: /Ouvrir la rencontre : Équipe 1 reçoit Massy/ }));
+    expect(onOpen).toHaveBeenCalledWith("f-live");
+  });
+});
+
+describe("InterclubLive — les rencontres des derniers jours restent en haut", () => {
+  it("garde une rencontre TERMINÉE du jour, résumée en une ligne", async () => {
+    charge = { fixtures: [{ ...rencontre("done"), matches: moitie }] };
+    const { getByText, container } = render(<Banc />);
+    await souffle();
+    expect(getByText("Terminée")).toBeTruthy();
+    // Une ligne, pas l'écran de scores figés qu'on avait retiré : le détail est dans la fiche.
+    expect(container.querySelector(".ic-live-matches")).toBeNull();
+  });
+
+  it("range la rencontre d'hier sous « Ces derniers jours », datée et résumée", async () => {
+    charge = { fixtures: [passee("live", 1, moitie)] };
+    const { getByText, container } = render(<Banc />);
+    await souffle();
+    expect(getByText("Ces derniers jours")).toBeTruthy();
+    expect(getByText("Aucune rencontre aujourd'hui.")).toBeTruthy();
+    expect(container.querySelector(".ic-live-date")?.textContent).toMatch(/2 sept/);
+    expect(container.querySelector(".ic-live-matches")).toBeNull();
+    // Personne ne la joue : pas de voile « en cours ».
+    expect(container.querySelector(".ic-live-card.is-live")).toBeNull();
+  });
+
+  it("NE SONDE PAS pour une rencontre d'hier laissée inachevée", async () => {
+    // Le défaut que la date ferme : « en cours » faute de deux simples saisis, la rencontre
+    // déclenchait un sondage toutes les dix secondes, des jours durant.
+    charge = { fixtures: [passee("live", 1, moitie)] };
+    render(<Banc />);
+    await souffle();
+    expect(calls.length).toBe(1);
+    await avance(120_000);
+    expect(calls.length).toBe(1);
+  });
+
+  it("sonde en revanche la soirée d'hier qui DÉBORDE après minuit", async () => {
+    const enJeu = [{ ...moitie[1], home: "Thomas", away: "Gérard", status: "live", live: { current: { home: 4, away: 2 }, serving: "home" } }];
+    charge = { fixtures: [passee("live", 1, enJeu)] };
+    const { container } = render(<Banc />);
+    await souffle();
+    // Détaillée et peinte : elle se joue.
+    expect(container.querySelector(".ic-live-card.is-live")).toBeTruthy();
+    await avance(10_000);
+    expect(calls.length).toBe(2);
   });
 });

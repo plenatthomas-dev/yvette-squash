@@ -3,13 +3,13 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   applyPoint,
-  applyServe,
   colorsTooClose,
   replay,
   resolveColor,
+  startServe,
+  toggleServeBox,
   undo as undoEvent,
   winGamesFor,
-  type Box,
   type ScoreEvent,
   type Side,
 } from "@/lib/interclub";
@@ -157,15 +157,8 @@ export function FreeScoringSession({
   }
 
   const scorePoint = (side: Side) => {
-    if (state.serving === null || state.awaitingServeBox || state.status === "done" || remaining > 0)
-      return;
+    if (state.serving === null || state.status === "done" || remaining > 0) return;
     commit((prev) => applyPoint(prev, bestOf, side));
-  };
-
-  const chooseBox = (box: Box) => {
-    if (!state.serving) return;
-    const who = state.serving;
-    commit((prev) => applyServe(prev, bestOf, who, box));
   };
 
   async function finish() {
@@ -192,8 +185,8 @@ export function FreeScoringSession({
       canUndo={events.length > 0}
       remaining={remaining}
       onPoint={scorePoint}
-      onFirstServe={(side, box) => commit((prev) => applyServe(prev, bestOf, side, box))}
-      onBox={chooseBox}
+      onFirstServe={(side) => commit((prev) => startServe(prev, bestOf, side))}
+      onToggleBox={() => commit((prev) => toggleServeBox(prev, bestOf))}
       onUndo={() => {
         stopBreak();
         commit((prev) => undoEvent(prev));
