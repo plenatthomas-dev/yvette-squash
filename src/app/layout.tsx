@@ -9,6 +9,7 @@ import ChunkErrorReload from "@/components/ChunkErrorReload";
 import AnnounceModal from "@/components/AnnounceModal";
 import FeatureProvider from "@/components/FeatureProvider";
 import InstallAppPrompt from "@/components/InstallAppPrompt";
+import AndroidAppPrompt from "@/components/AndroidAppPrompt";
 import "@picocss/pico/css/pico.min.css";
 import "./globals.css";
 
@@ -59,6 +60,7 @@ export default async function RootLayout({
         <FeatureProvider>{children}</FeatureProvider>
         <AnnounceModal />
         <InstallAppPrompt />
+        <AndroidAppPrompt />
         <Analytics />
         <SpeedInsights />
       </body>

@@ -3,11 +3,12 @@
 // Bannière « installer l'appli » : encourage les visiteurs (typiquement arrivés via le QR
 // code / lien partagé) à installer l'appli plutôt que de la garder comme simple onglet.
 //
-// Trois cas, du meilleur au plus dégradé :
-//  1) `beforeinstallprompt` reçu (Chrome/Edge, Android comme desktop) → vrai prompt natif au clic.
+// Deux cas :
+//  1) `beforeinstallprompt` reçu (Chrome/Edge sur ordinateur) → vrai prompt natif au clic.
 //  2) iOS Safari → aucune API d'installation ; on guide vers Partager ⬆ → « Sur l'écran d'accueil ».
-//  3) Android sans event (SW pas encore prêt, heuristique d'engagement non atteinte, navigateur
-//     non-Chromium…) → après un court délai, on affiche des instructions manuelles (menu ⋮).
+//
+// Sur Android, rien : AndroidAppPrompt y propose l'appli Android (l'APK) à la place de la PWA.
+// On y retient seulement la mini-barre d'installation de Chrome, qui proposerait la PWA.
 //
 // Jamais affichée si l'appli tourne déjà en standalone (déjà installée), et masquable
 // (mémorisé en local : elle vit hors connexion, écran de login inclus).
@@ -17,19 +18,13 @@ import { isAndroidApp } from "@/lib/androidApp";
 
 const SNOOZE_KEY = "installPromptSnooze";
 const SNOOZE_MS = 14 * 24 * 60 * 60 * 1000; // 14 jours
-// Délai avant de basculer sur les instructions manuelles Android si le prompt natif n'a pas
-// été reçu. `beforeinstallprompt` peut arriver un court instant après le chargement (le SW
-// doit s'activer) : on lui laisse sa chance d'abord, mais court pour ne pas faire attendre.
-// Si l'event arrive APRÈS ce délai, il remplace de toute façon les instructions par le vrai
-// prompt (upgrade transparent), donc on peut être agressif ici.
-const ANDROID_FALLBACK_MS = 2000;
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
-type Mode = "prompt" | "ios" | "android-manual";
+type Mode = "prompt" | "ios";
 
 function snoozed(): boolean {
   try {
@@ -87,12 +82,13 @@ export default function InstallAppPrompt() {
       });
     }
 
-    // Chromium (Android + desktop Chrome/Edge) : le vrai prompt d'installation. On l'écoute
-    // partout — même sur desktop, où l'installation a du sens (raccourci appli).
+    // Chromium (desktop Chrome/Edge) : le vrai prompt d'installation, où elle a du sens
+    // (raccourci appli). Sur Android, la mini-barre native est retenue et rien ne la remplace.
     const onBeforeInstall = (e: Event) => {
       e.preventDefault(); // on affiche NOTRE bannière plutôt que la mini-barre native
+      if (isAndroid()) return;
       setDeferred(e as BeforeInstallPromptEvent);
-      setMode("prompt"); // remplace un éventuel fallback manuel par le vrai prompt
+      setMode("prompt");
     };
     const onInstalled = () => {
       snooze();
@@ -102,19 +98,10 @@ export default function InstallAppPrompt() {
     window.addEventListener("beforeinstallprompt", onBeforeInstall);
     window.addEventListener("appinstalled", onInstalled);
 
-    let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
-    if (isIosSafari()) {
-      // Pas d'event possible sur iOS → instructions manuelles tout de suite.
-      setMode("ios");
-    } else if (isAndroid()) {
-      // On laisse sa chance au prompt natif ; sinon, instructions manuelles (menu ⋮).
-      fallbackTimer = setTimeout(() => {
-        setMode((m) => m ?? "android-manual");
-      }, ANDROID_FALLBACK_MS);
-    }
+    // Pas d'event possible sur iOS → instructions manuelles tout de suite.
+    if (isIosSafari()) setMode("ios");
 
     return () => {
-      if (fallbackTimer) clearTimeout(fallbackTimer);
       window.removeEventListener("beforeinstallprompt", onBeforeInstall);
       window.removeEventListener("appinstalled", onInstalled);
     };
@@ -172,12 +159,6 @@ export default function InstallAppPrompt() {
             Ajoute-la à ton écran d'accueil : accès direct en un tap, affichage plein écran (sans
             la barre du navigateur) et alertes quand un terrain se libère. Rien à télécharger sur
             un store.
-          </>
-        )}
-        {mode === "android-manual" && (
-          <>
-            Installe l'appli : menu <strong>⋮</strong> du navigateur →{" "}
-            <strong>Installer l'application</strong> (ou <strong>Ajouter à l'écran d'accueil</strong>).
           </>
         )}
         {mode === "ios" && (
