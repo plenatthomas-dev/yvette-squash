@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
 import { prisma } from "@/lib/db";
+import { isAdminEmail } from "@/lib/admin";
 import { readJsonBody } from "@/lib/http-tx";
 import { isRealDateISO } from "@/lib/time";
 import { interclubChanged } from "@/lib/interclub-gate";
@@ -32,6 +33,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const access = await requireInterclubMember(req);
   if (!access.ok) return access.response;
+  const { session } = access;
 
   const raw = Number(req.nextUrl.searchParams.get("limit"));
   const limit = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), 100) : 20;
@@ -153,18 +155,35 @@ export async function GET(req: NextRequest) {
     ),
   }));
 
-  return NextResponse.json({ hasMore, teams: equipes, fixtures });
+  // `canCreate` : l'écran n'affiche « Nouvelle rencontre » qu'à ceux que le POST acceptera.
+  // Statut lu sur la session, déjà chargée — cette liste se recharge à chaque retour au
+  // premier plan.
+  return NextResponse.json({
+    hasMore,
+    teams: equipes,
+    fixtures,
+    canCreate: isAdminEmail(session.email),
+  });
 }
 
 // POST /api/interclub : crée une rencontre et ses N simples d'un coup.
 // { date, teamId, opponent, home?, season?, matchCount?, bestOf?, force?,
 //   matches?: [{ userId? | guestId?, awayName?, homeColor?, awayColor? }] }
-// Ouvert à TOUT membre connecté : dans un club de cette taille, exiger un rôle bloquerait la
-// saisie les soirs où le capitaine joue.
+//
+// RÉSERVÉ AUX ADMINS depuis que le calendrier squashnet est synchronisé (cron + import admin) :
+// c'est lui qui génère les rencontres, un membre n'a plus à en créer. L'admin garde la main
+// pour ce que la ligue ne publierait pas. Composer, marquer et saisir les scores restent
+// ouverts à tout membre.
 export async function POST(req: NextRequest) {
   const access = await requireInterclubMember(req);
   if (!access.ok) return access.response;
   const { session } = access;
+  if (!isAdminEmail(session.email)) {
+    return NextResponse.json(
+      { error: "Les rencontres viennent du calendrier de la ligue" },
+      { status: 403 },
+    );
+  }
 
   const body = await readJsonBody(req);
   const { date, teamId, opponent, home, season, matchCount, bestOf, matches, force } = body as {

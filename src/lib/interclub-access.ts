@@ -10,13 +10,16 @@
 // alors que la fonction y est éteinte, et rien ne le signale puisque l'écran, lui, est caché.
 //
 // LE MODÈLE D'AUTORISATION DE L'INTERCLUB, ÉNONCÉ UNE FOIS POUR TOUTES
-// Il n'y a qu'un seul rôle : MEMBRE CONNECTÉ. Tout membre peut créer une rencontre, composer
-// une équipe, prendre le marquage d'un match et y saisir les points. C'est une décision de
-// produit, pas un oubli — cf. `docs/interclub.md`, section « Autorisations ». Le club compte
-// quelques dizaines de personnes qui se connaissent ; exiger un rôle de capitaine bloquerait
-// la saisie exactement les soirs où le capitaine joue, et c'est le seul moment où elle sert.
+// Il n'y a qu'un seul rôle : MEMBRE CONNECTÉ. Tout membre peut composer une équipe, prendre le
+// marquage d'un match et y saisir les points. C'est une décision de produit, pas un oubli —
+// cf. `docs/interclub.md`, section « Autorisations ». Le club compte quelques dizaines de
+// personnes qui se connaissent ; exiger un rôle de capitaine bloquerait la saisie exactement
+// les soirs où le capitaine joue, et c'est le seul moment où elle sert.
 //
-// Trois exceptions seulement, et chacune protège quelqu'un d'un ÉCRASEMENT, jamais d'un accès :
+// CRÉER une rencontre est réservé aux admins (POST /api/interclub) : le calendrier squashnet
+// synchronisé les génère, un membre n'a plus à en créer.
+//
+// Trois autres exceptions, et chacune protège quelqu'un d'un ÉCRASEMENT, jamais d'un accès :
 //   * un match ENTAMÉ ne se modifie qu'au créateur de la rencontre, au joueur concerné, au
 //     marqueur ou à un admin (PATCH …/matches/{mid}) ;
 //   * un match dont quelqu'un TIENT le marquage ne s'écrit pas par-dessus lui, tant que sa
