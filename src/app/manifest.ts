@@ -62,6 +62,17 @@ export default function manifest(): MetadataRoute.Manifest {
         purpose: "monochrome",
       },
     ],
+    // L'appli Android (android/twa-manifest.json) : permet à la PWA de savoir, par
+    // `getInstalledRelatedApps`, si elle est déjà installée (cf. AndroidAppPrompt). Surtout pas
+    // de `prefer_related_applications` : Chrome cesserait de proposer la PWA et renverrait vers
+    // le Play Store, où l'appli n'est pas publiée.
+    related_applications: [
+      {
+        platform: "play",
+        id: "fr.squashyvette.app",
+        url: "https://play.google.com/store/apps/details?id=fr.squashyvette.app",
+      },
+    ],
     // Appui long sur l'icône : ouvre directement une vue. Repris tels quels par l'appli
     // Android (android/twa-manifest.json) ; ses icônes doivent donc être EN PRODUCTION avant
     // un `bubblewrap update`. Une vue coupée (Frais, Interclub) retombe sur le planning.

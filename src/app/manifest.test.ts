@@ -12,6 +12,7 @@ import manifest from "./manifest";
 const racine = (p: string) => fileURLToPath(new URL(`../../${p}`, import.meta.url));
 const shortcuts = manifest().shortcuts ?? [];
 const twa = JSON.parse(readFileSync(racine("android/twa-manifest.json"), "utf8")) as {
+  packageId: string;
   host: string;
   shortcuts: { name: string; url: string; chosenIconUrl: string; chosenMaskableIconUrl?: string }[];
 };
@@ -38,5 +39,19 @@ describe("raccourcis de l'icône", () => {
         return [s.name, `${base}${s.url}`, icone, icone];
       }),
     );
+  });
+});
+
+// Sans le bon package, `getInstalledRelatedApps` ne trouve jamais l'appli : la PWA continue de
+// la proposer à qui l'a déjà (cf. AndroidAppPrompt).
+describe("l'appli Android liée", () => {
+  it("est celle que construit Bubblewrap", () => {
+    expect(manifest().related_applications).toEqual([
+      expect.objectContaining({ platform: "play", id: twa.packageId }),
+    ]);
+  });
+
+  it("ne détourne pas l'installation de la PWA vers le Play Store", () => {
+    expect(manifest().prefer_related_applications).toBeFalsy();
   });
 });

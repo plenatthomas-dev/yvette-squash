@@ -2,25 +2,32 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, act } from "@testing-library/react";
 import InstallAppPrompt from "@/components/InstallAppPrompt";
 
-// DANS L'APPLI ANDROID, PAS DE BANNIÈRE « INSTALLER L'APPLI ».
+// SUR ANDROID, PAS DE BANNIÈRE « INSTALLER L'APPLI » (LA PWA).
 //
-// L'appli Android (TWA, cf. android/README.md) n'est que Chrome en plein écran sur le site : la
-// bannière s'y affichait donc comme dans un onglet, et proposait d'installer l'appli à quelqu'un
-// qui venait justement de l'ouvrir. Chrome ne signale la TWA que par le référent du PREMIER
-// chargement (`android-app://<package>/`) : il faut s'en souvenir pour la session.
+// AndroidAppPrompt y propose l'appli Android (l'APK) à la place. Proposer aussi la PWA ferait
+// deux offres concurrentes, et la PWA installée garderait ensuite les notifications de l'appli.
+// La mini-barre d'installation de Chrome, qui proposerait la PWA, reste donc retenue.
+// Sur ordinateur, rien ne change : la bannière suit `beforeinstallprompt`.
 
 const ANDROID_UA =
   "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36";
+const DESKTOP_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
 
-function referrer(value: string) {
-  Object.defineProperty(document, "referrer", { value, configurable: true });
+/** Chrome signale que la PWA peut s'installer. */
+function beforeInstallPrompt() {
+  const e = new Event("beforeinstallprompt", { cancelable: true });
+  Object.assign(e, { prompt: () => Promise.resolve(), userChoice: Promise.resolve({ outcome: "dismissed" }) });
+  act(() => {
+    window.dispatchEvent(e);
+  });
+  return e;
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
+  localStorage.clear();
   sessionStorage.clear();
-  referrer("");
-  vi.spyOn(navigator, "userAgent", "get").mockReturnValue(ANDROID_UA);
   // jsdom n'implémente pas `matchMedia` : « pas en mode standalone ».
   vi.stubGlobal("matchMedia", (q: string) => ({ matches: false, media: q }));
 });
@@ -31,34 +38,32 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Laisse passer le délai au bout duquel Android affiche les instructions manuelles. */
-async function attend() {
-  await act(async () => {
-    vi.advanceTimersByTime(5000);
+describe("InstallAppPrompt — Android", () => {
+  beforeEach(() => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(ANDROID_UA);
   });
-}
 
-describe("InstallAppPrompt — l'appli Android", () => {
-  it("s'affiche dans Chrome Android, hors appli", async () => {
+  it("ne propose pas la PWA, même quand Chrome la dit installable", async () => {
     const { container } = render(<InstallAppPrompt />);
-    await attend();
+    beforeInstallPrompt();
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(container.querySelector(".install-banner")).toBeNull();
+  });
+
+  it("retient la mini-barre d'installation de Chrome", () => {
+    render(<InstallAppPrompt />);
+    expect(beforeInstallPrompt().defaultPrevented).toBe(true);
+  });
+});
+
+describe("InstallAppPrompt — ordinateur", () => {
+  it("propose l'installation quand Chrome la dit possible", () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(DESKTOP_UA);
+    const { container } = render(<InstallAppPrompt />);
+    expect(container.querySelector(".install-banner")).toBeNull();
+    beforeInstallPrompt();
     expect(container.querySelector(".install-banner")).not.toBeNull();
-  });
-
-  it("ne s'affiche pas quand l'appli Android vient de lancer la page", async () => {
-    referrer("android-app://fr.squashyvette.app/");
-    const { container } = render(<InstallAppPrompt />);
-    await attend();
-    expect(container.querySelector(".install-banner")).toBeNull();
-  });
-
-  it("ne revient pas après un rechargement dans l'appli, où le référent a disparu", async () => {
-    referrer("android-app://fr.squashyvette.app/");
-    render(<InstallAppPrompt />).unmount();
-
-    referrer("https://squash-yvette.vercel.app/");
-    const { container } = render(<InstallAppPrompt />);
-    await attend();
-    expect(container.querySelector(".install-banner")).toBeNull();
   });
 });
