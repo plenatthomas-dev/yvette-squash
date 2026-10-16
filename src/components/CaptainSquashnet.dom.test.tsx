@@ -36,8 +36,19 @@ beforeEach(() => {
 
 afterEach(() => vi.unstubAllGlobals());
 
+const onSent = vi.fn();
+
 function monte(toast = vi.fn()) {
-  render(<CaptainSquashnet fixtureId="f1" onClose={vi.fn()} toast={toast} onExpired={() => false} />);
+  onSent.mockClear();
+  render(
+    <CaptainSquashnet
+      fixtureId="f1"
+      onClose={vi.fn()}
+      onSent={onSent}
+      toast={toast}
+      onExpired={() => false}
+    />,
+  );
   const login = screen.getByLabelText("Identifiant squashnet") as HTMLInputElement;
   const mdp = screen.getByLabelText("Mot de passe squashnet") as HTMLInputElement;
   fireEvent.change(login, { target: { value: "thomas" } });
@@ -63,10 +74,17 @@ describe("CaptainSquashnet", () => {
     expect(screen.getByText("PLENAT THOMAS – THUILLIER GUILLAUME")).toBeTruthy();
     expect(screen.getByText("9-11 3-11 9-11")).toBeTruthy();
 
-    reponses.push({ status: 200, body: { ok: true, lignes: LIGNES } });
+    expect(onSent).not.toHaveBeenCalled();
+
+    reponses.push({
+      status: 200,
+      body: { ok: true, lignes: LIGNES, sentAt: "2026-10-16T18:00:00.000Z" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Envoyer sur squashnet" }));
     await souffle();
     expect(envois[1]).toMatchObject({ action: "send", seen: "abcd1234" });
+    // L'écran de la rencontre l'apprend, pour dire « envoyé le… » à la place du bouton.
+    expect(onSent).toHaveBeenCalledWith("2026-10-16T18:00:00.000Z");
     expect(screen.getByRole("status").textContent).toMatch(/Envoyé, et relu sur squashnet/);
     expect(toast).toHaveBeenCalledWith("ok", "Score envoyé sur squashnet.");
     // Les identifiants ne restent pas à l'écran une fois le travail fait.

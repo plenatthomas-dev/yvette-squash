@@ -27,11 +27,14 @@ type Etape = "saisie" | "apercu" | "envoye";
 export default function CaptainSquashnet({
   fixtureId,
   onClose,
+  onSent,
   toast,
   onExpired,
 }: {
   fixtureId: string;
   onClose: () => void;
+  /** L'envoi est parti ET relu sur squashnet : l'écran de la rencontre doit le dire. */
+  onSent: (sentAt: string) => void;
   toast: (type: "ok" | "err" | "info", msg: string) => void;
   onExpired: (status: number) => boolean;
 }) {
@@ -64,6 +67,7 @@ export default function CaptainSquashnet({
         problemes?: string[];
         lignes?: LigneEnvoi[];
         seen?: string;
+        sentAt?: string;
       }>(res);
       if (!res.ok) {
         setErreur({ message: data?.error ?? `Erreur ${res.status}`, problemes: data?.problemes ?? [] });
@@ -77,6 +81,7 @@ export default function CaptainSquashnet({
         setEtape("envoye");
         setLogin("");
         setMotDePasse("");
+        onSent(data?.sentAt ?? new Date().toISOString());
         toast("ok", "Score envoyé sur squashnet.");
       }
     } catch (e) {

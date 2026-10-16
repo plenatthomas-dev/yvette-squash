@@ -137,7 +137,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const fixture = await prisma.interclub.findUnique({
     where: { id },
-    select: { teamId: true, official: { select: { checkJson: true } } },
+    select: { teamId: true, official: { select: { checkJson: true, sentAt: true } } },
   });
   // L'accès se contrôle sur l'ÉQUIPE de la rencontre, donc il faut d'abord la lire. Une
   // rencontre inconnue sort en 404 sans rien révéler de plus.
@@ -145,7 +145,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const access = await requireCaptainOf(req, fixture.teamId);
   if (!access.ok) return access.response;
 
-  return NextResponse.json({ report: lireRapport(fixture.official?.checkJson ?? null) });
+  return NextResponse.json({
+    report: lireRapport(fixture.official?.checkJson ?? null),
+    // Hors du rapport : il ne vient pas de la vérification, et une revérification le réécrit
+    // sans toucher à cette date.
+    sentAt: fixture.official?.sentAt?.toISOString() ?? null,
+  });
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

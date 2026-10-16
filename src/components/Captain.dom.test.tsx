@@ -37,6 +37,7 @@ function fixture(over: Record<string, unknown> = {}) {
     matchCount: 1,
     checkedAt: null,
     problems: null,
+    sentAt: null,
     ...over,
   };
 }
@@ -111,11 +112,15 @@ const introuvable = (): CheckReport =>
 let fetchMock: ReturnType<typeof vi.fn>;
 
 /** Monte l'écran avec une liste, puis un rapport rendu par le GET de détail. */
-function monte(fixtures: Record<string, unknown>[], report: CheckReport | null = null) {
+function monte(
+  fixtures: Record<string, unknown>[],
+  report: CheckReport | null = null,
+  sentAt: string | null = null,
+) {
   fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
     if (url === "/api/captain") return reponse({ teams: [{ id: "t1", name: "Équipe 1" }], fixtures });
     if (init?.method === "POST") return reponse({ report: report ?? rapport() });
-    return reponse({ report });
+    return reponse({ report, sentAt });
   });
   vi.stubGlobal("fetch", fetchMock);
   return render(<Captain toast={toast} onExpired={onExpired} />);
@@ -142,6 +147,22 @@ describe("Captain — la liste", () => {
     await souffle();
     expect(screen.getByText("✓ prêt")).toBeTruthy();
     expect(screen.getByText("3 à régler")).toBeTruthy();
+  });
+
+  // 18:00 UTC = 20h00 à Paris en octobre : l'heure dite est celle du club.
+  it("une rencontre envoyée sur squashnet le dit, date et heure comprises", async () => {
+    monte([fixture({ problems: 0, checkedAt: "2026-10-16T17:00:00.000Z", sentAt: "2026-10-16T18:00:00.000Z" })]);
+    await souffle();
+    expect(screen.getByText("✓ envoyée")).toBeTruthy();
+    expect(screen.queryByText("✓ prêt")).toBeNull();
+    expect(screen.getByText("envoyée le 16/10 à 20h00")).toBeTruthy();
+  });
+
+  it("des points à régler APRÈS l'envoi restent visibles depuis la liste", async () => {
+    monte([fixture({ problems: 1, checkedAt: "2026-10-17T09:00:00.000Z", sentAt: "2026-10-16T18:00:00.000Z" })]);
+    await souffle();
+    expect(screen.getByText("1 à régler")).toBeTruthy();
+    expect(screen.queryByText("✓ envoyée")).toBeNull();
   });
 
   it("aucune rencontre → le dit, plutôt qu'un écran vide", async () => {
@@ -465,6 +486,22 @@ describe("Captain — le détail", () => {
     await ouvrir();
     fireEvent.click(screen.getByRole("button", { name: "Envoyer sur squashnet…" }));
     expect(screen.getByRole("dialog", { name: "Envoyer sur squashnet" })).toBeTruthy();
+  });
+
+  it("déjà envoyée : la phrase « envoyé le… » remplace le bouton", async () => {
+    monte([fixture()], rapport(), "2026-10-16T18:00:00.000Z");
+    await souffle();
+    await ouvrir();
+    expect(screen.getByText("✅ Envoyé sur squashnet le 16/10 à 20h00.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Envoyer sur squashnet…" })).toBeNull();
+  });
+
+  it("déjà envoyée, mais rapport illisible : l'envoi se dit quand même", async () => {
+    monte([fixture()], null, "2026-10-16T18:00:00.000Z");
+    await souffle();
+    await ouvrir();
+    expect(screen.getByText("✅ Envoyé sur squashnet le 16/10 à 20h00.")).toBeTruthy();
+    expect(screen.getByText("Pas encore vérifiée.")).toBeTruthy();
   });
 
   it("ne propose pas l'envoi tant qu'un joueur n'est pas identifié", async () => {

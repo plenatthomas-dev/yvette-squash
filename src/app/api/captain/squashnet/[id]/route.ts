@@ -194,7 +194,20 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         502,
       );
     }
-    return json({ ok: true, lignes: envoi.lignes, saisiePar: detail.saisiePar });
+    // LA TRACE DE L'ENVOI, pour que rouvrir la rencontre dise « envoyé le… » au lieu de proposer
+    // d'envoyer à nouveau. Seulement ici, après la relecture conforme : un envoi que squashnet
+    // n'affiche pas n'est pas « fait ». Son échec ne change rien à ce qui est parti — le
+    // capitaine doit l'apprendre quand même, d'où le `catch`.
+    const sentAt = new Date();
+    await prisma.interclubOfficial
+      .update({ where: { interclubId: id }, data: { sentAt } })
+      .catch(() => {});
+    return json({
+      ok: true,
+      lignes: envoi.lignes,
+      saisiePar: detail.saisiePar,
+      sentAt: sentAt.toISOString(),
+    });
   } catch (e) {
     if (e instanceof AccesRefuse) {
       await prisma.loginAttempt.create({ data: { ip, identifier } }).catch(() => {});
