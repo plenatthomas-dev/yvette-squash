@@ -107,6 +107,13 @@ L'envoi part de l'écran de vérification, avec le bouton « Envoyer sur squashn
    envoie ensuite le formulaire (`330250`), puis **relit** le détail (`330253`) et le compare à
    ce qui est parti. La réussite ne s'annonce qu'après cette relecture.
 
+**L'envoi laisse une trace** (`InterclubOfficial.sentAt`, migration 59), écrite seulement après
+une relecture conforme. Rouvrir la rencontre affiche « ✅ Envoyé sur squashnet le 16/10 à 20h00 »
+à la place du bouton, en heure du club : squashnet referme son formulaire dès la saisie, et le
+bouton ne mènerait qu'au refus « déjà saisie ». La liste dit « ✓ envoyée », sauf si une
+revérification postérieure trouve des points à régler. Une saisie faite à la main sur squashnet
+ne laisse pas cette trace : c'est la feuille publiée, relue à chaque vérification, qui la montre.
+
 **squashnet n'a pas d'API.** C'est le même `index.php` + `ic_a` que les pages publiques, derrière
 une connexion (`/connexion`, `ic_a=131328`). Le jeton `ic_csrf` est exigé dans chaque `POST`.
 Les codes et les captures datent du 16/10/2026 :

@@ -349,8 +349,18 @@ describe("GET /api/captain/check/{id}", () => {
 
   it("jamais vérifiée → `null`, pas une erreur", async () => {
     h.fixture = { teamId: "t1", official: null };
-    const { report } = await (await GET(req(), ctx())).json();
+    const { report, sentAt } = await (await GET(req(), ctx())).json();
     expect(report).toBeNull();
+    expect(sentAt).toBeNull();
+  });
+
+  it("rend la date d'envoi sur squashnet, à côté du rapport", async () => {
+    h.fixture = {
+      teamId: "t1",
+      official: { checkJson: null, sentAt: new Date("2026-10-16T18:00:00Z") },
+    };
+    const { sentAt } = await (await GET(req(), ctx())).json();
+    expect(sentAt).toBe("2026-10-16T18:00:00.000Z");
   });
 
   // Un rapport d'un format antérieur passe `JSON.parse` et lèverait au rendu, où il n'y a pas
