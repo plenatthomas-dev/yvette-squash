@@ -33,7 +33,13 @@ import { CLUB_TZ } from "./time";
 import { normalizeColor, RECENT_FIXTURE_DAYS, shiftISO } from "./interclub";
 import { derivedStatus, fixtureScore, parseLive } from "./interclub-db";
 
-const TAG = "interclub-live";
+/**
+ * Invalidé par `interclubChanged()`, donc par toute écriture de rencontre. Exporté pour les
+ * autres caches qui dépendent des rencontres (cf. `lib/interclub-standings.ts`) : ils héritent
+ * ainsi de chaque appel déjà en place au lieu d'en exiger un second, qu'on finirait par oublier.
+ */
+export const INTERCLUB_TAG = "interclub-live";
+const TAG = INTERCLUB_TAG;
 
 /**
  * Filet de sécurité court : une invalidation manquée ne fige l'affichage que 30 secondes.

@@ -1959,8 +1959,8 @@ export default function AdminPage() {
                                 </button>
                               </div>
 
-                              {/* Le classement se relit à la demande : le cron hebdomadaire ne
-                                  passe que le lundi, et c'est JUSTE APRÈS avoir saisi l'ancrage
+                              {/* Le classement se relit tout seul après chaque rencontre (cron
+                                  d'après-match), mais c'est JUSTE APRÈS avoir saisi l'ancrage
                                   qu'on a besoin de vérifier qu'il est bon. */}
                               <button
                                 type="button"

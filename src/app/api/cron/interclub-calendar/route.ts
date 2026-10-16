@@ -10,7 +10,7 @@ import {
   calendarFingerprint,
   CalendarUnreadableError,
 } from "@/lib/squashnet/calendar";
-import { fetchStandings } from "@/lib/squashnet/standings";
+import { refreshTeamStandings } from "@/lib/interclub-standings";
 import { notifyCalendarDrift, notifyCalendarUnreadable } from "@/lib/interclub-notify";
 
 export const runtime = "nodejs";
@@ -113,18 +113,20 @@ export async function GET(req: NextRequest) {
     // calendrier en échec : le 2026-10-05, les deux calendriers illisibles (dates bouchon de la
     // poule) ont privé la prod de tout classement, alors que la page du classement — une autre
     // page — se lisait très bien. La dépendance allait dans les deux sens ; elle n'en a aucun.
+    //
+    // Depuis la relecture d'après-match (`cron/interclub-standings`), ce passage n'est plus
+    // qu'un filet : il couvre l'équipe ancrée sans rencontre récente, ou le cron externe arrêté.
     if (team.snDrawId) {
       try {
-        const rows = await fetchStandings(team.snEventId!, team.snDrawId, team.snRoundId!);
-        // Zéro ligne n'est pas un classement : c'est une poule non publiée, ou un ancrage
-        // faux. L'écrire écraserait un tableau valide par du vide.
-        if (rows.length > 0) {
-          await prisma.interclubTeam.update({
-            where: { id: team.id },
-            data: { snStandingsJson: JSON.stringify(rows), snStandingsAt: new Date() },
-          });
-          standings++;
-        }
+        // Zéro ligne (`empty`) n'est ni un succès ni une panne : la poule n'est pas publiée.
+        const r = await refreshTeamStandings({
+          id: team.id,
+          snEventId: team.snEventId!,
+          snDrawId: team.snDrawId,
+          snRoundId: team.snRoundId!,
+        });
+        if (r.ok) standings++;
+        else if (r.reason === "unreachable") standingsFailed++;
       } catch {
         standingsFailed++;
       }
