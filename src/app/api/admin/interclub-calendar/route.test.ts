@@ -48,7 +48,12 @@ vi.mock("@/lib/interclub-access", async () => {
   };
 });
 vi.mock("@/lib/admin", () => ({ requireAdmin: async () => h.admin }));
-vi.mock("@/lib/interclub-gate", () => ({ interclubChanged: vi.fn() }));
+vi.mock("@/lib/interclub-gate", async (importOriginal) => ({
+  // Le reste du module (le tag, `todayISO`) sert à `lib/interclub-standings`, que la route
+  // importe pour relire le classement.
+  ...(await importOriginal<typeof import("@/lib/interclub-gate")>()),
+  interclubChanged: vi.fn(),
+}));
 vi.mock("@/lib/interclub-notify", () => ({
   notifyFixtureMoved: vi.fn(async (...args: [unknown, string, unknown]) => {
     h.moved.push(args);

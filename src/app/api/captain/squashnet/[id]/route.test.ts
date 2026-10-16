@@ -26,6 +26,7 @@ const h = vi.hoisted(() => ({
   ouvrirSession: vi.fn(),
   posterAjax: vi.fn(),
   posterFormulaire: vi.fn(),
+  officialUpdate: vi.fn(),
 }));
 
 vi.mock("@/lib/captain-access", () => {
@@ -39,6 +40,7 @@ vi.mock("@/lib/captain-access", () => {
 vi.mock("@/lib/db", () => ({
   prisma: {
     interclub: { findUnique: vi.fn(async () => h.fixture) },
+    interclubOfficial: { update: (...a: unknown[]) => h.officialUpdate(...a) },
     loginAttempt: {
       count: vi.fn(async () => h.echecs),
       create: vi.fn(async (a: unknown) => {
@@ -96,6 +98,7 @@ beforeEach(() => {
     p.ic_a === "330249" ? FORMULAIRE : "",
   );
   h.posterFormulaire.mockReset().mockResolvedValue("");
+  h.officialUpdate.mockReset().mockResolvedValue({});
 });
 
 describe("avant squashnet", () => {
@@ -206,7 +209,13 @@ describe("send", () => {
     );
     const res = await appel({ action: "send", seen });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, lignes, saisiePar: "PLENAT THOMAS" });
+    const data = await res.json();
+    expect(data).toEqual({ ok: true, lignes, saisiePar: "PLENAT THOMAS", sentAt: expect.any(String) });
+    // La date d'envoi est gardée, pour que rouvrir la rencontre dise « envoyé le… ».
+    expect(h.officialUpdate).toHaveBeenCalledWith({
+      where: { interclubId: "f1" },
+      data: { sentAt: new Date(data.sentAt) },
+    });
     const champs = h.posterFormulaire.mock.calls[0][1] as Record<string, string>;
     expect(champs).toMatchObject({ ic_a: "330250", tieid: "1893481", h1_2509582: "648361", scv1_2509582: "11" });
   });
@@ -222,6 +231,19 @@ describe("send", () => {
     const data = await res.json();
     expect(data.problemes).toEqual(["Simple n° 1 : absent du détail squashnet."]);
     expect(data.reponse).toBe("Joueur trop fort");
+    // Ce que squashnet n'affiche pas n'est pas « envoyé ».
+    expect(h.officialUpdate).not.toHaveBeenCalled();
+  });
+
+  it("une trace d'envoi impossible à écrire ne fait pas croire à un échec", async () => {
+    const { lignes, seen } = await apercu();
+    h.posterAjax.mockImplementation(async (_s: unknown, p: { ic_a: string }) =>
+      p.ic_a === "330249" ? FORMULAIRE : p.ic_a === "330253" ? detailDe(lignes) : "",
+    );
+    h.officialUpdate.mockRejectedValue(new Error("Neon injoignable"));
+    const res = await appel({ action: "send", seen });
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
   });
 });
 

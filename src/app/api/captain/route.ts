@@ -77,7 +77,7 @@ export async function GET(req: NextRequest) {
       status: true,
       teamId: true,
       matchCount: true,
-      official: { select: { checkedAt: true, checkJson: true } },
+      official: { select: { checkedAt: true, checkJson: true, sentAt: true } },
     },
   });
   // Les journées d'EXEMPTION n'ont ni joueurs ni score : rien à vérifier, rien à saisir.
@@ -114,6 +114,8 @@ export async function GET(req: NextRequest) {
         // `null` = jamais vérifiée, ou rapport d'un format qu'on ne sait plus lire. Les deux se
         // rattrapent pareil (relancer la vérification), donc ils se disent pareil.
         problems: rapport ? countProblems(rapport) : null,
+        /** Envoi du score sur squashnet par l'appli. `null` = pas envoyé D'ICI (cf. le schéma). */
+        sentAt: f.official?.sentAt?.toISOString() ?? null,
       };
     }),
   });

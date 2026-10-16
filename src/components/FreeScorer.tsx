@@ -28,6 +28,7 @@ import {
   type FreeMatch,
 } from "@/lib/free-scorer";
 import { canvasToPng, renderScoreCard, scoreFileName } from "@/lib/score-image";
+import { shareImage } from "@/lib/share-image";
 import { useBreakTimer } from "@/lib/useBreakTimer";
 import { keepAwake } from "@/lib/wake-lock";
 import ColorPicker from "./ColorPicker";
@@ -36,73 +37,19 @@ import ScoreBoard, { hapticFor } from "./ScoreBoard";
 
 type Toast = (type: "ok" | "err" | "info", msg: string) => void;
 
-/** Partage en TEXTE : feuille de partage du système, sinon presse-papier. Le repli ultime. */
-async function shareText(text: string, toast: Toast) {
-  try {
-    if (typeof navigator.share === "function") {
-      await navigator.share({ text });
-      return;
-    }
-  } catch (e) {
-    if ((e as Error)?.name === "AbortError") return;
-    // Partage refusé (contexte non sécurisé, permission) : on tente la copie.
-  }
-  try {
-    await navigator.clipboard.writeText(text);
-    toast("ok", "Résultat copié");
-  } catch {
-    toast("err", "Partage impossible sur cet appareil");
-  }
-}
-
-/** Enregistre le fichier sur l'appareil (ordinateur sans partage de fichiers). */
-function download(file: File) {
-  const url = URL.createObjectURL(file);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = file.name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Laisse au navigateur le temps de lancer le téléchargement avant de libérer l'URL.
-  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
-}
-
 /**
  * Partage le résultat EN IMAGE — c'est ce qu'on envoie dans le groupe WhatsApp du club, pas
- * une phrase. Dans l'ordre :
- *
- *  1. feuille de partage du système avec le PNG (téléphones : WhatsApp, SMS, Messages…) ;
- *  2. sinon, téléchargement du PNG (ordinateur sans partage de fichiers) ;
- *  3. sinon — pas de canvas du tout — le texte, comme avant.
- *
- * L'image est fabriquée SANS `await` avant `navigator.share` : Safari iOS n'autorise le partage
- * que dans la foulée du geste (cf. `lib/score-image.ts`). Une annulation par l'utilisateur
- * n'est pas une erreur et ne dit rien.
+ * une phrase. Le texte reste le repli d'un navigateur sans canvas (cf. `lib/share-image.ts`).
  */
 export async function shareResult(m: FreeMatch, toast: Toast, logo?: HTMLImageElement | null) {
-  let file: File | null = null;
-  try {
-    const canvas = renderScoreCard(m, logo);
-    if (canvas) file = canvasToPng(canvas, scoreFileName(m));
-  } catch {
-    file = null; // canvas refusé (mémoire, navigateur ancien) : repli sur le texte
-  }
-  if (file) {
-    if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file] });
-        return;
-      } catch (e) {
-        if ((e as Error)?.name === "AbortError") return;
-        // Partage de fichier refusé : on retombe sur le téléchargement.
-      }
-    }
-    download(file);
-    toast("ok", "Image du score enregistrée");
-    return;
-  }
-  await shareText(resultLine(m), toast);
+  await shareImage(
+    () => {
+      const canvas = renderScoreCard(m, logo);
+      return canvas ? canvasToPng(canvas, scoreFileName(m)) : null;
+    },
+    { text: resultLine(m), saved: "Image du score enregistrée" },
+    toast,
+  );
 }
 
 /**

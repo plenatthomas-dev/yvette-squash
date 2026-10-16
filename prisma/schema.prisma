@@ -1072,6 +1072,10 @@ model InterclubOfficial {
   /// n'a pas d'error boundary : sa forme est VÉRIFIÉE à la lecture (`estRapportValide`), parce
   /// qu'un JSON d'un format antérieur passe `JSON.parse` puis lève au rendu.
   checkJson   String?
+  /// Envoi du score sur squashnet PAR L'APPLI, relu et conforme (`/api/captain/squashnet`).
+  /// Une saisie faite à la main sur squashnet n'y laisse aucune trace : la feuille publiée,
+  /// relue à chaque vérification, est alors la seule à le dire.
+  sentAt      DateTime?
 }
 
 // Un simple de la rencontre. Côté asso : un MEMBRE (homeUserId) ou un remplaçant hors appli

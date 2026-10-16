@@ -91,6 +91,24 @@ L'onglet « Capitaine » est **absent** pour les autres — pas grisé. Les autr
 quand leur fonction est coupée, ce qui est une information utile (« ça arrive ») ; ici ce serait
 l'inverse : annoncer à trente membres une porte que deux personnes peuvent ouvrir.
 
+### Partager la feuille en image (depuis le 16/10/2026)
+
+Le bouton « Partager », au bout de la ligne du compte, fabrique une image PNG de la rencontre
+pour le groupe WhatsApp de l'équipe. Elle contient le compte, puis chaque simple : ses deux
+joueurs, le détail jeu par jeu et les jeux gagnés. Elle remplace la capture d'écran, pour
+laquelle l'écran avait été resserré.
+
+- Le dessin est dans `src/lib/captain-image.ts`, sur le modèle du score d'un match libre
+  (`score-image.ts`, dont il reprend l'en-tête et la palette).
+- Le partage passe par `src/lib/share-image.ts`, commun aux deux images. Sur téléphone, c'est la
+  feuille de partage du système. Sur un ordinateur, le PNG est téléchargé. Sans canvas, la
+  feuille part en texte.
+- Les noms sont ceux de la fédération, remis en minuscules (« Plenat Thomas »), ou le nom saisi
+  quand le joueur n'a pas été rapproché.
+- ⚠️ Le bouton fait 30 px de haut, comme le « 3 – 1 » : la ligne du compte garde ses 49 px,
+  mesurés à 390 px de large. Plus haut, il repousserait le dernier simple hors de la capture
+  d'écran (cf. `.cap-tie` dans `globals.css`).
+
 ### Envoyer le score sur squashnet (depuis le 16/10/2026)
 
 Le score officiel ne vit toujours pas dans l'appli, mais elle peut le **transmettre** à la place
@@ -106,6 +124,13 @@ L'envoi part de l'écran de vérification, avec le bouton « Envoyer sur squashn
 2. **`send`** reconstruit l'envoi et refuse s'il diffère de l'aperçu (empreinte `seen`). Elle
    envoie ensuite le formulaire (`330250`), puis **relit** le détail (`330253`) et le compare à
    ce qui est parti. La réussite ne s'annonce qu'après cette relecture.
+
+**L'envoi laisse une trace** (`InterclubOfficial.sentAt`, migration 59), écrite seulement après
+une relecture conforme. Rouvrir la rencontre affiche « ✅ Envoyé sur squashnet le 16/10 à 20h00 »
+à la place du bouton, en heure du club : squashnet referme son formulaire dès la saisie, et le
+bouton ne mènerait qu'au refus « déjà saisie ». La liste dit « ✓ envoyée », sauf si une
+revérification postérieure trouve des points à régler. Une saisie faite à la main sur squashnet
+ne laisse pas cette trace : c'est la feuille publiée, relue à chaque vérification, qui la montre.
 
 **squashnet n'a pas d'API.** C'est le même `index.php` + `ic_a` que les pages publiques, derrière
 une connexion (`/connexion`, `ic_a=131328`). Le jeton `ic_csrf` est exigé dans chaque `POST`.
@@ -872,12 +897,36 @@ supprimé n'est pas perdue pour autant : `setById IS NULL` s'y lit sans ambiguï
 quelqu'un qui n'est plus là » — celle qu'il avait donnée pour lui-même, elle, part avec lui par
 cascade.
 
-### Les deux crons
+### Les trois crons
 
 | Cron | Rythme | Ce qu'il fait |
 |---|---|---|
+| `/api/cron/interclub-standings` | `0 2,6,10,14,18,22 * * *` **Europe/Paris**, via **cron-job.org** | Relit le **classement de poule** des équipes qui ont joué : à partir de **22 h le soir du match**, puis toutes les 4 h pendant les **5 jours suivants** (dernier passage à 22 h le 5e jour). Hors fenêtre, ne touche pas Postgres. |
 | `/api/cron/interclub-availability` | `0 8 * * *` | Ouvre l'appel à **J-10**, relance les non-répondants à **J-3** et envoie le récap au capitaine à J-3, puis rappelle **à J-1** l'heure, le lieu et l'adresse — aux seuls **alignés**, et sans rien demander. Idempotence par `availabilityOpenedAt` / `availabilityRemindedAt` / `eveRemindedAt`, lus **en cascade** : un seul envoi par jour et par rencontre. **Silence total sur une date non confirmée.** |
-| `/api/cron/interclub-calendar` | `0 9 * * 1` | Pour chaque équipe ancrée : récupère, compare, met à jour `snCheckedAt`. Alerte capitaine et admins **tant que l'écart n'est pas appliqué**, et **n'écrit aucune rencontre** — l'application reste un geste d'admin. |
+| `/api/cron/interclub-calendar` | `0 9 * * 1` | Pour chaque équipe ancrée : récupère, compare, met à jour `snCheckedAt`. Alerte capitaine et admins **tant que l'écart n'est pas appliqué**, et **n'écrit aucune rencontre** — l'application reste un geste d'admin. Relit aussi le classement, en filet du précédent. |
+
+**Le classement d'après-match passe par cron-job.org**, comme `check-alerts` : le plan Vercel
+Hobby refuse au déploiement toute expression plus fréquente qu'une fois par jour (cf.
+`docs/neon-keep-alive.md`). Réglages du job :
+
+| Champ | Valeur |
+|---|---|
+| URL | `https://squash-yvette.vercel.app/api/cron/interclub-standings` |
+| Méthode | `GET` |
+| En-tête | `Authorization: Bearer <CRON_SECRET>` |
+| Expression cron | `0 2,6,10,14,18,22 * * *` |
+| Fuseau | `Europe/Paris` ⚠️ (sinon UTC, et le passage de 22 h tombe à minuit l'été) |
+
+Le cron passe tous les jours, match ou pas ; c'est la route qui décide s'il y a quelque chose à
+relire (`standingsWindowOpen`). Reporter une rencontre ne demande donc rien de ce côté-là. La
+porte qui le décide vit dans le Data Cache, invalidée par `interclubChanged()` : un passage sans
+fenêtre ouverte ne réveille pas Neon, et ne laisse **aucune trace** dans le suivi des crons de
+`/admin` — la ligne `interclub-standings` date du dernier passage utile. Une date
+**prévisionnelle** n'ouvre pas de fenêtre, sauf si un score y a été saisi.
+
+Coût Neon : en saison, les fenêtres des deux équipes se chevauchent presque sans trou, donc
+jusqu'à ~5 réveils par jour (le passage de 18 h tombe dans la fenêtre du keep-alive), soit
+**~3 CU-h/mois** sur les 100 du plan gratuit. Rien hors saison.
 
 `snCheckedAt` existe pour répondre à la question que le silence ne tranche pas : « le calendrier
 n'a pas bougé », ou « on n'a pas regardé » ?
@@ -1096,6 +1145,7 @@ inventerait des écarts.
 | `GET /api/captain/check/{id}` | Relit le dernier rapport — sans toucher à squashnet |
 | `POST /api/captain/check/{id}` | REFAIT la vérification (jusqu'à 8 recherches fédérales) |
 | `GET /api/cron/interclub-calendar` | Contrôle hebdomadaire de dérive — alerte, n'écrit rien |
+| `GET /api/cron/interclub-standings` | Relecture du classement de poule après chaque rencontre (cron externe) |
 | `POST /api/admin/members` (action `set_clt_override`) | Correction admin du classement ET du rang mixte d'un membre (**admin**) |
 | `POST /api/admin/members` (action `set_squashnet_name`) | Nom sous lequel chercher un membre sur squashnet, puis rapprochement immédiat (**admin**) |
 | `POST /api/admin/members` (action `rematch_squashnet`) | Retente le rapprochement d'un membre, sans rien modifier (**admin**) |

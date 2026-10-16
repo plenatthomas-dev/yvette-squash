@@ -125,7 +125,21 @@ describe("GET /api/captain", () => {
   it("jamais vérifiée → `problems` à null, pas à zéro", async () => {
     const { fixtures } = await (await GET(req())).json();
     // `0` voudrait dire « vérifiée, rien à signaler » — l'inverse de la vérité.
-    expect(fixtures[0]).toMatchObject({ checkedAt: null, problems: null });
+    expect(fixtures[0]).toMatchObject({ checkedAt: null, problems: null, sentAt: null });
+  });
+
+  it("rend la date d'envoi sur squashnet", async () => {
+    h.fixtures = [
+      fixture({
+        official: {
+          checkedAt: new Date("2026-10-16T17:00:00Z"),
+          checkJson: rapportOk,
+          sentAt: new Date("2026-10-16T18:00:00Z"),
+        },
+      }),
+    ];
+    const { fixtures } = await (await GET(req())).json();
+    expect(fixtures[0].sentAt).toBe("2026-10-16T18:00:00.000Z");
   });
 
   it("vérifiée sans problème → 0, avec sa date", async () => {

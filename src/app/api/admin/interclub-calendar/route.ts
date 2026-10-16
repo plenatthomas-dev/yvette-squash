@@ -24,7 +24,7 @@ import {
   MAX_VENUE_ADDRESS_LEN,
 } from "@/lib/interclub-db";
 import { notifyFixtureMoved } from "@/lib/interclub-notify";
-import { fetchStandings } from "@/lib/squashnet/standings";
+import { refreshTeamStandings } from "@/lib/interclub-standings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -179,9 +179,9 @@ export async function POST(req: NextRequest) {
 
   // LE CLASSEMENT, À LA DEMANDE.
   //
-  // La passe hebdomadaire le rafraîchit déjà, mais elle passe le lundi : sans ce bouton,
-  // l'admin qui vient de renseigner l'ancrage attendrait jusqu'à six jours pour vérifier qu'il
-  // a saisi les bons identifiants. Or c'est exactement le moment où il faut pouvoir vérifier —
+  // Les crons le rafraîchissent déjà — après chaque rencontre, et le lundi —, mais sans ce
+  // bouton l'admin qui vient de renseigner l'ancrage attendrait le prochain match pour vérifier
+  // qu'il a saisi les bons identifiants. Or c'est exactement le moment où il faut pouvoir vérifier —
   // une division fausse rend un tableau parfaitement crédible d'une autre poule.
   if (body.action === "standings") {
     if (!team.snDrawId) {
@@ -190,29 +190,27 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    let rows;
-    try {
-      rows = await fetchStandings(team.snEventId, team.snDrawId, team.snRoundId);
-    } catch {
+    const r = await refreshTeamStandings({
+      id: team.id,
+      snEventId: team.snEventId,
+      snDrawId: team.snDrawId,
+      snRoundId: team.snRoundId,
+    });
+    if (!r.ok && r.reason === "unreachable") {
       return NextResponse.json(
         { error: "squashnet n'a pas répondu. Réessaie dans un moment." },
         { status: 502 },
       );
     }
     // Zéro ligne n'est pas un classement vide : c'est une poule non publiée, ou un ancrage
-    // faux. L'écrire écraserait un tableau valide par du vide, en silence.
-    if (rows.length === 0) {
+    // faux. Rien n'a été écrit, et l'admin doit le savoir.
+    if (!r.ok) {
       return NextResponse.json(
         { error: "Aucun classement publié pour cette poule (ou identifiants incorrects)." },
         { status: 404 },
       );
     }
-    const at = new Date();
-    await prisma.interclubTeam.update({
-      where: { id: team.id },
-      data: { snStandingsJson: JSON.stringify(rows), snStandingsAt: at },
-    });
-    return NextResponse.json({ ok: true, rows: rows.length, standingsAt: at.toISOString() });
+    return NextResponse.json({ ok: true, rows: r.rows, standingsAt: r.at.toISOString() });
   }
 
   let published: OwnTie[];

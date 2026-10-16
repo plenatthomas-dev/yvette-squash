@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { readOk } from "@/lib/apiFetch";
 import { countProblems, type CheckReport, type PlayerCheck } from "@/lib/captain-check";
 // La PHRASE vient du module de règle, elle n'est pas réécrite ici : l'écran doit dire exactement
@@ -8,6 +8,16 @@ import { countProblems, type CheckReport, type PlayerCheck } from "@/lib/captain
 // croirait.
 import { describeOfficial } from "@/lib/captain-official";
 import CaptainSquashnet from "@/components/CaptainSquashnet";
+import { ShareIcon } from "@/components/icons";
+import {
+  renderRencontreCard,
+  rencontreFileName,
+  rencontreTexte,
+  type RencontrePartagee,
+} from "@/lib/captain-image";
+import { canvasToPng } from "@/lib/score-image";
+import { shareImage } from "@/lib/share-image";
+import { CLUB_TZ, fmtTime } from "@/lib/time";
 
 // ============================================================================
 //  L'ESPACE CAPITAINE — vérifier une rencontre avant de la saisir chez la ligue.
@@ -55,6 +65,8 @@ interface Fixture {
   checkedAt: string | null;
   /** Nombre de points à régler au dernier passage. `null` = jamais vérifiée. */
   problems: number | null;
+  /** Score envoyé sur squashnet par l'appli. `null` = pas envoyé d'ici. */
+  sentAt: string | null;
 }
 
 type Liste = { teams: { id: string; name: string }[]; fixtures: Fixture[] };
@@ -68,6 +80,13 @@ const jour = (d: string) =>
 
 const quand = (iso: string) =>
   new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+
+/**
+ * « 16/10 à 20h00 », en heure du club. L'HEURE, ici et pas ailleurs : un envoi se fait le soir
+ * de la rencontre, et c'est elle qui dit si c'était avant ou après la correction d'un score.
+ */
+const envoyeLe = (iso: string) =>
+  `${new Date(iso).toLocaleDateString("fr-FR", { timeZone: CLUB_TZ, day: "2-digit", month: "2-digit" })} à ${fmtTime(iso).replace(":", "h")}`;
 
 /** Le camp d'une ligne de joueur, dit comme le capitaine le dirait. */
 const camp = (p: PlayerCheck) => (p.side === "home" ? "nous" : "eux");
@@ -108,6 +127,16 @@ export default function Captain({
   const [rapport, setRapport] = useState<CheckReport | null>(null);
   const [busy, setBusy] = useState(false);
   const [envoi, setEnvoi] = useState(false);
+  const [sentAt, setSentAt] = useState<string | null>(null);
+
+  // Le logo du club, chargé d'avance pour l'image partagée : le dessin est synchrone et ne
+  // l'attendra pas (cf. `lib/share-image.ts`). Pas encore prêt → image sans logo.
+  const logoRef = useRef<HTMLImageElement | null>(null);
+  useEffect(() => {
+    const img = new Image();
+    img.src = "/logo_squash.jpeg";
+    logoRef.current = img;
+  }, []);
 
   const charger = useCallback(async () => {
     try {
@@ -129,11 +158,18 @@ export default function Captain({
   const ouvrir = async (f: Fixture) => {
     setOuverte(f);
     setRapport(null);
+    // Celui de la liste d'abord, pour que la phrase soit là dès l'ouverture ; la lecture du
+    // rapport le remplace par celui de la base, plus frais.
+    setSentAt(f.sentAt);
     try {
       const res = await fetch(`/api/captain/check/${f.id}`, { cache: "no-store" });
       if (onExpired(res.status)) return;
-      const { report } = await readOk<{ report: CheckReport | null }>(res);
+      const { report, sentAt: envoye } = await readOk<{
+        report: CheckReport | null;
+        sentAt?: string | null;
+      }>(res);
       setRapport(report);
+      if (envoye !== undefined) setSentAt(envoye);
     } catch {
       // Pas de rapport lisible : l'écran propose simplement de vérifier. Rien à annoncer.
       setRapport(null);
@@ -172,6 +208,35 @@ export default function Captain({
     for (const p of rapport?.players ?? []) {
       parSimple.set(p.order, [...(parSimple.get(p.order) ?? []), p]);
     }
+    /** La feuille en image, pour le groupe de l'équipe — sans passer par une capture d'écran. */
+    const partager = (r: CheckReport) => {
+      const rencontre: RencontrePartagee = {
+        nous: ouverte.teamFedName ?? ouverte.teamName ?? "Nous",
+        eux: ouverte.opponent,
+        home: ouverte.home,
+        date: ouverte.date,
+        round: ouverte.round,
+        rapport: r,
+      };
+      void shareImage(
+        () => {
+          const canvas = renderRencontreCard(rencontre, logoRef.current);
+          return canvas ? canvasToPng(canvas, rencontreFileName(rencontre)) : null;
+        },
+        { text: rencontreTexte(rencontre), saved: "Image de la rencontre enregistrée" },
+        toast,
+      );
+    };
+
+    // DÉJÀ ENVOYÉ : la phrase remplace le bouton. squashnet referme le formulaire dès la saisie
+    // (« déjà saisie, attend la confirmation ») ; le bouton ne mènerait qu'à ce refus, après
+    // avoir redemandé les identifiants. Hors du rapport, et dit même sans lui : un rapport
+    // d'un format qu'on ne relit plus n'efface pas un envoi qui a eu lieu.
+    const envoye = sentAt && (
+      <p className="cap-officiel cap-officiel-ok" role="status">
+        ✅ Envoyé sur squashnet le {envoyeLe(sentAt)}.
+      </p>
+    );
 
     return (
       <section className="cap">
@@ -217,7 +282,10 @@ export default function Captain({
         </p>
 
         {rapport === null ? (
-          <p className="muted tiny">Pas encore vérifiée.</p>
+          <>
+            {envoye}
+            <p className="muted tiny">Pas encore vérifiée.</p>
+          </>
         ) : (
           <>
             <div className={`notice ${n === 0 ? "info" : "error"} cap-verdict`}>
@@ -235,13 +303,14 @@ export default function Captain({
                 cohérents et chaque joueur identifié chez la fédération. Le reste du rapport
                 (ordre d'en face, feuille déjà publiée) informe mais n'empêche pas — c'est
                 squashnet qui dira si la saisie est encore ouverte. */}
-            {rapport.tie.ok &&
-              rapport.scores.every((s) => s.ok) &&
-              rapport.players.every((p) => p.fedName) && (
-                <button type="button" className="cap-envoyer" onClick={() => setEnvoi(true)}>
-                  Envoyer sur squashnet…
-                </button>
-              )}
+            {envoye ||
+              (rapport.tie.ok &&
+                rapport.scores.every((s) => s.ok) &&
+                rapport.players.every((p) => p.fedName) && (
+                  <button type="button" className="cap-envoyer" onClick={() => setEnvoi(true)}>
+                    Envoyer sur squashnet…
+                  </button>
+                ))}
 
             {/* LE COMPTE DE LA RENCONTRE en premier : c'est le chiffre que la fédération
                 attend, et celui qu'on relit en dernier avant de valider. */}
@@ -252,6 +321,19 @@ export default function Captain({
               <span className="muted tiny">
                 {rapport.tie.problem ?? `sur ${ouverte.matchCount} simples`}
               </span>
+              {/* LE PARTAGE, DANS LA LIGNE DU COMPTE et non sous elle : cet écran se prend aussi
+                  en photo, et chaque pixel de hauteur pousse le dernier simple hors de la
+                  capture (cf. `.cap-tie` dans globals.css). */}
+              {rapport.scores.length > 0 && (
+                <button
+                  type="button"
+                  className="secondary outline cap-partager"
+                  onClick={() => partager(rapport)}
+                >
+                  <ShareIcon />
+                  Partager
+                </button>
+              )}
             </div>
 
             {/* CE QUE LA LIGUE PUBLIE, juste sous notre propre compte — c'est là que la
@@ -423,6 +505,10 @@ export default function Captain({
           <CaptainSquashnet
             fixtureId={ouverte.id}
             onClose={() => setEnvoi(false)}
+            onSent={(iso) => {
+              setSentAt(iso);
+              void charger(); // la liste aussi doit le dire
+            }}
             toast={toast}
             onExpired={onExpired}
           />
@@ -460,7 +546,12 @@ export default function Captain({
                         rappel de ce qu'il sait déjà, sur une ligne déjà chargée. */}
                     {liste.teams.length > 1 && f.teamName ? ` · ${f.teamName}` : ""}
                   </span>
-                  {f.problems === null ? (
+                  {/* ENVOYÉE l'emporte sur « prêt » — c'est la fin du parcours —, mais pas sur
+                      des points à régler : une revérification qui trouve, après l'envoi, une
+                      feuille divergente doit encore se voir de la liste. */}
+                  {f.sentAt && !f.problems ? (
+                    <span className="cap-pastille cap-pastille-ok">✓ envoyée</span>
+                  ) : f.problems === null ? (
                     <span className="cap-pastille">à vérifier</span>
                   ) : f.problems === 0 ? (
                     <span className="cap-pastille cap-pastille-ok">✓ prêt</span>
@@ -474,8 +565,12 @@ export default function Captain({
                   <span>
                     {f.home ? "vs" : "chez"} <strong>{f.opponent}</strong>
                   </span>
-                  {f.checkedAt && (
-                    <span className="muted tiny">vérifiée le {quand(f.checkedAt)}</span>
+                  {f.sentAt ? (
+                    <span className="muted tiny">envoyée le {envoyeLe(f.sentAt)}</span>
+                  ) : (
+                    f.checkedAt && (
+                      <span className="muted tiny">vérifiée le {quand(f.checkedAt)}</span>
+                    )
                   )}
                 </span>
               </button>
