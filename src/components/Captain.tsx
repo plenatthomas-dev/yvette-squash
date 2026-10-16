@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { readOk } from "@/lib/apiFetch";
 import { countProblems, type CheckReport, type PlayerCheck } from "@/lib/captain-check";
 // La PHRASE vient du module de règle, elle n'est pas réécrite ici : l'écran doit dire exactement
@@ -8,6 +8,15 @@ import { countProblems, type CheckReport, type PlayerCheck } from "@/lib/captain
 // croirait.
 import { describeOfficial } from "@/lib/captain-official";
 import CaptainSquashnet from "@/components/CaptainSquashnet";
+import { ShareIcon } from "@/components/icons";
+import {
+  renderRencontreCard,
+  rencontreFileName,
+  rencontreTexte,
+  type RencontrePartagee,
+} from "@/lib/captain-image";
+import { canvasToPng } from "@/lib/score-image";
+import { shareImage } from "@/lib/share-image";
 import { CLUB_TZ, fmtTime } from "@/lib/time";
 
 // ============================================================================
@@ -120,6 +129,15 @@ export default function Captain({
   const [envoi, setEnvoi] = useState(false);
   const [sentAt, setSentAt] = useState<string | null>(null);
 
+  // Le logo du club, chargé d'avance pour l'image partagée : le dessin est synchrone et ne
+  // l'attendra pas (cf. `lib/share-image.ts`). Pas encore prêt → image sans logo.
+  const logoRef = useRef<HTMLImageElement | null>(null);
+  useEffect(() => {
+    const img = new Image();
+    img.src = "/logo_squash.jpeg";
+    logoRef.current = img;
+  }, []);
+
   const charger = useCallback(async () => {
     try {
       const res = await fetch("/api/captain", { cache: "no-store" });
@@ -190,6 +208,26 @@ export default function Captain({
     for (const p of rapport?.players ?? []) {
       parSimple.set(p.order, [...(parSimple.get(p.order) ?? []), p]);
     }
+    /** La feuille en image, pour le groupe de l'équipe — sans passer par une capture d'écran. */
+    const partager = (r: CheckReport) => {
+      const rencontre: RencontrePartagee = {
+        nous: ouverte.teamFedName ?? ouverte.teamName ?? "Nous",
+        eux: ouverte.opponent,
+        home: ouverte.home,
+        date: ouverte.date,
+        round: ouverte.round,
+        rapport: r,
+      };
+      void shareImage(
+        () => {
+          const canvas = renderRencontreCard(rencontre, logoRef.current);
+          return canvas ? canvasToPng(canvas, rencontreFileName(rencontre)) : null;
+        },
+        { text: rencontreTexte(rencontre), saved: "Image de la rencontre enregistrée" },
+        toast,
+      );
+    };
+
     // DÉJÀ ENVOYÉ : la phrase remplace le bouton. squashnet referme le formulaire dès la saisie
     // (« déjà saisie, attend la confirmation ») ; le bouton ne mènerait qu'à ce refus, après
     // avoir redemandé les identifiants. Hors du rapport, et dit même sans lui : un rapport
@@ -283,6 +321,19 @@ export default function Captain({
               <span className="muted tiny">
                 {rapport.tie.problem ?? `sur ${ouverte.matchCount} simples`}
               </span>
+              {/* LE PARTAGE, DANS LA LIGNE DU COMPTE et non sous elle : cet écran se prend aussi
+                  en photo, et chaque pixel de hauteur pousse le dernier simple hors de la
+                  capture (cf. `.cap-tie` dans globals.css). */}
+              {rapport.scores.length > 0 && (
+                <button
+                  type="button"
+                  className="secondary outline cap-partager"
+                  onClick={() => partager(rapport)}
+                >
+                  <ShareIcon />
+                  Partager
+                </button>
+              )}
             </div>
 
             {/* CE QUE LA LIGUE PUBLIE, juste sous notre propre compte — c'est là que la

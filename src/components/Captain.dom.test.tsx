@@ -3,6 +3,18 @@ import { render, screen, act, fireEvent, within } from "@testing-library/react";
 import Captain from "@/components/Captain";
 import type { CheckReport } from "@/lib/captain-check";
 
+// Le DESSIN de la feuille ne tourne pas sous jsdom (pas de canvas) : il se regarde dans un
+// navigateur. Ici, on contrôle ce qui part — une image si on en a une, le texte sinon.
+const image = vi.hoisted(() => ({ ok: true }));
+vi.mock("@/lib/captain-image", async (importOriginal) => {
+  const vrai = await importOriginal<typeof import("@/lib/captain-image")>();
+  return {
+    ...vrai,
+    renderRencontreCard: () =>
+      image.ok ? ({ toDataURL: () => "data:image/png;base64,iVBORw0KGgo=" } as HTMLCanvasElement) : null,
+  };
+});
+
 // L'ESPACE CAPITAINE, vu de l'écran. Ce fichier verrouille les trois partis pris que l'en-tête
 // du composant énonce, et qu'un essai à la main ne verrait pas forcément :
 //   1. on ne vérifie JAMAIS tout seul — la vérification coûte huit appels à un site associatif ;
@@ -476,6 +488,42 @@ describe("Captain — le détail", () => {
     await souffle();
     expect(toast).toHaveBeenCalledWith("err", "squashnet est injoignable");
     expect(screen.getByText("Pas encore vérifiée.")).toBeTruthy();
+  });
+
+  // LE PARTAGE EN IMAGE, pour le groupe de l'équipe : ce que la capture d'écran faisait.
+  it("partage la feuille de la rencontre en image (PNG nommé d'après la rencontre)", async () => {
+    image.ok = true;
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, canShare: () => true, share });
+    monte([fixture()], rapport());
+    await souffle();
+    await ouvrir();
+    fireEvent.click(screen.getByRole("button", { name: "Partager" }));
+    await souffle();
+    const fichier = (share.mock.calls[0][0] as ShareData).files![0];
+    expect(fichier.type).toBe("image/png");
+    expect(fichier.name).toBe("rencontre-yvette-1-squash-club-de-renne-2026-09-04.png");
+  });
+
+  it("sans canvas, la feuille part en texte", async () => {
+    image.ok = false;
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, share });
+    monte([fixture()], rapport());
+    await souffle();
+    await ouvrir();
+    fireEvent.click(screen.getByRole("button", { name: "Partager" }));
+    await souffle();
+    expect(share).toHaveBeenCalledWith({
+      text: "Yvette 1 1-0 Squash Club de Rennes\n1. Dupont Jean – Martin Paul : 11-9 11-6 12-10",
+    });
+  });
+
+  it("rien à partager tant que la rencontre n'est pas vérifiée", async () => {
+    monte([fixture()]);
+    await souffle();
+    await ouvrir();
+    expect(screen.queryByRole("button", { name: "Partager" })).toBeNull();
   });
 
   // L'ENVOI CHEZ LA LIGUE n'est proposé que si ce qui partirait est complet : un joueur non

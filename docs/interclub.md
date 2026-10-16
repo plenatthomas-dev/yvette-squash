@@ -91,6 +91,24 @@ L'onglet « Capitaine » est **absent** pour les autres — pas grisé. Les autr
 quand leur fonction est coupée, ce qui est une information utile (« ça arrive ») ; ici ce serait
 l'inverse : annoncer à trente membres une porte que deux personnes peuvent ouvrir.
 
+### Partager la feuille en image (depuis le 16/10/2026)
+
+Le bouton « Partager », au bout de la ligne du compte, fabrique une image PNG de la rencontre
+pour le groupe WhatsApp de l'équipe. Elle contient le compte, puis chaque simple : ses deux
+joueurs, le détail jeu par jeu et les jeux gagnés. Elle remplace la capture d'écran, pour
+laquelle l'écran avait été resserré.
+
+- Le dessin est dans `src/lib/captain-image.ts`, sur le modèle du score d'un match libre
+  (`score-image.ts`, dont il reprend l'en-tête et la palette).
+- Le partage passe par `src/lib/share-image.ts`, commun aux deux images. Sur téléphone, c'est la
+  feuille de partage du système. Sur un ordinateur, le PNG est téléchargé. Sans canvas, la
+  feuille part en texte.
+- Les noms sont ceux de la fédération, remis en minuscules (« Plenat Thomas »), ou le nom saisi
+  quand le joueur n'a pas été rapproché.
+- ⚠️ Le bouton fait 30 px de haut, comme le « 3 – 1 » : la ligne du compte garde ses 49 px,
+  mesurés à 390 px de large. Plus haut, il repousserait le dernier simple hors de la capture
+  d'écran (cf. `.cap-tie` dans `globals.css`).
+
 ### Envoyer le score sur squashnet (depuis le 16/10/2026)
 
 Le score officiel ne vit toujours pas dans l'appli, mais elle peut le **transmettre** à la place
