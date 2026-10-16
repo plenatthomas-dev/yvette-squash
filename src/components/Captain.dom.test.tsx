@@ -457,6 +457,23 @@ describe("Captain — le détail", () => {
     expect(screen.getByText("Pas encore vérifiée.")).toBeTruthy();
   });
 
+  // L'ENVOI CHEZ LA LIGUE n'est proposé que si ce qui partirait est complet : un joueur non
+  // identifié ne pourrait être choisi dans aucune liste du formulaire fédéral.
+  it("propose l'envoi sur squashnet quand le rapport est complet, et ouvre sa fenêtre", async () => {
+    monte([fixture()], rapport());
+    await souffle();
+    await ouvrir();
+    fireEvent.click(screen.getByRole("button", { name: "Envoyer sur squashnet…" }));
+    expect(screen.getByRole("dialog", { name: "Envoyer sur squashnet" })).toBeTruthy();
+  });
+
+  it("ne propose pas l'envoi tant qu'un joueur n'est pas identifié", async () => {
+    monte([fixture()], introuvable());
+    await souffle();
+    await ouvrir();
+    expect(screen.queryByRole("button", { name: "Envoyer sur squashnet…" })).toBeNull();
+  });
+
   it("on revient à la liste sans perdre l'écran", async () => {
     monte([fixture()]);
     await souffle();
