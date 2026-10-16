@@ -15,12 +15,15 @@ import {
   type DirectoryMember,
 } from "@/lib/directoryCache";
 import {
-  ensurePushSubscribed,
   pushEnabledOnServer,
   pushSubscriptionState,
   pushSupported,
+  requestPush,
+  restoreWantedPush,
   unsubscribePush,
 } from "@/lib/pushClient";
+import { onForeground } from "@/lib/onForeground";
+import NotifUnblockHelp from "@/components/NotifUnblockHelp";
 import {
   enrollPasskey,
   passkeySupported,
@@ -234,10 +237,44 @@ export function SettingsButton({
     pushSubscriptionState().then((st) => {
       if (!cancelled) setPushState(st);
     });
+    // Retour des réglages du téléphone avec le panneau ouvert : l'état affiché doit suivre, et
+    // un blocage tout juste levé se termine sans nouveau geste (cf. `restoreWantedPush`).
+    const stop = onForeground(async () => {
+      await restoreWantedPush();
+      const st = await pushSubscriptionState();
+      if (!cancelled) setPushState(st);
+    });
     return () => {
       cancelled = true;
+      stop();
     };
   }, [open]);
+
+  /** « C'est fait, vérifier » du guide de déblocage : relit la permission et conclut. */
+  const recheckPush = async () => {
+    setPushBusy(true);
+    try {
+      let st = await pushSubscriptionState();
+      if (st.permission === "granted" && !st.subscribed) {
+        const outcome = await requestPush().catch(() => "failed" as const);
+        st = await pushSubscriptionState();
+        toast(
+          outcome === "ok" ? "ok" : "err",
+          outcome === "ok" ? "Notifications activées sur cet appareil ✓" : "Activation impossible — réessaie dans un instant.",
+        );
+      } else if (st.permission === "default") {
+        toast("info", "Autorisation remise à zéro : presse « Activer les notifications ».");
+      } else if (st.permission === "denied") {
+        toast(
+          "err",
+          "Toujours bloquées. Si tu viens de les autoriser, ferme complètement l'appli puis rouvre-la.",
+        );
+      }
+      setPushState(st);
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   // Délégation (idée 4) : liste des membres (pour choisir des délégués) + délégations
   // sortantes actives (une par délégué). Chargées à l'ouverture du panneau (peuvent avoir bougé).
@@ -1075,11 +1112,18 @@ export function SettingsButton({
               ) : pushState === null ? (
                 <p className="muted tiny">Vérification…</p>
               ) : pushState.permission === "denied" ? (
-                <p className="muted tiny">
-                  Elles sont bloquées pour ce site dans les réglages du navigateur. Il faut les
-                  y réautoriser — l&apos;appli ne peut plus le demander elle-même une fois le
-                  refus enregistré.
-                </p>
+                // Un refus enregistré ne se lève plus depuis l'appli (aucun navigateur ne laisse
+                // un site redemander) : le guide donne le chemin de CET appareil, et le retour
+                // dans l'appli termine l'activation tout seul.
+                <NotifUnblockHelp
+                  intro={
+                    <>
+                      <strong>Bloquées sur cet appareil.</strong> Pour les rétablir :
+                    </>
+                  }
+                  busy={pushBusy}
+                  onRecheck={recheckPush}
+                />
               ) : pushState.subscribed ? (
                 <>
                   <p className="muted tiny">✓ Cet appareil est abonné.</p>
@@ -1148,24 +1192,32 @@ export function SettingsButton({
                   </div>
                 </>
               ) : (
-                <button
-                  type="button"
-                  disabled={pushBusy}
-                  onClick={async () => {
-                    setPushBusy(true);
-                    const ok = await ensurePushSubscribed();
-                    setPushState(await pushSubscriptionState());
-                    setPushBusy(false);
-                    toast(
-                      ok ? "ok" : "err",
-                      ok
-                        ? "Notifications activées sur cet appareil."
-                        : "Autorisation refusée — rien ne sera envoyé.",
-                    );
-                  }}
-                >
-                  {pushBusy ? "…" : "Activer les notifications"}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    disabled={pushBusy}
+                    onClick={async () => {
+                      setPushBusy(true);
+                      const outcome = await requestPush().catch(() => "failed" as const);
+                      setPushState(await pushSubscriptionState());
+                      setPushBusy(false);
+                      // Refus : pas de toast — le guide de déblocage prend la place du bouton.
+                      if (outcome === "ok") toast("ok", "Notifications activées sur cet appareil.");
+                      else if (outcome === "dismissed")
+                        toast("info", "Demande fermée sans réponse — presse à nouveau et choisis « Autoriser ».");
+                      else if (outcome === "failed") toast("err", "Activation impossible — réessaie dans un instant.");
+                    }}
+                  >
+                    {pushBusy ? "…" : "Activer les notifications"}
+                  </button>
+                  {/* Un « Bloquer » pressé par réflexe ne se rattrape plus que dans les
+                      réglages : on dit AVANT quelle réponse donner. */}
+                  {pushState.permission === "default" && (
+                    <p className="muted tiny">
+                      Une demande va s&apos;afficher : choisis « Autoriser ».
+                    </p>
+                  )}
+                </>
               )}
             </section>
 

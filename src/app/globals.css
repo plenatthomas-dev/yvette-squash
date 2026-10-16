@@ -5419,6 +5419,30 @@ body[data-bottombar] .install-banner {
   font-size: 0.8rem;
 }
 
+/* Guide de déblocage des notifications (Paramètres, encart interclub) : trois gestes
+   numérotés, puis un bouton à la taille du texte — pas la pleine largeur de Pico. */
+.setting .notif-unblock {
+  font-size: 0.8rem;
+}
+.notif-unblock p {
+  margin: 0 0 6px;
+}
+.notif-unblock-steps {
+  margin: 0 0 8px;
+  padding-left: 1.3em;
+}
+.notif-unblock-steps li {
+  margin-bottom: 4px;
+  list-style: decimal;
+}
+.notif-unblock-check {
+  display: inline-block;
+  width: auto;
+  margin: 2px 0 0;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+}
+
 /* Pastille de choix libre : damier tant qu'aucune couleur personnalisée n'est retenue, la
    couleur elle-même sinon — sans quoi rien n'indiquait qu'un choix hors raccourcis était actif. */
 .ic-swatch-free.is-custom {
@@ -7554,6 +7578,33 @@ body[data-bottombar] .install-banner {
 .cap-quand {
   display: block;
   margin-top: 2px;
+}
+
+/* L'envoi chez la ligue : le geste qui suit un verdict propre, juste sous lui. */
+.cap-envoyer {
+  margin: 0 0 12px;
+  width: auto;
+}
+/* Ce qui part, simple par simple — une ligne chacun, les jeux en chiffres tabulaires
+   pour que les « 11-9 » s'alignent d'un simple à l'autre. */
+.cap-envoi-lignes {
+  margin: 8px 0 12px;
+  padding-left: 0;
+  list-style: none;
+  font-size: 0.85rem;
+}
+.cap-envoi-lignes li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--pico-card-border-color);
+}
+.cap-envoi-jeux {
+  display: block;
+  font-variant-numeric: tabular-nums;
+  color: var(--pico-muted-color);
+}
+.cap-envoi-problemes {
+  margin: 6px 0 0;
+  padding-left: 18px;
 }
 
 /* Le compte de la rencontre — le chiffre que la fédération attend. */

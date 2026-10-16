@@ -91,6 +91,69 @@ L'onglet « Capitaine » est **absent** pour les autres — pas grisé. Les autr
 quand leur fonction est coupée, ce qui est une information utile (« ça arrive ») ; ici ce serait
 l'inverse : annoncer à trente membres une porte que deux personnes peuvent ouvrir.
 
+### Envoyer le score sur squashnet (depuis le 16/10/2026)
+
+Le score officiel ne vit toujours pas dans l'appli, mais elle peut le **transmettre** à la place
+du recopiage à la main. Le geste reste celui du capitaine.
+
+L'envoi part de l'écran de vérification, avec le bouton « Envoyer sur squashnet… », et se fait en
+**deux temps**, comme l'import du calendrier. La route est
+`POST /api/captain/squashnet/[id]`.
+
+1. **`preview`** se connecte à squashnet avec les identifiants du capitaine. Elle lit le
+   formulaire de la rencontre (`ic_a=330249`) et montre ce qui partira : l'équipe qui reçoit à
+   gauche, les jeux de son point de vue.
+2. **`send`** reconstruit l'envoi et refuse s'il diffère de l'aperçu (empreinte `seen`). Elle
+   envoie ensuite le formulaire (`330250`), puis **relit** le détail (`330253`) et le compare à
+   ce qui est parti. La réussite ne s'annonce qu'après cette relecture.
+
+**squashnet n'a pas d'API.** C'est le même `index.php` + `ic_a` que les pages publiques, derrière
+une connexion (`/connexion`, `ic_a=131328`). Le jeton `ic_csrf` est exigé dans chaque `POST`.
+Les codes et les captures datent du 16/10/2026 :
+- `src/lib/squashnet/captain.ts` lit le formulaire et construit l'envoi ;
+- `session.ts` tient la session ;
+- les captures sont dans `__fixtures__/capitaine-2027-*`.
+
+**Les identifiants squashnet ne sont jamais stockés.**
+- Ils transitent dans le corps de la requête et servent à une connexion. Ils ne sont ni
+  journalisés, ni répétés dans une réponse.
+- La session squashnet meurt avec la requête.
+- Côté écran, ils ne vivent que dans l'état de la fenêtre. Les `autocomplete` standards laissent
+  le gestionnaire de mots de passe du navigateur les mémoriser, et c'est le seul endroit où ils
+  vivent.
+- Trois refus de squashnet en 15 min bloquent l'envoi, pour ne pas faire verrouiller le compte
+  fédéral (`LoginAttempt`, clés préfixées `squashnet:`).
+
+**Ce qui part, c'est le rapport de vérification**, pas les simples relus en base : c'est ce que
+le capitaine a vu. D'où trois refus avant même de contacter squashnet :
+- un simple n'est pas terminé ;
+- un simple a été modifié **après** la vérification ;
+- il n'y a pas de rapport du tout.
+
+⚠️ **« home » dans le rapport, c'est nous, pas le recevant.** Le formulaire met le recevant à
+gauche (`h1_`, `sch`). Notre colonne se reconnaît au `teamid` porté par la case « Forfait » de
+chaque équipe, jamais à `Interclub.home`. Se tromper croiserait les deux équipes et inverserait
+chaque jeu.
+
+⚠️ **L'envoi n'existe qu'en production** (`VERCEL_ENV`). Recette et les prévisualisations
+tournent sur la base de dev, alors que squashnet est toujours le vrai : un essai y enverrait des
+scores d'essai à la fédération, au nom d'un vrai capitaine. L'aperçu, qui n'écrit rien, reste
+ouvert partout, et c'est lui qu'on essaie hors production.
+
+**Tout doute est un refus nommé**, et rien n'est envoyé dans ces cas :
+- un joueur absent des listes squashnet ;
+- deux options homonymes ;
+- un nombre de simples qui diffère ;
+- un formulaire illisible.
+
+La saisie à la main reste toujours possible.
+
+**Ce que squashnet impose :**
+- La saisie n'est ouverte **que du jour de la rencontre jusqu'à 5 jours après**.
+- **Les deux capitaines** peuvent saisir : l'un saisit, l'autre confirme.
+- Sans formulaire, la liste des rencontres (`330241`) dit pourquoi : déjà saisie, déjà validée,
+  ou pas encore ouverte.
+
 ---
 
 ## Modèle de données

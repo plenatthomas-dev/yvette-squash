@@ -11,8 +11,9 @@ vi.mock("@/components/HeaderMenu", () => ({ HeaderMenu: () => null }));
 vi.mock("@/components/AnnouncementBanner", () => ({ recheckBanner: vi.fn() }));
 vi.mock("@/lib/apiFetch", () => ({ reportMaintenance: vi.fn() }));
 vi.mock("@/lib/sound", () => ({ unlockAudio: vi.fn(), playSuccessJingle: vi.fn(), playError: vi.fn(), playAlert: vi.fn() }));
+vi.mock("@/lib/notif-report", () => ({ reportNotifState: vi.fn(async () => {}) }));
 vi.mock("@/lib/pushClient", () => ({
-  ensurePushSubscribed: vi.fn(), syncPushSubscription: vi.fn(), pushSupported: () => false, pushEnabledOnServer: () => false,
+  requestPush: vi.fn(), restoreWantedPush: vi.fn(async () => false), syncPushSubscription: vi.fn(), pushSupported: () => false, pushEnabledOnServer: () => false,
 }));
 vi.mock("@/components/PlanningGrid", () => ({ PlanningGrid: ({ planning, onBook, onCancelMine }: {
   planning: PlanningDay; onBook: (s: Slot) => void; onCancelMine: (s: Slot) => void;

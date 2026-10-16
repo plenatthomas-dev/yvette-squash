@@ -11,6 +11,11 @@ import FeatureFlagsPanel from "@/components/FeatureFlagsPanel";
 import { recheckBanner } from "@/components/AnnouncementBanner";
 import { bookingOriginHint } from "@/lib/booking-origin";
 import { compareRosterOrder, KNOWN_CLASSEMENTS } from "@/lib/interclub-order";
+import {
+  NOTIF_STATE_WINDOW_DAYS,
+  platformBreakdown,
+  type NotifSummary,
+} from "@/lib/notif-state";
 
 type PendingRequest = {
   id: string;
@@ -266,6 +271,8 @@ type Dashboard = {
   bookingsResa: number;
   // false ⇒ la détection « hors appli » est coupée, donc bookingsResa vaut 0 par construction.
   externalDetection: boolean;
+  // Absent tant que le serveur déployé ne le calcule pas encore (déploiement en cours).
+  notifs?: NotifSummary;
   crons: CronRun[];
 };
 
@@ -1320,6 +1327,8 @@ export default function AdminPage() {
                   hint={bookingOriginHint(dash)}
                 />
               </div>
+
+              {dash.notifs && <NotifStats n={dash.notifs} members={dash.members - dash.disabledMembers} />}
 
               {/* Santé des crons */}
               <div style={{ marginTop: 10 }}>
@@ -2677,6 +2686,49 @@ export default function AdminPage() {
 // Elle S'ENFONCE au lieu de s'encadrer : une liste posée sur une carte ne se sépare pas en
 // donnant une carte à chaque élément (Règle de la Carte sur Carte). Deux surfaces de même
 // valeur ne se distinguent pas l'une de l'autre, si bien ombrées soient-elles.
+/**
+ * QUI NE REÇOIT PAS LES NOTIFICATIONS, ET POURQUOI. Chaque appareil le déclare en ouvrant
+ * l'appli (cf. lib/notif-report.ts) ; un membre compte selon son MEILLEUR appareil — il n'est
+ * pas « bloqué » parce que son ordinateur a refusé si son téléphone reçoit.
+ */
+function NotifStats({ n, members }: { n: NotifSummary; members: number }) {
+  return (
+    <>
+      <hr className="adm-sep" />
+      <h3 className="adm-carte-titre">🔔 Notifications</h3>
+      {n.members === 0 ? (
+        <p className="muted tiny">
+          Aucun appareil relevé pour l&apos;instant : les chiffres arrivent à mesure que les membres
+          ouvrent l&apos;appli.
+        </p>
+      ) : (
+        <>
+          <p className="muted tiny">
+            {n.members} membre{n.members > 1 ? "s" : ""} relevé{n.members > 1 ? "s" : ""} sur{" "}
+            {members} ({n.devices} appareil{n.devices > 1 ? "s" : ""} ouvert
+            {n.devices > 1 ? "s" : ""} ces {NOTIF_STATE_WINDOW_DAYS} derniers jours).
+          </p>
+          <div className="adm-stats">
+            <Stat label="Les reçoivent" value={n.byMember.receiving} />
+            <Stat
+              label="Bloquées"
+              value={n.byMember.denied}
+              hint={platformBreakdown(n.deniedByPlatform) || undefined}
+            />
+            <Stat label="Jamais demandé" value={n.byMember.notAsked} />
+            <Stat label="Coupées" value={n.byMember.off} hint="« Ne plus recevoir »" />
+            <Stat
+              label="Sans support"
+              value={n.byMember.unsupported}
+              hint={platformBreakdown(n.unsupportedByPlatform) || undefined}
+            />
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 function Stat({ label, value, hint }: { label: string; value: number; hint?: string }) {
   return (
     <div className="adm-stat">
