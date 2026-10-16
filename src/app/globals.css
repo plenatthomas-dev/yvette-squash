@@ -5419,6 +5419,30 @@ body[data-bottombar] .install-banner {
   font-size: 0.8rem;
 }
 
+/* Guide de déblocage des notifications (Paramètres, encart interclub) : trois gestes
+   numérotés, puis un bouton à la taille du texte — pas la pleine largeur de Pico. */
+.setting .notif-unblock {
+  font-size: 0.8rem;
+}
+.notif-unblock p {
+  margin: 0 0 6px;
+}
+.notif-unblock-steps {
+  margin: 0 0 8px;
+  padding-left: 1.3em;
+}
+.notif-unblock-steps li {
+  margin-bottom: 4px;
+  list-style: decimal;
+}
+.notif-unblock-check {
+  display: inline-block;
+  width: auto;
+  margin: 2px 0 0;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+}
+
 /* Pastille de choix libre : damier tant qu'aucune couleur personnalisée n'est retenue, la
    couleur elle-même sinon — sans quoi rien n'indiquait qu'un choix hors raccourcis était actif. */
 .ic-swatch-free.is-custom {

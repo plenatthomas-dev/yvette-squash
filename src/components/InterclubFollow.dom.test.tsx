@@ -25,6 +25,8 @@ vi.mock("@/lib/pushClient", () => ({
   pushSubscriptionState: () => pushSubscriptionState(),
   pushSupported: () => true,
   pushEnabledOnServer: () => true,
+  restoreWantedPush: async () => false,
+  markPushWanted: () => {},
 }));
 
 const InterclubFollow = (await import("@/components/InterclubFollow")).default;
@@ -184,5 +186,25 @@ describe("InterclubFollow — l'appareil qui n'était pas abonné", () => {
 
     expect(getByRole("status").textContent).toMatch(/bloquées/);
     expect(queryByRole("button", { name: "Activer ici" })).toBeNull();
+  });
+
+  it("donne le chemin de déblocage, et termine l'activation une fois l'autorisation rendue", async () => {
+    // Un refus ne se lève plus depuis l'appli : le guide le remplace, et « C'est fait »
+    // conclut sans nouveau détour par les Paramètres.
+    suivis = [{ teamId: "t1", level: "result" }];
+    pushSubscriptionState.mockResolvedValue({ permission: "denied", subscribed: false });
+    ensurePushSubscribed.mockResolvedValue(true);
+
+    const { getByRole, queryByRole } = monte();
+    await souffle();
+    expect(getByRole("status").querySelectorAll("ol li")).toHaveLength(3);
+
+    pushSubscriptionState.mockResolvedValue({ permission: "granted", subscribed: false });
+    fireEvent.click(getByRole("button", { name: "C'est fait, vérifier" }));
+    await souffle();
+
+    expect(ensurePushSubscribed).toHaveBeenCalledTimes(1);
+    expect(toast.mock.calls[0][0]).toBe("ok");
+    expect(queryByRole("status")).toBeNull();
   });
 });
