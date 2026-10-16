@@ -6098,6 +6098,16 @@ body[data-bottombar] .install-banner {
   font-size: 0.8rem;
   color: var(--warn-fg);
 }
+/* « Cette équipe a déjà une rencontre ce jour-là », dans le formulaire de création. Le bouton
+   « Ouvrir » vit DANS l'encadré et non dans la rangée du bas : trois boutons n'y tiennent pas
+   sur un téléphone, et c'est la réponse à l'avertissement — il se lit avec lui. */
+.ic-same-day p {
+  margin: 0 0 8px;
+}
+.ic-same-day button {
+  margin: 0;
+  width: 100%;
+}
 .ic-cal-actions {
   display: flex;
   flex-wrap: wrap;

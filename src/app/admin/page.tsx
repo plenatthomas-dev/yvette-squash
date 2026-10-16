@@ -163,6 +163,10 @@ type CalPreview = {
   teamName: string;
   published: number;
   toCreate: CalTie[];
+  /** Journées couvertes par une rencontre SAISIE À LA MAIN le même jour : on la rattache au
+      lieu d'en créer une seconde. `storedOpponent` est le nom saisi, pour repérer un faux
+      rapprochement avant d'appliquer. */
+  toAdopt: { id: string; tie: CalTie; storedOpponent: string | null }[];
   toUpdate: { id: string; tie: CalTie; changes: CalChange[] }[];
   /** Journées importées de cet événement que la ligue ne publie PLUS. Signalées, jamais
       supprimées : une rencontre peut déjà porter une composition et des réponses. */
@@ -1020,6 +1024,7 @@ export default function AdminPage() {
         teamName: data.teamName ?? t.name,
         published: data.published ?? 0,
         toCreate: data.toCreate ?? [],
+        toAdopt: data.toAdopt ?? [],
         toUpdate: data.toUpdate ?? [],
         toDelete: data.toDelete ?? [],
         confirmDrift: data.confirmDrift ?? [],
@@ -1082,6 +1087,7 @@ export default function AdminPage() {
       });
       const data = (await res.json().catch(() => ({}))) as {
         created?: number;
+        adopted?: number;
         updated?: number;
         moved?: number;
         vanished?: number;
@@ -1102,6 +1108,7 @@ export default function AdminPage() {
         ok: true,
         text:
           `${t.name} : ${data.created ?? 0} rencontre(s) créée(s), ${data.updated ?? 0} corrigée(s)` +
+          (data.adopted ? `, ${data.adopted} rattachée(s) à une rencontre saisie à la main` : "") +
           (data.moved
             ? ` — ${data.moved} déplacée(s), l'équipe est prévenue et leurs disponibilités sont remises à zéro`
             : "") +
@@ -2007,12 +2014,14 @@ export default function AdminPage() {
                                     <strong>{icCal.published}</strong> rencontre
                                     {icCal.published > 1 ? "s" : ""} publiée
                                     {icCal.published > 1 ? "s" : ""} pour nous ·{" "}
-                                    {icCal.toCreate.length} à créer · {icCal.toUpdate.length} à
-                                    corriger · {icCal.unchanged} inchangée
+                                    {icCal.toCreate.length} à créer ·{" "}
+                                    {icCal.toAdopt.length > 0 && <>{icCal.toAdopt.length} à rattacher · </>}
+                                    {icCal.toUpdate.length} à corriger · {icCal.unchanged} inchangée
                                     {icCal.unchanged > 1 ? "s" : ""}
                                   </p>
 
                                   {icCal.toCreate.length === 0 &&
+                                  icCal.toAdopt.length === 0 &&
                                   icCal.toUpdate.length === 0 &&
                                   icCal.toDelete.length === 0 &&
                                   icCal.confirmDrift.length === 0 ? (
@@ -2030,6 +2039,18 @@ export default function AdminPage() {
                                           {!c.dateConfirmed && (
                                             <span className="ic-provisoire-tag">prévisionnelle</span>
                                           )}
+                                        </li>
+                                      ))}
+                                      {/* Une rencontre SAISIE À LA MAIN ce jour-là : elle reçoit
+                                          la journée au lieu qu'on en crée une seconde. Le nom
+                                          saisi est montré à côté du nom publié — c'est ce qui
+                                          permet de voir un rapprochement qui n'a pas lieu d'être. */}
+                                      {icCal.toAdopt.map((a) => (
+                                        <li key={`a${a.id}`}>
+                                          <strong>{a.tie.round}</strong> — {a.tie.date} : rattachée à
+                                          la rencontre saisie à la main
+                                          {a.storedOpponent && ` (c. ${a.storedOpponent})`}, au lieu
+                                          d&apos;en créer une seconde
                                         </li>
                                       ))}
                                       {icCal.toUpdate.map((u) => (
@@ -2143,10 +2164,14 @@ export default function AdminPage() {
                                          (cf. la route d'import) ; le bouton n'a donc plus rien à y faire. */
                                       disabled={
                                         icCalBusy !== null ||
-                                        (icCal.toCreate.length === 0 && icCal.toUpdate.length === 0)
+                                        (icCal.toCreate.length === 0 &&
+                                          icCal.toAdopt.length === 0 &&
+                                          icCal.toUpdate.length === 0)
                                       }
                                       title={
-                                        icCal.toCreate.length > 0 || icCal.toUpdate.length > 0
+                                        icCal.toCreate.length > 0 ||
+                                        icCal.toAdopt.length > 0 ||
+                                        icCal.toUpdate.length > 0
                                           ? "Écrit les créations et corrections listées ci-dessus."
                                           : icCal.confirmDrift.length > 0 || icCal.toDelete.length > 0
                                             ? "Rien à écrire ici : le statut de date et les journées retirées se corrigent sur la rencontre. Le contrôle du lundi continuera de les signaler tant que ce n'est pas fait."

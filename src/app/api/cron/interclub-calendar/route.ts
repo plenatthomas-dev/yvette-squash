@@ -203,6 +203,7 @@ export async function GET(req: NextRequest) {
     const diff = diffCalendar(stored, published, team.snEventId!);
     const changes = [
       ...diff.toCreate.map((t) => `${t.round} nouvelle (${t.date})`),
+      ...diff.toAdopt.map((a) => `${a.tie.round} à rattacher à la rencontre saisie à la main du ${a.tie.date}`),
       ...diff.toUpdate.map((u) => {
         const d = u.changes.find((c) => c.field === "date");
         return d ? `${u.tie.round} déplacée au ${d.to}` : `${u.tie.round} modifiée`;

@@ -251,6 +251,13 @@ export async function POST(req: NextRequest) {
       // « le même calendrier » — deux définitions finiraient par se contredire.
       seen: calendarFingerprint(published),
       toCreate: diff.toCreate,
+      // Le nom saisi à la main est joint : l'admin doit voir CE QUI sera rattaché, pas seulement
+      // la journée publiée — c'est lui qui repère un rapprochement qui n'aurait pas lieu d'être.
+      toAdopt: diff.toAdopt.map((a) => ({
+        id: a.id,
+        tie: a.tie,
+        storedOpponent: stored.find((s) => s.id === a.id)?.opponent ?? null,
+      })),
       toUpdate: diff.toUpdate,
       toDelete: diff.toDelete,
       // Rapporté, jamais appliqué : c'est une déduction qui ne doit pas écraser une correction
@@ -369,6 +376,61 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // LE RATTACHEMENT D'UNE RENCONTRE SAISIE À LA MAIN (cf. `diffCalendar`).
+  //
+  // On pose la clé et la journée, et l'on ne fait que COMBLER ce qui est vide : l'adversaire,
+  // la date et le côté (domicile / extérieur) restent ceux qu'un humain a saisis. Le prochain
+  // import la traitera comme n'importe quelle rencontre importée, et proposera à ce moment-là
+  // ce qui diffère encore — à l'admin d'en décider, comme pour les autres.
+  //
+  // CE QUI DIFFÈRE ENCORE GARDE L'ALERTE EN VIE. Un côté inversé (saisie « reçoit », ligue
+  // « se déplace ») n'est pas réécrit ici ; si l'empreinte était posée par-dessus, le cron du
+  // lundi ne le signalerait plus jamais. On rejoue donc le diff sur la ligne telle qu'elle sera
+  // écrite, avec la même définition que partout ailleurs.
+  let rattachees = 0;
+  let rattacheesEcart = 0;
+  for (const a of diff.toAdopt) {
+    const s = stored.find((x) => x.id === a.id);
+    if (!s) continue;
+    const apres: StoredTie = {
+      ...s,
+      snMatchKey: matchKey(team.snEventId, a.tie.round),
+      round: a.tie.round,
+      snOpponentTeamId: a.tie.opponentTeamId ?? s.snOpponentTeamId,
+      time: s.time ?? a.tie.time,
+      venue: s.venue ?? borne(a.tie.venue, MAX_VENUE_LEN),
+      venueAddress: s.venueAddress ?? borne(a.tie.venueAddress, MAX_VENUE_ADDRESS_LEN),
+    };
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.interclub.update({
+          where: { id: a.id },
+          data: {
+            snMatchKey: apres.snMatchKey,
+            round: apres.round,
+            ...(a.tie.opponentTeamId ? { snOpponentTeamId: a.tie.opponentTeamId } : {}),
+            time: apres.time,
+            venue: apres.venue,
+            venueAddress: apres.venueAddress,
+          },
+        });
+        // La saison ne se pose que si elle manque : `StoredTie` ne la porte pas, d'où un
+        // `updateMany` conditionnel plutôt qu'une lecture de plus.
+        await tx.interclub.updateMany({
+          where: { id: a.id, season: null },
+          data: { season: seasonOf(a.tie.date) || null },
+        });
+      });
+      rattachees++;
+      const reste = diffCalendar([apres], [a.tie], team.snEventId);
+      if (reste.toUpdate.length > 0 || reste.confirmDrift.length > 0) rattacheesEcart++;
+    } catch (e) {
+      // Même règle que la création : un second « Appliquer » heurte l'index unique, la
+      // journée est déjà rattachée — rien à faire, et rien à compter.
+      if (!isUniqueViolation(e)) throw e;
+    }
+  }
+
   for (const u of diff.toUpdate) {
     // Même règle que le `PATCH` : une rencontre commencée ne se déplace plus. Le reste de ses
     // champs (lieu corrigé, adversaire réorthographié) s'applique quand même — ce n'est que la
@@ -452,7 +514,10 @@ export async function POST(req: NextRequest) {
   // `snCheckedAt` est posée dans tous les cas : elle répond à l'autre question — « on a regardé »
   // —, et un écart qui subsiste ne veut pas dire qu'on n'a pas regardé.
   const resteUnEcart =
-    diff.confirmDrift.length > 0 || diff.toDelete.length > 0 || frozen.length > 0;
+    diff.confirmDrift.length > 0 ||
+    diff.toDelete.length > 0 ||
+    frozen.length > 0 ||
+    rattacheesEcart > 0;
   await prisma.interclubTeam.update({
     where: { id: team.id },
     data: {
@@ -481,6 +546,7 @@ export async function POST(req: NextRequest) {
     // heurter cinq doublons et de n'en créer aucune. L'admin n'avait aucun moyen de distinguer
     // un import qui a pris d'un import qui n'a rien fait.
     created: creees,
+    adopted: rattachees,
     updated: diff.toUpdate.length,
     unchanged: diff.unchanged,
     moved: moved.length,

@@ -530,6 +530,20 @@ corriger l'existante. **Une rencontre saisie à la main (`snMatchKey` nul) est i
 l'import** — même doctrine que les corrections de classement : l'automatique et l'humain ne
 partagent aucune colonne.
 
+⚠️ **Une équipe, une rencontre par jour — les doublons ne se tranchent pas à l'écran.** Le
+15/10/2026, J2 contre CAL Squash a existé deux fois : la rencontre importée, avec les réponses de
+disponibilité, et une seconde créée au bord du terrain, avec les scores. Aucun écran ne permet
+de fusionner deux fiches ; il a fallu le faire en base. Deux gardes, une par ordre d'arrivée :
+
+- **création après import** — `POST /api/interclub` refuse en `409 same_day` une rencontre de la
+  même équipe à la même date, en désignant l'existante. Le formulaire le dit avant d'écrire
+  (« Ouvrir cette rencontre ») ; « Créer quand même » envoie `force` pour la double journée réelle.
+- **import après création** — `diffCalendar` **rattache** (`toAdopt`) la journée publiée à la
+  rencontre manuelle quand c'est la **seule** de l'équipe ce jour-là : il pose la clé et la
+  journée, comble les champs vides, et ne réécrit rien de ce qu'un humain a saisi. Deux manuelles
+  le même jour : il crée, comme avant, plutôt que de choisir. Si la rattachée diffère encore
+  (côté, adversaire), l'empreinte n'est pas posée et l'alerte du lundi le resignale.
+
 **Une date qui change efface les disponibilités de la rencontre** et remet l'appel à zéro.
 « Je suis dispo le 9 » ne veut pas dire « je suis dispo le 16 », et ce sont précisément les
 soirs de report qu'on se retrouve à trois.

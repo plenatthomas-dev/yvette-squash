@@ -583,7 +583,11 @@ export interface StoredTie {
   venue: string | null;
   venueAddress: string | null;
   dateConfirmed: boolean;
-  /** NULL = saisie à la main, donc intouchable par l'import. */
+  /**
+   * NULL = saisie à la main : l'import ne la MODIFIE jamais. Il peut seulement la RATTACHER à
+   * sa journée (`toAdopt`) quand elle est la seule de son jour — la clé posée, elle devient une
+   * rencontre importée comme les autres.
+   */
   snMatchKey: string | null;
   /** `teamid` adverse déjà en base. NULL sur toute rencontre importée avant qu'il n'existe. */
   snOpponentTeamId: string | null;
@@ -599,6 +603,12 @@ export interface FieldChange {
 export interface CalendarDiff {
   /** Journées publiées qu'on n'a pas encore. */
   toCreate: OwnTie[];
+  /**
+   * Journées publiées qu'une rencontre SAISIE À LA MAIN couvre déjà : même équipe, même date,
+   * et la seule rencontre manuelle de ce jour-là. On lui pose la clé de la journée au lieu de
+   * créer une seconde rencontre (cf. `diffCalendar`).
+   */
+  toAdopt: { id: string; tie: OwnTie }[];
   /** Journées connues dont un champ a bougé. */
   toUpdate: { id: string; tie: OwnTie; changes: FieldChange[] }[];
   /**
@@ -666,11 +676,19 @@ const asText = (v: string | boolean | null): string | null =>
  * par date : la date est précisément ce qui bouge, donc rapprocher par elle créerait une
  * rencontre de plus à chaque report au lieu de corriger l'existante.
  *
- * Une rencontre SAISIE À LA MAIN (`snMatchKey` nul) n'est jamais proposée à la modification,
- * même si sa journée coïncide : c'est la même doctrine que les corrections de classement, où
- * l'automatique et l'humain ne partagent aucune colonne. Elle n'empêche pas non plus la
- * création de son homologue importée — deux rencontres apparaîtront, et c'est à un humain de
- * trancher, plutôt qu'à un rapprochement approximatif d'en écraser une.
+ * Une rencontre SAISIE À LA MAIN (`snMatchKey` nul) n'est jamais proposée à la modification :
+ * c'est la même doctrine que les corrections de classement, où l'automatique et l'humain ne
+ * partagent aucune colonne.
+ *
+ * ⚠️ MAIS ELLE EST RATTACHÉE À SA JOURNÉE quand elle est la SEULE rencontre manuelle de l'équipe
+ * à cette date (`toAdopt`). La règle précédente — « deux rencontres apparaîtront, et c'est à un
+ * humain de trancher » — produisait des doublons qu'aucun écran ne permettait de trancher :
+ * le 15/10/2026, J2 contre CAL Squash existait deux fois, l'une avec les réponses de dispo,
+ * l'autre avec les scores, et il a fallu les fusionner en base. Le rattachement ne réécrit
+ * RIEN de ce qu'un humain a saisi (adversaire, lieu de jeu, date) : il pose la clé et comble
+ * les champs vides. La date suffit à rapprocher — une équipe ne joue qu'une rencontre par
+ * soir —, mais seulement sans ambiguïté : deux rencontres manuelles le même jour, et l'import
+ * crée la sienne comme avant, plutôt que de choisir au hasard.
  *
  * Une seule définition de « ce qui a changé », partagée par la prévisualisation, l'application
  * et le contrôle hebdomadaire : deux définitions finiraient par se contredire, et l'alerte
@@ -682,6 +700,7 @@ export function diffCalendar(stored: StoredTie[], fetched: OwnTie[], eventId: st
   );
   const diff: CalendarDiff = {
     toCreate: [],
+    toAdopt: [],
     toUpdate: [],
     toDelete: [],
     confirmDrift: [],
@@ -700,10 +719,27 @@ export function diffCalendar(stored: StoredTie[], fetched: OwnTie[], eventId: st
     diff.toDelete.push({ id: s.id, round: s.round, date: s.date, opponent: s.opponent });
   }
 
+  // Les rencontres saisies à la main, par date — candidates au rattachement. Une rencontre
+  // n'est rattachée qu'UNE fois, même si deux journées publiées tombaient le même jour (dates
+  // bouchon de la fédération) : la seconde est alors créée, comme avant.
+  const manuelles = new Map<string, StoredTie[]>();
+  for (const s of stored) {
+    if (s.snMatchKey !== null) continue;
+    manuelles.set(s.date, [...(manuelles.get(s.date) ?? []), s]);
+  }
+  const rattachees = new Set<string>();
+
   for (const tie of fetched) {
     const known = byKey.get(matchKey(eventId, tie.round));
     if (!known) {
-      diff.toCreate.push(tie);
+      const memeJour = manuelles.get(tie.date) ?? [];
+      const seule = memeJour.length === 1 ? memeJour[0] : null;
+      if (seule && !rattachees.has(seule.id)) {
+        rattachees.add(seule.id);
+        diff.toAdopt.push({ id: seule.id, tie });
+      } else {
+        diff.toCreate.push(tie);
+      }
       continue;
     }
     const changes: FieldChange[] = [];
@@ -754,6 +790,7 @@ const statutDate = (v: boolean) => (v ? "confirmée" : "prévisionnelle");
 export function describeDiff(diff: CalendarDiff): string[] {
   return [
     ...diff.toCreate.map((t) => `${t.round} à créer (${t.date})`),
+    ...diff.toAdopt.map((a) => `${a.tie.round} rattachée à la rencontre saisie à la main du ${a.tie.date}`),
     ...diff.toUpdate.map(
       (u) => `${u.tie.round} : ${u.changes.map((c) => `${c.field} ${c.from ?? "—"} → ${c.to ?? "—"}`).join(", ")}`,
     ),
