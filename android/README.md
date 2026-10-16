@@ -86,9 +86,16 @@ jarsigner) en lisant le mot de passe dans l'environnement.
 
 Sur Android, la bannière d'installation propose l'APK, et non plus la PWA : dans un onglet
 (arrivée par le QR code) comme dans la PWA déjà installée, à qui elle demande ensuite de la
-supprimer (`src/components/AndroidAppPrompt.tsx`). Elle pointe toujours vers la dernière Release :
-`https://github.com/plenatthomas-dev/yvette-squash/releases/latest/download/squash-yvette.apk`.
-Ce lien ne marche que si **l'APK garde ce nom** d'une version à l'autre.
+supprimer (`src/components/AndroidAppPrompt.tsx`).
+
+Le lien est `/squash-yvette.apk`, sur notre domaine : la route relaie la dernière Release,
+`https://github.com/plenatthomas-dev/yvette-squash/releases/latest/download/squash-yvette.apk`,
+et le CDN de Vercel garde le fichier une heure. Ça ne marche que si **l'APK garde ce nom** d'une
+version à l'autre.
+
+⚠️ Ne pas donner le lien github.com aux membres. Le 16/10/2026, sur un Pixel 8a où l'appli GitHub
+est installée, elle a réclamé ce lien (elle se déclare pour tout github.com) et l'a ouvert dans sa
+petite fenêtre Chrome, où le téléchargement est resté bloqué à 100 %.
 
 Nouvelle version (après `bubblewrap update`, qui incrémente `appVersionCode`, puis `build.sh`) :
 
