@@ -18,9 +18,10 @@
 import { useEffect, useState } from "react";
 import { androidAppInstalled, isAndroidApp, isAndroidPwa } from "@/lib/androidApp";
 
-// Toujours la dernière Release : l'APK y garde ce nom d'une version à l'autre.
-export const APK_URL =
-  "https://github.com/plenatthomas-dev/yvette-squash/releases/latest/download/squash-yvette.apk";
+// La dernière Release GitHub, relayée par notre domaine (src/app/squash-yvette.apk/route.ts) : un
+// lien github.com est réclamé par l'appli GitHub quand elle est installée, et le téléchargement
+// reste alors bloqué dans sa fenêtre.
+export const APK_URL = "/squash-yvette.apk";
 
 const SNOOZE_KEY = "androidAppPromptSnooze";
 const SNOOZE_MS = 14 * 24 * 60 * 60 * 1000; // 14 jours
@@ -90,7 +91,7 @@ export default function AndroidAppPrompt() {
             {pwa
               ? "Elle remplace cette version, ajoutée depuis le navigateur."
               : "Accès direct depuis l'écran d'accueil, plein écran et alertes quand un terrain se libère."}{" "}
-            Le fichier se télécharge sur GitHub, hors du Play Store.
+            Elle s'installe depuis ce site, hors du Play Store.
           </>
         )}
         {mode === "downloaded" && (
@@ -110,9 +111,9 @@ export default function AndroidAppPrompt() {
       </span>
       <span className="install-banner-actions">
         {mode === "offer" && (
-          // Un lien plutôt qu'un bouton : GitHub sert le fichier en pièce jointe, la page reste
+          // Un lien plutôt qu'un bouton : le fichier arrive en pièce jointe, la page reste
           // affichée et passe aux instructions.
-          <a role="button" href={APK_URL} onClick={() => setMode("downloaded")}>
+          <a role="button" href={APK_URL} download onClick={() => setMode("downloaded")}>
             Télécharger
           </a>
         )}
