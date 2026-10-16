@@ -15,17 +15,19 @@ import { resolveColor } from "@/lib/interclub";
 
 /** Largeur de l'image, en px. 1080 : le format carré/portrait des messageries, net sur tout écran. */
 export const CARD_WIDTH = 1080;
-const PAD = 64;
+export const PAD = 64;
+/** Hauteur de l'en-tête (logo, club, sous-titre) — cf. `drawHeader`. */
+export const HEAD_H = 120;
 const ROW_H = 132;
-const FONT = "system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+export const FONT = "system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
 
 // Palette du thème sombre du produit (DESIGN.md) : page, carte, filet, texte, sourdine. L'image
 // quitte l'appli, elle ne suit donc pas le thème choisi — le sombre est celui de `theme_color`.
-const PAGE = "#0e1116";
-const CARTE = "#191e26";
-const FILET = "#434b58";
-const ENCRE = "#f3f4f6";
-const SOURDINE = "#9aa2ae";
+export const PAGE = "#0e1116";
+export const CARTE = "#191e26";
+export const FILET = "#434b58";
+export const ENCRE = "#f3f4f6";
+export const SOURDINE = "#9aa2ae";
 // Paire ambre « en cours » (hors thème, documentée dans DESIGN.md).
 const LIVE_BG = "#fcd34d";
 const LIVE_FG = "#78350f";
@@ -38,7 +40,7 @@ export function fitText(ctx: Pick<CanvasRenderingContext2D, "measureText">, text
   return s.trimEnd() + "…";
 }
 
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+export function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y, x + w, y + h, r);
@@ -65,8 +67,7 @@ export function renderScoreCard(m: FreeMatch, logo?: HTMLImageElement | null): H
   const ctx = canvas.getContext?.("2d");
   if (!ctx) return null;
 
-  const headH = 120;
-  const cardY = PAD + headH + 40;
+  const cardY = PAD + HEAD_H + 40;
   const cardH = ROW_H * 2 + 48;
   const footH = 96;
   const H = cardY + cardH + footH + PAD - 24;
@@ -77,31 +78,9 @@ export function renderScoreCard(m: FreeMatch, logo?: HTMLImageElement | null): H
   ctx.fillRect(0, 0, CARD_WIDTH, H);
 
   // --- en-tête : logo, nom du club, date -------------------------------------------------------
-  let textX = PAD;
-  if (logo && logo.complete && logo.naturalWidth > 0) {
-    const size = headH;
-    ctx.save();
-    roundRect(ctx, PAD, PAD, size, size, 24);
-    ctx.fillStyle = "#ffffff";
-    ctx.fill();
-    ctx.clip();
-    const ratio = Math.min(size / logo.naturalWidth, size / logo.naturalHeight);
-    const w = logo.naturalWidth * ratio;
-    const h = logo.naturalHeight * ratio;
-    ctx.drawImage(logo, PAD + (size - w) / 2, PAD + (size - h) / 2, w, h);
-    ctx.restore();
-    textX = PAD + size + 32;
-  }
-  ctx.textBaseline = "alphabetic";
-  ctx.fillStyle = ENCRE;
-  ctx.font = `700 48px ${FONT}`;
-  ctx.fillText("Squash de l'Yvette", textX, PAD + 58);
-  ctx.fillStyle = SOURDINE;
-  ctx.font = `400 34px ${FONT}`;
   // Les matchs de tournoi entrent dans l'historique sous l'id `trn-<match>` (cf. Tournament).
   const genre = m.id.startsWith("trn-") ? "Tournoi" : "Match amical";
-  const sous = `${s.done ? genre : "Match en cours"} · ${prettyDate(m.startedAt)}`;
-  ctx.fillText(fitText(ctx, sous, CARD_WIDTH - textX - PAD), textX, PAD + 106);
+  drawHeader(ctx, `${s.done ? genre : "Match en cours"} · ${prettyDate(m.startedAt)}`, logo);
 
   // --- tableau de marque ------------------------------------------------------------------------
   const cardX = PAD;
@@ -198,16 +177,48 @@ export function canvasToPng(canvas: HTMLCanvasElement, name: string): File {
   return new File([bytes], name, { type: "image/png" });
 }
 
+/**
+ * L'en-tête commun aux images du club : logo (s'il est prêt), « Squash de l'Yvette », et une
+ * ligne de sous-titre. Occupe `HEAD_H` px de haut à partir de `PAD`.
+ */
+export function drawHeader(ctx: CanvasRenderingContext2D, sous: string, logo?: HTMLImageElement | null) {
+  let textX = PAD;
+  if (logo && logo.complete && logo.naturalWidth > 0) {
+    const size = HEAD_H;
+    ctx.save();
+    roundRect(ctx, PAD, PAD, size, size, 24);
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+    ctx.clip();
+    const ratio = Math.min(size / logo.naturalWidth, size / logo.naturalHeight);
+    const w = logo.naturalWidth * ratio;
+    const h = logo.naturalHeight * ratio;
+    ctx.drawImage(logo, PAD + (size - w) / 2, PAD + (size - h) / 2, w, h);
+    ctx.restore();
+    textX = PAD + size + 32;
+  }
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "left";
+  ctx.fillStyle = ENCRE;
+  ctx.font = `700 48px ${FONT}`;
+  ctx.fillText("Squash de l'Yvette", textX, PAD + 58);
+  ctx.fillStyle = SOURDINE;
+  ctx.font = `400 34px ${FONT}`;
+  ctx.fillText(fitText(ctx, sous, CARD_WIDTH - textX - PAD), textX, PAD + 106);
+}
+
+/** Un morceau de nom de fichier : sans accents, en minuscules, 20 caractères au plus. */
+export const slug = (v: string, repli = "joueur") =>
+  v
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 20) || repli;
+
 /** Nom de fichier lisible : « score-paul-marc-2026-09-25.png ». */
 export function scoreFileName(m: FreeMatch): string {
-  const slug = (v: string) =>
-    v
-      .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 20) || "joueur";
   const d = new Date(m.startedAt);
   const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   return `score-${slug(m.home.name)}-${slug(m.away.name)}-${iso}.png`;
