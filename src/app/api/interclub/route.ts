@@ -157,7 +157,7 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/interclub : crée une rencontre et ses N simples d'un coup.
-// { date, teamId, opponent, home?, season?, matchCount?, bestOf?,
+// { date, teamId, opponent, home?, season?, matchCount?, bestOf?, force?,
 //   matches?: [{ userId? | guestId?, awayName?, homeColor?, awayColor? }] }
 // Ouvert à TOUT membre connecté : dans un club de cette taille, exiger un rôle bloquerait la
 // saisie les soirs où le capitaine joue.
@@ -167,7 +167,8 @@ export async function POST(req: NextRequest) {
   const { session } = access;
 
   const body = await readJsonBody(req);
-  const { date, teamId, opponent, home, season, matchCount, bestOf, matches } = body as {
+  const { date, teamId, opponent, home, season, matchCount, bestOf, matches, force } = body as {
+    force?: unknown;
     date?: unknown;
     teamId?: unknown;
     opponent?: unknown;
@@ -202,6 +203,31 @@ export async function POST(req: NextRequest) {
   const team = await prisma.interclubTeam.findUnique({ where: { id: teamId } });
   if (!team) {
     return NextResponse.json({ error: "Équipe inconnue" }, { status: 400 });
+  }
+
+  // UNE ÉQUIPE NE JOUE QU'UNE RENCONTRE PAR SOIR — sauf à le dire explicitement (`force`).
+  //
+  // Le 15/10/2026, J2 contre CAL Squash a existé deux fois : la rencontre importée du calendrier
+  // fédéral, avec les réponses de disponibilité, et une seconde créée au bord du terrain, avec
+  // les scores. Rien ne l'empêchait, et rien à l'écran ne permettait ensuite de fusionner les
+  // deux. Le refus porte la rencontre existante pour que l'écran propose de l'OUVRIR — c'est
+  // presque toujours ce qu'on cherchait. `force` reste pour le cas réel mais rare d'une double
+  // journée le même jour. Lecture sur l'index `(teamId, date)`.
+  if (force !== true) {
+    const deja = await prisma.interclub.findFirst({
+      where: { teamId, date },
+      select: { id: true, opponent: true, round: true, home: true },
+    });
+    if (deja) {
+      return NextResponse.json(
+        {
+          error: `${team.name} a déjà une rencontre ce jour-là (${deja.home ? "reçoit" : "se déplace à"} ${deja.opponent}${deja.round ? `, ${deja.round}` : ""}).`,
+          code: "same_day",
+          existing: deja,
+        },
+        { status: 409 },
+      );
+    }
   }
 
   // Composition : facultative à la création (on inscrit souvent la rencontre avant de savoir

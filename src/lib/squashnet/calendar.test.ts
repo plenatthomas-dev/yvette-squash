@@ -6,6 +6,7 @@ import {
   parseTeamCalendar,
   ownFixtures,
   diffCalendar,
+  describeDiff,
   calendarFingerprint,
   matchKey,
   type StoredTie,
@@ -358,6 +359,49 @@ describe("diffCalendar", () => {
     const d = diffCalendar([manuelle], [own()], EVENT);
     expect(d.toUpdate).toEqual([]);
     expect(d.toCreate).toHaveLength(1);
+  });
+
+  it("RATTACHE la seule rencontre manuelle du même jour au lieu d'en créer une seconde", () => {
+    // Le doublon du 15/10/2026 : J2 contre CAL Squash existait deux fois, les dispos sur
+    // l'une, les scores sur l'autre. Une équipe ne joue qu'une rencontre par soir — la date
+    // suffit à rapprocher, et rien de ce qu'un humain a saisi n'est proposé à la réécriture.
+    const manuelle = stored({ id: "m", snMatchKey: null, opponent: "montmartre", round: null });
+    const d = diffCalendar([manuelle], [own()], EVENT);
+    expect(d.toCreate).toEqual([]);
+    expect(d.toUpdate).toEqual([]);
+    expect(d.toAdopt).toEqual([{ id: "m", tie: own() }]);
+    expect(describeDiff(d)).toEqual(["J1 rattachée à la rencontre saisie à la main du 2026-10-09"]);
+  });
+
+  it("ne rattache PAS quand deux rencontres manuelles partagent la date : il crée, comme avant", () => {
+    const d = diffCalendar(
+      [stored({ id: "a", snMatchKey: null }), stored({ id: "b", snMatchKey: null })],
+      [own()],
+      EVENT,
+    );
+    expect(d.toAdopt).toEqual([]);
+    expect(d.toCreate).toHaveLength(1);
+  });
+
+  it("ne rattache une rencontre manuelle qu'UNE fois, même à deux journées du même jour", () => {
+    // Les dates bouchon de la fédération font tomber plusieurs journées le même jour.
+    const d = diffCalendar(
+      [stored({ id: "m", snMatchKey: null })],
+      [own({ round: "J1" }), own({ round: "J5" })],
+      EVENT,
+    );
+    expect(d.toAdopt.map((a) => [a.id, a.tie.round])).toEqual([["m", "J1"]]);
+    expect(d.toCreate.map((t) => t.round)).toEqual(["J5"]);
+  });
+
+  it("ne rattache rien à une journée déjà importée : la clé prime sur la date", () => {
+    const d = diffCalendar(
+      [stored(), stored({ id: "m", snMatchKey: null })],
+      [own()],
+      EVENT,
+    );
+    expect(d.toAdopt).toEqual([]);
+    expect(d).toMatchObject({ toCreate: [], unchanged: 1 });
   });
 
   it("SIGNALE une journée que la ligue ne publie plus", () => {

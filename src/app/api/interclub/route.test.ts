@@ -17,6 +17,9 @@ const h = vi.hoisted(() => ({
   /** Les rencontres PASSÉES telles que `loadKnownOpponents` les lit — une autre forme, une autre requête. */
   passees: [] as Array<Record<string, unknown>>,
   created: null as null | Record<string, unknown>,
+  /** La rencontre que l'équipe a DÉJÀ ce jour-là, telle que la garde de création la lit. */
+  sameDay: null as null | Record<string, unknown>,
+  sameDayWhere: null as null | Record<string, unknown>,
 }));
 
 vi.mock("@/lib/features-server", () => ({
@@ -36,6 +39,10 @@ vi.mock("@/lib/db", () => ({
       findMany: vi.fn(async (args?: { select?: Record<string, unknown> }) =>
         args?.select && "official" in args.select ? h.passees : h.fixtures,
       ),
+      findFirst: vi.fn(async (args: { where: Record<string, unknown> }) => {
+        h.sameDayWhere = args.where;
+        return h.sameDay;
+      }),
       create: vi.fn(async (args: { data: Record<string, unknown> }) => {
         h.created = args.data;
         return { id: "f1" };
@@ -101,6 +108,8 @@ beforeEach(() => {
   h.fixtures = [];
   h.passees = [];
   h.created = null;
+  h.sameDay = null;
+  h.sameDayWhere = null;
 });
 
 describe("GET /api/interclub", () => {
@@ -269,6 +278,28 @@ describe("GET /api/interclub", () => {
 });
 
 describe("POST /api/interclub", () => {
+  it("REFUSE une seconde rencontre de la même équipe le même jour, et désigne la première", async () => {
+    // Le doublon du 15/10/2026 : J2 contre CAL Squash importée, puis recréée au bord du
+    // terrain — les dispos sur l'une, les scores sur l'autre.
+    h.sameDay = { id: "f0", opponent: "CAL Squash", round: "J2", home: true };
+    const res = await POST(post(validBody));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: "Équipe 1 a déjà une rencontre ce jour-là (reçoit CAL Squash, J2).",
+      code: "same_day",
+      existing: h.sameDay,
+    });
+    expect(h.sameDayWhere).toEqual({ teamId: "t1", date: "2026-09-03" });
+    expect(h.created).toBeNull();
+  });
+
+  it("crée quand même sur demande explicite (`force`) — une double journée existe", async () => {
+    h.sameDay = { id: "f0", opponent: "CAL Squash", round: null, home: false };
+    const res = await POST(post({ ...validBody, force: true }));
+    expect(res.status).toBe(201);
+    expect(h.created).not.toBeNull();
+  });
+
   it("404 si la fonction est désactivée", async () => {
     h.interclub = false;
     expect((await POST(post(validBody))).status).toBe(404);
