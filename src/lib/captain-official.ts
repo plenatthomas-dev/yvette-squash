@@ -193,6 +193,21 @@ export interface OurLine {
   winner: "home" | "away" | null;
 }
 
+/**
+ * Ce simple porte-t-il un RÉSULTAT chez la ligue ?
+ *
+ * ⚠️ UN JOUEUR NE SUFFIT PAS. Dès que la composition est déclarée sur squashnet, la feuille
+ * publique affiche les deux joueurs de chaque simple à 0-0, sans score ni vainqueur — avant toute
+ * saisie. Compter ces lignes comme saisies faisait annoncer « La ligue publie 0-0 : 5 écarts »,
+ * et un point à régler, sur une rencontre que personne n'avait encore saisie (16/10/2026, Yvette 2
+ * – Verrieres 3) : exactement l'état normal qu'on vient vérifier AVANT d'aller saisir.
+ */
+function aUnResultat(l: TieLine): boolean {
+  return (
+    l.winner !== null || !!l.score?.trim() || (l.gamesA ?? 0) + (l.gamesB ?? 0) > 0
+  );
+}
+
 /** Le numéro d'ordre porté par un intitulé fédéral (« Homme 1 » → 1), ou null. */
 function ordreDe(label: string): number | null {
   const m = /(\d+)\s*$/.exec(label);
@@ -243,7 +258,7 @@ export function compareOfficial(
   }
 
   const url = tieUrl(sheet.snTieId);
-  const saisis = sheet.lines.filter((l) => l.a || l.b);
+  const saisis = sheet.lines.filter(aUnResultat);
 
   if (saisis.length === 0) {
     return { status: "empty", home: null, away: null, ...base, problems: [], side, url };
@@ -285,7 +300,7 @@ export function compareOfficial(
   const parOrdre = new Map<number, TieLine>();
   for (const l of sheet.lines) {
     const n = ordreDe(l.label);
-    if (n !== null && (l.a || l.b)) parOrdre.set(n, l);
+    if (n !== null && aUnResultat(l)) parOrdre.set(n, l);
   }
 
   for (const n of ours) {

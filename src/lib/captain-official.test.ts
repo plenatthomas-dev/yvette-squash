@@ -191,6 +191,28 @@ describe("compareOfficial — les états qui ne se confondent pas", () => {
     expect(compareOfficial(releveConforme, null, null, 5).status).toBe("unread");
   });
 
+  it("⚠️ une composition déclarée à 0-0 n'est PAS une saisie — la ligue attend encore", () => {
+    // Le 16/10/2026 : la feuille de Yvette 2 – Verrieres 3 affichait les huit joueurs, 0-0
+    // partout, avant toute saisie. L'écran annonçait « 5 écarts » et un point à régler.
+    const compo: TieSheet = {
+      ...feuille,
+      lines: feuille.lines.map((l) => ({
+        ...l,
+        score: null,
+        winner: null,
+        gamesA: 0,
+        gamesB: 0,
+        pointsA: 0,
+        pointsB: 0,
+      })),
+      totals: { matchesA: 0, matchesB: 0, gamesA: 0, gamesB: 0, pointsA: 0, pointsB: 0 },
+    };
+    const o = compareOfficial(releveConforme, compo, "A", 5);
+    expect(o.status).toBe("empty");
+    expect(o.problems).toEqual([]);
+    expect(describeOfficial(o)).toBe("La ligue n'a encore enregistré aucun simple.");
+  });
+
   it("« pas d'identifiant fédéral » n'est ni l'un ni l'autre", () => {
     // Rien à aller chercher : c'est un import de calendrier qu'il faut, pas une relance.
     const o = officialAbsent(releveConforme);
