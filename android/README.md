@@ -82,6 +82,28 @@ l'**affiche en clair** dans son message d'erreur au moindre échec. C'est arriv�
 et le mot de passe a été changé. `build.sh` fait la même chose (Gradle, zipalign, apksigner,
 jarsigner) en lisant le mot de passe dans l'environnement.
 
+## Distribuer l'APK (Releases GitHub)
+
+Sur Android, la bannière d'installation propose l'APK, et non plus la PWA : dans un onglet
+(arrivée par le QR code) comme dans la PWA déjà installée, à qui elle demande ensuite de la
+supprimer (`src/components/AndroidAppPrompt.tsx`). Elle pointe toujours vers la dernière Release :
+`https://github.com/plenatthomas-dev/yvette-squash/releases/latest/download/squash-yvette.apk`.
+Ce lien ne marche que si **l'APK garde ce nom** d'une version à l'autre.
+
+Nouvelle version (après `bubblewrap update`, qui incrémente `appVersionCode`, puis `build.sh`) :
+
+```bash
+cp android/app-release-signed.apk /tmp/squash-yvette.apk
+gh release create android-v<versionName> /tmp/squash-yvette.apk --target main --latest \
+  --title "Appli Android <versionName>" --notes "…"
+```
+
+Première version : `android-v1.0.0` (versionCode 1), publiée le 16/10/2026.
+
+⚠️ Cet APK est signé avec la **clé d'upload**, la version du Play Store le sera avec la clé
+*Play App Signing*. Android refuse une mise à jour signée par une autre clé : un membre qui a
+installé l'APK devra le désinstaller avant de prendre celle du Store.
+
 ## Tester sur un téléphone
 
 1. Sur le téléphone : Paramètres → À propos → toucher 7 fois « Numéro de build », puis
