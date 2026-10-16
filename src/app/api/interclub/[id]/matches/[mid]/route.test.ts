@@ -363,7 +363,7 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
   it("détache le joueur et remet le placeholder", async () => {
     await PATCH(patch({ homeUserId: null, homeDisplayName: "À désigner" }), ctx);
     expect(h.updated).toMatchObject({ homeDisplayName: "À désigner" });
-    expect(h.updated?.homeUser).toEqual({ disconnect: true });
+    expect(h.updated).toMatchObject({ homeUserId: null, homeGuestId: null });
   });
 
   it("le nom d'un membre rattaché prime sur un nom envoyé en même temps", async () => {
@@ -591,8 +591,12 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
     h.guest = { id: "g1", name: "Paul Hors-Appli", teamId: "team-1", snClt: "4D", snRangM: 812 };
     await PATCH(patch({ homeGuestId: "g1" }), ctx);
     expect(h.updated).toMatchObject({ homeDisplayName: "Paul Hors-Appli" });
-    expect(h.updated?.homeGuest).toEqual({ connect: { id: "g1" } });
-    expect(h.updated?.homeUser).toEqual({ disconnect: true });
+    // Les DEUX colonnes dans le même `update` : un `connect` + `disconnect` partait en deux
+    // requêtes, et la contrainte `InterclubMatch_user_or_guest` refusait l'état intermédiaire
+    // (membre ET invité) — un 500 en prod en remplaçant un membre par un invité.
+    expect(h.updated).toMatchObject({ homeUserId: null, homeGuestId: "g1" });
+    expect(h.updated).not.toHaveProperty("homeUser");
+    expect(h.updated).not.toHaveProperty("homeGuest");
   });
 
   it("refuse un joueur hors appli sans classement connu", async () => {
