@@ -148,15 +148,24 @@ jamais un delta : les écritures sont donc idempotentes, ce qui dispense d'une f
 ordonnée à la reprise après coupure. Le seul envoi hors de cette file est celui du score final,
 au « Terminer », et le journal local n'est purgé **qu'après** un envoi confirmé.
 
-**Qui engage ?** Le marquage s'ouvre sur cette question — quel joueur, et de quel carré. Le
+**Qui engage ?** Le marquage s'ouvre sur cette question — quel joueur, et lui seul. Le
 premier service se tire au sort sur le terrain : ni l'appli ni le serveur ne peuvent le
 connaître, et le supposer se trompe une fois sur deux. Les deux cases de points restent
 **inertes** tant qu'on n'a pas répondu, parce que le moteur ignore un point sans serveur — des
 cases actives absorberaient les appuis en silence, sur un écran qu'on utilise sans le regarder.
-Aux jeux suivants, seul le **carré** est redemandé : le règlement désigne le serveur (le
-vainqueur du jeu précédent) mais lui laisse le côté. Un match repris dont des jeux sont déjà
-enregistrés ne repose pas la question — leur serveur n'a plus d'importance, et le déroulé que
-`seedEvents` reconstitue est assumé comme inventé.
+Un match repris dont des jeux sont déjà enregistrés ne repose pas la question — leur serveur
+n'a plus d'importance, et le déroulé que `seedEvents` reconstitue est assumé comme inventé.
+
+**Le carré se propose, il ne se demande plus** (demande du club, 2026-10-16). Un panneau
+« carré gauche / droit » bloquait le point suivant à chaque reprise de service — des dizaines de
+fois par match. Désormais une pastille **« D? »** apparaît sur la case du serveur : sans appui,
+il sert à droite ; un appui la bascule en « G? ». S'il gagne l'échange, elle passe à « G » (ou
+« D ») sans point d'interrogation — c'est la règle, plus un choix — et alterne tant qu'il garde
+le service ; un appui corrige encore, toujours facultatif. À chaque **reprise** de service, et en
+début de jeu, la proposition est le carré que ce joueur a choisi à son **premier** service du
+match (`firstBox`) : on commence presque toujours ses séries du même côté. Avant tout service,
+à droite. Un appui sur la pastille est un `serve` du même joueur dans le journal : « Annuler »
+le défait comme un point.
 
 **Ce que l'écran de marquage doit rendre lisible.** Il se lit à bout de bras : l'arbitre tourne
 le téléphone vers les joueurs. Le score est donc dimensionné pour REMPLIR sa case (requête de
@@ -856,6 +865,17 @@ commencée où personne n'a encore marqué s'affichaient donc à l'identique, sc
 La carte en cours porte désormais le voile `--live-wash` et la pastille `.ic-status` du reste
 du module — le vocabulaire d'état existait déjà (`.ic-row-live`, `.ic-match-live`), on ne l'avait
 pas appliqué ici.
+
+**Les derniers jours restent en haut, et la carte ouvre la fiche** (demande du club,
+2026-10-16). Le panneau garde, sous « Ces derniers jours », les rencontres des quatre jours
+précédents (`RECENT_FIXTURE_DAYS`), terminées ou non, pour finir d'en saisir les scores sans les
+chercher dans le calendrier. Elles s'y résument en une ligne — date, état, score — et toute
+carte s'ouvre d'un appui. Le **sondage**, lui, ne regarde que ce qui peut encore bouger : les
+rencontres du jour, et celle de la veille seulement si un simple y est en cours de marquage
+(soirée qui déborde après minuit). Une rencontre d'hier restée « en cours » faute de deux simples
+saisis ne déclenche plus le sondage à 10 s. Au-delà de quatre jours, une rencontre commencée et
+jamais finie s'affiche **« Non complétée »** (`fixtureDisplayStatus`) ; une date passée sans
+aucun score, **« À saisir »**.
 
 ⚠️ **Pourquoi pas le cache CDN**, contrairement à ce que prévoyait l'étude initiale : un cache
 partagé indexe sur l'URL, pas sur le cookie. La première réponse servie à un membre connecté

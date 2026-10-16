@@ -374,7 +374,7 @@ describe("InterclubScorer — le premier serveur se corrige", () => {
     await souffle();
 
     expect(getByText(/Qui engage/)).toBeTruthy();
-    fireEvent.click(getByText("Thomas · gauche"));
+    fireEvent.click(getByText("Thomas sert"));
     await souffle();
     // Le panneau a disparu : le serveur est désigné.
     expect(queryByText(/Qui engage/)).toBeNull();
@@ -400,27 +400,17 @@ describe("InterclubScorer — balle de jeu et balle de match", () => {
   /**
    * Amène le jeu à `h`-`a`.
    *
-   * ⚠️ IL FAUT RÉPONDRE AU CARRÉ DE SERVICE. À chaque reprise de service, l'écran réclame le
-   * carré et IGNORE les appuis tant qu'on ne l'a pas donné (`applyPoint` ne devine pas un
-   * serveur). Une aide qui tape dix fois d'affilée n'enregistre donc qu'un seul point après un
-   * changement de main — et l'essai mesure alors 10-1 en croyant mesurer 10-10.
+   * Le carré de service ne se réclame plus (il se propose, cf. `interclub.ts`) : seule la
+   * pause entre deux jeux bloque encore les appuis, et il faut la passer.
    */
   async function jusqua(ecran: ReturnType<typeof monteVierge>, h: number, a: number) {
     const tape = async (qui: string) => {
-      // Le carré peut être réclamé AVANT le premier appui : un match repris s'arrête juste
-      // après un jeu gagné, donc en attente du carré du jeu suivant. Sans ce dégagement, le
-      // tout premier appui de l'essai est avalé et il en manque un à l'arrivée.
       await degage();
       fireEvent.click(ecran.getByLabelText(`Point pour ${qui}`));
       await souffle();
       await degage();
     };
     const degage = async () => {
-      const carre = ecran.queryByText("Carré gauche");
-      if (carre) {
-        fireEvent.click(carre);
-        await souffle();
-      }
       // La pause entre deux jeux bloque aussi les appuis : on la passe, comme le ferait le
       // marqueur qui enchaîne.
       const reprendre = ecran.queryByText("Reprendre maintenant");
@@ -437,7 +427,7 @@ describe("InterclubScorer — balle de jeu et balle de match", () => {
     vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
     const ecran = monteVierge();
     await souffle();
-    fireEvent.click(ecran.getByText("Thomas · gauche"));
+    fireEvent.click(ecran.getByText("Thomas sert"));
     await souffle();
 
     await jusqua(ecran, 9, 0);
@@ -451,7 +441,7 @@ describe("InterclubScorer — balle de jeu et balle de match", () => {
     vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
     const ecran = monteVierge();
     await souffle();
-    fireEvent.click(ecran.getByText("Thomas · gauche"));
+    fireEvent.click(ecran.getByText("Thomas sert"));
     await souffle();
     await jusqua(ecran, 10, 10);
     expect(ecran.queryByText("balle de jeu")).toBeNull();
@@ -488,7 +478,7 @@ describe("InterclubScorer — les gestes qu'on fait sans regarder", () => {
     vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
     const { getByText, getByLabelText } = monteVierge();
     await souffle();
-    fireEvent.click(getByText("Thomas · gauche"));
+    fireEvent.click(getByText("Thomas sert"));
     await souffle();
 
     fireEvent.click(getByLabelText("Point pour Thomas"));
@@ -508,7 +498,7 @@ describe("InterclubScorer — les gestes qu'on fait sans regarder", () => {
     vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
     const { getByText, getByLabelText } = monteVierge();
     await souffle();
-    fireEvent.click(getByText("Thomas · gauche"));
+    fireEvent.click(getByText("Thomas sert"));
     await souffle();
     expect(() => fireEvent.click(getByLabelText("Point pour Thomas"))).not.toThrow();
   });

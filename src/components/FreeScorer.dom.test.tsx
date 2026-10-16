@@ -24,18 +24,16 @@ vi.mock("@/lib/score-image", () => ({
 const clic = (el: HTMLElement) => act(() => fireEvent.click(el));
 const bouton = (name: string | RegExp) => screen.getByRole("button", { name });
 
-/** Désigne le premier serveur (joueur 1, carré droit). */
+/** Désigne le premier serveur — le carré, lui, se propose. */
 function engager(nom: string) {
-  clic(bouton(`${nom} · droite`));
+  clic(bouton(`${nom} sert`));
 }
 
-/** Marque `n` points pour `nom`, en franchissant pause et choix de carré s'ils surgissent. */
+/** Marque `n` points pour `nom`, en franchissant la pause si elle surgit. */
 function points(nom: string, n: number) {
   for (let i = 0; i < n; i++) {
     const pause = screen.queryByRole("button", { name: "Reprendre maintenant" });
     if (pause) clic(pause);
-    const carre = screen.queryByRole("button", { name: "Carré droit" });
-    if (carre) clic(carre);
     clic(bouton(`Point pour ${nom}`));
   }
 }

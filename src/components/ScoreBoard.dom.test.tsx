@@ -21,7 +21,8 @@ const etat = (over: Partial<MatchState> = {}): MatchState => ({
   gamesWon: { home: 2, away: 1 },
   serving: "home",
   servingBox: "left",
-  awaitingServeBox: false,
+  boxProposed: false,
+  firstBox: { home: "right", away: "right" },
   status: "live",
   winner: null,
   ...over,
@@ -30,6 +31,7 @@ const etat = (over: Partial<MatchState> = {}): MatchState => ({
 function monte(first: "home" | "away" | undefined, state = etat()) {
   const onPoint = vi.fn();
   const onFirstServe = vi.fn();
+  const onToggleBox = vi.fn();
   const r = render(
     <ScoreBoard
       state={state}
@@ -43,7 +45,7 @@ function monte(first: "home" | "away" | undefined, state = etat()) {
       remaining={0}
       onPoint={onPoint}
       onFirstServe={onFirstServe}
-      onBox={vi.fn()}
+      onToggleBox={onToggleBox}
       onUndo={vi.fn()}
       onSkipBreak={vi.fn()}
       onBack={vi.fn()}
@@ -51,7 +53,7 @@ function monte(first: "home" | "away" | undefined, state = etat()) {
       first={first}
     />,
   );
-  return { ...r, onPoint, onFirstServe };
+  return { ...r, onPoint, onFirstServe, onToggleBox };
 }
 
 describe("ScoreBoard — l'équipe qui reçoit, en premier", () => {
@@ -81,10 +83,12 @@ describe("ScoreBoard — l'équipe qui reçoit, en premier", () => {
 
   it("« Qui engage ? » propose l'adversaire en premier, et désigne le bon joueur", () => {
     const { container, onFirstServe } = monte("away", etat({ serving: null, servingBox: null }));
-    const rangees = container.querySelectorAll(".ics-ask-row");
-    expect(rangees[0].textContent).toContain("Gérard");
-    fireEvent.click(rangees[0].querySelector("button") as HTMLElement);
-    expect(onFirstServe).toHaveBeenCalledWith("away", "left");
+    const boutons = container.querySelectorAll(".ics-ask-row button");
+    // Deux réponses, pas quatre : le carré ne se demande plus, il se propose.
+    expect(boutons).toHaveLength(2);
+    expect(boutons[0].textContent).toBe("Gérard sert");
+    fireEvent.click(boutons[0]);
+    expect(onFirstServe).toHaveBeenCalledWith("away");
   });
 
   it("le résultat donne les jeux du VAINQUEUR d'abord, de quelque côté qu'il soit", () => {
@@ -97,5 +101,45 @@ describe("ScoreBoard — l'équipe qui reçoit, en premier", () => {
     expect(monte("home", fini).container.querySelector(".ics-done")?.textContent).toBe(
       "Gérard l'emporte 3–1",
     );
+  });
+});
+
+// ============================================================================
+//  LE CARRÉ DE SERVICE, PROPOSÉ ET FACULTATIF (demande du club, 2026-10-16)
+// ============================================================================
+describe("ScoreBoard — le carré de service", () => {
+  it("s'affiche sur la case du SERVEUR seulement, et se distingue en proposition", () => {
+    const { container } = monte("home", etat({ serving: "away", servingBox: "right", boxProposed: true }));
+    const cellules = container.querySelectorAll(".ics-cell");
+    expect(cellules[0].querySelector(".ics-box")).toBeNull();
+    const pastille = cellules[1].querySelector(".ics-box");
+    expect(pastille?.textContent).toBe("D?");
+    expect(pastille?.classList.contains("is-proposed")).toBe(true);
+  });
+
+  it("perd son « ? » quand le carré découle de la règle", () => {
+    const { container } = monte("home", etat({ serving: "home", servingBox: "left", boxProposed: false }));
+    const pastille = container.querySelector(".ics-box");
+    expect(pastille?.textContent).toBe("G");
+    expect(pastille?.classList.contains("is-proposed")).toBe(false);
+  });
+
+  it("un appui change le carré — et ne marque AUCUN point", () => {
+    const { getByRole, onToggleBox, onPoint } = monte("home", etat({ boxProposed: true }));
+    fireEvent.click(getByRole("button", { name: /Thomas sert à gauche \(proposé\)/ }));
+    expect(onToggleBox).toHaveBeenCalledTimes(1);
+    expect(onPoint).not.toHaveBeenCalled();
+  });
+
+  it("ne bloque jamais le point : les deux cases restent actives sur une proposition", () => {
+    const { getByLabelText } = monte("home", etat({ boxProposed: true }));
+    expect((getByLabelText("Point pour Thomas") as HTMLButtonElement).disabled).toBe(false);
+    expect((getByLabelText("Point pour Gérard") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("n'est pas un bouton DANS le bouton du point", () => {
+    const { container } = monte("home");
+    expect(container.querySelector(".ics-side .ics-box")).toBeNull();
+    expect(container.querySelector(".ics-cell > .ics-box")).not.toBeNull();
   });
 });

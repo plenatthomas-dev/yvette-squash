@@ -4463,6 +4463,15 @@ body[data-bottombar] .install-banner {
   background: var(--past);
   border-color: transparent;
 }
+/* « Non complétée » : commencée, jamais finie, et sa date est loin (cf. `fixtureDisplayStatus`).
+   Ni « en cours » — personne ne la joue — ni « terminée » : il manque des scores. Une quatrième
+   forme, donc, et pas une nuance des trois autres : contour EN TIRETS à l'encre d'avertissement.
+   Pas d'aplat — l'ambre plein dit « ça se joue maintenant », et c'est justement faux ici.
+   « À saisir » (date passée, rien de saisi) garde le contour de « à venir » (DESIGN.md). */
+.ic-status.ic-incomplete {
+  color: var(--warn-fg);
+  border: 1.5px dashed currentColor;
+}
 
 /* Seul « en cours » se peint au niveau de la LIGNE : c'est le seul état qui demande qu'on
    regarde maintenant. Le reste se lit à la pastille. */
@@ -4920,6 +4929,16 @@ body[data-bottombar] .install-banner {
    `touch-action: manipulation` et `user-select: none` sont déjà posés ailleurs dans
    cette feuille pour exactement ces deux raisons (`.wait-btn`, `td.cell`, `.wk-seg.tap`) ;
    ils manquaient au seul endroit où le geste est répété cinquante fois par jeu. */
+/* La case porte DEUX boutons frères : le point (toute la surface) et le carré de service
+   (son coin bas-droit). C'est donc elle, et non le bouton du point, qui est la cellule de la
+   grille — et un conteneur de taille, pour que la pastille du carré se règle sur la case
+   comme le reste. */
+.ics-cell {
+  container-type: size;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
 .ics-side {
   container-type: size;
   position: relative;
@@ -4927,6 +4946,8 @@ body[data-bottombar] .install-banner {
   touch-action: manipulation;
   -webkit-user-select: none;
   user-select: none;
+  /* Un bouton ne s'étire pas de lui-même hors d'une grille, même en `display: block`. */
+  width: 100%;
   height: 100%;
   margin: 0;
   padding: 0;
@@ -5057,25 +5078,53 @@ body[data-bottombar] .install-banner {
   font-weight: 700;
 }
 
-/* « sert à gauche/à droite », encadré parce qu'il se lit d'un coup d'œil au moment de servir.
-   La bordure prend l'encre calculée du maillot — donc lisible sur n'importe quelle couleur
-   d'équipe, comme le reste de la case. */
-.ics-serve {
-  font-size: clamp(0.85rem, 3.8vmin, 1.4rem);
-  font-size: clamp(0.8rem, min(10.5cqw, 8cqh), 1.6rem);
+/* LE CARRÉ DE SERVICE, « D? » / « G? » proposé, « D » / « G » réglementaire — sur la case du
+   serveur, coin bas-droit. Il désigne aussi QUI sert : il n'apparaît que sur sa case.
+
+   C'est un bouton, mais FACULTATIF : on ne le touche que pour corriger. D'où une pastille
+   assez grande pour le pouce (44 px, la cible tactile minimale) sans l'être au point de
+   voler les appuis destinés au point, qui couvrent tout le reste de la case.
+
+   La proposition se distingue de la règle par le POINTILLÉ, en plus du « ? » : deux signaux
+   pour une nuance qu'on lit de loin. Aucun aplat — l'encre est celle du maillot, calculée
+   (cf. `inkFor`), et la bordure prend `currentColor` : lisible sur n'importe quelle couleur
+   d'équipe, sans opacité qui la composerait avec le fond (cf. `.ics-won`). */
+.ics-box {
+  position: absolute;
+  z-index: 1;
+  right: 8px;
+  bottom: 6px;
+  margin: 0;
+  width: auto;
+  min-width: 56px;
+  min-height: 44px;
+  padding: 2px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(1.05rem, 4.6vmin, 1.75rem);
+  font-size: clamp(1.05rem, min(12cqw, 10cqh), 2rem);
   font-weight: 800;
-  line-height: 1.15;
-  padding: 2px 10px;
+  line-height: 1;
+  color: var(--pico-contrast);
+  background: transparent;
   border: 2px solid currentColor;
   border-radius: 999px;
+  box-shadow: none;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
 }
+.ics-box:is(:hover, :active, :focus) { background: transparent; border-color: currentColor; }
+.ics-box:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.ics-box.is-proposed { border-style: dashed; }
 
-/* Panneau de question (engagement, carré de service, pause, fin). Il occupe le bas de
+/* Panneau de question (engagement, pause, fin). Il occupe le bas de
    l'écran, à portée du pouce. */
 /* ⚠️ PAR-DESSUS LE TABLEAU, JAMAIS EN DESSOUS DE LUI.
 
-   Ces quatre panneaux — « Qui engage ? », le carré de service, la pause, la fin de
-   match — étaient des frères du tableau dans la colonne. Chacune de leurs apparitions
+   Ces panneaux — « Qui engage ? », la pause, la fin de match, et jadis le carré de
+   service — étaient des frères du tableau dans la colonne. Chacune de leurs apparitions
    lui prenait donc sa hauteur, et comme toute la typographie des deux cases se règle
    en REQUÊTES DE CONTENEUR sur la case elle-même, le score changeait de taille à
    chaque fois : à la fin de chaque jeu, à chaque reprise de service, et au coup de
@@ -5112,12 +5161,13 @@ body[data-bottombar] .install-banner {
   justify-content: center;
   flex-wrap: wrap;
 }
-/* « Qui engage ? » pose QUATRE boutons, une rangée par joueur. `gap` ne joue qu'À L'INTÉRIEUR
-   d'une rangée : entre deux `.ics-ask-row` voisines il ne se passait rien, et le bloc portait
+/* Rangées voisines — « Qui engage ? » en posait deux, aucun panneau n'en pose plus qu'une
+   aujourd'hui. `gap` ne joue qu'À L'INTÉRIEUR d'une rangée : entre deux `.ics-ask-row`
+   voisines il ne se passait rien, et le bloc portait
    une gouttière de 10 px horizontalement contre 0 verticalement — les deux rangées se
    touchaient bord à bord. La marge rend au bloc la gouttière qui lui manquait. */
 .ics-ask-row + .ics-ask-row { margin-top: 10px; }
-/* Le libellé tient rarement sur une ligne sur un téléphone debout (« Gérard · gauche » dans
+/* Le libellé tient rarement sur une ligne sur un téléphone debout (« Gérard sert » dans
    environ 150 px) : il faut donc que le bouton respire en HAUTEUR, sinon deux lignes de texte
    remplissent la boîte jusqu'au filet. */
 .ics-ask-row button {
@@ -5197,6 +5247,7 @@ body[data-bottombar] .install-banner {
 /* --- Interclub : suivi en direct (spectateurs) --- */
 .ic-live { margin: 14px 0; }
 .ic-live-title { margin: 0 0 6px; font-size: 0.85rem; }
+.ic-live-title-recent { margin-top: 12px; }
 
 .ic-live-card {
   padding: 10px 14px;
@@ -5225,6 +5276,60 @@ body[data-bottombar] .install-banner {
 /* C'est le nom des équipes qui plie quand la ligne serre : la pastille d'état et le score
    sont les deux choses qu'on vient lire. */
 .ic-live-who { flex: 1; min-width: 0; }
+
+/* LA CARTE ENTIÈRE OUVRE LA FICHE. Un seul bouton — le nom de la rencontre — dont le
+   pseudo-élément s'étire sur toute la carte : on tape n'importe où, le lecteur d'écran et le
+   clavier ne rencontrent qu'UN contrôle. Un `onClick` sur l'article aurait laissé la carte
+   muette au clavier ; un bouton englobant la carte n'est pas du HTML valide (une liste n'entre
+   pas dans un bouton). */
+.ic-live-card.is-link {
+  position: relative;
+  cursor: pointer;
+}
+.ic-live-card.is-link:hover { border-color: var(--pico-primary); }
+.ic-live-card.is-link.is-live:hover { border-color: var(--live-edge); }
+.ic-live-open {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  width: auto;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ic-live-open:is(:hover, :active, :focus) { background: none; color: inherit; box-shadow: none; }
+.ic-live-open::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.ic-live-open:focus-visible { outline: none; }
+.ic-live-open:focus-visible::after {
+  outline: 2px solid var(--pico-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+/* Carte RÉSUMÉE : l'en-tête EST la carte. Pico pose sous l'en-tête d'un `article` une marge
+   (`--pico-block-spacing-vertical`) qui sépare la bande du corps ; sans corps, elle laissait
+   une bande vide de 27 px sous chaque rencontre résumée (mesuré à 390 px). La marge négative
+   annule exactement le rembourrage bas de la carte (`.ic-live-card`, 10 px). */
+.ic-live-card.is-compact > .ic-live-head {
+  margin-bottom: -10px;
+  border-bottom: 0;
+  border-radius: inherit;
+}
+.ic-live-date { font-size: 0.78rem; white-space: nowrap; }
+.ic-live-chevron {
+  font-size: 1.3rem;
+  line-height: 1;
+  color: var(--pico-muted-color);
+}
 .ic-live-score {
   font-weight: 700;
   font-size: 1.1rem;

@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   applyPoint,
-  applyServe,
   replay,
   seedEvents,
+  startServe,
+  toggleServeBox,
   undo as undoEvent,
   winGamesFor,
   type Box,
@@ -274,11 +275,12 @@ export default function InterclubScorer({
             // s'est perdue — ne s'annonce pas, sous peine de se déclarer en conflit avec sa
             // propre écriture et d'y perdre le journal.
             knownGameCount: typeof ackRef.current === "number" ? ackRef.current : undefined,
+            // `awaitingServeBox` n'est plus envoyé : le carré ne s'attend plus, il se propose
+            // (cf. `interclub.ts`). Le serveur lit son absence comme `false`.
             live: st.status === "done" ? null : {
               current: st.current,
               serving: st.serving,
               servingBox: st.servingBox,
-              awaitingServeBox: st.awaitingServeBox,
             },
           }),
         });
@@ -437,18 +439,13 @@ export default function InterclubScorer({
   const attendServeur = state.serving === null;
 
   const scorePoint = (side: Side) => {
-    if (attendServeur || state.awaitingServeBox || state.status === "done" || remaining > 0) return;
+    if (attendServeur || state.status === "done" || remaining > 0) return;
     commit((prev) => applyPoint(prev, bestOf, side));
   };
 
-  const chooseBox = (box: Box) => {
-    if (!state.serving) return;
-    const who = state.serving;
-    commit((prev) => applyServe(prev, bestOf, who, box));
-  };
+  const toggleBox = () => commit((prev) => toggleServeBox(prev, bestOf));
 
-  const chooseFirstServer = (side: Side, box: Box) =>
-    commit((prev) => applyServe(prev, bestOf, side, box));
+  const chooseFirstServer = (side: Side) => commit((prev) => startServe(prev, bestOf, side));
 
   const doUndo = () => {
     stopBreak();
@@ -516,7 +513,7 @@ export default function InterclubScorer({
       remaining={remaining}
       onPoint={scorePoint}
       onFirstServe={chooseFirstServer}
-      onBox={chooseBox}
+      onToggleBox={toggleBox}
       onUndo={doUndo}
       onSkipBreak={stopBreak}
       onBack={() => void finish()}

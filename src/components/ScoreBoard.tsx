@@ -5,7 +5,6 @@ import { useCloseRequest } from "@/lib/useCloseRequest";
 import {
   ballPoint,
   resolveColor,
-  type Box,
   type GameScore,
   type MatchState,
   type Side,
@@ -69,7 +68,7 @@ export default function ScoreBoard({
   remaining,
   onPoint,
   onFirstServe,
-  onBox,
+  onToggleBox,
   onUndo,
   onSkipBreak,
   onBack,
@@ -91,8 +90,10 @@ export default function ScoreBoard({
   /** Secondes de pause restantes, 0 hors pause. */
   remaining: number;
   onPoint: (side: Side) => void;
-  onFirstServe: (side: Side, box: Box) => void;
-  onBox: (box: Box) => void;
+  /** L'engagement : qui sert. Le carré, lui, se propose (cf. `startServe`). */
+  onFirstServe: (side: Side) => void;
+  /** Appui FACULTATIF sur « D? » / « G? » : le serveur change de carré. */
+  onToggleBox: () => void;
   onUndo: () => void;
   onSkipBreak: () => void;
   onBack: () => void;
@@ -141,43 +142,60 @@ export default function ScoreBoard({
     const name = isHome ? homeName : awayName;
     const pts = isHome ? state.current.home : state.current.away;
     const won = isHome ? state.gamesWon.home : state.gamesWon.away;
-    const serving = state.serving === who;
+    const serving = state.serving === who && state.servingBox !== null;
+    const droite = state.servingBox === "right";
     return (
-      <button
-        className="ics-side"
-        style={c ? { background: c.bg, color: c.fg, borderColor: c.fg } : undefined}
-        onClick={() => onPoint(who)}
-        disabled={
-          attendServeur || state.awaitingServeBox || state.status === "done" || remaining > 0
-        }
-        aria-label={`Point pour ${name}`}
-      >
-        <span className="ics-name">{name}</span>
-        {/* Coin HAUT-DROIT, le seul des quatre qui restait libre : le score garde le centre
-            entier, et l'annonce ne lui prend pas un pixel de hauteur. C'est ce qu'un marqueur
-            dit à voix haute avant l'échange, et l'écran le savait déjà sans jamais le dire. */}
-        {balle?.side === who && (
-          <span className={`ics-balle${balle.match ? " ics-balle-match" : ""}`}>
-            {balle.match ? "balle de match" : "balle de jeu"}
-          </span>
-        )}
-        <span className="ics-points">{pts}</span>
-        {/* Barre du bas : jeux gagnés à gauche, carré de service à droite. Groupés plutôt que
-            posés chacun dans son coin — sur une case étroite (téléphone debout), « sert à
-            gauche » et « 1 jeu » ne tiennent pas côte à côte, et se chevauchaient. Ici la
-            barre se replie sur deux lignes au lieu de les superposer. */}
-        <span className="ics-foot">
-          <span className="ics-won">
-            <span className="sr-only">Jeux gagnés : </span>
-            {won} jeu{won > 1 ? "x" : ""}
-          </span>
-          {serving && (
-            <span className="ics-serve" title={`${name} sert`}>
-              sert {state.servingBox === "left" ? "à gauche" : state.servingBox === "right" ? "à droite" : ""}
+      <div className="ics-cell" key={who}>
+        <button
+          className="ics-side"
+          style={c ? { background: c.bg, color: c.fg, borderColor: c.fg } : undefined}
+          onClick={() => onPoint(who)}
+          disabled={attendServeur || state.status === "done" || remaining > 0}
+          aria-label={`Point pour ${name}`}
+        >
+          <span className="ics-name">{name}</span>
+          {/* Coin HAUT-DROIT, le seul des quatre qui restait libre : le score garde le centre
+              entier, et l'annonce ne lui prend pas un pixel de hauteur. C'est ce qu'un marqueur
+              dit à voix haute avant l'échange, et l'écran le savait déjà sans jamais le dire. */}
+          {balle?.side === who && (
+            <span className={`ics-balle${balle.match ? " ics-balle-match" : ""}`}>
+              {balle.match ? "balle de match" : "balle de jeu"}
             </span>
           )}
-        </span>
-      </button>
+          <span className="ics-points">{pts}</span>
+          {/* Bas-gauche : les jeux gagnés. Le coin bas-droit revient au carré de service, qui
+              vit HORS de ce bouton (cf. plus bas). */}
+          <span className="ics-foot">
+            <span className="ics-won">
+              <span className="sr-only">Jeux gagnés : </span>
+              {won} jeu{won > 1 ? "x" : ""}
+            </span>
+          </span>
+        </button>
+        {/* LE CARRÉ DE SERVICE, À CÔTÉ DU SERVEUR — « D? » proposé, « D » réglementaire.
+            L'appui est FACULTATIF : il ne sert qu'à corriger, et ne bloque jamais le point
+            suivant. Le carré se réclamait autrefois par un panneau à chaque reprise de service,
+            et c'est ce panneau que le club a jugé trop contraignant (2026-10-16).
+
+            Un bouton FRÈRE de la case, posé par-dessus son coin, et non un enfant : un bouton
+            dans un bouton n'est pas du HTML valide, et l'appui remonterait au point. Il reprend
+            l'encre calculée du maillot, comme tout ce qui est peint sur la case. */}
+        {serving && (
+          <button
+            type="button"
+            className={`ics-box${state.boxProposed ? " is-proposed" : ""}`}
+            style={c ? { color: c.fg } : undefined}
+            onClick={onToggleBox}
+            aria-label={`${name} sert ${droite ? "à droite" : "à gauche"}${
+              state.boxProposed ? " (proposé)" : ""
+            } — toucher pour servir ${droite ? "à gauche" : "à droite"}`}
+            title="Changer de carré"
+          >
+            {droite ? "D" : "G"}
+            {state.boxProposed && <span aria-hidden="true">?</span>}
+          </button>
+        )}
+      </div>
     );
   };
 
@@ -223,29 +241,17 @@ export default function ScoreBoard({
         {side(second)}
       </div>
 
-      {/* Premier service du match : il faut désigner qui sert ET de quel carré. */}
+      {/* Premier service du match : on ne demande QUE qui sert. Le carré se propose sur la
+          case du serveur (« D? »), et se corrige d'un appui si besoin. */}
       {state.serving === null && state.status !== "done" && (
         <div className="ics-ask">
           <p>Qui engage&nbsp;?</p>
-          {[first, second].map((who) => {
-            const nom = who === "home" ? homeName : awayName;
-            return (
-              <div className="ics-ask-row" key={who}>
-                <button onClick={() => onFirstServe(who, "left")}>{nom} · gauche</button>
-                <button onClick={() => onFirstServe(who, "right")}>{nom} · droite</button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Reprise de service : le carré ne se déduit pas, le joueur le CHOISIT. */}
-      {state.awaitingServeBox && state.serving && state.status !== "done" && remaining === 0 && (
-        <div className="ics-ask">
-          <p>{state.serving === "home" ? homeName : awayName} sert&nbsp;:</p>
           <div className="ics-ask-row">
-            <button onClick={() => onBox("left")}>Carré gauche</button>
-            <button onClick={() => onBox("right")}>Carré droit</button>
+            {[first, second].map((who) => (
+              <button key={who} onClick={() => onFirstServe(who)}>
+                {who === "home" ? homeName : awayName} sert
+              </button>
+            ))}
           </div>
         </div>
       )}
