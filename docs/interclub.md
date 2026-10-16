@@ -24,8 +24,9 @@ Trois choses à couvrir, dans cet ordre d'importance :
 
 ## Autorisations — un seul rôle, et c'est une décision
 
-**Tout membre connecté peut créer une rencontre, composer une équipe, prendre le marquage d'un
-match et y saisir les points.** Il y a bien un **capitaine** par équipe depuis le calendrier,
+**Tout membre connecté peut composer une équipe, prendre le marquage d'un match et y saisir
+les points.** Créer une rencontre, en revanche, est réservé à l'admin depuis octobre 2026 (voir
+plus bas) : le calendrier squashnet synchronisé les génère. Il y a bien un **capitaine** par équipe depuis le calendrier,
 mais ce n'est pas un rôle : c'est une **désignation**, et il ne peut rien que les autres ne
 puissent (cf. « Calendrier, capitaines et disponibilités »).
 
@@ -47,8 +48,12 @@ Les seules restrictions protègent quelqu'un d'un **écrasement**, jamais d'un a
 | Une composition qui romprait l'**ordre des simples** (le mieux classé des joueurs présents doit jouer le simple n° 1 ; à classement égal, le meilleur rang mixte passe devant) est refusée | `POST /api/interclub`, `PATCH …/matches/{mid}` (règle unique, `lineupOrderConflict`) | Une rencontre disputée dans le mauvais ordre, sanctionnable par la fédération |
 | Le même refus s'applique à la composition **adverse** — mais seulement quand tous les adversaires désignés nous sont connus | les deux mêmes routes (`awayLineupConflict`) | La sanction vaut des deux côtés ; refuser sur une base incomplète empêcherait d'inscrire une première rencontre contre un club jamais croisé (cf. « L'ordre des simples ADVERSES ») |
 
-Deux choses échappent toutefois au membre, et sont réservées à l'**admin** :
+Trois choses échappent toutefois au membre, et sont réservées à l'**admin** :
 
+- **créer une rencontre** (`POST /api/interclub`, 403 sinon). Le calendrier de la ligue,
+  synchronisé par le cron et l'import admin, génère les rencontres ; le bouton « Nouvelle
+  rencontre » ne s'affiche qu'à l'admin (`canCreate` renvoyé par `GET /api/interclub`), qui
+  garde la main pour ce que la ligue ne publierait pas ;
 - **l'appartenance à une équipe** (`POST /api/admin/members`, action `set_team`) — elle décide
   qui peut être aligné, donc s'y inscrire soi-même reviendrait à s'inviter dans une
   composition. La route `PATCH /api/profile` l'a acceptée un temps : c'était une erreur

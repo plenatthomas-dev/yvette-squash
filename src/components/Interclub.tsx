@@ -642,6 +642,8 @@ export default function Interclub({
   const [openId, setOpenId] = useState<string | null>(null);
   const [fixture, setFixture] = useState<Fixture | null>(null);
   const [creating, setCreating] = useState(false);
+  /** Admin seulement : les rencontres viennent du calendrier de la ligue (cf. le POST). */
+  const [canCreate, setCanCreate] = useState(false);
   const [scoring, setScoring] = useState<string | null>(null);
   /** Onglet d'équipe actif : `"all"` ou un `teamId`. Filtre d'affichage, rien de plus. */
   const [tab, setTab] = useState<string>("all");
@@ -706,9 +708,15 @@ export default function Interclub({
     try {
       const res = await fetch("/api/interclub?limit=100", { cache: "no-store" });
       if (onExpiredRef.current(res.status)) return;
-      const data = await readOk<{ teams: Team[]; fixtures: FixtureRow[]; hasMore?: boolean }>(res);
+      const data = await readOk<{
+        teams: Team[];
+        fixtures: FixtureRow[];
+        hasMore?: boolean;
+        canCreate?: boolean;
+      }>(res);
       setTeams(data.teams);
       setRows(data.fixtures);
+      setCanCreate(data.canCreate === true);
       // La route renvoyait `hasMore` depuis toujours et PERSONNE NE LE LISAIT : une liste
       // tronquée était indiscernable d'une liste complète. C'est ce silence qui a fait chercher
       // la panne du côté de l'import, où il n'y avait rien.
@@ -1013,7 +1021,7 @@ export default function Interclub({
 
   return (
     <section className="interclub">
-      {/* L'abonnement OUVRE la page, avant même « Nouvelle rencontre ». Il vivait sous la liste
+      {/* L'abonnement OUVRE la page, avant même le titre. Il vivait sous la liste
           des rencontres du jour, dans le bloc « En direct » : personne ne l'y trouvait, et on
           pouvait se croire abonné sans l'être. C'est le réglage le plus consulté de l'écran, et
           le seul qui décide de ce qu'on recevra les soirs où l'on n'ouvre pas l'appli. */}
@@ -1021,9 +1029,11 @@ export default function Interclub({
 
       <div className="ic-head">
         <h3>Interclub</h3>
-        <button onClick={() => setCreating(true)} disabled={teams.length === 0}>
-          Nouvelle rencontre
-        </button>
+        {canCreate && (
+          <button onClick={() => setCreating(true)} disabled={teams.length === 0}>
+            Nouvelle rencontre
+          </button>
+        )}
       </div>
 
       {/* La carte du haut OUVRE la fiche : c'est le chemin court vers la rencontre de ce soir

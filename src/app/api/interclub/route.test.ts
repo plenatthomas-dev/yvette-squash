@@ -5,6 +5,8 @@ import type { NextRequest } from "next/server";
 const h = vi.hoisted(() => ({
   interclub: true,
   session: null as null | { userId: string },
+  /** Créer une rencontre est réservé aux admins ; vrai par défaut, la plupart des tests POST créent. */
+  admin: true,
   teams: [] as Array<Record<string, unknown>>,
   team: null as null | Record<string, unknown>,
   /** Le membre que `resolveHomePick` trouvera (ou non) — un seul suffit à la plupart des tests. */
@@ -26,6 +28,7 @@ vi.mock("@/lib/features-server", () => ({
   getFeatures: async () => ({ interclub: h.interclub }),
 }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
+vi.mock("@/lib/admin", () => ({ isAdminEmail: vi.fn(() => h.admin) }));
 vi.mock("@/lib/db", () => ({
   prisma: {
     interclubTeam: {
@@ -92,6 +95,7 @@ const validBody = {
 beforeEach(() => {
   h.interclub = true;
   h.session = { userId: "u1" };
+  h.admin = true;
   h.teams = [
     {
       id: "t1",
@@ -121,6 +125,12 @@ describe("GET /api/interclub", () => {
   it("401 si non authentifié", async () => {
     h.session = null;
     expect((await GET(req())).status).toBe(401);
+  });
+
+  it("`canCreate` suit le statut admin, comme le POST", async () => {
+    expect((await (await GET(req())).json()).canCreate).toBe(true);
+    h.admin = false;
+    expect((await (await GET(req())).json()).canCreate).toBe(false);
   });
 
   it("renvoie les équipes et les rencontres avec leur score", async () => {
@@ -310,10 +320,17 @@ describe("POST /api/interclub", () => {
     expect((await POST(post(validBody))).status).toBe(401);
   });
 
-  it("tout membre connecté peut créer une rencontre (aucun rôle exigé)", async () => {
+  it("un admin crée une rencontre", async () => {
     const res = await POST(post(validBody));
     expect(res.status).toBe(201);
     expect(h.created?.createdById).toBe("u1");
+  });
+
+  it("403 pour un membre non admin : les rencontres viennent du calendrier de la ligue", async () => {
+    h.admin = false;
+    const res = await POST(post(validBody));
+    expect(res.status).toBe(403);
+    expect(h.created).toBeNull();
   });
 
   it("crée autant de simples que demandé, numérotés dans l'ordre", async () => {
