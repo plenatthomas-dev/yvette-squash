@@ -28,6 +28,9 @@ let connus: { teams: string[]; players: unknown[] } = { teams: [], players: [] }
 /** La ligue a-t-elle rapporté un roster NEUF au dernier rafraîchissement ? Surchargé par test. */
 let rosterNeuf = false;
 
+/** `canCreate` de la liste : admin par défaut, ces tests ouvrent le formulaire de création. */
+let admin = true;
+
 const adversaire = (
   name: string,
   clt: string | null = null,
@@ -109,6 +112,7 @@ beforeEach(() => {
   // ferait recharger le menu dans tous les suivants — un doublon d'appel qu'ils constateraient
   // sans pouvoir l'expliquer.
   rosterNeuf = false;
+  admin = true;
   matches = [simple(1, "À désigner"), simple(2, "À désigner")];
   localStorage.clear();
   vi.stubGlobal(
@@ -140,6 +144,7 @@ beforeEach(() => {
       if (/\/api\/interclub\/f1$/.test(u)) return reponse(FIXTURE());
       return reponse({
         teams: [{ id: "t1", name: "Équipe 1" }],
+        canCreate: admin,
         fixtures: [
           {
             id: "f1",
@@ -190,6 +195,15 @@ describe("Menu du club adverse (nouvelle rencontre)", () => {
     await souffle();
     return r;
   }
+
+  it("le bouton n'apparaît pas à un membre : les rencontres viennent du calendrier", async () => {
+    admin = false;
+    const r = render(<Interclub toast={vi.fn()} onExpired={() => false} />);
+    await souffle();
+    // La liste est bien chargée : sans cela, l'absence du bouton ne prouverait rien.
+    expect(r.getByText(/Massy/)).toBeTruthy();
+    expect(r.queryByText(/Nouvelle rencontre/)).toBeNull();
+  });
 
   it("propose les clubs déjà rencontrés plutôt qu'un champ à retaper", async () => {
     connus = { teams: ["Chaville 4", "Massy"], players: [] };

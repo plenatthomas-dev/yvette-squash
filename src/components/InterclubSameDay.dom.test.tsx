@@ -70,7 +70,8 @@ beforeEach(() => {
       }
       // Une fiche ouverte : son contenu ne compte pas ici, seul l'appel qui y mène.
       if (/\/api\/interclub\/[^/?]+$/.test(u)) return reponse({ error: "absente" }, 404);
-      return reponse({ teams: [{ id: "t1", name: "Équipe 1" }], fixtures: liste });
+      // `canCreate` : le formulaire n'est offert qu'à l'admin.
+      return reponse({ teams: [{ id: "t1", name: "Équipe 1" }], fixtures: liste, canCreate: true });
     }),
   );
 });
