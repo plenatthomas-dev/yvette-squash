@@ -840,6 +840,7 @@ export default function Interclub({
     home: boolean;
     matchCount: number;
     bestOf: number;
+    force?: boolean;
   }) {
     setBusy(true);
     try {
@@ -849,6 +850,17 @@ export default function Interclub({
         body: JSON.stringify(form),
       });
       if (onExpired(res.status)) return;
+      // Le serveur a vu une rencontre de cette équipe ce jour-là que notre liste ignorait
+      // encore (créée ou importée depuis son chargement). On recharge : l'avertissement du
+      // formulaire apparaît alors avec son bouton « Ouvrir », et le choix reste à la personne.
+      if (res.status === 409) {
+        const d = (await res.json().catch(() => null)) as { code?: string; error?: string } | null;
+        if (d?.code === "same_day") {
+          toast("info", d.error ?? "Cette équipe a déjà une rencontre ce jour-là.");
+          await loadList();
+          return;
+        }
+      }
       const data = await readOk<{ id: string }>(res);
       toast("ok", "Rencontre créée");
       setCreating(false);
@@ -1147,6 +1159,11 @@ export default function Interclub({
           teams={teams}
           knownTeams={known.teams}
           busy={busy}
+          sameDay={(teamId, date) => rows?.find((r) => r.team.id === teamId && r.date === date)}
+          onOpen={(id) => {
+            setCreating(false);
+            setOpenId(id);
+          }}
           onClose={() => setCreating(false)}
           onSubmit={createFixture}
         />
@@ -1203,6 +1220,8 @@ function CreateDialog({
   teams,
   knownTeams,
   busy,
+  sameDay,
+  onOpen,
   onClose,
   onSubmit,
 }: {
@@ -1210,6 +1229,9 @@ function CreateDialog({
   /** Les clubs déjà rencontrés — après un import de calendrier, exactement ceux de notre poule. */
   knownTeams: string[];
   busy: boolean;
+  /** La rencontre que cette équipe a déjà ce jour-là, s'il y en a une. */
+  sameDay: (teamId: string, date: string) => FixtureRow | undefined;
+  onOpen: (id: string) => void;
   onClose: () => void;
   onSubmit: (f: {
     date: string;
@@ -1218,6 +1240,7 @@ function CreateDialog({
     home: boolean;
     matchCount: number;
     bestOf: number;
+    force?: boolean;
   }) => void;
 }) {
   const [date, setDate] = useState(todayISO());
@@ -1238,6 +1261,7 @@ function CreateDialog({
   const [bestOf, setBestOf] = useState(5);
 
   const canSubmit = !!date && !!teamId && opponent.trim().length > 0 && !busy;
+  const deja = date && teamId ? sameDay(teamId, date) : undefined;
 
   return (
     <Dialog onClose={onClose} label="Nouvelle rencontre">
@@ -1331,11 +1355,30 @@ function CreateDialog({
           </select>
         </label>
       </div>
+      {/* UNE ÉQUIPE, UNE RENCONTRE PAR JOUR. Le 15/10/2026, l'Équipe 1 a eu deux fiches contre
+          CAL Squash : celle de l'import fédéral, et une seconde créée le soir même par quelqu'un
+          qui ne l'avait pas vue — les scores sur l'une, les disponibilités sur l'autre. On le dit
+          ici, avant d'écrire, avec le chemin vers la bonne. « Créer quand même » reste possible :
+          un report peut faire tomber deux rencontres le même jour, et c'est à la personne d'en
+          juger, pas au formulaire. Le serveur fait le même contrôle (409 `same_day`) pour le cas
+          où la liste affichée ici serait en retard. */}
+      {deja && (
+        <div className="ic-cal-warn ic-same-day" role="status">
+          <p>
+            ⚠️ {teams.find((t) => t.id === teamId)?.name ?? "Cette équipe"} a déjà une rencontre
+            ce jour-là : {deja.home ? "reçoit" : "se déplace à"} {deja.opponent}
+            {deja.round ? ` (${deja.round})` : ""}.
+          </p>
+          <button onClick={() => onOpen(deja.id)}>Ouvrir cette rencontre</button>
+        </div>
+      )}
+
       <div className="modal-actions">
         <button className="secondary" onClick={onClose}>
           Annuler
         </button>
         <button
+          className={deja ? "secondary" : undefined}
           disabled={!canSubmit}
           onClick={() =>
             onSubmit({
@@ -1345,10 +1388,11 @@ function CreateDialog({
               home,
               matchCount,
               bestOf: isValidBestOf(bestOf) ? bestOf : 5,
+              ...(deja ? { force: true } : {}),
             })
           }
         >
-          Créer
+          {deja ? "Créer quand même" : "Créer"}
         </button>
       </div>
     </Dialog>

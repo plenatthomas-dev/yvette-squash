@@ -27,6 +27,7 @@ const h = vi.hoisted(() => ({
   /** Nombre de créations à faire échouer en doublon (P2002), comme un second « Appliquer ». */
   createDoublons: 0,
   updated: [] as Array<{ id: string; data: Record<string, unknown> }>,
+  updatedMany: [] as Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>,
   wipedFor: [] as string[],
   moved: [] as Array<[unknown, string, unknown]>,
   standings: [] as Array<Record<string, unknown>>,
@@ -100,6 +101,12 @@ vi.mock("@/lib/db", () => {
         h.updated.push({ id: args.where.id, data: args.data });
         return args.data;
       }),
+      updateMany: vi.fn(
+        async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+          h.updatedMany.push(args);
+          return { count: 1 };
+        },
+      ),
     },
     interclubAvailability: {
       deleteMany: vi.fn(async (args: { where: { interclubId: string } }) => {
@@ -183,6 +190,7 @@ beforeEach(() => {
   h.created = [];
   h.createDoublons = 0;
   h.updated = [];
+  h.updatedMany = [];
   h.wipedFor = [];
   h.moved = [];
   h.standings = [{ rank: 1, name: "Squash de l'Yvette", snTeamId: "161092", points: 9 }];
@@ -476,6 +484,58 @@ describe("application", () => {
     await applique();
     expect(h.updated).toEqual([]);
     expect(h.created).toHaveLength(1); // son homologue fédérale est créée à côté
+  });
+
+  it("RATTACHE la seule rencontre manuelle du même jour, sans réécrire ce qu'un humain a saisi", async () => {
+    // Le doublon du 15/10/2026, dans l'autre ordre : la rencontre saisie à la main d'abord,
+    // l'import ensuite. Avant, il en créait une seconde ; il pose désormais la clé sur la
+    // première, et ne comble que ce qui est vide.
+    h.fixtures = [
+      enBase({ id: "m", snMatchKey: null, round: null, opponent: "montmartre", time: null }),
+    ];
+    h.published = [publiee({ opponentTeamId: "161001" })];
+    const prev = await (await POST(req({ action: "preview", teamId: "t1" }))).json();
+    expect(prev.toCreate).toEqual([]);
+    expect(prev.toAdopt).toEqual([
+      expect.objectContaining({ id: "m", storedOpponent: "montmartre" }),
+    ]);
+
+    const res = await (await applique()).json();
+    expect(h.created).toEqual([]);
+    expect(h.updated).toEqual([
+      {
+        id: "m",
+        data: {
+          snMatchKey: `${EVENT}:J1`,
+          round: "J1",
+          snOpponentTeamId: "161001",
+          time: "20:00",
+          venue: "SQUASH DE L YVETTE",
+          venueAddress: "1 RUE DU SQUASH",
+        },
+      },
+    ]);
+    expect(h.updated[0].data).not.toHaveProperty("opponent");
+    expect(h.updatedMany).toEqual([
+      { where: { id: "m", season: null }, data: { season: "2026/2027" } },
+    ]);
+    expect(res).toMatchObject({ created: 0, adopted: 1 });
+  });
+
+  it("garde l'alerte du lundi en vie quand la rencontre rattachée diffère encore", async () => {
+    // Saisie « reçoit », publiée « se déplace » : le rattachement ne tranche pas, et poser
+    // l'empreinte ferait taire pour toujours le seul signal qui le dirait.
+    h.fixtures = [enBase({ id: "m", snMatchKey: null, home: true })];
+    h.published = [publiee({ home: false })];
+    await applique();
+    expect(h.teamUpdates.at(-1)).not.toHaveProperty("snCalendarHash");
+  });
+
+  it("pose l'empreinte quand la rencontre rattachée coïncide en tout", async () => {
+    h.fixtures = [enBase({ id: "m", snMatchKey: null })];
+    h.published = [publiee()];
+    await applique();
+    expect(h.teamUpdates.at(-1)).toHaveProperty("snCalendarHash");
   });
 });
 
