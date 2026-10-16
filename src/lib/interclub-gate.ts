@@ -30,7 +30,7 @@
 import { unstable_cache, revalidateTag } from "next/cache";
 import { prisma } from "./db";
 import { CLUB_TZ } from "./time";
-import { normalizeColor } from "./interclub";
+import { normalizeColor, RECENT_FIXTURE_DAYS, shiftISO } from "./interclub";
 import { derivedStatus, fixtureScore, parseLive } from "./interclub-db";
 
 const TAG = "interclub-live";
@@ -43,20 +43,22 @@ const TAG = "interclub-live";
 const TTL_S = 30;
 
 /**
- * Bornes de la charge utile du direct. Sans elles, une rencontre restée « en cours » par
- * accident s'ajouterait DÉFINITIVEMENT à une réponse relue et resérialisée toutes les dix
- * secondes par chaque spectateur — la sélection `status = "live"` n'ayant, elle, aucun plancher
- * de date. Deux jours couvrent une soirée qui déborde après minuit ; six rencontres, le cas où
- * les deux équipes jouent le même soir avec de la marge.
+ * Bornes de la charge utile du direct, relue et resérialisée toutes les dix secondes par
+ * chaque spectateur.
+ *
+ * La fenêtre est celle du HAUT DE L'ÉCRAN : les rencontres du jour, et celles des
+ * `RECENT_FIXTURE_DAYS` jours précédents — terminées ou non — qu'on y garde pour finir d'en
+ * saisir les scores (demande du club, 2026-10-16). Elle couvre au passage la soirée qui
+ * déborde après minuit, raison d'être de l'ancien plancher à deux jours.
+ *
+ * Huit rencontres : nos deux équipes jouent au plus une fois par semaine chacune, cinq jours
+ * en comptent donc quatre au pire — le double laisse la marge d'une journée reportée.
  */
-const LIVE_MAX_DAYS_BACK = 2;
-const LIVE_MAX_FIXTURES = 6;
+const LIVE_MAX_FIXTURES = 8;
 
 /** Date plancher du direct, en heure murale du club. */
 function floorISO(now: Date = new Date()): string {
-  const d = new Date(`${todayISO(now)}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - LIVE_MAX_DAYS_BACK);
-  return d.toISOString().slice(0, 10);
+  return shiftISO(todayISO(now), -RECENT_FIXTURE_DAYS);
 }
 
 /** Date du jour en heure MURALE du club (règle unique du projet, cf. lib/time.ts). */
@@ -97,12 +99,17 @@ export interface LiveFixture {
 }
 
 async function readLive(): Promise<LiveFixture[]> {
+  const today = todayISO();
   const rows = await prisma.interclub.findMany({
-    // Les rencontres du jour ET celles restées en direct : une soirée qui déborde après
-    // minuit ne doit pas disparaître de l'écran de ceux qui la suivent.
+    // Rien de FUTUR : le haut de l'écran montre ce qui se joue et ce qui vient de se jouer, le
+    // calendrier est dans la liste en dessous.
+    //
+    // Une date passée mais PRÉVISIONNELLE n'est pas une rencontre jouée : c'est la date
+    // bouchon que la fédération pose sur les journées non planifiées (cf. `dateConfirmed`).
+    // Elle n'entre que si quelqu'un y a saisi quelque chose — ce qui prouve qu'elle a eu lieu.
     where: {
-      date: { gte: floorISO() },
-      OR: [{ date: todayISO() }, { status: "live" }],
+      date: { gte: floorISO(), lte: today },
+      OR: [{ date: today }, { dateConfirmed: true }, { status: { not: "scheduled" } }],
     },
     orderBy: [{ date: "desc" }],
     take: LIVE_MAX_FIXTURES,

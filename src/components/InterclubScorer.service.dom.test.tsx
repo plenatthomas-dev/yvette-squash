@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, act, fireEvent } from "@testing-library/react";
 import InterclubScorer from "@/components/InterclubScorer";
 
-// QUI ENGAGE, ET DE QUEL CARRÉ.
+// QUI ENGAGE.
 //
 // Le premier service d'un match se tire au sort sur le terrain. Ni l'appli ni le serveur ne
-// peuvent le connaître : seul le marqueur, qui est là, peut le saisir.
+// peuvent le connaître : seul le marqueur, qui est là, peut le saisir. Le CARRÉ, lui, se
+// propose (« D? » sur la case du serveur) et se corrige d'un appui facultatif — on ne le
+// demande plus (demande du club, 2026-10-16).
 //
 // L'écran savait le demander — il porte un panneau « Qui engage ? » conditionné à
 // `serving === null` — mais ce panneau était INATTEIGNABLE : `seedEvents` posait « le joueur
@@ -65,15 +67,15 @@ afterEach(() => {
 });
 
 describe("InterclubScorer — le premier service se saisit, il ne se suppose pas", () => {
-  it("demande qui engage sur un match vierge, et propose les quatre combinaisons", async () => {
-    const { getByText, getByRole } = monte(vierge);
+  it("demande qui engage sur un match vierge — le serveur seulement", async () => {
+    const { getByText, getByRole, queryByRole } = monte(vierge);
     await souffle();
 
     expect(getByText("Qui engage ?")).toBeDefined();
-    // Deux joueurs × deux carrés : le carré fait partie de la question, il ne se déduit pas.
-    for (const nom of ["Thomas · droite", "Thomas · gauche", "Gérard · droite", "Gérard · gauche"]) {
-      expect(getByRole("button", { name: nom })).toBeDefined();
-    }
+    expect(getByRole("button", { name: "Thomas sert" })).toBeDefined();
+    expect(getByRole("button", { name: "Gérard sert" })).toBeDefined();
+    // Le carré ne fait plus partie de la question.
+    expect(queryByRole("button", { name: /gauche|droite/ })).toBeNull();
   });
 
   it("garde les cases de points INERTES tant que personne n'a répondu", async () => {
@@ -90,11 +92,13 @@ describe("InterclubScorer — le premier service se saisit, il ne se suppose pas
     const { getByLabelText, getByRole, queryByText } = monte(vierge);
     await souffle();
 
-    // Le marqueur désigne l'ADVERSAIRE, à gauche : rien de ce que l'appli aurait supposé.
-    fireEvent.click(getByRole("button", { name: "Gérard · gauche" }));
+    // Le marqueur désigne l'ADVERSAIRE : rien de ce que l'appli aurait supposé.
+    fireEvent.click(getByRole("button", { name: "Gérard sert" }));
     await souffle();
 
     expect(queryByText("Qui engage ?")).toBeNull();
+    // Le carré se PROPOSE sur sa case, sans rien attendre.
+    expect(getByRole("button", { name: /Gérard sert à droite \(proposé\)/ })).toBeDefined();
     expect((getByLabelText("Point pour Thomas") as HTMLButtonElement).disabled).toBe(false);
     expect((getByLabelText("Point pour Gérard") as HTMLButtonElement).disabled).toBe(false);
   });
@@ -107,10 +111,9 @@ describe("InterclubScorer — le premier service se saisit, il ne se suppose pas
 
     expect(queryByText("Qui engage ?")).toBeNull();
 
-    // En revanche le CARRÉ se redemande, et c'est une autre question : au jeu suivant, le
-    // règlement désigne le serveur — le vainqueur du jeu précédent — mais lui laisse le choix
-    // du carré. L'appli ne suppose donc que ce que le règlement lui permet de déduire.
-    expect(getByRole("button", { name: "Carré droit" })).toBeDefined();
-    expect(getByRole("button", { name: "Carré gauche" })).toBeDefined();
+    // Le carré, lui, est une PROPOSITION : au jeu suivant, le règlement désigne le serveur — le
+    // vainqueur du jeu précédent — mais lui laisse le choix du carré. L'appli le propose et
+    // laisse corriger ; elle ne bloque plus le point en attendant une réponse.
+    expect(getByRole("button", { name: /Thomas sert à droite \(proposé\)/ })).toBeDefined();
   });
 });

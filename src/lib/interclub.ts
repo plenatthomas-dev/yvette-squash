@@ -9,11 +9,20 @@
 //
 // Le SERVICE est la partie subtile, et la source de la plupart des erreurs de marquage :
 //  * le serveur qui GAGNE l'échange garde le service et CHANGE de carré automatiquement ;
-//  * le joueur qui REPREND le service CHOISIT son carré — l'appli doit donc le demander,
-//    on ne peut pas le déduire ;
+//  * le joueur qui REPREND le service CHOISIT son carré — on ne peut pas le déduire ;
 //  * en début de jeu, le premier serveur choisit aussi son carré.
-// D'où `awaitingServeBox` : tant qu'il est vrai, l'écran doit réclamer le carré avant
-// d'accepter le point suivant.
+//
+// ⚠️ LE CHOIX DU CARRÉ SE PROPOSE, IL NE SE RÉCLAME PLUS. L'écran bloquait le point suivant
+// tant que le marqueur n'avait pas répondu « carré gauche / carré droit » — à chaque reprise de
+// service, donc des dizaines de fois par match, sur un écran qu'on tape sans le regarder. Le
+// club l'a jugé trop contraignant (2026-10-16). Désormais le moteur PROPOSE un carré
+// (`boxProposed`, affiché « D? » / « G? ») et le marquage continue sans attendre ; le marqueur
+// ne touche au carré que si la proposition est fausse.
+//
+// La proposition n'est pas « à droite » au hasard : c'est le carré que CE joueur a choisi à
+// son tout premier service du match (`firstBox`). Un joueur commence presque toujours ses
+// séries du même côté — à droite contre un droitier, souvent à gauche contre un gaucher —
+// donc la première réponse vaut pour les suivantes. Avant tout service, à droite.
 //
 // Tout l'état se DÉRIVE d'un journal d'événements (`replay`). L'undo est donc un simple
 // `pop()` suivi d'un rejeu : un seul chemin de code, aucune divergence possible entre ce que
@@ -40,6 +49,60 @@ export const BEST_OF_VALUES = [3, 5] as const;
 /** Bornes du nombre de simples dans une rencontre. */
 export const MIN_MATCH_COUNT = 1;
 export const MAX_MATCH_COUNT = 8;
+/** Carré proposé à un joueur qui n'a encore jamais servi dans le match. */
+export const DEFAULT_BOX: Box = "right";
+
+/**
+ * Combien de jours une rencontre reste EN TÊTE de l'écran interclub après sa date — le temps
+ * de finir d'en saisir les scores sans aller la chercher dans la liste (demande du club,
+ * 2026-10-16). Au-delà, une rencontre commencée et jamais finie se déclare « non complétée ».
+ *
+ * Une seule constante pour les deux usages, et c'est voulu : une rencontre quitte le haut de
+ * l'écran le jour même où sa pastille cesse de dire « en cours ».
+ */
+export const RECENT_FIXTURE_DAYS = 4;
+
+/** `"2026-10-16"` décalé de `days` jours de calendrier (négatif = vers le passé). */
+export function shiftISO(iso: string, days: number): string {
+  // Midi UTC : aucun changement d'heure ne peut faire basculer la date.
+  const d = new Date(`${iso}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * L'état d'une rencontre TEL QU'ON L'AFFICHE, qui n'est pas tout à fait l'état stocké : la
+ * date compte aussi.
+ *
+ *  * `incomplete` — commencée, jamais terminée, et sa date est passée de plus de
+ *    `RECENT_FIXTURE_DAYS` jours. « En cours » annonçait une soirée qui se joue, alors qu'il
+ *    manque simplement des scores qu'on n'a pas saisis.
+ *  * `toEnter` — date passée, rien de saisi. « À venir » sur une rencontre d'hier était faux.
+ *    Seulement si la date est FERME : une date prévisionnelle est une date bouchon de la
+ *    fédération (cf. `dateConfirmed`), la rencontre n'a pas eu lieu.
+ *
+ * `today` est la date MURALE du club, fournie par l'appelant : ce module ne lit pas l'horloge.
+ */
+export type FixtureDisplayStatus = "scheduled" | "toEnter" | "live" | "incomplete" | "done";
+
+export function fixtureDisplayStatus(
+  f: { status: string; date: string; dateConfirmed?: boolean },
+  today: string,
+): FixtureDisplayStatus {
+  if (f.status === "done") return "done";
+  if (f.status === "live") {
+    return f.date < shiftISO(today, -RECENT_FIXTURE_DAYS) ? "incomplete" : "live";
+  }
+  return f.date < today && f.dateConfirmed !== false ? "toEnter" : "scheduled";
+}
+
+export const FIXTURE_STATUS_LABEL: Record<FixtureDisplayStatus, string> = {
+  scheduled: "À venir",
+  toEnter: "À saisir",
+  live: "En cours",
+  incomplete: "Non complétée",
+  done: "Terminée",
+};
 
 export type ScoreEvent =
   // Un échange gagné par `side`.
@@ -62,10 +125,20 @@ export interface MatchState {
   gamesWon: GameScore;
   /** Qui sert. `null` tant que le premier serveur n'a pas été désigné. */
   serving: Side | null;
-  /** De quel carré. `null` quand le choix est attendu. */
+  /** De quel carré. `null` seulement quand personne ne sert (avant l'engagement, après la fin). */
   servingBox: Box | null;
-  /** Vrai ⇒ l'écran doit réclamer le carré avant d'accepter le point suivant. */
-  awaitingServeBox: boolean;
+  /**
+   * Vrai ⇒ le carré est une PROPOSITION (« D? ») : le serveur vient de prendre le service et
+   * n'a pas encore joué d'échange, c'est donc lui qui choisit. Faux ⇒ le carré découle du
+   * règlement (il a gagné l'échange précédent et change de côté). Dans les deux cas le point
+   * suivant s'accepte : la proposition n'attend aucune réponse.
+   */
+  boxProposed: boolean;
+  /**
+   * Le carré de chaque joueur au PREMIER échange qu'il a servi dans le match, `null` tant qu'il
+   * n'a pas servi. C'est ce carré qu'on lui propose à chaque reprise de service.
+   */
+  firstBox: { home: Box | null; away: Box | null };
   status: "pending" | "live" | "done";
   winner: Side | null;
 }
@@ -363,10 +436,16 @@ function emptyState(): MatchState {
     gamesWon: { home: 0, away: 0 },
     serving: null,
     servingBox: null,
-    awaitingServeBox: false,
+    boxProposed: false,
+    firstBox: { home: null, away: null },
     status: "pending",
     winner: null,
   };
+}
+
+/** Le carré à proposer à `side` quand il prend le service : son premier choix, sinon à droite. */
+function proposedBox(s: MatchState, side: Side): Box {
+  return s.firstBox[side] ?? DEFAULT_BOX;
 }
 
 /**
@@ -383,15 +462,29 @@ export function replay(events: readonly ScoreEvent[], bestOf: number): MatchStat
     if (s.status === "done") break;
 
     if (e.t === "serve") {
+      // Un AUTRE joueur prend le service (l'engagement du match, une reprise) : c'est lui qui
+      // choisit, le carré est donc une proposition. Le MÊME joueur : c'est le marqueur qui
+      // corrige le carré, et la correction ne change pas la nature de ce qu'elle corrige —
+      // « D? » devient « G? », « D » devient « G ».
+      //
+      // Les journaux d'avant 2026-10-16, déjà posés sur les téléphones, portent un `serve` à
+      // chaque reprise de service (la réponse à « carré gauche / droit ») : même joueur que
+      // celui que la reprise vient de désigner, ils se lisent donc comme une correction de la
+      // proposition, ce qu'ils étaient.
+      if (s.serving !== e.side) s.boxProposed = true;
       s.serving = e.side;
       s.servingBox = e.box;
-      s.awaitingServeBox = false;
       continue;
     }
 
     // Un point avant même que le premier serveur soit désigné n'a pas de sens : l'écran ne
     // le propose pas. On l'ignore plutôt que de deviner un serveur.
     if (s.serving === null) continue;
+
+    // Le premier échange qu'un joueur sert FIXE sa préférence pour tout le match. Pris ici, au
+    // moment où l'échange se joue, et non à la prise de service : une correction du carré
+    // avant l'échange doit compter, puisque c'est elle qui dit vrai.
+    if (s.firstBox[s.serving] === null) s.firstBox[s.serving] = s.servingBox ?? DEFAULT_BOX;
 
     s.status = "live";
     if (e.side === "home") s.current.home += 1;
@@ -409,25 +502,27 @@ export function replay(events: readonly ScoreEvent[], bestOf: number): MatchStat
         s.winner = s.gamesWon.home > s.gamesWon.away ? "home" : "away";
         s.serving = null;
         s.servingBox = null;
-        s.awaitingServeBox = false;
+        s.boxProposed = false;
         continue;
       }
 
       // Jeu suivant : le vainqueur du jeu sert en premier, et choisit son carré.
       s.serving = winnerOfGame;
-      s.servingBox = null;
-      s.awaitingServeBox = true;
+      s.servingBox = proposedBox(s, winnerOfGame);
+      s.boxProposed = true;
       continue;
     }
 
     if (e.side === s.serving) {
-      // Le serveur marque : il garde le service et change de carré.
+      // Le serveur marque : il garde le service et change de carré — le règlement le dit,
+      // ce n'est plus une proposition.
       s.servingBox = s.servingBox === "right" ? "left" : "right";
+      s.boxProposed = false;
     } else {
       // Reprise de service : le nouveau serveur choisit son carré.
       s.serving = e.side;
-      s.servingBox = null;
-      s.awaitingServeBox = true;
+      s.servingBox = proposedBox(s, e.side);
+      s.boxProposed = true;
     }
   }
 
@@ -441,8 +536,30 @@ export function applyPoint(
   side: Side,
 ): ScoreEvent[] {
   const s = replay(events, bestOf);
-  if (s.status === "done" || s.serving === null || s.awaitingServeBox) return [...events];
+  if (s.status === "done" || s.serving === null) return [...events];
   return [...events, { t: "point", side }];
+}
+
+/**
+ * L'engagement du match : `side` sert, du carré qu'on lui propose. Le marqueur ne répond qu'à
+ * « qui sert ? » ; le carré se corrige ensuite d'un appui, s'il le faut (cf. `toggleServeBox`).
+ */
+export function startServe(
+  events: readonly ScoreEvent[],
+  bestOf: number,
+  side: Side,
+): ScoreEvent[] {
+  return applyServe(events, bestOf, side, proposedBox(replay(events, bestOf), side));
+}
+
+/**
+ * Le serveur change de carré : l'appui FACULTATIF sur « D? » / « G? ». Ajouté au journal comme
+ * un `serve` du même joueur — donc défait par « Annuler » comme n'importe quel appui.
+ */
+export function toggleServeBox(events: readonly ScoreEvent[], bestOf: number): ScoreEvent[] {
+  const s = replay(events, bestOf);
+  if (s.status === "done" || s.serving === null) return [...events];
+  return applyServe(events, bestOf, s.serving, s.servingBox === "left" ? "right" : "left");
 }
 
 /** Désigne le serveur et son carré. Renvoie le journal (inchangé si le match est fini). */
@@ -524,11 +641,12 @@ export function seedEvents(
   // « Qui engage ? » à sa place.
   if (!finis && !enCours) return [];
 
-  let ev: ScoreEvent[] = applyServe([], bestOf, "home", "right");
+  let ev: ScoreEvent[] = applyServe([], bestOf, "home", DEFAULT_BOX);
 
+  // Aucun carré à choisir en route : le moteur propose le sien à chaque reprise et n'attend
+  // aucune réponse. Les préférences que ce déroulé inventé laisse derrière lui valent toutes
+  // « à droite », c'est-à-dire exactement le défaut d'un joueur qui n'aurait jamais servi.
   const point = (side: Side) => {
-    const st = replay(ev, bestOf);
-    if (st.awaitingServeBox && st.serving) ev = applyServe(ev, bestOf, st.serving, "right");
     ev = applyPoint(ev, bestOf, side);
   };
 
@@ -561,11 +679,11 @@ export function seedEvents(
     // avec le mauvais serveur — une erreur plus insidieuse qu'un score perdu, parce qu'elle ne
     // se voit pas.
     //
-    // Le CARRÉ peut manquer : entre la reprise de service et le choix du carré, l'instantané
-    // porte `servingBox: null`. On pose alors « à droite », du même mouvement que le déroulé
-    // inventé ci-dessus — le marqueur le corrige d'un geste s'il le faut, là où perdre le
-    // serveur ne se rattrape pas.
-    if (live.serving) ev = applyServe(ev, bestOf, live.serving, live.servingBox ?? "right");
+    // Le CARRÉ peut manquer : les instantanés écrits avant 2026-10-16 portaient
+    // `servingBox: null` entre la reprise de service et le choix du carré. On pose alors « à
+    // droite », du même mouvement que le déroulé inventé ci-dessus — le marqueur le corrige
+    // d'un geste s'il le faut, là où perdre le serveur ne se rattrape pas.
+    if (live.serving) ev = applyServe(ev, bestOf, live.serving, live.servingBox ?? DEFAULT_BOX);
   }
 
   return ev;

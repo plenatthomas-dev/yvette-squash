@@ -227,7 +227,13 @@ export async function PATCH(
         throw new HttpError(400, "Score impossible pour ce format");
       }
 
-      const data: Prisma.InterclubMatchUpdateInput = {};
+      // Forme NON VÉRIFIÉE (clés étrangères en colonnes) et non `connect`/`disconnect` : Prisma
+      // exécute ces deux-là en requêtes SÉPARÉES. Passer d'un membre à un invité posait donc
+      // d'abord `homeGuestId` alors que `homeUserId` était encore là, et la contrainte
+      // `InterclubMatch_user_or_guest` refusait cet état intermédiaire — un 500 sur tout
+      // changement membre → invité (et l'inverse). Ici les deux colonnes partent dans le MÊME
+      // `UPDATE`, et la contrainte ne voit que l'état final.
+      const data: Prisma.InterclubMatchUncheckedUpdateInput = {};
 
       // Composition. Un simple porte un MEMBRE ou un INVITÉ (joueur d'équipe sans compte),
       // jamais les deux, et jamais un nom libre : `resolveHomePick` applique la règle du club
@@ -264,8 +270,8 @@ export async function PATCH(
           name: p.homeDisplayName,
         });
         if (orderProblem) throw new HttpError(400, orderProblem);
-        data.homeUser = p.homeUserId ? { connect: { id: p.homeUserId } } : { disconnect: true };
-        data.homeGuest = p.homeGuestId ? { connect: { id: p.homeGuestId } } : { disconnect: true };
+        data.homeUserId = p.homeUserId;
+        data.homeGuestId = p.homeGuestId;
         data.homeDisplayName = p.homeDisplayName;
       }
       if (typeof awayName === "string" && awayName.trim()) {
@@ -357,7 +363,7 @@ export async function PATCH(
         data.status = winner ? "done" : parsedGames.length ? "live" : "pending";
         // Le match n'est plus en cours : la prise de marquage n'a plus lieu d'être.
         if (winner) {
-          data.scorer = { disconnect: true };
+          data.scorerId = null;
           data.scorerClaimedAt = null;
           data.liveJson = null;
         }

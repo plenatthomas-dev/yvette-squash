@@ -92,7 +92,7 @@ describe("InterclubScorer — le nombre d'écritures ne suit pas le nombre de po
 
     // Qui engage : c'est le premier `commit`, et la fenêtre étant vierge il part tout de suite.
     // (Un match vierge n'a plus de serveur par défaut : le marqueur le désigne, cf. `seedEvents`.)
-    fireEvent.click(getByRole("button", { name: "Thomas · droite" }));
+    fireEvent.click(getByRole("button", { name: "Thomas sert" }));
     await avance(0);
     expect(ecritures).toBe(1);
 
@@ -116,7 +116,7 @@ describe("InterclubScorer — le nombre d'écritures ne suit pas le nombre de po
     const { getByText, getByLabelText, getByRole } = monte();
     await souffle();
 
-    fireEvent.click(getByRole("button", { name: "Thomas · droite" }));
+    fireEvent.click(getByRole("button", { name: "Thomas sert" }));
     await avance(0);
     for (let i = 0; i < 5; i++) {
       fireEvent.click(getByLabelText("Point pour Thomas"));

@@ -22,7 +22,11 @@ import {
   seedEvents,
   replay,
   sequenceWinner,
+  startServe,
+  toggleServeBox,
   undo,
+  fixtureDisplayStatus,
+  shiftISO,
   validGameSequence,
   winGamesFor,
   type ScoreEvent,
@@ -34,17 +38,13 @@ import {
 } from "./interclub";
 
 /**
- * Joue une suite d'échanges en répondant « à droite » à chaque fois que le moteur réclame un
- * carré. Permet d'écrire les tests en termes de qui gagne l'échange, sans noyer l'intention
- * sous les événements de service — ceux-ci ont leurs propres tests plus bas.
+ * Joue une suite d'échanges en laissant le moteur proposer chaque carré. Permet d'écrire les
+ * tests en termes de qui gagne l'échange, sans noyer l'intention sous les événements de
+ * service — ceux-ci ont leurs propres tests plus bas.
  */
 function playSides(bestOf: number, sides: Side[], firstServer: Side = "home"): ScoreEvent[] {
   let ev: ScoreEvent[] = applyServe([], bestOf, firstServer, "right");
-  for (const s of sides) {
-    const st = replay(ev, bestOf);
-    if (st.awaitingServeBox && st.serving) ev = applyServe(ev, bestOf, st.serving, "right");
-    ev = applyPoint(ev, bestOf, s);
-  }
+  for (const s of sides) ev = applyPoint(ev, bestOf, s);
   return ev;
 }
 
@@ -117,7 +117,8 @@ describe("replay — le service", () => {
     const st = replay(ev, 5);
     expect(st.serving).toBe("home");
     expect(st.servingBox).toBe("left");
-    expect(st.awaitingServeBox).toBe(false);
+    // Le règlement le dit : ce n'est plus une proposition.
+    expect(st.boxProposed).toBe(false);
   });
 
   it("le carré continue d'alterner tant que le serveur enchaîne", () => {
@@ -127,37 +128,155 @@ describe("replay — le service", () => {
     expect(replay(ev, 5).servingBox).toBe("right");
   });
 
-  it("à la reprise de service, le carré n'est PAS déduit : il est réclamé", () => {
+  it("à la reprise de service, le carré se PROPOSE — à droite pour qui n'a jamais servi", () => {
     let ev = applyServe([], 5, "home", "right");
     ev = applyPoint(ev, 5, "away"); // l'adversaire gagne l'échange -> reprise de service
     const st = replay(ev, 5);
     expect(st.serving).toBe("away");
-    expect(st.servingBox).toBeNull();
-    expect(st.awaitingServeBox).toBe(true);
+    expect(st.servingBox).toBe("right");
+    expect(st.boxProposed).toBe(true);
   });
 
-  it("aucun point n'est accepté tant que le carré n'a pas été choisi", () => {
+  it("n'attend AUCUNE réponse : le point suivant s'accepte sans toucher au carré", () => {
+    // C'était le défaut ergonomique : un panneau « carré gauche / droit » bloquait le point
+    // à chaque reprise de service, des dizaines de fois par match.
     let ev = applyServe([], 5, "home", "right");
     ev = applyPoint(ev, 5, "away");
-    const bloque = applyPoint(ev, 5, "away");
-    expect(bloque).toEqual(ev); // refusé : le journal n'a pas bougé
-
-    const debloque = applyPoint(applyServe(ev, 5, "away", "left"), 5, "away");
-    expect(debloque.length).toBe(ev.length + 2);
-    expect(replay(debloque, 5).current).toEqual({ home: 0, away: 2 });
+    const suite = applyPoint(ev, 5, "away");
+    expect(suite.length).toBe(ev.length + 1);
+    const st = replay(suite, 5);
+    expect(st.current).toEqual({ home: 0, away: 2 });
+    // Proposé à droite, non corrigé, il a gagné : il passe à gauche, et c'est la règle.
+    expect(st.servingBox).toBe("left");
+    expect(st.boxProposed).toBe(false);
   });
 
-  it("le vainqueur d'un jeu sert au jeu suivant, et choisit son carré", () => {
+  it("le vainqueur d'un jeu sert au jeu suivant, du carré qu'on lui propose", () => {
     const st = replay(playSides(5, times(11, "away")), 5);
     expect(st.serving).toBe("away");
-    expect(st.servingBox).toBeNull();
-    expect(st.awaitingServeBox).toBe(true);
+    expect(st.servingBox).toBe("right");
+    expect(st.boxProposed).toBe(true);
   });
 
   it("ignore un point tant qu'aucun premier serveur n'est désigné", () => {
     const st = replay([{ t: "point", side: "home" }], 5);
     expect(st.current).toEqual({ home: 0, away: 0 });
     expect(st.status).toBe("pending");
+  });
+});
+
+// ============================================================================
+//  LE CARRÉ PROPOSÉ (demande du club, 2026-10-16)
+//
+//  « D? » à la prise de service, corrigeable d'un appui facultatif ; « D » / « G » ensuite,
+//  par la règle. Et la proposition se souvient du PREMIER carré de chaque joueur : on commence
+//  presque toujours ses séries du même côté.
+// ============================================================================
+describe("le carré proposé, et la préférence de chaque joueur", () => {
+  it("l'engagement ne demande que le serveur, et propose à droite", () => {
+    const st = replay(startServe([], 5, "away"), 5);
+    expect(st.serving).toBe("away");
+    expect(st.servingBox).toBe("right");
+    expect(st.boxProposed).toBe(true);
+  });
+
+  it("une correction avant l'échange reste une proposition : « D? » devient « G? »", () => {
+    const ev = toggleServeBox(startServe([], 5, "home"), 5);
+    const st = replay(ev, 5);
+    expect(st.servingBox).toBe("left");
+    expect(st.boxProposed).toBe(true);
+  });
+
+  it("une correction en cours de série garde le statut réglementaire : « G » devient « D »", () => {
+    let ev = startServe([], 5, "home");
+    ev = applyPoint(ev, 5, "home"); // D? gagné -> G
+    ev = toggleServeBox(ev, 5);
+    const st = replay(ev, 5);
+    expect(st.servingBox).toBe("right");
+    expect(st.boxProposed).toBe(false);
+    // …et l'alternance repart de la correction.
+    expect(replay(applyPoint(ev, 5, "home"), 5).servingBox).toBe("left");
+  });
+
+  it("propose à la reprise le carré de son PREMIER service, pas « à droite »", () => {
+    // Thomas engage à gauche (corrigé), perd l'échange ; Gérard sert, perd ; Thomas reprend.
+    let ev = toggleServeBox(startServe([], 5, "home"), 5); // G?
+    ev = applyPoint(ev, 5, "away"); // reprise : Gérard, D?
+    ev = applyPoint(ev, 5, "home"); // reprise : Thomas
+    const st = replay(ev, 5);
+    expect(st.serving).toBe("home");
+    expect(st.servingBox).toBe("left");
+    expect(st.boxProposed).toBe(true);
+    expect(st.firstBox).toEqual({ home: "left", away: "right" });
+  });
+
+  it("garde le premier choix même si une série suivante commence de l'autre côté", () => {
+    let ev = startServe([], 5, "home"); // Thomas D?, gardé
+    ev = applyPoint(ev, 5, "away"); // Gérard
+    ev = applyPoint(ev, 5, "home"); // Thomas reprend : D? proposé…
+    ev = toggleServeBox(ev, 5); // …corrigé en G? cette fois
+    ev = applyPoint(ev, 5, "away"); // Gérard
+    ev = applyPoint(ev, 5, "home"); // Thomas reprend
+    expect(replay(ev, 5).servingBox).toBe("right");
+  });
+
+  it("vaut aussi au début de chaque jeu, pour le vainqueur du précédent", () => {
+    let ev = toggleServeBox(startServe([], 5, "away"), 5); // Gérard engage à gauche
+    for (let i = 0; i < 11; i++) ev = applyPoint(ev, 5, "away");
+    const st = replay(ev, 5);
+    expect(st.games).toHaveLength(1);
+    expect(st.serving).toBe("away");
+    expect(st.servingBox).toBe("left");
+    expect(st.boxProposed).toBe(true);
+  });
+
+  it("relit un journal d'AVANT : le `serve` de chaque reprise se lit comme une correction", () => {
+    // Journal posé sur un téléphone avant la mise à jour : à chaque reprise, la réponse à
+    // « carré gauche / droit » suit le point.
+    const ancien: ScoreEvent[] = [
+      { t: "serve", side: "home", box: "right" },
+      { t: "point", side: "away" },
+      { t: "serve", side: "away", box: "left" },
+      { t: "point", side: "away" },
+    ];
+    const st = replay(ancien, 5);
+    expect(st.current).toEqual({ home: 0, away: 2 });
+    expect(st.serving).toBe("away");
+    expect(st.servingBox).toBe("right");
+    expect(st.firstBox).toEqual({ home: "right", away: "left" });
+  });
+
+  it("ne change pas de carré une fois le match terminé", () => {
+    const fini = playSides(3, times(22, "home"));
+    expect(toggleServeBox(fini, 3)).toEqual(fini);
+  });
+});
+
+describe("fixtureDisplayStatus — la date compte aussi", () => {
+  const today = "2026-10-16";
+
+  it("reste « en cours » jusqu'à quatre jours après la date, « non complétée » au-delà", () => {
+    expect(fixtureDisplayStatus({ status: "live", date: today }, today)).toBe("live");
+    expect(fixtureDisplayStatus({ status: "live", date: "2026-10-12" }, today)).toBe("live");
+    expect(fixtureDisplayStatus({ status: "live", date: "2026-10-11" }, today)).toBe("incomplete");
+  });
+
+  it("dit « à saisir » d'une date passée sans score — sauf date prévisionnelle", () => {
+    expect(fixtureDisplayStatus({ status: "scheduled", date: "2026-10-15" }, today)).toBe("toEnter");
+    expect(
+      fixtureDisplayStatus({ status: "scheduled", date: "2026-10-15", dateConfirmed: false }, today),
+    ).toBe("scheduled");
+    expect(fixtureDisplayStatus({ status: "scheduled", date: today }, today)).toBe("scheduled");
+  });
+
+  it("une rencontre terminée l'est quelle que soit sa date", () => {
+    expect(fixtureDisplayStatus({ status: "done", date: "2025-01-01" }, today)).toBe("done");
+  });
+
+  it("décale les dates en jours de calendrier, changement d'heure compris", () => {
+    expect(shiftISO("2026-10-16", -4)).toBe("2026-10-12");
+    expect(shiftISO("2026-10-27", -4)).toBe("2026-10-23"); // passage à l'heure d'hiver le 25
+    expect(shiftISO("2026-03-02", -4)).toBe("2026-02-26");
   });
 });
 
@@ -209,12 +328,12 @@ describe("undo", () => {
     expect(replay(undo(apres), 5)).toEqual(replay(avant, 5));
   });
 
-  it("annule aussi un choix de carré", () => {
+  it("annule aussi un changement de carré", () => {
     let ev = applyServe([], 5, "home", "right");
-    ev = applyPoint(ev, 5, "away"); // reprise de service
-    const choisi = applyServe(ev, 5, "away", "left");
-    expect(replay(choisi, 5).awaitingServeBox).toBe(false);
-    expect(replay(undo(choisi), 5).awaitingServeBox).toBe(true);
+    ev = applyPoint(ev, 5, "away"); // reprise de service, « D? »
+    const corrige = toggleServeBox(ev, 5);
+    expect(replay(corrige, 5).servingBox).toBe("left");
+    expect(replay(undo(corrige), 5).servingBox).toBe("right");
   });
 
   it("annuler un journal vide ne casse rien", () => {
@@ -258,8 +377,9 @@ describe("seedEvents — reprendre un match déjà entamé", () => {
   it("laisse un match en cours dans un état où l'on peut reprendre le marquage", () => {
     const st = replay(seedEvents([g(11, 5)], 5), 5);
     expect(st.status).toBe("live");
-    // Le vainqueur du jeu sert au suivant et doit choisir son carré.
-    expect(st.awaitingServeBox).toBe(true);
+    // Le vainqueur du jeu sert au suivant, et son carré est une proposition.
+    expect(st.serving).toBe("home");
+    expect(st.boxProposed).toBe(true);
   });
 });
 
@@ -295,7 +415,6 @@ describe("seedEvents — reprendre le JEU EN COURS, pas seulement les jeux finis
     const st = replay(seedEvents([], 5, { current: g(5, 3), serving: "away", servingBox: "left" }), 5);
     expect(st.serving).toBe("away");
     expect(st.servingBox).toBe("left");
-    expect(st.awaitingServeBox).toBe(false);
   });
 
   it("pose « à droite » quand le carré n'est pas encore choisi", () => {
