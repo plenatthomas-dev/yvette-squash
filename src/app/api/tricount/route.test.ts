@@ -327,6 +327,30 @@ describe("GET /api/tricount — ce que la vue décide", () => {
     expect(par.autre.canDelete).toBe(false); // ni l'un ni l'autre
   });
 
+  it("pose `canDelete` (et non `canEdit`) pour le BÉNÉFICIAIRE d'un remboursement", async () => {
+    // u2 déclare avoir remboursé u1 : u1 doit pouvoir retirer ce « j'ai remboursé » si le
+    // virement n'est jamais arrivé — la route DELETE l'autorise, l'écran doit le proposer.
+    h.rows = [
+      tricount({
+        id: "t1",
+        date: "2026-09-03",
+        expenses: [
+          depense({ id: "pour-moi", payer: "u2", montant: 500, entre: ["u1"], isRefund: true }),
+          depense({ id: "pour-u3", payer: "u2", montant: 500, entre: ["u3"], isRefund: true }),
+          // Porter une part d'une VRAIE dépense ne donne aucun droit de la supprimer.
+          depense({ id: "vraie", payer: "u2", montant: 500, entre: ["u1"] }),
+        ],
+      }),
+    ];
+    const [t] = (await corps()).tricounts as unknown as {
+      expenses: { id: string; canDelete: boolean; canEdit: boolean }[];
+    }[];
+    const par = Object.fromEntries(t.expenses.map((e) => [e.id, e]));
+    expect(par["pour-moi"]).toMatchObject({ canDelete: true, canEdit: false });
+    expect(par["pour-u3"]).toMatchObject({ canDelete: false, canEdit: false });
+    expect(par.vraie).toMatchObject({ canDelete: false, canEdit: false });
+  });
+
   it("ouvre à l'ADMIN les lignes et les messages des autres — sauf l'édition d'un remboursement", async () => {
     h.session = { ...resaUser, email: "chef@example.com" };
     h.rows = [

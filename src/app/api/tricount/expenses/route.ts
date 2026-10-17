@@ -14,6 +14,7 @@ import {
 import { getFeatures } from "@/lib/features-server";
 import { httpErrorResponse, readJsonBody, serializableTransaction } from "@/lib/http-tx";
 import { blockEmailOnlyExpenseWrite, refuseSiSolde } from "@/lib/tricount-guard";
+import { dateSaisieRecevable } from "@/lib/date-saisie";
 import { lierJoueurs, lireIdsJoueurs } from "@/lib/tricount-club";
 
 export const runtime = "nodejs";
@@ -60,7 +61,9 @@ export async function POST(req: NextRequest) {
       weights?: unknown;
     };
 
-  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  // Date RÉELLE et vraisemblable, pas seulement bien formée : « 2026-13-01 » finissait en 500
+  // Prisma, « 2026-02-30 » en tricount fantôme (cf. lib/date-saisie.ts).
+  if (!dateSaisieRecevable(date)) {
     return NextResponse.json({ error: "Date invalide" }, { status: 400 });
   }
   const cleanLabel = typeof label === "string" ? label.trim() : "";

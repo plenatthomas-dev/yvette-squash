@@ -21,9 +21,10 @@ export const runtime = "nodejs";
 
 
 // DELETE /api/tricount/expenses/{id} -> supprime une dépense (ou un remboursement).
-// Autorisé seulement à celui qui l'a saisie, au payeur ou à un admin. Supprimer une vraie
-// dépense remet à zéro les validations du tricount ; supprimer la dernière ligne
-// supprime le tricount lui-même (plus de coquille vide dans l'historique).
+// Autorisé seulement à celui qui l'a saisie, au payeur ou à un admin — et, pour un
+// REMBOURSEMENT, aussi à son bénéficiaire (cf. plus bas). Supprimer une vraie dépense remet à
+// zéro les validations du tricount ; supprimer la dernière vraie dépense supprime le tricount
+// lui-même (plus de coquille vide dans l'historique), sauf s'il porte des remboursements.
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -38,13 +39,31 @@ export async function DELETE(
   const { id } = await params;
   const expense = await prisma.expense.findUnique({
     where: { id },
-    select: { tricountId: true, isRefund: true, creatorId: true, payerId: true },
+    select: {
+      tricountId: true,
+      isRefund: true,
+      creatorId: true,
+      payerId: true,
+      shares: { select: { userId: true } },
+    },
   });
+  // LE BÉNÉFICIAIRE D'UN REMBOURSEMENT PEUT LE RETIRER. Un remboursement est déclaré par celui
+  // qui paie : créateur = payeur = débiteur (ou un membre pour le compte d'un invité payeur).
+  // Le bénéficiaire, lui, n'en porte que l'UNIQUE part. Sans cette clause, un « j'ai remboursé »
+  // jamais suivi d'un virement ne pouvait être retiré que par son auteur — celui-là même qui
+  // s'est trompé, ou qui ment — et le bénéficiaire voyait sa créance effacée sans recours
+  // qu'un admin. Même règle que le `canDelete` du GET (api/tricount/route.ts) : les deux
+  // doivent dire la même chose, sans quoi l'écran proposerait un bouton qui rend 404.
   if (
     !expense ||
     (expense.creatorId !== session.userId &&
       expense.payerId !== session.userId &&
-      !isAdminEmail(session.email))
+      !isAdminEmail(session.email) &&
+      !(
+        expense.isRefund &&
+        expense.shares.length === 1 &&
+        expense.shares[0].userId === session.userId
+      ))
   ) {
     return NextResponse.json({ error: "Dépense introuvable ou non autorisée" }, { status: 404 });
   }
@@ -52,8 +71,13 @@ export async function DELETE(
   // ont le droit de le déclarer (cf. tricount-guard + route refunds) : leur interdire de le
   // supprimer les enfermait dans leur erreur, d'autant que PATCH renvoie « un remboursement ne se
   // modifie pas, supprime-le et refais-le » — une consigne qu'ils ne pouvaient pas suivre.
-  // L'ownership est déjà vérifié ci-dessus : on ne peut défaire que SON propre remboursement
-  // (ou n'importe lequel pour un admin).
+  // L'ownership est déjà vérifié ci-dessus : on ne peut défaire que SON propre remboursement,
+  // celui dont on est bénéficiaire (ou n'importe lequel pour un admin).
+  //
+  // ⚠️ `refuseSiSolde` lit HORS de la transaction ci-dessous (comme en création et en
+  // édition) : il relit via le client global de `lib/tricount-guard.ts`, qui n'accepte pas de
+  // client de transaction. Fenêtre étroite — un remboursement qui solde le tricount entre ce
+  // contrôle et l'écriture — mais réelle ; la fermer demande de faire accepter `tx` au garde.
   if (!expense.isRefund) {
     const blocked = blockEmailOnlyExpenseWrite(session);
     if (blocked) return blocked;
@@ -61,30 +85,54 @@ export async function DELETE(
     if (clos) return clos;
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.expense.delete({ where: { id } });
-    if (!expense.isRefund) {
-      await tx.tricountApproval.deleteMany({ where: { tricountId: expense.tricountId, user: { disabledAt: null } } });
-    }
-    // ⚠️ ON NE COMPTE QUE LES VRAIES DÉPENSES, jamais les remboursements.
-    //
-    // Compter toutes les lignes laissait survivre un tricount qui n'en portait plus que des
-    // remboursements — et un tel tricount est un piège sans issue. Il n'a plus aucun payeur,
-    // donc `ready` est faux à jamais : `approve` répond 403 (« seuls les payeurs valident »,
-    // la liste est vide) et `refunds` 409 (« tous les payeurs doivent d'abord valider »).
-    // Pire, les soldes s'INVERSENT : la seule ligne restante est un remboursement, celui qui
-    // l'a versé apparaît créancier et son bénéficiaire débiteur. A voyait « tu dois 15,00 € »
-    // pour de l'argent qu'il avait déjà reçu, sans aucun moyen d'en sortir.
-    //
-    // Sans vraie dépense, le tricount n'a plus d'objet : il tombe, et ses remboursements
-    // orphelins avec lui (`onDelete: Cascade`).
-    const remaining = await tx.expense.count({
-      where: { tricountId: expense.tricountId, isRefund: false },
-    });
-    if (remaining === 0) {
-      await tx.tricount.delete({ where: { id: expense.tricountId } });
-    }
-  });
+  // ⚠️ SERIALIZABLE, comme la création et l'édition, et pour la même raison : supprimer une
+  // vraie dépense remet les validations à zéro, et SSI ne protège qu'ENTRE transactions
+  // sérialisables. En Read Committed, une validation concurrente (`approve`, elle sérialisable)
+  // pouvait survivre au `deleteMany` : le tricount redevenait « prêt » avec un payeur qui
+  // n'avait pas vu disparaître la dépense. Le corps est rejouable tel quel — il n'écrit qu'en
+  // base, et un rejeu repart d'une transaction annulée.
+  try {
+    await serializableTransaction(async (tx) => {
+      await tx.expense.delete({ where: { id } });
+      if (!expense.isRefund) {
+        await tx.tricountApproval.deleteMany({ where: { tricountId: expense.tricountId, user: { disabledAt: null } } });
+      }
+      // ⚠️ ON NE COMPTE QUE LES VRAIES DÉPENSES, jamais les remboursements.
+      //
+      // Compter toutes les lignes laissait survivre un tricount qui n'en portait plus que des
+      // remboursements — et un tel tricount est un piège sans issue. Il n'a plus aucun payeur,
+      // donc `ready` est faux à jamais : `approve` répond 403 (« seuls les payeurs valident »,
+      // la liste est vide) et `refunds` 409 (« tous les payeurs doivent d'abord valider »).
+      // Pire, les soldes s'INVERSENT : la seule ligne restante est un remboursement, celui qui
+      // l'a versé apparaît créancier et son bénéficiaire débiteur. A voyait « tu dois 15,00 € »
+      // pour de l'argent qu'il avait déjà reçu, sans aucun moyen d'en sortir.
+      //
+      // Sans vraie dépense, le tricount n'a plus d'objet : il tombe.
+      const remaining = await tx.expense.count({
+        where: { tricountId: expense.tricountId, isRefund: false },
+      });
+      if (remaining === 0) {
+        // … MAIS PAS EN EMPORTANT DES REMBOURSEMENTS. Ce sont des mouvements d'argent RÉELS :
+        // les laisser partir en cascade (`onDelete: Cascade`) effaçait sans un mot la trace
+        // d'un virement fait. On refuse, et l'`HttpError` annule la suppression ci-dessus avec
+        // le reste de la transaction : rien n'a bougé.
+        const remboursements = await tx.expense.count({
+          where: { tricountId: expense.tricountId, isRefund: true },
+        });
+        if (remboursements > 0) {
+          throw new HttpError(
+            409,
+            "Ce tricount porte des remboursements : modifie la dépense plutôt que de la supprimer, ou retire d'abord les remboursements.",
+          );
+        }
+        await tx.tricount.delete({ where: { id: expense.tricountId } });
+      }
+    }, "Écriture concurrente sur ce tricount, réessaie");
+  } catch (e) {
+    const res = httpErrorResponse(e);
+    if (res) return res;
+    throw e;
+  }
   return NextResponse.json({ ok: true });
 }
 

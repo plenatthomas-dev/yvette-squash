@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import { MIN_PLAYERS, MAX_PLAYERS } from "@/lib/tournament";
 
@@ -68,7 +68,14 @@ const cree = () => h.create.mock.calls[0][0].data;
 const joueursCrees = () =>
   (cree().players as { create: Record<string, unknown>[] }).create;
 
+// Les dates des tests sont FIXES : sans horloge figée, la plage de ±2 ans autour
+// d'aujourd'hui (lib/date-saisie.ts) finirait par les refuser.
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-17T12:00:00Z") });
   h.featureOn = true;
   h.session = { userId: "u1", resa: { id: 42 } };
   h.users = [];
@@ -184,6 +191,10 @@ describe("POST /api/tournaments — les neuf refus", () => {
     ["au format français", "14/11/2026"],
     ["tronquée", "2026-11"],
     ["avec une heure", "2026-11-14T20:00"],
+    // Bien formées, mais irréelles ou invraisemblables (±2 ans, cf. lib/date-saisie.ts).
+    ["inexistante (30 février)", "2026-02-30"],
+    ["au mois 13", "2026-13-01"],
+    ["à plus de deux ans", "2062-11-14"],
   ])("400 sur une date %s", async (_cas, date) => {
     // `date` est une CHAÎNE en base, et les listes se trient dessus : un format libre casse
     // l'ordre chronologique sans jamais lever d'erreur.

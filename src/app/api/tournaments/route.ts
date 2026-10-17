@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { getFeatures } from "@/lib/features-server";
 import { proposeFormats, MIN_PLAYERS, MAX_PLAYERS } from "@/lib/tournament";
+import { dateSaisieRecevable } from "@/lib/date-saisie";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -63,7 +64,9 @@ export async function POST(req: NextRequest) {
     players?: unknown;
   };
 
-  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  // Date RÉELLE et vraisemblable, pas seulement bien formée : « 2026-02-30 » s'enregistrait tel
+  // quel, et un tournoi en 2062 se perdait dans la liste (cf. lib/date-saisie.ts).
+  if (!dateSaisieRecevable(date)) {
     return NextResponse.json({ error: "Date invalide" }, { status: 400 });
   }
   if (targetMatches !== 2 && targetMatches !== 3 && targetMatches !== 4) {

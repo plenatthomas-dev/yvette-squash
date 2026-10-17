@@ -5,12 +5,20 @@ import { getFeatures } from "@/lib/features-server";
 import { readJsonBody, isUniqueViolation, isMissingRecord } from "@/lib/http-tx";
 import { isForumReaction } from "@/lib/forum";
 import { broadcastForum, FORUM_EVENT_REACTION } from "@/lib/forum-realtime";
+import { gesteRefuse } from "@/lib/geste-debit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Un clic est bien plus facile à répéter qu'un message : le garde-fou est plus large en
-// nombre, mais il existe pour la même raison — un client qui boucle remplirait Neon.
+// nombre, mais il existe pour la même raison — un client qui boucle remplirait Neon, et
+// surtout chaque clic DIFFUSE un événement Pusher, dont le quota est JOURNALIER : l'épuiser
+// fait taire le temps réel du fil pour tout le club jusqu'au lendemain.
+//
+// Compté en GESTES dans un journal à part (cf. lib/geste-debit.ts), et non sur les réactions
+// présentes : la bascule pose puis RETIRE la même ligne, si bien qu'un client qui re-clique la
+// même pastille à l'infini n'en laissait jamais plus d'une — le 429 ne partait jamais. La
+// fenêtre ne doit pas dépasser 15 min (purge de la table partagée, vérifiée à l'appel).
 const WINDOW_MS = 10 * 60_000;
 const MAX_PER_WINDOW = 120;
 
@@ -46,10 +54,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   });
   if (!message) return NextResponse.json({ error: "Message introuvable" }, { status: 404 });
 
-  const recent = await prisma.forumReaction.count({
-    where: { userId: session.userId, createdAt: { gte: new Date(Date.now() - WINDOW_MS) } },
-  });
-  if (recent >= MAX_PER_WINDOW) {
+  if (await gesteRefuse(`forum-react:${session.userId}`, WINDOW_MS, MAX_PER_WINDOW)) {
     return NextResponse.json({ error: "Trop de réactions d'un coup." }, { status: 429 });
   }
 

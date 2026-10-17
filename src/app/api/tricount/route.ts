@@ -171,6 +171,14 @@ export async function GET(req: NextRequest) {
         })),
         expenses: t.expenses.map((e) => {
           const mine = e.creatorId === session.userId || e.payerId === session.userId || admin;
+          // Le BÉNÉFICIAIRE d'un remboursement (seul porteur de sa part) peut le retirer : un
+          // « j'ai remboursé » jamais suivi d'un virement effaçait sinon sa créance sans
+          // recours. Même règle que la route DELETE (api/tricount/expenses/[id]) — les deux
+          // doivent dire la même chose, sans quoi l'écran cacherait un geste permis, ou
+          // offrirait un bouton qui rend 404. Il ne gagne PAS l'édition (`canEdit`), qu'un
+          // remboursement n'offre à personne.
+          const beneficiaire =
+            e.isRefund && e.shares.length === 1 && e.shares[0].userId === session.userId;
           const payerKey = e.payerId ? userKey(e.payerId) : guestKey(e.payerGuestId as string);
           return {
             id: e.id,
@@ -186,7 +194,7 @@ export async function GET(req: NextRequest) {
               const p = parseKey(key);
               return { id: p.id, kind: p.kind, name: name(key), amountCents: s.amountCents };
             }),
-            canDelete: mine,
+            canDelete: mine || beneficiaire,
             // Édition réservée aux vraies dépenses (un remboursement se supprime/refait).
             canEdit: mine && !e.isRefund,
           };

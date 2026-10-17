@@ -16,7 +16,7 @@ const h = vi.hoisted(() => ({
   featureRanking: true,
   /** Verdict que renvoie le rapprochement immédiat déclenché par `set_squashnet_name`. */
   refreshMember: vi.fn(),
-  blockers: { expenses: 0, shares: 0, tournaments: 0, total: 0 },
+  blockers: { expenses: 0, shares: 0, tournaments: 0, interclubs: 0, total: 0 },
   members: [{ id: "u1" }] as unknown[],
   teams: [{ id: "t1", name: "Équipe 1" }] as unknown[],
   team: { id: "t1" } as null | { id: string },
@@ -52,7 +52,10 @@ vi.mock("@/lib/features-server", () => ({
     interclub: h.featureInterclub,
   }),
 }));
-vi.mock("@/lib/members", () => ({
+// `deleteBlockersMessage` reste le VRAI : c'est lui qui met en mots ce qui bloque, et le test
+// du 409 interclub ci-dessous vérifie précisément ce texte.
+vi.mock("@/lib/members", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/members")>()),
   listMembers: vi.fn(async () => h.members),
   deleteBlockersFor: vi.fn(async () => h.blockers),
 }));
@@ -127,7 +130,7 @@ beforeEach(() => {
   h.featureInterclub = true;
   h.featureRanking = true;
   h.refreshMember.mockReset().mockResolvedValue("matched");
-  h.blockers = { expenses: 0, shares: 0, tournaments: 0, total: 0 };
+  h.blockers = { expenses: 0, shares: 0, tournaments: 0, interclubs: 0, total: 0 };
   h.members = [{ id: "u1" }];
   h.teams = [{ id: "t1", name: "Équipe 1" }];
   h.team = { id: "t1" };
@@ -255,10 +258,24 @@ describe("POST /api/admin/members", () => {
   });
 
   it("delete : 409 si dépendances bloquantes (ne supprime pas)", async () => {
-    h.blockers = { expenses: 2, shares: 5, tournaments: 0, total: 7 };
+    h.blockers = { expenses: 2, shares: 5, tournaments: 0, interclubs: 0, total: 7 };
     const res = await POST(postReq({ id: "u1", action: "delete" }));
     expect(res.status).toBe(409);
     expect((await res.json()).blockers.total).toBe(7);
+    expect(h.userDelete).not.toHaveBeenCalled();
+  });
+
+  it("delete : 409 explicite (et non 500) pour un membre qui a créé une rencontre interclub", async () => {
+    // `Interclub.createdBy` est en RESTRICT : sans ce compte, `user.delete` levait un P2003
+    // que rien ne rattrapait, et l'admin recevait un 500 nu.
+    h.blockers = { expenses: 0, shares: 0, tournaments: 0, interclubs: 1, total: 1 };
+    const res = await POST(postReq({ id: "u1", action: "delete" }));
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe(
+      "Suppression impossible : ce membre a une rencontre interclub créée. Désactive-le plutôt.",
+    );
+    expect(body.blockers.interclubs).toBe(1);
     expect(h.userDelete).not.toHaveBeenCalled();
   });
 

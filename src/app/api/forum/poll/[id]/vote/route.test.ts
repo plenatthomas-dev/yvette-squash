@@ -40,10 +40,23 @@ const h = vi.hoisted(() => ({
   essais: 0,
   /** Ce que `createMany` doit jeter au premier essai, pour éprouver le rejeu. */
   jette: null as null | Error,
-  /** Le nombre de voix récentes du membre, et le `where` avec lequel on l'a demandé. */
-  recentCount: 0,
-  countWhere: null as null | Record<string, unknown>,
+  /**
+   * Le journal des gestes (`LoginAttempt`, cf. lib/geste-debit.ts), en mémoire. Il HONORE
+   * `ip`, `identifier` et les bornes de `createdAt` : c'est ce qui permet de mesurer une
+   * vraie rafale — un chiffre fixe aurait répondu à la place de la route.
+   */
+  journal: [] as { ip: string; identifier: string; createdAt: Date }[],
 }));
+
+type WhereJournal = { ip?: string; identifier?: string; createdAt?: { gte?: Date; lt?: Date } };
+const dansJournal = (
+  l: { ip: string; identifier: string; createdAt: Date },
+  w: WhereJournal,
+) =>
+  (w.ip === undefined || l.ip === w.ip) &&
+  (w.identifier === undefined || l.identifier === w.identifier) &&
+  (!w.createdAt?.gte || l.createdAt >= w.createdAt.gte) &&
+  (!w.createdAt?.lt || l.createdAt < w.createdAt.lt);
 
 vi.mock("@/lib/session", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/session")>()),
@@ -77,13 +90,21 @@ vi.mock("@/lib/db", () => {
         return {};
       }),
     },
-    forumPollVote: {
-      // Le `where` est CAPTURÉ, et non ignoré : le remplacer par `{}` dans la route ferait de
-      // la limite un plafond global au club, sans qu'aucun test de ce fichier ne rougisse.
-      count: vi.fn(async (args?: { where?: Record<string, unknown> }) => {
-        h.countWhere = args?.where ?? null;
-        return h.recentCount;
+    loginAttempt: {
+      create: vi.fn(async ({ data }: { data: { ip: string; identifier: string } }) => {
+        h.journal.push({ ...data, createdAt: new Date() });
+        return {};
       }),
+      count: vi.fn(async ({ where }: { where: WhereJournal }) =>
+        h.journal.filter((l) => dansJournal(l, where)).length,
+      ),
+      deleteMany: vi.fn(async ({ where }: { where: WhereJournal }) => {
+        const avant = h.journal.length;
+        h.journal = h.journal.filter((l) => !dansJournal(l, where));
+        return { count: avant - h.journal.length };
+      }),
+    },
+    forumPollVote: {
       deleteMany: vi.fn(async (args: { where: Record<string, unknown> }) => {
         h.efface = args.where;
         return { count: 0 };
@@ -150,8 +171,7 @@ beforeEach(() => {
   h.isolation = null;
   h.essais = 0;
   h.jette = null;
-  h.recentCount = 0;
-  h.countWhere = null;
+  h.journal = [];
 });
 
 describe("gardes", () => {
@@ -237,24 +257,45 @@ describe("le remplacement est ATOMIQUE", () => {
 // UN ÉVÉNEMENT PUSHER — dont le quota est JOURNALIER. Un client qui boucle ne fait pas
 // qu'alourdir Neon : il fait taire le temps réel du fil pour tout le club jusqu'au lendemain.
 describe("garde-fou de débit", () => {
-  it("laisse passer un usage normal", async () => {
-    h.recentCount = 59;
-    expect((await POST(vote(["o1"]), ctx)).status).toBe(200);
-  });
+  /** `n` gestes déjà journalisés pour ce membre, il y a `ilYa` ms. */
+  const prerempli = (n: number, ilYa = 0, identifier = "forum-vote:u1") =>
+    Array.from({ length: n }, () => ({
+      ip: "geste", identifier, createdAt: new Date(Date.now() - ilYa),
+    }));
 
-  it("refuse en 429 au-delà, sans écrire ni diffuser", async () => {
-    h.recentCount = 60;
+  it("bascule ×60 : un client qui coche/décoche la même case finit en 429", async () => {
+    // LE DÉFAUT : la limite comptait les voix ENCORE PRÉSENTES, or chaque vote efface les cases
+    // du membre avant de reposer les siennes. Cocher/décocher à l'infini laissait le compteur à
+    // une voix au plus — le 429 ne partait jamais, et chaque clic diffusait un événement Pusher.
+    for (let i = 0; i < 60; i++) {
+      expect((await POST(vote(i % 2 ? [] : ["o1"]), ctx)).status).toBe(200);
+    }
+    h.diffuse = null;
+    h.ecrit = null;
+    h.efface = null;
     expect((await POST(vote(["o1"]), ctx)).status).toBe(429);
     expect(h.ecrit).toBeNull();
     expect(h.efface).toBeNull();
     expect(h.diffuse).toBeNull();
   });
 
-  it("compte les voix d'UN SEUL membre, sur une fenêtre glissante", async () => {
-    await POST(vote(["o1"]), ctx);
-    expect(h.countWhere?.userId).toBe("u1");
-    const gte = (h.countWhere?.createdAt as { gte: Date }).gte;
-    expect(Math.round((Date.now() - gte.getTime()) / 60_000)).toBe(10);
+  it("laisse passer un usage normal", async () => {
+    h.journal = prerempli(59);
+    expect((await POST(vote(["o1"]), ctx)).status).toBe(200);
+  });
+
+  it("compte les gestes d'UN SEUL membre, sur une fenêtre glissante de 10 min", async () => {
+    // Les gestes d'un autre membre, ou plus vieux que la fenêtre, ne comptent pas.
+    h.journal = [...prerempli(60, 0, "forum-vote:u2"), ...prerempli(60, 10 * 60_000 + 1000)];
+    expect((await POST(vote(["o1"]), ctx)).status).toBe(200);
+    // … et les vieux gestes du membre sont purgés au passage ; ceux d'u2 restent.
+    expect(h.journal.filter((l) => l.identifier === "forum-vote:u1")).toHaveLength(1);
+    expect(h.journal.filter((l) => l.identifier === "forum-vote:u2")).toHaveLength(60);
+  });
+
+  it("ne compte pas la réaction du fil dans le compteur du vote", async () => {
+    h.journal = prerempli(60, 0, "forum-react:u1");
+    expect((await POST(vote(["o1"]), ctx)).status).toBe(200);
   });
 });
 
