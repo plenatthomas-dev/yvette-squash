@@ -71,6 +71,7 @@ type Action =
   | "revoke_passkey"
   | "revoke_passkeys"
   | "delete"
+  | "anonymize"
   | "set_team"
   | "set_clt_override"
   | "set_squashnet_name"
@@ -262,6 +263,13 @@ export default function MembersPage() {
 
   const act = (id: string, action: Action) => {
     if (action === "delete" && !confirm("Supprimer définitivement ce compte ?")) return;
+    if (
+      action === "anonymize" &&
+      !confirm(
+        "Effacer les données personnelles de ce membre (RGPD) ? Son nom, son e-mail, ses messages, réservations et alertes disparaissent ; ses dépenses restent, au nom « Membre supprimé ». C'est IRRÉVERSIBLE.",
+      )
+    )
+      return;
     if (
       action === "revoke_passkeys" &&
       !confirm("Retirer TOUS les passkeys (connexion biométrique) de ce membre ?")
@@ -795,6 +803,17 @@ export default function MembersPage() {
                     style={{ color: "var(--danger-fg)" }}
                   >
                     Supprimer
+                  </button>
+                  {/* Quand « Supprimer » est refusé (parts de tricount) : efface la personne,
+                      garde l'argent (cf. lib/members, anonymizeMember). */}
+                  <button
+                    type="button"
+                    className="secondary tiny"
+                    disabled={busyId === m.id}
+                    onClick={() => act(m.id, "anonymize")}
+                    style={{ color: "var(--danger-fg)" }}
+                  >
+                    Effacer ses données (RGPD)
                   </button>
                 </div>
 

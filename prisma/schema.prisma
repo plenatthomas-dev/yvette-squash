@@ -164,6 +164,8 @@ model User {
   interclubAvailabilitySet InterclubAvailability[] @relation("AvailabilitySetter")
   notifications            AppNotification[]
   notifDeviceStates        NotifDeviceState[]
+
+  @@index([teamId])
 }
 
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
@@ -540,6 +542,7 @@ model TricountComment {
   createdAt  DateTime @default(now())
 
   @@index([tricountId, createdAt])
+  @@index([userId])
 }
 
 // « OK pour lancer les remboursements » d'un payeur sur un tricount. Les approbations
@@ -553,6 +556,7 @@ model TricountApproval {
   createdAt  DateTime @default(now())
 
   @@unique([tricountId, userId])
+  @@index([userId])
 }
 
 // Une dépense payée par un membre pour le compte de plusieurs (balles, repas, pot…).
@@ -584,6 +588,9 @@ model Expense {
 
   @@index([tricountId])
   @@index([spentAt])
+  @@index([creatorId])
+  @@index([payerGuestId])
+  @@index([payerId])
 }
 
 // Part d'un participant dans une dépense (répartition égale, ajustée au centime :
@@ -629,6 +636,7 @@ model Tournament {
   matches       Match[]
 
   @@index([date])
+  @@index([createdById])
 }
 
 // Un participant : soit un MEMBRE (userId) soit un INVITÉ hors asso (guestName, prénom
@@ -648,6 +656,7 @@ model TournamentPlayer {
 
   @@index([tournamentId])
   @@index([userId])
+  @@index([groupId])
 }
 
 // Une poule (round-robin). Absente pour un tournoi 100 % tableau.
@@ -1065,6 +1074,7 @@ model Interclub {
   @@unique([teamId, snMatchKey])
   @@index([date])
   @@index([teamId, date])
+  @@index([createdById])
 }
 
 /// CE QUE LE CAPITAINE A VÉRIFIÉ AVANT D'ALLER SAISIR CHEZ LA FÉDÉRATION.
@@ -1161,6 +1171,9 @@ model InterclubMatch {
 
   @@unique([interclubId, order])
   @@index([interclubId])
+  @@index([homeGuestId])
+  @@index([homeUserId])
+  @@index([scorerId])
 }
 
 // Un jeu TERMINÉ, en points. Les jeux en cours ne sont pas ici : ils vivent dans liveJson.
@@ -1248,6 +1261,9 @@ model InterclubAvailability {
   @@unique([interclubId, userId])
   @@unique([interclubId, guestId])
   @@index([interclubId, status])
+  @@index([guestId])
+  @@index([setById])
+  @@index([userId])
 }
 
 // Journal des notifications envoyées à un membre.

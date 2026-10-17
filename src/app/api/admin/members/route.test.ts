@@ -35,6 +35,7 @@ const h = vi.hoisted(() => ({
   /** Les démissions de capitaine posées par `set_team`. */
   teamUpdateMany: vi.fn(async () => ({ count: 1 })),
   probeDeleteMany: vi.fn(async () => ({ count: 0 })),
+  anonymize: vi.fn(async () => {}),
 }));
 
 vi.mock("@/lib/admin", () => ({
@@ -60,6 +61,7 @@ vi.mock("@/lib/members", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/members")>()),
   listMembers: vi.fn(async () => h.members),
   deleteBlockersFor: vi.fn(async () => h.blockers),
+  anonymizeMember: h.anonymize,
 }));
 vi.mock("@/lib/email-auth", () => ({
   createEmailToken: h.createEmailToken,
@@ -639,5 +641,23 @@ describe("POST /api/admin/members — désactiver, sans laisser de tricount bloq
   it("n'écrit aucune validation quand le membre n'est payeur de rien", async () => {
     await POST(postReq({ id: "u1", action: "disable" }));
     expect(h.approvalsCreated).not.toHaveBeenCalled();
+  });
+});
+
+// Audit 2026-10, point 21 : effacement RGPD d'un membre que `delete` refuse.
+describe("POST /api/admin/members — anonymize", () => {
+  it("efface la personne dans une transaction", async () => {
+    h.anonymize.mockClear();
+    const res = await POST(postReq({ id: "u1", action: "anonymize" }));
+    expect(res.status).toBe(200);
+    expect(h.anonymize).toHaveBeenCalledWith("u1", expect.anything());
+  });
+
+  it("jamais sur soi-même", async () => {
+    h.anonymize.mockClear();
+    h.target = { ...h.target!, id: "adm" };
+    const res = await POST(postReq({ id: "adm", action: "anonymize" }));
+    expect(res.status).toBe(400);
+    expect(h.anonymize).not.toHaveBeenCalled();
   });
 });
