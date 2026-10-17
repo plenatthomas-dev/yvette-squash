@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { hashPassword, verifyPassword } from "@/lib/crypto";
 import { normalizeEmail, createEmailSession } from "@/lib/session";
 import { getFeatures } from "@/lib/features-server";
-import { EMAIL_RE, clientIp } from "@/lib/email-auth";
+import { EMAIL_RE, MAX_PASSWORD_LEN, clientIp } from "@/lib/email-auth";
 import { isDbUnavailable, dbUnavailableResponse } from "@/lib/db-error";
 import { appBlockForEmail, appBlockedResponse } from "@/lib/app-block";
 
@@ -40,6 +40,13 @@ export async function POST(req: NextRequest) {
   }
   if (!EMAIL_RE.test(body.email.trim())) {
     return NextResponse.json({ error: "Email invalide." }, { status: 400 });
+  }
+  // Borne AVANT tout scrypt : `verifyPassword` (et le hash leurre) coûtent en proportion de
+  // l'entrée, et cette route est anonyme. Aucun mot de passe stocké ne la dépasse : la même
+  // borne est imposée à sa création (cf. lib/email-auth, passwordProblem). L'email, lui, est
+  // déjà borné à 254 caractères par EMAIL_RE.
+  if (body.password.length > MAX_PASSWORD_LEN) {
+    return NextResponse.json({ error: "Mot de passe trop long." }, { status: 400 });
   }
   const email = normalizeEmail(body.email);
   const ip = clientIp(req);
@@ -93,10 +100,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Succès : on efface l'ardoise de cette IP ET de ce compte (les fautes de frappe précédentes
-    // ne doivent pénaliser ni les prochains logins du foyer/club, ni le membre), puis on ouvre
-    // une session « email seul ».
-    await prisma.loginAttempt.deleteMany({ where: { OR: [{ ip }, { identifier: email }] } });
+    // Succès : on efface les échecs de CE COUPLE (IP, compte) — les fautes de frappe du membre
+    // ne doivent pas le pénaliser — puis on ouvre une session « email seul ».
+    // Surtout PAS `OR: [{ ip }, { identifier }]`, l'ancienne forme : elle effaçait les échecs de
+    // l'IP sur TOUS les comptes, et un attaquant muni d'UN compte valide remettait à zéro la
+    // limite par IP en se connectant entre deux salves (cf. api/auth/login, même règle).
+    await prisma.loginAttempt.deleteMany({ where: { ip, identifier: email } });
     const sid = await createEmailSession(user.id);
     const res = NextResponse.json({ displayName: user.displayName });
     res.cookies.set("sid", sid, {

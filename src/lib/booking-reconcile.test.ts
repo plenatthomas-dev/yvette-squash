@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { PlanningDay } from "./resamania/types";
 
 const h = vi.hoisted(() => ({
-  bookings: [] as Array<{ id: string; classEventId: string; user: { contactId: string | null } }>,
+  bookings: [] as Array<{
+    id: string;
+    classEventId: string;
+    createdAt?: Date;
+    user: { contactId: string | null };
+  }>,
   users: [] as Array<{ id: string; contactId: string | null }>,
   externalBookings: false,
   findMany: vi.fn(),
@@ -170,4 +175,65 @@ it("oublie l'ancien attendee en restaurant une résa refaite sur ResaMania", asy
   expect(h.upsert).toHaveBeenCalledWith(expect.objectContaining({
     update: expect.objectContaining({ attendeeId: null, actingUserId: null, status: "booked" }),
   }));
+});
+
+// PHOTO DU PLANNING ET RÉSAS PLUS RÉCENTES QU'ELLE. Le marquage « annulé ailleurs » est une
+// écriture DESTRUCTIVE fondée sur une photo : une résa faite après la photo y apparaît
+// forcément libre. Sans garde, une résa faite à l'instant via une autre instance serverless
+// disparaissait du journal (et de « Mes résas ») au premier affichage d'un planning en retard.
+describe("reconcilePlanningWithBookings — fraîcheur de la photo (fetchedAt)", () => {
+  const photo = Date.parse("2026-07-11T10:00:00Z");
+  const libre = () => planning([slot({ bookable: true, status: "free", bookerContactId: null })]);
+
+  it("réservation créée APRÈS la photo → pas annulée, présences gardées", async () => {
+    h.bookings = [{
+      id: "b1",
+      classEventId: "/class_events/1",
+      createdAt: new Date(photo + 3_000),
+      user: { contactId: "contact-alice" },
+    }];
+    await reconcilePlanningWithBookings(libre(), "2026-07-11", photo);
+    expect(h.updateMany).not.toHaveBeenCalled();
+    // Les présences notées juste après la résa ne doivent pas être purgées non plus.
+    expect(h.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("réservation créée dans la marge de 5 s AVANT la photo → pas encore jugée", async () => {
+    // ResaMania peut mettre un instant à refléter dans son planning une résa qu'il a acceptée.
+    h.bookings = [{
+      id: "b1",
+      classEventId: "/class_events/1",
+      createdAt: new Date(photo - 2_000),
+      user: { contactId: "contact-alice" },
+    }];
+    await reconcilePlanningWithBookings(libre(), "2026-07-11", photo);
+    expect(h.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("réservation nettement antérieure à la photo → annulée comme avant", async () => {
+    h.bookings = [{
+      id: "b1",
+      classEventId: "/class_events/1",
+      createdAt: new Date(photo - 60_000),
+      user: { contactId: "contact-alice" },
+    }];
+    await reconcilePlanningWithBookings(libre(), "2026-07-11", photo);
+    expect(h.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["b1"] } },
+      data: { status: "cancelled" },
+    });
+  });
+
+  it("résa récente sur un créneau pris : jamais prise pour une résa « hors appli »", async () => {
+    // Elle vient de l'appli : la détection ne doit pas réécrire sa source en "resamania".
+    h.externalBookings = true;
+    h.bookings = [{
+      id: "b1",
+      classEventId: "/class_events/1",
+      createdAt: new Date(photo + 1_000),
+      user: { contactId: "contact-alice" },
+    }];
+    await reconcilePlanningWithBookings(planning([slot()]), "2026-07-11", photo);
+    expect(h.upsert).not.toHaveBeenCalled();
+  });
 });

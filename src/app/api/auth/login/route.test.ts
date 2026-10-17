@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   create: vi.fn(async (_args: { data: { ip: string; identifier: string } }) => ({})),
   deleteMany: vi.fn(async (_args: { where: Record<string, unknown> }) => ({ count: 0 })),
   login: vi.fn(),
+  createSession: vi.fn(async (_resa: unknown) => "sid"),
   // Réglage `block` lu par la garde « appli fermée ». `null` = appli ouverte (défaut).
   appSetting: vi.fn(async () => null as { value: string } | null),
 }));
@@ -24,14 +25,20 @@ vi.mock("@/lib/db", () => ({
     appSetting: { findUnique: h.appSetting },
   },
 }));
-vi.mock("@/lib/resamania/client", () => ({ login: h.login }));
+// Les erreurs typées et leurs gardes sont les VRAIES : la route décide sur leur classement
+// (refus → 401 compté, indisponible → 503 non compté).
+vi.mock("@/lib/resamania/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/resamania/client")>()),
+  login: h.login,
+}));
 vi.mock("@/lib/session", () => ({
-  createSession: vi.fn(async () => "sid"),
+  createSession: h.createSession,
   normalizeEmail: (s: string) => s.trim().toLowerCase(),
   AccountDisabledError: class extends Error {},
 }));
 
 import { POST } from "./route";
+import { ResaAuthRejectedError, ResaUnavailableError } from "@/lib/resamania/client";
 
 const req = (body: unknown, headers: Record<string, string> = {}) =>
   ({
@@ -50,6 +57,7 @@ beforeEach(() => {
     args.where.ip !== undefined ? h.ipCount : h.accountCount,
   );
   h.login.mockResolvedValue({ identity: { givenName: "Alice", familyName: "Martin" } });
+  h.createSession.mockResolvedValue("sid");
   h.appSetting.mockResolvedValue(null); // appli ouverte par défaut
   process.env.ADMIN_EMAILS = "chef@example.com";
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -90,7 +98,9 @@ describe("POST /api/auth/login — rate limiting", () => {
   });
 
   it("un échec incrémente les DEUX compteurs", async () => {
-    h.login.mockRejectedValue(new Error("bad creds"));
+    // Rejet construit à l'appel (et non `mockRejectedValue`) : vitest remonte comme échec du
+    // test une exception levée par un espion, même attrapée par la route.
+    h.login.mockImplementation(() => Promise.reject(new ResaAuthRejectedError("bad creds")));
     const res = await POST(req(creds, { "x-real-ip": "1.2.3.4" }));
     expect(res.status).toBe(401);
     expect(h.create.mock.calls[0][0].data).toEqual({
@@ -99,10 +109,42 @@ describe("POST /api/auth/login — rate limiting", () => {
     });
   });
 
-  it("une réussite efface l'ardoise de l'IP ET du compte", async () => {
+  it("une réussite n'efface QUE les échecs du couple (IP, compte)", async () => {
+    // Ce test figeait l'inverse : `OR: [{ ip }, { identifier }]`, qui effaçait les échecs de
+    // l'IP sur TOUS les comptes. Avec UN compte valide, un attaquant alternait quatre essais
+    // sur les comptes visés et une connexion réussie avec le sien : la limite par IP repartait
+    // de zéro à chaque fois, donc ne limitait plus rien.
     await POST(req(creds, { "x-real-ip": "1.2.3.4" }));
     const cleared = h.deleteMany.mock.calls.at(-1)?.[0].where;
-    expect(cleared?.OR).toEqual([{ ip: "1.2.3.4" }, { identifier: "alice@example.com" }]);
+    expect(cleared).toEqual({ ip: "1.2.3.4", identifier: "alice@example.com" });
+  });
+
+  it("ResaMania indisponible → 503, SANS compter de tentative", async () => {
+    // Une panne amont n'est pas la faute du membre ; la compter verrouillerait tout un club
+    // derrière son IP partagée au bout de cinq essais.
+    h.login.mockImplementation(() => Promise.reject(new ResaUnavailableError("down", 503)));
+    const res = await POST(req(creds, { "x-real-ip": "1.2.3.4" }));
+    expect(res.status).toBe(503);
+    expect(h.create).not.toHaveBeenCalled();
+    expect(await res.json()).not.toHaveProperty("maintenance"); // pas une panne de NOTRE base
+  });
+
+  it("erreur à l'ouverture de session (ex. email déjà pris, P2002) → 500, PAS « identifiants invalides »", async () => {
+    h.createSession.mockImplementation(() =>
+      Promise.reject(Object.assign(new Error("Unique constraint failed on the fields: (`email`)"), { code: "P2002" })),
+    );
+    const res = await POST(req(creds, { "x-real-ip": "1.2.3.4" }));
+    expect(res.status).toBe(500);
+    expect(h.create).not.toHaveBeenCalled(); // le mot de passe était bon : rien à compter
+  });
+
+  it("borne la longueur des entrées (400) sans rien lire ni appeler", async () => {
+    const long = await POST(req({ username: "a".repeat(255), password: "pw" }));
+    expect(long.status).toBe(400);
+    const longPw = await POST(req({ username: "alice@example.com", password: "p".repeat(201) }));
+    expect(longPw.status).toBe(400);
+    expect(h.count).not.toHaveBeenCalled();
+    expect(h.login).not.toHaveBeenCalled();
   });
 
   it("refuse un identifiant non textuel sans rien compter", async () => {

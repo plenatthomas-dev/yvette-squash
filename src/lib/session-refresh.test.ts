@@ -7,7 +7,12 @@ const h = vi.hoisted(() => ({
   refresh: vi.fn(),
 }));
 vi.mock("./crypto", () => ({ encrypt: (s: string) => s, decrypt: (s: string) => s }));
-vi.mock("./resamania/client", () => ({ ensureFresh: h.refresh }));
+// Les erreurs typées et leurs gardes sont les VRAIES : c'est leur classement que session.ts
+// consulte pour décider de supprimer (refus) ou de garder (panne passagère) la session.
+vi.mock("./resamania/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./resamania/client")>()),
+  ensureFresh: h.refresh,
+}));
 vi.mock("./db", () => ({ prisma: { session: {
   findUnique: vi.fn(async () => ({ ...h.row })),
   updateMany: vi.fn(async ({ where, data }: {
@@ -23,7 +28,9 @@ vi.mock("./db", () => ({ prisma: { session: {
   }),
   deleteMany: vi.fn(),
 } } }));
-import { getSession, refreshBackoffMs } from "./session";
+import { getSession, refreshBackoffMs, ResaRefreshTransientError } from "./session";
+import { prisma } from "./db";
+import { ResaAuthRejectedError, ResaUnavailableError } from "./resamania/client";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -33,6 +40,7 @@ beforeEach(() => {
   h.row.expiresAt = new Date(Date.now() + 86400_000);
   h.row.refreshClaimedAt = null;
   h.refresh.mockReset();
+  vi.mocked(prisma.session.deleteMany).mockClear();
 });
 afterEach(() => vi.useRealTimers());
 
@@ -79,4 +87,43 @@ it("espace les relectures au lieu de marteler la base toutes les 250 ms", () => 
   let lectures = 0;
   while (t < 20_000) { t += refreshBackoffMs(lectures); lectures++; }
   expect(lectures).toBeLessThan(15); // était 80
+});
+
+// PANNE PASSAGÈRE ≠ JETON RÉVOQUÉ. Avant, toute erreur du rafraîchissement supprimait la
+// session : un 503 de quelques secondes chez ResaMania déconnectait chaque membre dont le jeton
+// expirait pendant ce temps (et cassait les délégations, qui vivent de ce même jeton).
+
+it("ResaMania en 503 au rafraîchissement : session CONSERVÉE, verrou relâché, erreur passagère", async () => {
+  // Rejet construit à l'appel (et non `mockRejectedValue`) : vitest remonte comme échec du test
+  // une exception levée par un espion, même attrapée par le code testé.
+  h.refresh.mockImplementation(() =>
+    Promise.reject(new ResaUnavailableError("Échange de token : ResaMania indisponible (503)", 503)),
+  );
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  const err = await getSession("sid").catch((e) => e);
+
+  expect(err).toBeInstanceOf(ResaRefreshTransientError);
+  expect(prisma.session.deleteMany).not.toHaveBeenCalled();
+  // Verrou rendu tout de suite : la requête suivante retente sans attendre la reprise d'un
+  // verrou abandonné (60 s)…
+  expect(h.row.refreshClaimedAt).toBeNull();
+  // …et les jetons sont intacts : rien n'a été écrasé par une réponse qui n'est jamais venue.
+  expect(h.row.refreshTokenEnc).toBe("refresh-old");
+
+  // La panne passée, la session repart d'elle-même.
+  h.refresh.mockResolvedValue({ accessToken: "fresh", refreshToken: "next", expiresAt: Date.now() + 3600_000 });
+  expect((await getSession("sid"))?.resa?.accessToken).toBe("fresh");
+});
+
+it("refresh token refusé (400 invalid_grant) : session supprimée, reconnexion requise", async () => {
+  h.refresh.mockImplementation(() =>
+    Promise.reject(new ResaAuthRejectedError("Échange de token refusé (400 invalid_grant)")),
+  );
+
+  expect(await getSession("sid")).toBeNull();
+  // Suppression sous le MÊME filtre de verrou : on ne détruit que la ligne qu'on a réservée.
+  expect(prisma.session.deleteMany).toHaveBeenCalledWith({
+    where: { id: "sid", refreshClaimedAt: expect.any(Date) },
+  });
 });
