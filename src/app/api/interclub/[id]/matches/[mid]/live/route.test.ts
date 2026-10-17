@@ -228,6 +228,25 @@ describe("PUT .../live — gardes", () => {
     expect((await PUT(put({ games: [{ home: 0, away: 11 }] }), ctx)).status).toBe(409);
   });
 
+  it("dit POURQUOI par un code : `match-done`, distinct de « quelqu'un d'autre marque »", async () => {
+    // Trois 409 sur cette route, trois réactions côté marqueur : renoncer (prise tenue),
+    // repartir du serveur (`stale-games`), jeter le journal (`match-done`). Sans code, l'écran
+    // confondait le dernier avec le premier et gardait son journal à vie.
+    h.match = freshMatch({ status: "done", scorerId: "u2", scorerClaimedAt: OLD, updatedAt: OLD });
+    h.session = { userId: "intrus" };
+    const res = await PUT(put({ games: [{ home: 0, away: 11 }] }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("match-done");
+    expect(h.updated).toBeNull();
+  });
+
+  it("la prise tenue par un autre reste un 409 SANS code `match-done`", async () => {
+    h.match = freshMatch({ scorerId: "u2", scorerClaimedAt: RECENT, updatedAt: RECENT });
+    const res = await PUT(put({ games: [] }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBeUndefined();
+  });
+
   it("mais celui qui marquait peut revenir sur sa saisie", async () => {
     // Le marqueur annule le point décisif : la liste RÉTRÉCIT, ce qui exige d'annoncer la base
     // (cf. « fraîcheur du journal » plus bas) — l'écran de marquage le fait à chaque envoi.

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { isAdminEmail } from "@/lib/admin";
 import { requireInterclubMember } from "@/lib/interclub-access";
-import { httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
+import { httpErrorResponse, readJsonBody, serializableTransaction } from "@/lib/http-tx";
 import {
   isAvailabilityStatus,
   parseComment,
@@ -194,7 +194,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!ctx.ok) return ctx.response;
   const { session, fixture } = ctx;
 
-  const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  // `readJsonBody` et non `req.json().catch(() => ({}))` : un corps `null` (JSON valide) passait
+  // le `catch` et faisait lever `body.forUserId` — un 500 là où tout autre corps malformé finit
+  // en 400 propre (cf. `http-tx.ts`).
+  const body = await readJsonBody(req);
   // « Dispo » / « Pas dispo » depuis une notification (public/sw.js) : l'appareil a pu changer
   // de compte depuis l'envoi, et la réponse serait alors posée au nom du mauvais joueur.
   const autreCompte = otherAccountResponse(body.forUserId, session.userId);

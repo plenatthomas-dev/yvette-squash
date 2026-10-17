@@ -253,6 +253,14 @@ describe("GET /api/admin/interclub-teams", () => {
 });
 
 describe("POST /api/admin/interclub-teams", () => {
+  // Un corps JSON valide mais pas un objet (`null` surtout) passait `req.json().catch(() => ({}))`
+  // et faisait lever `body.action` : un 500 au lieu du 400 « Action inconnue ».
+  it.each([null, 5, "x", [1, 2]])("répond 400, et non 500, à un corps JSON %j", async (corps) => {
+    const res = await POST(post(corps));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Action inconnue");
+  });
+
   it("403 si l'appelant n'est pas admin", async () => {
     h.admin = null;
     expect((await POST(post({ action: "add_guest", teamId: "t1", name: "X" }))).status).toBe(403);

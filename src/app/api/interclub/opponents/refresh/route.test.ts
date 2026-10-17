@@ -14,6 +14,7 @@ import type { NextRequest } from "next/server";
 
 const h = vi.hoisted(() => ({
   access: { ok: true } as { ok: boolean; status?: number },
+  admin: false,
   fixture: null as null | { snOpponentTeamId: string | null; date?: string },
   rencontres: [] as Array<{ snOpponentTeamId: string | null }>,
   findUnique: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock("@/lib/interclub-access", () => ({
       : { ok: false, response: new Response(null, { status: h.access.status ?? 401 }) as unknown },
   ),
 }));
+vi.mock("@/lib/admin", () => ({ isAdminEmail: vi.fn(() => h.admin) }));
 vi.mock("@/lib/db", () => ({
   prisma: {
     interclub: {
@@ -53,6 +55,7 @@ const req = (qs = "?teamId=t1") =>
 
 beforeEach(() => {
   h.access = { ok: true };
+  h.admin = false;
   h.fixture = null;
   h.rencontres = [];
   h.findUnique.mockReset().mockImplementation(async () => h.fixture);
@@ -116,7 +119,38 @@ describe("POST /api/interclub/opponents/refresh", () => {
     });
   });
 
-  describe("par équipe — la poule, à la profondeur du menu", () => {
+  // `force` et le chemin global étaient ouverts à tout membre, sans limite, alors que l'écran
+  // n'emploie que `?fixtureId=…` sans `force`. Ce sont des gestes d'admin.
+  describe("ce qu'un membre NON admin peut déclencher", () => {
+    it("`force=1` est IGNORÉ sur une rencontre : la fraîcheur et le repos après échec tiennent", async () => {
+      h.fixture = { snOpponentTeamId: "161092", date: "2027-03-04" };
+      const res = await POST(req("?fixtureId=f1&force=1"));
+      expect(res.status).toBe(200);
+      expect(h.refresh).toHaveBeenCalledWith(["161092"], expect.objectContaining({ force: false }));
+    });
+
+    it("le chemin global est refusé (403), sans lecture ni sortie réseau", async () => {
+      for (const qs of ["", "?teamId=t1", "?teamId=t1&force=1"]) {
+        const res = await POST(req(qs));
+        expect(res.status).toBe(403);
+      }
+      expect(h.findMany).not.toHaveBeenCalled();
+      expect(h.refresh).not.toHaveBeenCalled();
+    });
+
+    it("un admin, lui, garde `force` sur une rencontre", async () => {
+      h.admin = true;
+      h.fixture = { snOpponentTeamId: "161092", date: "2027-03-04" };
+      await POST(req("?fixtureId=f1&force=1"));
+      expect(h.refresh).toHaveBeenCalledWith(["161092"], expect.objectContaining({ force: true }));
+    });
+  });
+
+  describe("par équipe — la poule, à la profondeur du menu (admin)", () => {
+    beforeEach(() => {
+      h.admin = true;
+    });
+
     it("lit exactement `MAX_RENCONTRES` rencontres, les plus RÉCENTES", async () => {
       // Croissant, le `take` retiendrait les plus anciennes, et la poule en cours ne serait
       // jamais rafraîchie passé la quarantième rencontre. Même profondeur que `mergeOpponents` :
@@ -159,6 +193,7 @@ describe("POST /api/interclub/opponents/refresh", () => {
   });
 
   it("⚠️ garde `unreadable` et `failed` SÉPARÉS jusqu'à l'écran", async () => {
+    h.admin = true;
     // Le premier veut dire que le rendu de squashnet a changé et qu'il faut recapter une
     // fixture ; le second qu'ils n'ont pas répondu et qu'il faut réessayer. Les confondre
     // enverrait chercher un bug qui n'existe pas.

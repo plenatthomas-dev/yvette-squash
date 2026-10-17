@@ -22,8 +22,18 @@ const h = vi.hoisted(() => ({
   members: [] as Array<Record<string, unknown>>,
   guests: [] as Array<Record<string, unknown>>,
   answers: [] as Array<Record<string, unknown>>,
-  /** Ce que chaque `interclub.update` a écrit : les marqueurs d'idempotence. */
+  /** Ce que chaque PRISE de marqueur (`updateMany` sur `null`) a écrit. */
   updates: [] as Array<Record<string, unknown>>,
+  /**
+   * Les marqueurs PRIS, `id:marqueur` — l'état de la base que l'`updateMany` conditionné
+   * consulte. C'est lui qui rend la prise atomique dans le faux comme dans Postgres : deux
+   * passages qui demandent le même marqueur, un seul obtient `count: 1`.
+   */
+  pris: new Set<string>(),
+  /** Les marqueurs RENDUS après une erreur (`updateMany` qui remet `null`). */
+  rendus: [] as string[],
+  /** Ordre des écritures et des envois, pour vérifier que la prise PRÉCÈDE l'envoi. */
+  ordre: [] as string[],
   calls: [] as unknown[][],
   reminders: [] as unknown[][],
   digests: [] as unknown[][],
@@ -40,6 +50,7 @@ vi.mock("@/lib/cron-run", () => ({ recordCronRun: vi.fn() }));
 vi.mock("@/lib/interclub-gate", () => ({ todayISO: () => "2026-10-01" }));
 vi.mock("@/lib/interclub-notify", () => ({
   notifyAvailabilityCall: vi.fn(async (...a: unknown[]) => {
+    h.ordre.push("envoi");
     h.calls.push(a);
   }),
   notifyAvailabilityReminder: vi.fn(async (...a: unknown[]) => {
@@ -56,10 +67,25 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     interclub: {
       findMany: vi.fn(async () => h.fixtures),
-      update: vi.fn(async (args: { data: Record<string, unknown> }) => {
-        h.updates.push(args.data);
-        return {};
-      }),
+      // La prise (`where: { id, marqueur: null }`) et la restitution (`where: { id, marqueur:
+      // <Date> }`, `data: { marqueur: null }`) passent toutes deux par ici.
+      updateMany: vi.fn(
+        async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+          const { id, ...reste } = args.where;
+          const [marqueur, attendu] = Object.entries(reste)[0];
+          const cle = `${id}:${marqueur}`;
+          if (attendu === null) {
+            if (h.pris.has(cle)) return { count: 0 };
+            h.pris.add(cle);
+            h.ordre.push("prise");
+            h.updates.push(args.data);
+            return { count: 1 };
+          }
+          h.pris.delete(cle);
+          h.rendus.push(cle);
+          return { count: 1 };
+        },
+      ),
     },
     user: { findMany: vi.fn(async () => h.members) },
     interclubGuest: { findMany: vi.fn(async () => h.guests) },
@@ -110,6 +136,9 @@ beforeEach(() => {
   h.guests = [];
   h.answers = [];
   h.updates = [];
+  h.pris = new Set();
+  h.rendus = [];
+  h.ordre = [];
   h.calls = [];
   h.reminders = [];
   h.digests = [];
@@ -314,7 +343,7 @@ describe("relance (J-3) et récapitulatif du capitaine", () => {
       });
     });
 
-    it("marque la rencontre APRÈS l'envoi, et ne repasse pas le lendemain", async () => {
+    it("marque la rencontre, et ne repasse pas le lendemain", async () => {
       h.fixtures = [veille()];
       await GET(req());
       expect(h.updates.at(-1)).toHaveProperty("eveRemindedAt");
@@ -373,5 +402,65 @@ describe("relance (J-3) et récapitulatif du capitaine", () => {
     await GET(req());
     expect(h.reminders).toEqual([]);
     expect(h.digests[0][3]).toMatchObject({ yes: 0, maybe: 2 });
+  });
+});
+
+// LE MARQUEUR SE PREND AVANT L'ENVOI.
+//
+// Il était posé APRÈS, par un `update` inconditionnel : deux exécutions concurrentes (réessai de
+// la plateforme, déclenchement manuel pendant le passage planifié) lisaient toutes deux `null`
+// et envoyaient toutes deux. L'argument de l'ancien ordre — « sinon on perd l'appel si l'envoi
+// échoue » — ne tenait plus : `sendTo` avale déjà toute erreur de push.
+describe("deux passages concurrents n'envoient qu'une fois", () => {
+  it("prend le marqueur AVANT d'envoyer", async () => {
+    h.fixtures = [fixture()];
+    await GET(req());
+    expect(h.ordre).toEqual(["prise", "envoi"]);
+  });
+
+  it("⚠️ deux exécutions simultanées → UN seul appel", async () => {
+    h.fixtures = [fixture()];
+    const [a, b] = await Promise.all([GET(req()), GET(req())]);
+    const corps = [await a.json(), await b.json()];
+    expect(h.calls).toHaveLength(1);
+    expect(corps.map((c) => c.called).sort()).toEqual([0, 1]);
+  });
+
+  it("un marqueur déjà pris ailleurs → rien ne part, et ce n'est pas un échec", async () => {
+    h.fixtures = [fixture()];
+    h.pris.add("f1:availabilityOpenedAt");
+    const body = await (await GET(req())).json();
+    expect(h.calls).toEqual([]);
+    expect(body).toMatchObject({ called: 0, failed: 0 });
+  });
+
+  it("la relance et le récap ne partent qu'une fois aussi", async () => {
+    h.fixtures = [fixture({ date: "2026-10-03", availabilityOpenedAt: new Date("2026-09-25") })];
+    await Promise.all([GET(req()), GET(req())]);
+    expect(h.digests).toHaveLength(1);
+  });
+});
+
+describe("une rencontre en panne n'interrompt pas les autres", () => {
+  it("continue la boucle, REND le marqueur de la rencontre en échec, et le signale", async () => {
+    const { prisma } = await import("@/lib/db");
+    // La lecture des destinataires casse sur la PREMIÈRE rencontre (relance), pas sur la seconde.
+    vi.mocked(prisma.user.findMany).mockRejectedValueOnce(new Error("base indisponible"));
+    h.fixtures = [
+      fixture({ id: "f-panne", date: "2026-10-03", availabilityOpenedAt: new Date("2026-09-25") }),
+      fixture({ id: "f-ok" }),
+    ];
+    const body = await (await GET(req())).json();
+
+    // La seconde a bien reçu son appel.
+    expect(h.calls).toHaveLength(1);
+    expect(body).toMatchObject({ called: 1, failed: 1 });
+    // Le marqueur de la première est rendu : le passage du lendemain retentera.
+    expect(h.rendus).toEqual(["f-panne:availabilityRemindedAt"]);
+    expect(h.pris.has("f-panne:availabilityRemindedAt")).toBe(false);
+    // Et le tableau de bord le dit.
+    const [, ok, info] = vi.mocked(recordCronRun).mock.calls[0];
+    expect(ok).toBe(false);
+    expect(String(info)).toMatch(/ÉCHEC sur 1 rencontre/);
   });
 });

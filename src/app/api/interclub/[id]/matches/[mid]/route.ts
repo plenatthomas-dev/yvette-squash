@@ -377,6 +377,23 @@ export async function PATCH(
           data.scorerClaimedAt = null;
           data.liveJson = null;
         }
+        // LE JEU EN COURS NE SURVIT PAS À UNE CORRECTION DES JEUX TERMINÉS.
+        //
+        // `liveJson` décrit le jeu qui SUIT les jeux enregistrés : il n'a de sens que posé sur
+        // ces jeux-là. On ne le vidait pourtant que sur un match GAGNÉ, si bien qu'une saisie
+        // partielle — un capitaine qui entre le jeu 1 à la main, ou qui vide la liste pour
+        // ressaisir — laissait derrière elle l'ancien « 6-4 en cours » : la fiche l'affichait à
+        // la suite des nouveaux jeux, l'average (`runningTally`) le comptait, et le marqueur
+        // suivant le reprenait à l'amorçage (`seedEvents`) comme s'il était toujours joué.
+        //
+        // Dès que les jeux SAISIS diffèrent de ceux de la base, l'instantané part donc. Une
+        // écriture qui renvoie exactement les mêmes jeux (composition et score enregistrés d'un
+        // même geste, double soumission) n'y touche pas : le jeu en cours y reste vrai.
+        const saisis = parsedGames;
+        const memesJeux =
+          m.games.length === saisis.length &&
+          m.games.every((g, i) => g.pointsHome === saisis[i].home && g.pointsAway === saisis[i].away);
+        if (!memesJeux) data.liveJson = null;
       }
 
       // RIEN À ÉCRIRE ⇒ ON N'ÉCRIT PAS.
