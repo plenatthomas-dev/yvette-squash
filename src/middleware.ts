@@ -121,6 +121,6 @@ export function middleware(req: NextRequest) {
 // logo…). Le nonce/CSP scripts n'a de sens que sur les pages.
 export const config = {
   matcher: [
-    "/((?!api|_next/static|_next/image|favicon.ico|sw.js|manifest.webmanifest|.*\\.(?:jpe?g|png|svg|ico|webmanifest)$).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|sw.js|manifest.webmanifest|.*\\.(?:jpe?g|png|webp|svg|ico|webmanifest)$).*)",
   ],
 };

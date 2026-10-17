@@ -55,7 +55,8 @@ function moveFocus(from: HTMLElement, dRow: number, dCol: number, toEnd?: "start
   const step = dCol < 0 || toEnd === "start" ? -1 : 1;
   for (let i = targetCol; i >= 0 && i < cols.length; i += step) {
     const candidate = cols[i] as HTMLElement;
-    if (candidate.tabIndex === 0) {
+    // Une case INTERACTIVE, qu'elle soit l'arrêt de Tab (0) ou non (-1, tabindex roulant).
+    if (candidate.getAttribute("role") === "button") {
       candidate.focus();
       return;
     }
@@ -138,6 +139,11 @@ export function PlanningGrid({
   // On coche des créneaux libres (un seul terrain par horaire, règle ResaMania), puis on
   // réserve tout d'un coup. La sélection se vide dès qu'on quitte le mode.
   const [selected, setSelected] = useState<Set<string>>(new Set()); // ids de slots
+  // TABINDEX ROULANT (audit 2026-10, point 29) : UNE seule case de la grille est dans l'ordre
+  // de tabulation — la dernière touchée, ou la première interactive. Tab entre dans la grille
+  // puis en sort d'un coup ; les flèches s'y déplacent. Avant, chaque case libre était un arrêt
+  // de Tab : une cinquantaine pour traverser un après-midi au clavier.
+  const [active, setActive] = useState<string | null>(null);
   useEffect(() => {
     if (!selMode) setSelected(new Set());
   }, [selMode]);
@@ -194,6 +200,31 @@ export function PlanningGrid({
     return true;
   };
 
+  // La case porte-t-elle une action ? Même règle que le rendu plus bas — c'est elle qui décide
+  // de l'arrêt de tabulation.
+  const interactive = (slot: Slot): boolean => {
+    if (pendingIds?.has(slot.id)) return false;
+    if (slot.mine) return !selMode;
+    if (slot.bookedBy) return !selMode && new Date(slot.startsAt).getTime() >= now;
+    if (slot.bookable) {
+      if (new Date(slot.startsAt).getTime() < now) return false;
+      return selMode ? !timeHasMine(slot.startsAt) : true;
+    }
+    return false;
+  };
+  const ordre = times.flatMap((t) =>
+    planning.courts.map((c) => byKey.get(c.id + "|" + t)).filter((x): x is Slot => !!x && interactive(x)),
+  );
+  const tabStop = ordre.some((x) => x.id === active) ? active : (ordre[0]?.id ?? null);
+  /** Attributs clavier d'une case interactive : un seul arrêt de Tab, focus suivi. */
+  const roving = (slot: Slot) => ({
+    tabIndex: slot.id === tabStop ? 0 : -1,
+    onFocus: () => setActive(slot.id),
+  });
+  /** Ce que le lecteur d'écran annonce : terrain, horaire, état — la case seule ne disait rien. */
+  const label = (courtName: string, slot: Slot, etat: string) =>
+    `${courtName}, ${fmtTime(slot.startsAt)} : ${etat}`;
+
   // Coche/décoche un créneau (radio par horaire : au plus un terrain à la même heure).
   const toggleSel = (slot: Slot) => {
     setSelected((prev) => {
@@ -242,9 +273,9 @@ export function PlanningGrid({
         <table className="planning" onKeyDown={onGridKey}>
           <thead>
             <tr>
-              <th className="time">Heure</th>
+              <th className="time" scope="col">Heure</th>
               {planning.courts.map((c) => (
-                <th key={c.id}>{c.name}</th>
+                <th key={c.id} scope="col">{c.name}</th>
               ))}
             </tr>
           </thead>
@@ -253,7 +284,7 @@ export function PlanningGrid({
               const end = endByTime.get(t);
               return (
                 <tr key={t}>
-                  <th className="time">
+                  <th className="time" scope="row">
                     <span className="t-start">{fmtTime(t)}</span>
                     {end && <span className="t-end">{fmtTime(end)}</span>}
                     {!selMode && rowComplete(t) && (() => {
@@ -326,8 +357,9 @@ export function PlanningGrid({
                             ? {}
                             : {
                                 role: "button" as const,
-                                tabIndex: 0,
+                                ...roving(slot),
                                 title: "Ta réservation — cliquer pour annuler",
+                                "aria-label": label(c.name, slot, "ta réservation, appuie pour annuler"),
                                 onClick: () => onCancelMine(slot),
                                 onKeyDown: onKey(() => onCancelMine(slot)),
                               })}
@@ -356,7 +388,7 @@ export function PlanningGrid({
                       );
                       if (!canToggle) {
                         return (
-                          <td key={c.id} className={cls} title={title}>
+                          <td key={c.id} className={cls} title={title} aria-label={label(c.name, slot, `réservé par ${slot.bookedBy}`)}>
                             {content}
                           </td>
                         );
@@ -366,8 +398,13 @@ export function PlanningGrid({
                           key={c.id}
                           className={cls}
                           role="button"
-                          tabIndex={0}
+                          {...roving(slot)}
                           aria-pressed={attending}
+                          aria-label={label(
+                            c.name,
+                            slot,
+                            `réservé par ${slot.bookedBy}${attending ? ", tu es +1" : ", appuie pour signaler ta présence"}`,
+                          )}
                           title={title}
                           onClick={() => onTogglePresence(slot)}
                           onKeyDown={onKey(() => onTogglePresence(slot))}
@@ -384,6 +421,7 @@ export function PlanningGrid({
                             key={c.id}
                             className="cell past"
                             title="Créneau passé"
+                            aria-label={label(c.name, slot, "passé")}
                           >
                             —
                           </td>
@@ -405,12 +443,23 @@ export function PlanningGrid({
                           {...(act
                             ? {
                                 role: "button" as const,
-                                tabIndex: 0,
+                                ...roving(slot),
                                 onClick: act,
                                 onKeyDown: onKey(act),
                               }
                             : {})}
                           aria-pressed={selMode ? isSel : undefined}
+                          aria-label={label(
+                            c.name,
+                            slot,
+                            selMode
+                              ? canSel
+                                ? isSel
+                                  ? "sélectionné"
+                                  : "libre, appuie pour sélectionner"
+                                : "libre, mais tu joues déjà à cet horaire"
+                              : "libre, appuie pour réserver",
+                          )}
                           title={
                             selMode
                               ? canSel
@@ -428,7 +477,12 @@ export function PlanningGrid({
                       // proposée via le bouton 🕒 de l'en-tête d'horaire, uniquement quand
                       // l'horaire est complet (aucun terrain libre).
                       return (
-                        <td key={c.id} className="cell booked" title="Réservé (hors groupe)">
+                        <td
+                          key={c.id}
+                          className="cell booked"
+                          title="Réservé (hors groupe)"
+                          aria-label={label(c.name, slot, "réservé hors groupe")}
+                        >
                           Réservé
                         </td>
                       );

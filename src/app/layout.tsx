@@ -8,6 +8,7 @@ import UpdateReloader from "@/components/UpdateReloader";
 import ChunkErrorReload from "@/components/ChunkErrorReload";
 import AnnounceModal from "@/components/AnnounceModal";
 import FeatureProvider from "@/components/FeatureProvider";
+import { getFeatures } from "@/lib/features-server";
 import InstallAppPrompt from "@/components/InstallAppPrompt";
 import AndroidAppPrompt from "@/components/AndroidAppPrompt";
 import "@picocss/pico/css/pico.min.css";
@@ -39,7 +40,9 @@ export const viewport: Viewport = {
 // Applique le thème choisi (localStorage) avant le premier rendu → pas de flash.
 // Absent ou "system" → aucun attribut, Pico suit prefers-color-scheme. Les thèmes
 // explicites (light/dark/rose) sont posés en data-theme dès le paint initial.
-const themeScript = `(function(){try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark'||t==='rose'){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();`;
+// La couleur de la barre du navigateur suit aussi le thème CHOISI (cf. lib/theme : mêmes
+// valeurs, à changer ensemble).
+const themeScript = `(function(){try{var t=localStorage.getItem('theme');var c={light:'#ffffff',dark:'#0f1115',rose:'#ffc9e3'}[t];if(c){document.documentElement.setAttribute('data-theme',t);var m=document.querySelectorAll('meta[name="theme-color"]');for(var i=0;i<m.length;i++){m[i].setAttribute('content',c);}}}catch(e){}})();`;
 
 export default async function RootLayout({
   children,
@@ -49,6 +52,9 @@ export default async function RootLayout({
   // Nonce posé par src/middleware.ts (CSP stricte). On le passe au script de thème inline
   // pour qu'il reste autorisé. Next propage ce même nonce à ses propres scripts tout seul.
   const nonce = (await headers()).get("x-nonce") ?? undefined;
+  // Les flags effectifs, lus ICI plutôt que par un fetch client (audit 2026-10, point 26) : le
+  // layout est déjà dynamique, et `getFeatures` ne jette jamais (repli sur l'env).
+  const features = await getFeatures();
   return (
     <html lang="fr" suppressHydrationWarning>
       <body>
@@ -57,7 +63,7 @@ export default async function RootLayout({
         <MaintenanceBanner />
         <UpdateReloader />
         <AnnouncementBanner />
-        <FeatureProvider>{children}</FeatureProvider>
+        <FeatureProvider initial={features}>{children}</FeatureProvider>
         <AnnounceModal />
         <InstallAppPrompt />
         <AndroidAppPrompt />

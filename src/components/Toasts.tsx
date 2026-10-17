@@ -13,6 +13,8 @@
 // page.tsx), le fermer n'est qu'un raccourci pour le doigt — en faire une cible clavier
 // volerait le focus à chaque notification.
 
+import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+
 export type ToastType = "ok" | "err" | "info";
 export type Toast = { id: number; type: ToastType; msg: string };
 
@@ -69,4 +71,41 @@ export function Toasts({
       </div>
     </div>
   );
+}
+
+/** Afficher un toast. Stable : peut figurer dans les dépendances d'un hook sans le relancer. */
+export type ToastFn = (type: ToastType, msg: string) => void;
+
+const ToastContext = createContext<ToastFn>(() => {});
+
+/**
+ * L'état des toasts et leur pile, hors de la page (audit 2026-10, point 28 : première étape du
+ * découpage de l'écran d'accueil). Tout composant sous le fournisseur toaste avec `useToast()`,
+ * sans qu'on lui fasse descendre un `toast` de main en main.
+ */
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const [items, setItems] = useState<Toast[]>([]);
+  // `dismiss` est stable (aucune dépendance) : `toast`, qui en dépend, le reste donc aussi — et
+  // c'est requis, cf. le commentaire de `handleExpired` dans HomeApp.
+  const dismiss = useCallback((id: number) => {
+    setItems((t) => t.filter((x) => x.id !== id));
+  }, []);
+  const toast = useCallback<ToastFn>(
+    (type, msg) => {
+      const id = Date.now() + Math.random();
+      setItems((t) => [...t, { id, type, msg }]);
+      setTimeout(() => dismiss(id), toastDuration(type, msg));
+    },
+    [dismiss],
+  );
+  return (
+    <ToastContext.Provider value={toast}>
+      {children}
+      <Toasts items={items} onDismiss={dismiss} />
+    </ToastContext.Provider>
+  );
+}
+
+export function useToast(): ToastFn {
+  return useContext(ToastContext);
 }

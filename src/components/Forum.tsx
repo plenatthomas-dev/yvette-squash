@@ -1,5 +1,7 @@
 "use client";
 
+import "./Forum.css";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readOk } from "@/lib/apiFetch";
 import { onForeground } from "@/lib/onForeground";

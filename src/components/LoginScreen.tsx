@@ -267,7 +267,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   return (
     <main className="login">
       <h1 className="sr-only">Squash de l'Yvette</h1>
-      <img src="/logo_squash.jpeg" alt="Squash de l'Yvette" className="logo-hero" />
+      <img src="/logo_squash-336.webp" alt="Squash de l'Yvette" className="logo-hero" width={168} height={168} />
 
       {/* Onglet « Par email » : actif si le flag est ON ; sinon affiché grisé (désactivé)
           avec un tooltip « en cours de développement ». Seule ResaMania reste utilisable. */}

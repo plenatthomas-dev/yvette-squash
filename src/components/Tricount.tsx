@@ -1,5 +1,7 @@
 "use client";
 
+import "./Tricount.css";
+
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   MAX_COMMENT_LEN,

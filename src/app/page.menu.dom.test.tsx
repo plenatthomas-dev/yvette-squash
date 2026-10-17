@@ -54,7 +54,7 @@ vi.mock("@/components/FeatureProvider", () => ({
   useFeaturesReady: () => true,
 }));
 
-import Home from "./page";
+import Home from "./HomeApp";
 
 const response = (data: unknown) => ({ ok: true, status: 200, json: async () => data }) as Response;
 

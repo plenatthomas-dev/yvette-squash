@@ -9,7 +9,7 @@
 // Rappel : ceci ne protège rien. Couper un flag ici ne fait que masquer l'UI ; le refus vient
 // des routes API (features-server).
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { ENV_FEATURES, parseOverrides, resolveFeatures, type Features } from "@/lib/features";
 
@@ -67,9 +67,24 @@ export function notifyFeaturesChanged(): void {
   window.dispatchEvent(new CustomEvent(FEATURES_EVENT));
 }
 
-export default function FeatureProvider({ children }: { children: React.ReactNode }) {
-  const [features, setFeatures] = useState<Features>(ENV_FEATURES);
-  const [ready, setReady] = useState(false);
+export default function FeatureProvider({
+  children,
+  initial,
+}: {
+  children: React.ReactNode;
+  /**
+   * État effectif LU PAR LE SERVEUR au rendu du layout (audit 2026-10, point 26). Fourni, le
+   * premier rendu est juste ET `ready` d'emblée : plus d'aller-retour avant de savoir, plus de
+   * « pas encore chargé » lu comme « coupé ». Absent (tests, échec de lecture) : comportement
+   * d'avant, défauts d'env puis /api/features.
+   */
+  initial?: Features;
+}) {
+  const [features, setFeatures] = useState<Features>(initial ?? ENV_FEATURES);
+  const [ready, setReady] = useState(initial !== undefined);
+  // Le premier passage de l'effet de route n'a rien à relire quand le serveur vient de servir
+  // l'état : il ne relira qu'aux changements de route suivants.
+  const servedByServer = useRef(initial !== undefined);
   // Relit aussi à chaque changement de route : couvre le retour depuis /admin même si le
   // signal s'est perdu, et le cas d'un flag basculé depuis un autre appareil.
   const pathname = usePathname();
@@ -93,6 +108,10 @@ export default function FeatureProvider({ children }: { children: React.ReactNod
   }, []);
 
   useEffect(() => {
+    if (servedByServer.current) {
+      servedByServer.current = false;
+      return;
+    }
     void refresh();
   }, [refresh, pathname]);
 
