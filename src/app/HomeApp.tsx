@@ -449,7 +449,6 @@ function HomeScreen({ initialMe }: { initialMe?: InitialMe }) {
       /* la cloche est un confort : son échec ne doit rien interrompre */
     }
     // `notifs` n'est pas une dépendance : il n'est ici qu'un type, jamais lu.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Alerte « terrain libéré » quand l'appli est OUVERTE : le service worker relaie la notification
@@ -1323,6 +1322,9 @@ function HomeScreen({ initialMe }: { initialMe?: InitialMe }) {
                         icon: <BellIcon />,
                         badge: pendingRequests > 0 ? pendingRequests : undefined,
                         onClick: () => {
+                          // Chargement COMPLET voulu : /admin est une autre appli (son propre
+                          // état, ses propres lectures), rien de l'accueil n'y sert.
+                          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
                           window.location.href = "/admin";
                         },
                       },

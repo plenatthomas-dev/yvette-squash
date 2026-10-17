@@ -507,7 +507,6 @@ export default function AdminPage() {
     void loadTeams();
     // `loadTeams` est stable pour ce qui nous intéresse (il ne lit que des setters) ; le
     // relister en dépendance rejouerait la requête à chaque rendu.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interclub]);
 
   const act = async (id: string, action: "approve" | "reject" | "reject-block") => {

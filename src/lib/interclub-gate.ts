@@ -229,7 +229,9 @@ export async function getLiveFixtures(): Promise<LiveFixture[]> {
  */
 export function interclubChanged(): void {
   try {
-    revalidateTag(TAG);
+    // `{ expire: 0 }` : expiration IMMÉDIATE, comme avant Next 16 (qui exige désormais ce second
+    // argument — un profil « max » servirait l'ancienne valeur le temps de la recalculer).
+    revalidateTag(TAG, { expire: 0 });
   } catch (e) {
     // Ne JAMAIS faire échouer une écriture de score pour un problème de cache : au pire les
     // spectateurs voient l'ancien état pendant le TTL (30 s). `revalidateTag` lève hors

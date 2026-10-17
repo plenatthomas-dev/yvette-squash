@@ -144,5 +144,7 @@ export async function noteCronAlive(): Promise<void> {
  * le TTL : au pire, cette alerte-là n'est surveillée qu'une heure plus tard.
  */
 export function alertsChanged(): void {
-  revalidateTag(TAG);
+  // `{ expire: 0 }` : expiration IMMÉDIATE, comme avant Next 16 (qui exige désormais ce second
+  // argument — un profil « max » servirait l'ancienne valeur le temps de la recalculer).
+  revalidateTag(TAG, { expire: 0 });
 }

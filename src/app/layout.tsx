@@ -49,7 +49,7 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // Nonce posé par src/middleware.ts (CSP stricte). On le passe au script de thème inline
+  // Nonce posé par src/proxy.ts (CSP stricte). On le passe au script de thème inline
   // pour qu'il reste autorisé. Next propage ce même nonce à ses propres scripts tout seul.
   const nonce = (await headers()).get("x-nonce") ?? undefined;
   // Les flags effectifs, lus ICI plutôt que par un fetch client (audit 2026-10, point 26) : le

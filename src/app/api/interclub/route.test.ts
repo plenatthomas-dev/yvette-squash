@@ -344,7 +344,7 @@ describe("POST /api/interclub", () => {
     expect(h.created?.createdById).toBe("u1");
     // Une rencontre du jour de plus change le bandeau « En direct » : sans cette invalidation,
     // les spectateurs ne la verraient qu'à l'expiration du cache.
-    expect(h.revalidateTag).toHaveBeenCalledExactlyOnceWith("interclub-live");
+    expect(h.revalidateTag).toHaveBeenCalledExactlyOnceWith("interclub-live", { expire: 0 });
   });
 
   it("403 pour un membre non admin : les rencontres viennent du calendrier de la ligue", async () => {

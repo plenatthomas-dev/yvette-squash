@@ -20,7 +20,7 @@ const { version } = createRequire(import.meta.url)("./package.json");
 const APP_VERSION = version.split(".").slice(0, 2).join(".");
 
 // Headers de sécurité appliqués à toutes les réponses (pages + API).
-// NB : la Content-Security-Policy N'EST PLUS ICI — elle est posée par src/middleware.ts
+// NB : la Content-Security-Policy N'EST PLUS ICI — elle est posée par src/proxy.ts
 // (CSP stricte à nonce + strict-dynamic). La mettre aussi ici créerait un DEUXIÈME en-tête
 // CSP, et le navigateur appliquerait l'intersection des deux → casse. Une seule source.
 const securityHeaders = [

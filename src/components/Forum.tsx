@@ -594,7 +594,6 @@ export default function Forum({
     };
     // `limit` n'est volontairement PAS une dépendance : changer de page ne doit pas
     // reconstruire la connexion. Le rattrapage relit de toute façon depuis l'ancre.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [charge, retirer, appliquerReaction, inserer]);
 
   // Oubli des « en train d'écrire » : sans ce balayage, quelqu'un qui ferme son onglet en

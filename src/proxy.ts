@@ -97,7 +97,9 @@ function buildCsp(nonce: string): string {
   ].join("; ");
 }
 
-export function middleware(req: NextRequest) {
+// Next 16 : `middleware.ts` est devenu `proxy.ts`, et la fonction exportée `proxy` (audit
+// 2026-10, point 31). Rien d'autre ne change : même CSP, même matcher.
+export function proxy(req: NextRequest) {
   // btoa(randomUUID) → nonce base64 (~122 bits d'entropie), sans dépendre de Buffer
   // (compatible edge comme node).
   const nonce = btoa(crypto.randomUUID());

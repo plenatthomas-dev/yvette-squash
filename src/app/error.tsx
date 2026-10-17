@@ -29,9 +29,12 @@ export default function Error({
         <button type="button" onClick={() => reset()}>
           Réessayer
         </button>
-        <button type="button" className="secondary" onClick={() => window.location.assign("/")}>
+        {/* Un lien, pas `router.push` : après une erreur, mieux vaut repartir d'un document
+            neuf que d'un arbre React qui vient de casser. */}
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+        <a href="/" role="button" className="secondary">
           Revenir à l&apos;accueil
-        </button>
+        </a>
       </div>
       {error.digest && (
         <p className="muted tiny" style={{ marginTop: 16 }}>

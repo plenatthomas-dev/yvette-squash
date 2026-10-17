@@ -151,7 +151,6 @@ describe.skipIf(SANS_BASE)("SUR VRAIE BASE — deux transactions concurrentes", 
 
     // La réponse tient en une ligne, et c'est elle qu'on vient chercher :
     const verdict = [ra, rb].map((r) => (r.status === "fulfilled" ? "ok" : codePrisma(r.reason)));
-    // eslint-disable-next-line no-console
     console.log(`[soupçon A] A=${verdict[0]} · B=${verdict[1]}`);
 
     expect(ra.status).toBe("fulfilled");
@@ -217,7 +216,6 @@ describe.skipIf(SANS_BASE)("SUR VRAIE BASE — deux transactions concurrentes", 
     );
 
     const [ra, rb] = await Promise.allSettled([a, b]);
-    // eslint-disable-next-line no-console
     console.log(
       `[soupçon A2] A=${ra.status === "fulfilled" ? "ok" : codePrisma(ra.reason)} · ` +
         `B=${rb.status === "fulfilled" ? "ok" : codePrisma(rb.reason)}`,
@@ -268,7 +266,6 @@ describe.skipIf(SANS_BASE)("SUR VRAIE BASE — deux transactions concurrentes", 
     });
 
     const [ra, rb] = await Promise.allSettled([a, b]);
-    // eslint-disable-next-line no-console
     console.log(
       `[soupçon A'] A=${ra.status === "fulfilled" ? "ok" : codePrisma(ra.reason)} · ` +
         `B=${rb.status === "fulfilled" ? "ok" : codePrisma(rb.reason)} en ${toursDeB} tour(s)`,
@@ -306,7 +303,6 @@ describe.skipIf(SANS_BASE)("SUR VRAIE BASE — deux transactions concurrentes", 
       return "jamais atteint";
     }).catch((e) => e);
     const ecoule = Date.now() - t0;
-    // eslint-disable-next-line no-console
     console.log(`[soupçon B1] ${codePrisma(r)} après ${ecoule} ms, ${tours} tentative(s)`);
 
     expect(codePrisma(r)).toBe("P2028"); // « Transaction API error … expired »
@@ -367,7 +363,6 @@ describe.skipIf(SANS_BASE)("SUR VRAIE BASE — deux transactions concurrentes", 
       relacher.ouvrir();
       await longue;
 
-      // eslint-disable-next-line no-console
       console.log(`[soupçon B3] ${r === "ok" ? "ok" : codePrisma(r)} après ${attendu} ms`);
       expect(r).not.toBe("ok");
       expect(codePrisma(r)).toBe("P2028");
@@ -412,7 +407,6 @@ describe.skipIf(SANS_BASE)("SUR VRAIE BASE — deux transactions concurrentes", 
       const attendu = Date.now() - t0;
       await longue;
 
-      // eslint-disable-next-line no-console
       console.log(`[soupçon B4] ${r === "ok" ? "ok" : codePrisma(r)} après ${attendu} ms`);
       expect(r).toBe("ok");
       expect(attendu).toBeGreaterThan(2_000); // elle a bien dépassé le défaut, sans en mourir
@@ -509,7 +503,6 @@ describe.skipIf(SANS_BASE)("SUR VRAIE BASE — deux transactions concurrentes", 
     });
 
     const [ra, rb] = await Promise.allSettled([a, b]);
-    // eslint-disable-next-line no-console
     console.log(
       `[cas C] A=${ra.status === "fulfilled" ? `annonce=${ra.value}` : codePrisma(ra.reason)} · ` +
         `B=${rb.status === "fulfilled" ? `annonce=${rb.value}` : codePrisma(rb.reason)}`,
@@ -558,7 +551,6 @@ describe.skipIf(SANS_BASE)("SUR VRAIE BASE — deux transactions concurrentes", 
       lache(matchId2, luParB, luParA),
     ]);
     const annonces = [ra, rb].filter((r) => r.status === "fulfilled" && r.value === true).length;
-    // eslint-disable-next-line no-console
     console.log(`[cas C2] ${annonces} annonce(s) en Read Committed`);
 
     expect(annonces).toBe(2); // la double annonce, obtenue exprès

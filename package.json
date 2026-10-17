@@ -10,7 +10,7 @@
     "dev": "next dev",
     "build": "prisma generate && npm run db:deploy:retry && next build",
     "start": "next start",
-    "lint": "next lint --max-warnings 0",
+    "lint": "eslint src scripts --max-warnings 0",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:pg": "vitest run --project node pg.test.ts",
@@ -34,7 +34,7 @@
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "botid": "^1.5.11",
-    "next": "^15.5.27",
+    "next": "^16.4.2",
     "nodemailer": "^10.1.0",
     "pusher": "^5.3.4",
     "pusher-js": "^8.6.0",
@@ -52,12 +52,15 @@
     "@types/react-dom": "^19.0.0",
     "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "^6.1.1",
-    "eslint": "^8.57.1",
-    "eslint-config-next": "^15.5.27",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.4.2",
     "jsdom": "^30.0.1",
     "prisma": "^6.2.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.2"
   }
 }
