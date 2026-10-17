@@ -1118,6 +1118,12 @@ model InterclubMatch {
   scorerId        String?
   scorerClaimedAt DateTime?
   liveJson        String? // instantané du match en cours (cf. PlanningSnapshot.payloadJson)
+  // DURÉE DU MATCH, mesurée par le marquage en direct et par lui seul (cf. interclub-duree.ts).
+  // Heure du SERVEUR, jamais celle d'un téléphone. `startedAt` = premier point marqué,
+  // `finishedAt` = point décisif. NULL quand on ne sait pas : un score saisi après coup n'a
+  // pas d'heure, et ces colonnes n'en inventent pas.
+  startedAt       DateTime?
+  finishedAt      DateTime?
   updatedAt       DateTime        @updatedAt
   games           InterclubGame[]
 

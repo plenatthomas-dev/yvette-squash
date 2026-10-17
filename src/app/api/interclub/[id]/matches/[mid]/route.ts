@@ -18,6 +18,7 @@ import {
   scorerIsStale,
   MAX_PLAYER_NAME_LEN,
 } from "@/lib/interclub-db";
+import { correctedGameTimes } from "@/lib/interclub-duree";
 import { findAlignmentClash, findOrderConflict, resolveHomePick } from "@/lib/interclub-roster";
 import {
   findAwayAlignmentClash,
@@ -150,7 +151,11 @@ export async function PATCH(
           // Les POINTS, et pas seulement le nombre : la garde de fraîcheur compare désormais
           // le score des jeux déjà confirmés, un même nombre ne prouvant pas qu'on parle des
           // mêmes jeux (cf. `staleGamesReason`).
-          games: { orderBy: { number: "asc" }, select: { number: true, pointsHome: true, pointsAway: true } },
+          // `finishedAt` : un jeu corrigé garde l'heure à laquelle il s'est fini (cf. plus bas).
+          games: {
+            orderBy: { number: "asc" },
+            select: { number: true, pointsHome: true, pointsAway: true, finishedAt: true },
+          },
           interclub: {
             select: {
               id: true,
@@ -346,6 +351,11 @@ export async function PATCH(
           else away += 1;
         }
         // Remplacement intégral : on efface avant de réécrire.
+        //
+        // Aucune heure n'est INVENTÉE ici (cf. `interclub-duree.ts`) : un jeu corrigé garde
+        // celle du marquage en direct, un jeu ajouté après coup n'en a pas. Pour la même raison,
+        // `startedAt` et `finishedAt` du match ne sont pas touchés.
+        const times = correctedGameTimes(m.games, parsedGames);
         await tx.interclubGame.deleteMany({ where: { matchId: mid } });
         if (parsedGames.length) {
           await tx.interclubGame.createMany({
@@ -354,7 +364,7 @@ export async function PATCH(
               number: i + 1,
               pointsHome: g.home,
               pointsAway: g.away,
-              finishedAt: new Date(),
+              finishedAt: times[i],
             })),
           });
         }
