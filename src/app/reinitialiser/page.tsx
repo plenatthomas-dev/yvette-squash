@@ -7,6 +7,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
 import { useFeatures } from "@/components/FeatureProvider";
+import { readApi, userMessage } from "@/lib/apiFetch";
 
 export default function ResetPasswordPage() {
   const { emailLogin } = useFeatures();
@@ -34,12 +35,13 @@ export default function ResetPasswordPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, password }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Réinitialisation impossible");
+      // `readApi` et non `res.json()` : un 500 au corps vide affichait « Unexpected end of
+      // JSON input », et `userMessage` remplace « Failed to fetch » hors réseau (cf. lib/apiFetch).
+      await readApi(res);
       // Session posée par le serveur → on repart connecté sur l'accueil.
       window.location.href = "/";
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(userMessage(e));
       setBusy(false);
     }
   };
@@ -82,6 +84,7 @@ export default function ResetPasswordPage() {
                 minLength={8}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="new-password"
+                aria-describedby={err ? "reset-error" : undefined}
               />
               <button
                 type="button"
@@ -100,7 +103,13 @@ export default function ResetPasswordPage() {
           </form>
         </>
       )}
-      {err && <div className="notice error">⚠️ {err}</div>}
+      {/* `role="alert"` : l'échec s'affichait sous le formulaire sans être annoncé — au lecteur
+          d'écran, « Enregistrer » ne produisait rien. Relié au champ pour être relu au retour. */}
+      {err && (
+        <div className="notice error" role="alert" id="reset-error">
+          ⚠️ {err}
+        </div>
+      )}
       <PrivacyNotice />
     </main>
   );

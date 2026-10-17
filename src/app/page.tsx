@@ -18,7 +18,7 @@ import { HeaderMenu } from "@/components/HeaderMenu";
 import { LoginScreen } from "@/components/LoginScreen";
 import { LegendInfo } from "@/components/LegendInfo";
 import { Skeleton, EmptyState } from "@/components/Placeholders";
-import { Toasts, type Toast, type ToastType } from "@/components/Toasts";
+import { Toasts, toastDuration, type Toast, type ToastType } from "@/components/Toasts";
 import { ConfirmDialog, type ConfirmOpts, type ConfirmState } from "@/components/ConfirmDialog";
 import {
   LogoutIcon,
@@ -64,7 +64,7 @@ import { useFeatures, useFeaturesReady } from "@/components/FeatureProvider";
 import { runsAsInstalledAndroidApp } from "@/lib/androidApp";
 import { useCloseRequest } from "@/lib/useCloseRequest";
 import { recheckBanner } from "@/components/AnnouncementBanner";
-import { reportMaintenance } from "@/lib/apiFetch";
+import { ApiError, callApi, readApi, reportMaintenance, userMessage } from "@/lib/apiFetch";
 import { unlockAudio, playSuccessJingle, playError, playAlert } from "@/lib/sound";
 
 function toISODate(d: Date): string {
@@ -154,12 +154,22 @@ function inRange(iso: string, r: Range): boolean {
   }
 }
 
+// Réservation dont l'issue est INCONNUE (504 : ResaMania n'a pas répondu à temps). Ni succès
+// ni échec : on renvoie au planning, rechargé en frais. Cf. `onBook`.
+const BOOK_UNKNOWN_MESSAGE = "La réservation n'a pas pu être confirmée : vérifie le planning.";
+
 // Nom du module ouvert, affiché dans le bouton de retour de l'en-tête. Hors du composant :
 // c'est une constante, elle n'a pas à être reconstruite à chaque rendu.
-const SPECIAL_LABEL: Record<string, string> = {
+//
+// TYPÉ SUR LES VUES PLEIN ÉCRAN, et non `Record<string, string>` : le Fil (`forum`) y manquait,
+// et le bouton de retour s'affichait sans nom sur cet écran-là — aucune erreur, puisqu'un
+// `Record<string, …>` accepte toutes les clés absentes. Une vue ajoutée à `lib/views.ts` sans
+// libellé ici ne compile plus. « Le fil » : le nom que lui donne déjà le menu ⋯.
+const SPECIAL_LABEL: Record<Exclude<View, "day" | "week">, string> = {
   money: "Frais partagés",
   tourney: "Tournois",
   interclub: "Interclub",
+  forum: "Le fil",
   captain: "Capitaine",
   scorer: "Marqueur",
 };
@@ -324,11 +334,19 @@ export default function Home() {
     }
   };
 
-  const toast = useCallback((type: ToastType, msg: string) => {
-    const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, type, msg }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3500);
+  // `dismissToast` est stable (aucune dépendance) : `toast`, qui en dépend, le reste donc aussi —
+  // et c'est requis, cf. le commentaire de `handleExpired` plus bas.
+  const dismissToast = useCallback((id: number) => {
+    setToasts((t) => t.filter((x) => x.id !== id));
   }, []);
+  const toast = useCallback(
+    (type: ToastType, msg: string) => {
+      const id = Date.now() + Math.random();
+      setToasts((t) => [...t, { id, type, msg }]);
+      setTimeout(() => dismissToast(id), toastDuration(type, msg));
+    },
+    [dismissToast],
+  );
 
   const askConfirm = useCallback(
     (opts: ConfirmOpts) =>
@@ -555,24 +573,30 @@ export default function Home() {
       try {
         // Séquentiel à dessein : /api/planning réconcilie la base (résas annulées ailleurs),
         // puis /api/bookings lit un journal déjà à jour.
-        const pr = await fetch(`/api/planning?date=${d}${fresh ? "&fresh=1" : ""}`);
+        //
+        // `callApi` et non `fetch` + `res.json()` : ce couple affichait « Failed to fetch » hors
+        // réseau et « Unexpected end of JSON input » sur un 500 au corps vide, en lieu et place
+        // de la grille (cf. lib/apiFetch). Le 401 arrive désormais par l'exception, avec son
+        // statut — d'où son traitement dans le `catch`, APRÈS le contrôle de péremption.
+        const pdata = await callApi<PlanningDay>(`/api/planning?date=${d}${fresh ? "&fresh=1" : ""}`);
         if (request !== planningRequest.current) return;
-        if (pr.status === 401) {
-          setMe(null);
-          return;
-        }
-        const pdata = await pr.json();
-        if (request !== planningRequest.current) return;
-        if (!pr.ok) throw new Error(pdata.error ?? `Erreur ${pr.status}`);
         setPlanning(pdata);
-        const jr = await fetch(`/api/bookings?date=${d}`);
-        const journal = jr.ok ? await jr.json() : [];
+        // Le journal est un COMPLÉMENT de la grille : son échec (réseau perdu entre les deux
+        // appels) ne doit pas effacer un planning qu'on vient d'obtenir. Il l'effaçait — un
+        // TypeError ici tombait dans le `catch` ci-dessous, qui remet le planning à `null`.
+        const journal = await fetch(`/api/bookings?date=${d}`)
+          .then((jr) => (jr.ok ? jr.json() : []))
+          .catch(() => []);
         if (request !== planningRequest.current) return;
         setJournal(journal);
         void loadWaitCounts(d, d, request).catch(() => {});
       } catch (e) {
         if (request !== planningRequest.current) return;
-        setError((e as Error).message);
+        if (e instanceof ApiError && e.status === 401) {
+          setMe(null);
+          return;
+        }
+        setError(userMessage(e));
         setPlanning(null);
       } finally {
         if (request === planningRequest.current) setLoading(false);
@@ -588,21 +612,20 @@ export default function Home() {
     setError(null);
     try {
       // Un seul appel : /api/week renvoie les 7 jours (planning brut, sans réconciliation).
-      const r = await fetch(`/api/week?date=${d}${fresh ? "&fresh=1" : ""}`);
+      // `callApi` : même raison que pour le jour (cf. `load`), même traitement du 401.
+      const wk = await callApi<{ date: string; planning: PlanningDay }[]>(
+        `/api/week?date=${d}${fresh ? "&fresh=1" : ""}`,
+      );
       if (request !== planningRequest.current) return;
-      if (r.status === 401) {
-        setMe(null);
-        return;
-      }
-      const j = await r.json();
-      if (request !== planningRequest.current) return;
-      if (!r.ok) throw new Error(j.error ?? `Erreur ${r.status}`);
-      const wk = j as { date: string; planning: PlanningDay }[];
       setWeek(wk);
       if (wk.length) void loadWaitCounts(wk[0].date, wk[wk.length - 1].date, request).catch(() => {});
     } catch (e) {
       if (request !== planningRequest.current) return;
-      setError((e as Error).message);
+      if (e instanceof ApiError && e.status === 401) {
+        setMe(null);
+        return;
+      }
+      setError(userMessage(e));
       setWeek([]);
     } finally {
       if (request === planningRequest.current) setLoading(false);
@@ -834,7 +857,10 @@ export default function Home() {
     setPendingIds(new Set([slot.id]));
     setBusyVerb("Réservation en cours…");
     try {
-      const res = await fetch("/api/book", {
+      // Un succès peut porter `journalSynced: false` : la résa EST prise chez ResaMania, seule
+      // l'écriture du journal du club a échoué (la réconciliation du planning la rattrapera).
+      // Pour le membre, c'est une réservation confirmée — rien à lui dire de plus.
+      await callApi("/api/book", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -845,21 +871,30 @@ export default function Home() {
           onBehalfOf: actingAsId ?? undefined,
         }),
       });
-      if (handleExpired(res.status)) return;
-      const data = await res.json();
-      if (!res.ok) {
-        // Conflit « même créneau » : notif d'information plutôt qu'une erreur.
-        if (data.code === "overlap") {
-          toast("info", data.error);
-          return;
-        }
-        throw new Error(data.error ?? "le service n'a pas répondu comme prévu");
-      }
       toast("ok", "Réservation confirmée");
       playSuccessJingle(); // petit jingle de succès (réglable dans les Paramètres)
       reload(true); // frais : on vient d'écrire, on doit VOIR le créneau changer
     } catch (e) {
-      toast("err", "Réservation impossible : " + (e as Error).message);
+      if (e instanceof ApiError) {
+        if (handleExpired(e.status ?? 0)) return;
+        // Conflit « même créneau » : notif d'information plutôt qu'une erreur.
+        if (e.code === "overlap") {
+          toast("info", e.message);
+          return;
+        }
+        // 504 = RÉSULTAT INCONNU, pas un échec. ResaMania n'a pas répondu à temps (ou la
+        // fonction a été coupée) : la demande a pu aboutir chez lui sans que personne ne nous
+        // le dise. Écrire « Réservation impossible » pousserait à retaper, donc à réserver deux
+        // fois ou à croire à tort qu'on n'a rien. On renvoie à la seule source de vérité — le
+        // planning — et on le recharge EN FRAIS pour qu'il réponde tout de suite.
+        if (e.status === 504) {
+          toast("err", BOOK_UNKNOWN_MESSAGE);
+          playError();
+          reload(true);
+          return;
+        }
+      }
+      toast("err", "Réservation impossible : " + userMessage(e));
       playError(); // son d'échec de réservation
     } finally {
       setBusy(false);
@@ -882,18 +917,16 @@ export default function Home() {
     if (!ok) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/bookings/${b.id}`, {
+      await callApi(`/api/bookings/${b.id}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ onBehalfOf: onBehalf }),
       });
-      if (handleExpired(res.status)) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "le service n'a pas répondu comme prévu");
       toast("ok", "Réservation annulée");
       reload(true); // frais : on vient d'écrire
     } catch (e) {
-      toast("err", "Annulation impossible : " + (e as Error).message);
+      if (e instanceof ApiError && handleExpired(e.status ?? 0)) return;
+      toast("err", "Annulation impossible : " + userMessage(e));
     } finally {
       setBusy(false);
     }
@@ -913,18 +946,16 @@ export default function Home() {
     setPendingIds(new Set([slot.id]));
     setBusyVerb("Annulation en cours…");
     try {
-      const res = await fetch("/api/cancel-slot", {
+      await callApi("/api/cancel-slot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ classEventId: slot.id }),
       });
-      if (handleExpired(res.status)) return;
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "le service n'a pas répondu comme prévu");
       toast("ok", "Réservation annulée");
       reload(true); // frais : on vient d'écrire
     } catch (e) {
-      toast("err", "Annulation impossible : " + (e as Error).message);
+      if (e instanceof ApiError && handleExpired(e.status ?? 0)) return;
+      toast("err", "Annulation impossible : " + userMessage(e));
     } finally {
       setBusy(false);
       setPendingIds(new Set());
@@ -1038,7 +1069,7 @@ export default function Home() {
         setPendingIds(new Set([slot.id]));
         setProgress({ done: i, total: slots.length });
         try {
-          const res = await fetch("/api/book", {
+          await callApi("/api/book", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1049,21 +1080,20 @@ export default function Home() {
               onBehalfOf: actingAsId ?? undefined,
             }),
           });
-          if (res.status === 401) {
+          done++;
+        } catch (e) {
+          if (e instanceof ApiError && e.status === 401) {
             handleExpired(401);
             return;
           }
-          const data = await res.json().catch(() => ({}));
-          if (res.ok) done++;
-          else {
-            fails.push(
-              `${shortPretty(slot.startsAt.slice(0, 10))} ${fmtTime(slot.startsAt)} — ${slot.courtName} : ${data.error ?? `refusé (${res.status})`}`,
-            );
-            failedIds.push(slot.id);
-          }
-        } catch {
+          // Même lecture qu'en réservation simple : un 504 n'est pas un refus, c'est un
+          // résultat inconnu — la ligne le dit, et le `reload(true)` du bilan montrera la vérité.
+          const why =
+            e instanceof ApiError && e.status === 504
+              ? "non confirmée, vérifie le planning"
+              : userMessage(e);
           fails.push(
-            `${shortPretty(slot.startsAt.slice(0, 10))} ${fmtTime(slot.startsAt)} — ${slot.courtName} : réseau indisponible`,
+            `${shortPretty(slot.startsAt.slice(0, 10))} ${fmtTime(slot.startsAt)} — ${slot.courtName} : ${why}`,
           );
           failedIds.push(slot.id);
         }
@@ -1082,7 +1112,7 @@ export default function Home() {
       return;
     }
     // Au moins un échec : le détail créneau-par-créneau existe, il ne doit PAS être jeté dans
-    // un toast de 3,5 s intappable. Un membre qui bloque 5 créneaux pour un tournoi et en
+    // un toast éphémère. Un membre qui bloque 5 créneaux pour un tournoi et en
     // obtient 3 doit savoir LESQUELS ont raté pour retenter ou prévenir son partenaire.
     if (done > 0) playSuccessJingle();
     else playError();
@@ -1150,18 +1180,15 @@ export default function Home() {
         body: JSON.stringify({ date: day, hm }),
       });
       if (handleExpired(res.status)) return;
-      if (!res.ok) {
-        // Le serveur explique parfois précisément le refus (créneau trop lointain, par
-        // exemple). Le remplacer par « impossible de rejoindre » ferait passer une règle
-        // métier pour une panne, et le membre réessaierait.
-        const data = await res.json().catch(() => ({}));
-        throw new Error(typeof data.error === "string" ? data.error : "");
-      }
+      // Le serveur explique parfois précisément le refus (créneau trop lointain, par
+      // exemple). Le remplacer par « impossible de rejoindre » ferait passer une règle
+      // métier pour une panne, et le membre réessaierait — `readApi` relaie son `error`.
+      if (!res.ok) await readApi(res);
       toast("ok", "Inscrit en liste d'attente 🕒");
       loadAlerts();
       refreshWaitCounts();
     } catch (e) {
-      toast("err", (e as Error).message || "Impossible de rejoindre la liste d'attente.");
+      toast("err", userMessage(e, "Impossible de rejoindre la liste d'attente."));
     }
   };
 
@@ -1279,7 +1306,9 @@ export default function Home() {
                     width={46}
                     height={46}
                   />
-                  <span className="brand-back-label">{SPECIAL_LABEL[view]}</span>
+                  <span className="brand-back-label">
+                    {SPECIAL_LABEL[view as keyof typeof SPECIAL_LABEL]}
+                  </span>
                 </button>
               ) : (
                 <>
@@ -1916,7 +1945,8 @@ export default function Home() {
                         <span className="muted tiny">
                           {" "}
                           — {a.position}
-                          <sup>e</sup> sur {a.count} en attente
+                          {/* « 1er », pas « 1e » : seul le premier rang a sa forme propre. */}
+                          <sup>{a.position === 1 ? "er" : "e"}</sup> sur {a.count} en attente
                         </span>
                       )}
                     </span>
@@ -1935,7 +1965,7 @@ export default function Home() {
         </Dialog>
       )}
 
-      <Toasts items={toasts} />
+      <Toasts items={toasts} onDismiss={dismissToast} />
       <ConfirmDialog state={confirmState} onResolve={resolveConfirm} />
     </main>
   );

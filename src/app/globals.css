@@ -1626,10 +1626,12 @@ td.cell.past {
   z-index: 1000;
   width: max-content;
   max-width: 92vw;
-  /* NE JAMAIS RETIRER : un toast est une notification, pas une cible. Sans ça le conteneur
-     intercepte les taps sur toute sa surface pendant 3,5 s — y compris sur le bouton
-     « Réserver » qu'il recouvre, puisqu'il est fixé en bas avec un z-index de 1000.
-     `pointer-events` étant hérité, les toasts eux-mêmes en héritent.
+  /* NE JAMAIS RETIRER : le CONTENEUR n'est pas une cible. Sans ça il intercepte les taps sur
+     toute sa surface (gouttières comprises) — y compris sur le bouton « Réserver » qu'il
+     recouvre, puisqu'il est fixé en bas avec un z-index de 1000.
+     Les toasts, eux, REPRENNENT les appuis (`pointer-events: auto` sur `.toast`) : un appui
+     sur un toast le ferme (cf. Toasts.tsx). Ils étaient intappables par héritage, si bien
+     qu'une erreur de 8 s posée sur ce qu'on voulait toucher ne s'écartait pas.
      (Le plafonnement de la pile que j'avais ajouté ici est retiré : il visait l'empilement
      de trois échecs simultanés, or le bilan groupé passe désormais par un dialogue unique.
      Et `overflow-y: auto` était contradictoire — on ne fait pas défiler ce qui n'est pas
@@ -1645,6 +1647,9 @@ td.cell.past {
 }
 
 .toast {
+  /* Un appui le ferme (cf. `.toasts`, qui reste, lui, transparent aux appuis). */
+  pointer-events: auto;
+  cursor: pointer;
   padding: 11px 16px;
   border-radius: var(--radius);
   font-size: 0.9rem;
@@ -3139,6 +3144,12 @@ table.planning.week th.time.selhead {
 body[data-bottombar] .install-banner {
   display: none;
 }
+/* Même effacement pendant le marquage d'un match (attribut posé par ScoreBoard) : la bannière
+   recouvrait la case du bas, celle qu'on tape sans regarder. L'écran de marquage passe aussi
+   au-dessus d'elle (cf. `.ics`), en second filet. */
+body[data-scoring] .install-banner {
+  display: none;
+}
 
 .install-banner {
   position: fixed;
@@ -4174,6 +4185,26 @@ body[data-bottombar] .install-banner {
   }
 }
 
+/* Croix du bandeau d'annonce : ZONE D'APPUI de 44×44 centrée sur le glyphe, portée par un
+   pseudo-élément — la boîte du bouton, elle, ne change pas (`padding: 0` en inline), donc ni
+   le glyphe ni la hauteur du bandeau ne bougent. Calcul sur les valeurs déclarées : glyphe de
+   1,15rem à line-height 1 (≈ 18 px de haut, ≈ 15 px de large) ; bandeau de 12 px de padding
+   vertical autour d'une ligne portée par l'emoji de tête (1,15rem × 1,4 ≈ 26 px), soit
+   ≈ 50 px de haut. Les 44 px tiennent donc dans le bandeau, et débordent à droite de ≈ 14 px
+   dans les 16 px de padding : la zone n'atteint ni le bord de l'écran ni le contenu dessous. */
+.announce-close {
+  position: relative;
+}
+.announce-close::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
 /* --- Respect du réglage « réduire les animations » (a11y / WCAG 2.3.3) -----
    Pour les personnes sensibles au mouvement : on neutralise les animations
    décoratives (shimmer du skeleton en boucle, roue du rafraîchissement) et on
@@ -4280,6 +4311,21 @@ body[data-bottombar] .install-banner {
 }
 .passkey-item + .passkey-item {
   border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+/* « Oui, retirer » (un appareil) et « Oui, révoquer » (une délégation) : la seconde étape d'une
+   confirmation destructive. Encre et filet rouges, jamais un aplat — même traitement que
+   `.wk-detail-actions button.danger` et `.ic-roster-actions button.danger` (cf. DESIGN.md,
+   Rouge Alerte : « le liseré et le texte, jamais un aplat de fond »). */
+.passkey-item button.danger,
+.delegation-row-actions button.danger {
+  background: transparent;
+  color: var(--danger-fg);
+  border-color: var(--danger-border);
+}
+.passkey-item button.danger:not(:disabled):hover,
+.delegation-row-actions button.danger:not(:disabled):hover {
+  border-color: var(--danger-hover);
+  background: color-mix(in srgb, var(--danger-hover) 10%, transparent);
 }
 
 /* ============================ Interclub ============================
@@ -4842,7 +4888,12 @@ body[data-bottombar] .install-banner {
 .ics {
   position: fixed;
   inset: 0;
-  z-index: 30;
+  /* 960 : AU-DESSUS des bannières d'installation (900) et de la barre « Réserver » (950), SOUS
+     les toasts et les modales de confirmation (1000). À 30, la bannière d'installation se
+     posait sur la case du bas — elle est désormais aussi masquée (body[data-scoring]), cet
+     ordre est le second filet. Les toasts, eux, doivent rester lisibles par-dessus : c'est
+     par eux qu'arrivent les erreurs d'enregistrement pendant le match. */
+  z-index: 960;
   display: flex;
   flex-direction: column;
   background: var(--pico-background-color);

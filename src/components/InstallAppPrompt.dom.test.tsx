@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, fireEvent } from "@testing-library/react";
 import InstallAppPrompt from "@/components/InstallAppPrompt";
 
 // SUR ANDROID, PAS DE BANNIÈRE « INSTALLER L'APPLI » (LA PWA).
@@ -65,5 +65,53 @@ describe("InstallAppPrompt — ordinateur", () => {
     expect(container.querySelector(".install-banner")).toBeNull();
     beforeInstallPrompt();
     expect(container.querySelector(".install-banner")).not.toBeNull();
+  });
+});
+
+// ============================================================================
+//  AU CLAVIER, « PLUS TARD » NE DOIT PAS INSTALLER L'APPLI
+// ============================================================================
+//
+// Le conteneur écoutait Entrée/Espace : la touche REMONTÉE du bouton « Plus tard » y était
+// interceptée (`preventDefault` — le clic du bouton n'avait donc jamais lieu) et lançait
+// l'installation. Le conteneur n'écoute plus le clavier ; le clic souris reste.
+describe("InstallAppPrompt — clavier", () => {
+  beforeEach(() => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(DESKTOP_UA);
+  });
+
+  function promptEspion() {
+    const prompt = vi.fn(() => Promise.resolve());
+    const e = new Event("beforeinstallprompt", { cancelable: true });
+    Object.assign(e, { prompt, userChoice: Promise.resolve({ outcome: "dismissed" }) });
+    act(() => {
+      window.dispatchEvent(e);
+    });
+    return prompt;
+  }
+
+  it("Entrée sur « Plus tard » ne lance pas l'installation", () => {
+    const { getByRole } = render(<InstallAppPrompt />);
+    const prompt = promptEspion();
+    fireEvent.keyDown(getByRole("button", { name: "Plus tard" }), { key: "Enter" });
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("la bannière n'est plus un « bouton » qui contient des boutons", () => {
+    const { container } = render(<InstallAppPrompt />);
+    promptEspion();
+    const banniere = container.querySelector(".install-banner") as HTMLElement;
+    expect(banniere.getAttribute("role")).toBe("status");
+    expect(banniere.hasAttribute("tabindex")).toBe(false);
+  });
+
+  it("« Plus tard » masque la bannière ; « Installer » ouvre la popup native", async () => {
+    const { getByRole, container } = render(<InstallAppPrompt />);
+    const prompt = promptEspion();
+    await act(async () => {
+      fireEvent.click(getByRole("button", { name: "Installer" }));
+    });
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".install-banner")).toBeNull();
   });
 });

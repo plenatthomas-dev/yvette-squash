@@ -128,27 +128,23 @@ export default function InstallAppPrompt() {
     setDeferred(null);
   };
 
-  // En mode `prompt`, toute la bannière est un déclencheur : un tap n'importe où (hors bouton
-  // « Plus tard ») ouvre DIRECTEMENT la popup native d'installation (où l'on nomme l'appli).
+  // En mode `prompt`, toute la bannière est un déclencheur AU DOIGT ET À LA SOURIS : un tap
+  // n'importe où (hors bouton « Plus tard ») ouvre DIRECTEMENT la popup native d'installation.
   // Note : cet appel doit venir d'un geste utilisateur — impossible de l'ouvrir automatiquement.
+  //
+  // ⚠️ PLUS DE `role="button"`, DE `tabIndex` NI DE `onKeyDown` SUR LE CONTENEUR. Le gestionnaire
+  // de touche écoutait Entrée/Espace sur toute la bannière — donc aussi la touche REMONTÉE du
+  // bouton « Plus tard » qui avait le focus : il appelait `preventDefault()`, ce qui annulait le
+  // clic du bouton, puis lançait l'installation. Au clavier, « Plus tard » installait l'appli.
+  // Un « bouton » qui contient deux boutons n'était pas non plus une structure lisible au lecteur
+  // d'écran. Le clavier a déjà son chemin explicite : le bouton « Installer », juste à côté.
   const clickable = mode === "prompt";
 
   return (
     <div
       className={`install-banner${clickable ? " clickable" : ""}`}
-      role={clickable ? "button" : "status"}
-      tabIndex={clickable ? 0 : undefined}
+      role="status"
       onClick={clickable ? install : undefined}
-      onKeyDown={
-        clickable
-          ? (e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                install();
-              }
-            }
-          : undefined
-      }
     >
       <img src="/logo_squash.jpeg" alt="" aria-hidden="true" className="install-banner-icon" />
       <span className="install-banner-text">

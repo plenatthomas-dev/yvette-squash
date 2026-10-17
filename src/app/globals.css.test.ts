@@ -238,3 +238,58 @@ describe("les panneaux du marquage passent PAR-DESSUS le tableau", () => {
     expect(ligne).toBe(reserve);
   });
 });
+
+// ============================================================================
+//  LA CROIX DU BANDEAU D'ANNONCE : 44×44 D'APPUI, SANS TOUCHER À SA BOÎTE
+// ============================================================================
+describe("la croix du bandeau d'annonce", () => {
+  const sans = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
+  it("porte une zone d'appui de 44×44 par pseudo-élément", () => {
+    const m = /\.announce-close::before\s*\{([^}]*)\}/.exec(sans);
+    expect(m).not.toBeNull();
+    const regle = (m as RegExpExecArray)[1];
+    expect(regle).toMatch(/width\s*:\s*44px/);
+    expect(regle).toMatch(/height\s*:\s*44px/);
+    expect(regle).toMatch(/position\s*:\s*absolute/);
+  });
+  it("et la boîte du bouton reste positionnée pour l'accueillir", () => {
+    expect(/\.announce-close\s*\{[^}]*position\s*:\s*relative/.test(sans)).toBe(true);
+  });
+});
+
+// ============================================================================
+//  L'ÉCRAN DE MARQUAGE PASSE AU-DESSUS DES BANNIÈRES, SOUS LES TOASTS
+// ============================================================================
+describe("l'écran de marquage", () => {
+  const sans = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
+  const zDe = (sel: string) => {
+    const m = new RegExp(
+      "(?:^|[};])\\s*" + sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}",
+      "m",
+    ).exec(sans);
+    expect(m, sel).not.toBeNull();
+    return Number(/z-index\s*:\s*(\d+)/.exec((m as RegExpExecArray)[1])?.[1]);
+  };
+  it("masque les bannières d'installation pendant le marquage", () => {
+    expect(/body\[data-scoring\]\s+\.install-banner\s*\{[^}]*display\s*:\s*none/.test(sans)).toBe(true);
+  });
+  it("est au-dessus de la bannière d'installation, et sous les toasts", () => {
+    expect(zDe(".ics")).toBeGreaterThan(zDe(".install-banner"));
+    expect(zDe(".ics")).toBeLessThan(zDe(".toasts"));
+  });
+});
+
+// ============================================================================
+//  LES TOASTS SE FERMENT D'UN APPUI, LEUR CONTENEUR RESTE TRANSPARENT
+// ============================================================================
+describe("les toasts", () => {
+  const sans = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
+  const regle = (sel: string) =>
+    new RegExp("(?:^|[};])\\s*" + sel.replace(".", "\\.") + "\\s*\\{([^}]*)\\}", "m").exec(sans)?.[1] ?? "";
+  it("le conteneur ne prend aucun appui (il surplombe le bouton « Réserver »)", () => {
+    expect(regle(".toasts")).toMatch(/pointer-events\s*:\s*none/);
+  });
+  it("chaque toast reprend les appuis, pour pouvoir le fermer", () => {
+    expect(regle(".toast")).toMatch(/pointer-events\s*:\s*auto/);
+  });
+});

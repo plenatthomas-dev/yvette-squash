@@ -38,9 +38,16 @@ export function recheckBanner(): void {
 }
 
 // Couleurs pleines et saturées (texte blanc) pour bien trancher avec l'appli.
+//
+// ⚠️ `warn` EST À #c2410c, ET NON PLUS #ea580c. L'ancien orange ne tenait que 3,56:1 sous le
+// texte blanc ; le bandeau écrit en 0,95rem (≈15 px) demi-gras, ce qui n'est PAS du « grand
+// texte » au sens WCAG (≥ 18,66 px en gras) : le seuil est 4,5:1. #c2410c, l'orange un cran plus
+// profond de la même famille, donne 5,18:1 — au niveau du bleu `info` (5,17:1). C'est la Règle
+// du Contraste Avant la Marque de DESIGN.md : la couleur plie, pas le seuil. Et c'était
+// précisément le bandeau des annonces marquées IMPORTANTES qui se lisait le moins bien.
 const palette = {
   info: { bg: "#2563eb", fg: "#ffffff" },
-  warn: { bg: "#ea580c", fg: "#ffffff" },
+  warn: { bg: "#c2410c", fg: "#ffffff" },
 } as const;
 
 export default function AnnouncementBanner() {
@@ -208,8 +215,13 @@ export default function AnnouncementBanner() {
               {banner.message}
             </span>
           </div>
+          {/* `announce-close` agrandit la ZONE D'APPUI à 44×44 (pseudo-élément, cf. globals.css)
+              sans toucher à la boîte du bouton : le glyphe, sa taille et la hauteur du bandeau
+              restent ceux d'avant. Avec `padding: 0`, la cible était le glyphe seul — environ
+              15×18 px, au coin d'un bandeau qu'on veut justement pouvoir fermer d'un pouce. */}
           <button
             type="button"
+            className="announce-close"
             onClick={dismissBanner}
             aria-label="Masquer l'annonce"
             style={{
