@@ -13,6 +13,7 @@ const h = vi.hoisted(() => ({
   fetchThrows: false,
   rows: [] as unknown[],
   updates: [] as Array<{ where: unknown; data: Record<string, unknown> }>,
+  knownAt: null as Date | null,
 }));
 
 vi.mock("next/cache", () => ({
@@ -31,6 +32,7 @@ vi.mock("./db", () => ({
       }),
     },
     interclubTeam: {
+      findUnique: vi.fn(async () => ({ snStandingsAt: h.knownAt })),
       update: vi.fn(async (args: { where: unknown; data: Record<string, unknown> }) => {
         h.updates.push(args);
         return {};
@@ -133,7 +135,17 @@ describe("refreshTeamStandings", () => {
 
   it("n'écrase pas un tableau valide par du vide", async () => {
     h.rows = [];
+    h.knownAt = null;
     expect(await refreshTeamStandings(team)).toEqual({ ok: false, reason: "empty" });
+    expect(h.updates).toHaveLength(0);
+  });
+
+  // Audit 2026-10, point 15 : une poule déjà lue qui revient vide n'est pas « pas encore
+  // publiée » — c'est la page qui a changé.
+  it("zéro ligne pour une poule DÉJÀ LUE → `vanished`, rien d'écrasé", async () => {
+    h.rows = [];
+    h.knownAt = new Date("2026-10-01");
+    expect(await refreshTeamStandings(team)).toEqual({ ok: false, reason: "vanished" });
     expect(h.updates).toHaveLength(0);
   });
 

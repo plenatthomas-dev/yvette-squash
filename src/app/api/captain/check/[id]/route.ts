@@ -212,21 +212,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   // --- Les noms : c'est là que le réseau entre en jeu ---------------------
   //
-  // LA PÉRIODE EST LUE UNE SEULE FOIS. `searchRanking(nom)` sans mois va la chercher lui-même,
-  // ce qui doublerait le nombre d'appels — seize au lieu de huit, pour une valeur identique
-  // huit fois de suite.
-  let month: string | null;
-  try {
-    month = await getLatestMonth();
-  } catch {
-    month = null;
-  }
-  if (!month) {
-    return NextResponse.json(
-      { error: "squashnet est injoignable : la vérification des noms est impossible pour l'instant." },
-      { status: 502 },
-    );
-  }
+  // LA PÉRIODE EST LUE UNE SEULE FOIS, ET SEULEMENT AU PREMIER BESOIN. `searchRanking(nom)`
+  // sans mois va la chercher lui-même, ce qui doublerait le nombre d'appels. Mais la lire
+  // D'AVANCE bloquait tout — vérification, donc envoi du score — dès que cette seule page
+  // cassait, alors que les fiches d'équipe suffisent souvent à tout rapprocher (audit 2026-10,
+  // point 13). Sans période, seuls les joueurs à chercher par nom restent non vérifiés.
+  let periode: Promise<string | null> | null = null;
+  const mois = () => (periode ??= getLatestMonth().catch(() => null));
 
   const memo = new Map<string, RankingRow[] | null>();
   let premier = true;
@@ -240,7 +232,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     premier = false;
     let rows: RankingRow[] | null;
     try {
-      rows = await searchRanking(query, { month: month as string });
+      const month = await mois();
+      rows = month ? await searchRanking(query, { month }) : null;
     } catch {
       rows = null;
     }

@@ -1,4 +1,4 @@
-import { getMonths, searchRanking, type RankingRow } from "./client";
+import { getMonths, searchRankingPage, type RankingRow } from "./client";
 import { classifyRanking } from "./match";
 import { knownCouples, pointKey, writePoint, writeProbe } from "./history";
 import { subjectsToRefresh, type Subject } from "./refresh";
@@ -149,7 +149,7 @@ export async function backfillHistory(opts: BackfillOptions = {}): Promise<Backf
   boucle: for (const [i, month] of months.entries()) {
     // Le mémo vit le temps D'UN mois : c'est la même recherche d'un mois à l'autre, mais pas
     // la même réponse — la partager donnerait à février le classement de janvier.
-    const memo = new Map<string, RankingRow[] | null>();
+    const memo = new Map<string, Page | null>();
 
     for (const subject of subjects) {
       if (deja.has(pointKey(subject, month))) {
@@ -163,13 +163,14 @@ export async function backfillHistory(opts: BackfillOptions = {}): Promise<Backf
         result.stopped = true;
         break boucle;
       }
-      const rows = await rechercher(subject, month, memo, delayMs, result);
+      const page = await rechercher(subject, month, memo, delayMs, result);
       // `null` = squashnet n'a pas répondu pour cette recherche. On ne conclut rien, et on ne
       // marque rien : le mois reste ouvert, un run ultérieur le reprendra.
-      if (rows === null) {
+      if (page === null) {
         result.unresolved++;
         continue;
       }
+      const rows = page.rows;
       // HORS CLUB, ET PAR LICENCE QUAND ON L'A. L'historique suit le JOUEUR : un membre arrivé
       // l'an dernier a une progression avant son arrivée, et la refuser parce que le libellé du
       // club diffère confondrait « il est parti » avec « il n'était pas encore là ». La licence,
@@ -181,6 +182,10 @@ export async function backfillHistory(opts: BackfillOptions = {}): Promise<Backf
       });
       if (verdict.status !== "matched") {
         result.unresolved++;
+        // PAGE TRONQUÉE : squashnet n'a rendu que la page 1 d'un nom courant, et le joueur peut
+        // être en page 2. Ce n'est pas une absence constatée — pas de marque, le couple reste
+        // ouvert (audit 2026-10, point 14).
+        if (page.truncated) continue;
         // LA MARQUE : squashnet A RÉPONDU et le joueur n'y est pas. Un classement publié ne
         // change plus, donc l'absence est définitive et ce couple n'a pas à être redemandé.
         // Une réponse ABSENTE (`rows === null`) n'arrive jamais ici — elle est traitée plus
@@ -219,13 +224,15 @@ export async function backfillHistory(opts: BackfillOptions = {}): Promise<Backf
  * ne doivent pas déclencher trois fois la requête qui vient d'échouer. Le mois suivant repartira
  * de zéro, mémo neuf.
  */
+type Page = { rows: RankingRow[]; truncated: boolean };
+
 async function rechercher(
   subject: Subject,
   month: string,
-  memo: Map<string, RankingRow[] | null>,
+  memo: Map<string, Page | null>,
   delayMs: number,
   result: BackfillResult,
-): Promise<RankingRow[] | null> {
+): Promise<Page | null> {
   const cached = memo.get(subject.query);
   if (cached !== undefined) return cached;
 
@@ -233,12 +240,12 @@ async function rechercher(
   // pas attendre une seconde pour rien avant de rendre la main.
   if (result.requests > 0) await dodo(delayMs);
   result.requests++;
-  let rows: RankingRow[] | null;
+  let page: Page | null;
   try {
-    rows = await searchRanking(subject.query, { month });
+    page = await searchRankingPage(subject.query, { month });
   } catch {
-    rows = null;
+    page = null;
   }
-  memo.set(subject.query, rows);
-  return rows;
+  memo.set(subject.query, page);
+  return page;
 }

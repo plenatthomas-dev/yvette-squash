@@ -121,6 +121,7 @@ async function handle(req: NextRequest) {
     if (team.snDrawId) {
       try {
         // Zéro ligne (`empty`) n'est ni un succès ni une panne : la poule n'est pas publiée.
+        // `vanished` (zéro ligne pour une poule déjà lue), lui, est une panne.
         const r = await refreshTeamStandings({
           id: team.id,
           snEventId: team.snEventId!,
@@ -128,7 +129,7 @@ async function handle(req: NextRequest) {
           snRoundId: team.snRoundId!,
         });
         if (r.ok) standings++;
-        else if (r.reason === "unreachable") standingsFailed++;
+        else if (r.reason !== "empty") standingsFailed++;
       } catch {
         standingsFailed++;
       }

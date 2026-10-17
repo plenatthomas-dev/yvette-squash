@@ -34,6 +34,7 @@ const h = vi.hoisted(() => ({
   alertsChanged: vi.fn(),
   /** Les démissions de capitaine posées par `set_team`. */
   teamUpdateMany: vi.fn(async () => ({ count: 1 })),
+  probeDeleteMany: vi.fn(async () => ({ count: 0 })),
 }));
 
 vi.mock("@/lib/admin", () => ({
@@ -85,6 +86,7 @@ vi.mock("@/lib/db", () => ({
     },
     interclubGuest: { findMany: vi.fn(async () => h.invites) },
     session: { deleteMany: h.sessionDeleteMany },
+    squashnetRankingProbe: { deleteMany: h.probeDeleteMany },
     // La désactivation est ATOMIQUE : poser `disabledAt`, révoquer les sessions et valider
     // d'office les tricounts dont le membre est payeur vont ensemble. Le mock exécute le
     // corps sur les mêmes doubles, pour que le test voie les trois écritures.
@@ -489,6 +491,8 @@ describe("POST /api/admin/members — set_squashnet_name", () => {
     // savoir si le nom qu'il vient de taper était le bon.
     expect(h.refreshMember).toHaveBeenCalledWith("u1");
     expect(await res.json()).toMatchObject({ ok: true, status: "matched" });
+    // Les recherches vaines de l'historique portaient sur l'ancien nom : oubliées.
+    expect(h.probeDeleteMany).toHaveBeenCalledWith({ where: { userId: "u1" } });
   });
 
   it("relaie un rapprochement resté infructueux, sans annuler l'enregistrement", async () => {

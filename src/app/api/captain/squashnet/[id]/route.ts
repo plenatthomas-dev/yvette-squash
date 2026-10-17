@@ -125,6 +125,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     );
   }
 
+  // Levé JUSTE AVANT l'envoi du formulaire : à partir de là, le score a pu être écrit chez la
+  // fédération même si la suite échoue (réponse perdue, relecture refusée…). Une erreur après
+  // ce point n'est donc ni « squashnet ne répond pas, réessaie » — renvoyer doublerait la
+  // saisie — ni un refus d'identifiants à compter (audit 2026-10, point 12).
+  let ecrit = false;
   try {
     const session = await ouvrirSession(login, motDePasse);
     const html = await posterAjax(session, { ic_a: ACTION_FORMULAIRE, tieid: fixture.snTieId });
@@ -177,6 +182,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       );
     }
 
+    ecrit = true;
     const reponse = await posterFormulaire(session, envoi.champs);
     const detail = parseDetailRencontre(
       await posterAjax(session, { ic_a: ACTION_DETAIL, tieid: fixture.snTieId }),
@@ -209,6 +215,17 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       sentAt: sentAt.toISOString(),
     });
   } catch (e) {
+    if (ecrit) {
+      console.error("[captain/squashnet] échec APRÈS l'envoi du formulaire:", (e as Error)?.name);
+      return json(
+        {
+          error:
+            "L'envoi est parti, mais squashnet n'a pas confirmé : vérifie la rencontre sur squashnet AVANT de renvoyer quoi que ce soit.",
+          envoiIncertain: true,
+        },
+        502,
+      );
+    }
     if (e instanceof AccesRefuse) {
       await prisma.loginAttempt.create({ data: { ip, identifier } }).catch(() => {});
       // PAS 401 : le client lit 401 comme « ta session APPLI a expiré » et déconnecte.

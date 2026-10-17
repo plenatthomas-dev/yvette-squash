@@ -162,3 +162,17 @@ function coupleKey(r: { userId: string | null; guestId: string | null; month: st
 export function pointKey(subject: RankingSubject, month: string): string {
   return `${subject.kind}:${subject.id}:${month}`;
 }
+
+/**
+ * Oublie les recherches vaines d'un membre : à appeler quand son NOM DE RECHERCHE change. Les
+ * marques disaient « cherché sous l'ancien nom, pas trouvé » — sous le nouveau, la question est
+ * neuve, et les garder gelait l'historique que la correction devait débloquer (audit 2026-10,
+ * point 14). Best-effort : au pire, `retryProbes` fait la même chose en grand.
+ */
+export async function forgetProbes(userId: string): Promise<void> {
+  try {
+    await prisma.squashnetRankingProbe.deleteMany({ where: { userId } });
+  } catch {
+    /* une marque restante ne coûte qu'une recherche de moins */
+  }
+}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAdmin, isAdminUser } from "@/lib/admin";
+import { forgetProbes } from "@/lib/squashnet/history";
 import { listMembers, deleteBlockersFor, deleteBlockersMessage } from "@/lib/members";
 import { getFeatures } from "@/lib/features-server";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
@@ -271,6 +272,9 @@ export async function POST(req: NextRequest) {
       where: { id: target.id },
       data: { squashnetGivenName: given || null, squashnetFamilyName: family || null },
     });
+    // Les recherches vaines de l'historique portaient sur l'ANCIEN nom : on les oublie, pour
+    // que le prochain « Compléter l'historique » reprenne ce membre sous le nouveau.
+    await forgetProbes(target.id);
     // Rapprochement IMMÉDIAT : sans lui, l'admin saisirait un nom sans savoir s'il est le bon
     // et devrait attendre le passage mensuel du cron pour l'apprendre. Best-effort — l'échec
     // réseau ne remet pas en cause l'enregistrement du nom, qui est ce qu'on veut garder, et

@@ -235,6 +235,24 @@ describe("send", () => {
     expect(h.officialUpdate).not.toHaveBeenCalled();
   });
 
+  // Audit 2026-10, point 12 : le score a pu être écrit chez la fédération. Ni « réessaie »
+  // (renvoyer doublerait la saisie), ni un refus d'identifiants compté.
+  it("panne APRÈS l'envoi : message dédié, aucune tentative comptée", async () => {
+    const { seen } = await apercu();
+    h.posterAjax.mockImplementation(async (_s: unknown, p: { ic_a: string }) => {
+      if (p.ic_a === "330249") return FORMULAIRE;
+      if (p.ic_a === "330253") throw new AccesRefuse();
+      return "";
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await appel({ action: "send", seen });
+    expect(res.status).toBe(502);
+    const data = await res.json();
+    expect(data.envoiIncertain).toBe(true);
+    expect(data.error).toMatch(/vérifie la rencontre sur squashnet AVANT de renvoyer/);
+    expect(h.tentatives).toEqual([]);
+  });
+
   it("une trace d'envoi impossible à écrire ne fait pas croire à un échec", async () => {
     const { lignes, seen } = await apercu();
     h.posterAjax.mockImplementation(async (_s: unknown, p: { ic_a: string }) =>

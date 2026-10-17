@@ -85,7 +85,8 @@ async function handle(req: NextRequest) {
   }
 
   // Un classement encore VIDE n'est pas une panne : la poule n'est pas publiée, ou pas encore.
-  // Le compter à part évite de mettre le cron au rouge pour une attente normale.
+  // Le compter à part évite de mettre le cron au rouge pour une attente normale. Une poule DÉJÀ
+  // lue qui revient vide (`vanished`) est, elle, comptée en échec.
   await recordCronRun(
     "interclub-standings",
     failed === 0,

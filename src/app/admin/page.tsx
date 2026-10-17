@@ -1232,11 +1232,15 @@ export default function AdminPage() {
   // Complète l'historique du classement, PAR TRANCHES. La route s'arrête avant le couperet de
   // Vercel et dit ce qu'il reste ; le remplissage étant reprenable, recliquer reprend là où
   // l'on s'était arrêté sans jamais repayer le travail déjà fait.
-  const backfillRankings = async () => {
+  const backfillRankings = async (retryProbes = false) => {
     setRkHistBusy(true);
     setRkHistResult(null);
     try {
-      const res = await fetch("/api/admin/backfill-rankings", { method: "POST" });
+      const res = await fetch("/api/admin/backfill-rankings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ retryProbes }),
+      });
       const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
         months?: number;
@@ -2719,14 +2723,26 @@ export default function AdminPage() {
                   est découpé en tranches d'environ une minute&nbsp;: reclique jusqu'à
                   « historique complet ». Rien n'est jamais redemandé deux fois.
                 </p>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={rkHistBusy}
-                  onClick={backfillRankings}
-                >
-                  {rkHistBusy ? "Complètement… (jusqu'à 1 min)" : "Compléter l'historique"}
-                </button>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={rkHistBusy}
+                    onClick={() => backfillRankings(false)}
+                  >
+                    {rkHistBusy ? "Complètement… (jusqu'à 1 min)" : "Compléter l'historique"}
+                  </button>
+                  {/* Reprend aussi les recherches déjà faites en vain — utile après avoir
+                      corrigé des noms, ou si squashnet a publié tardivement. Plus lent. */}
+                  <button
+                    type="button"
+                    className="secondary outline"
+                    disabled={rkHistBusy}
+                    onClick={() => backfillRankings(true)}
+                  >
+                    Tout rechercher à nouveau
+                  </button>
+                </div>
                 {rkHistResult && (
                   <div
                     className={`notice ${rkHistResult.ok ? "info" : "error"}`}

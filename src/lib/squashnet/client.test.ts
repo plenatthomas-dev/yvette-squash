@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseRankingFragment, parseLatestMonth, parseMonths } from "./client";
+import { parseRankingFragment, parseLatestMonth, parseMonths, isRankingTruncated } from "./client";
 
 // Fragment réel capté sur squashnet.fr (POST ic_a=131079, name=courtaut) : sélecteur de mois
 // + bloc résultats. La 1re ligne est authentique ; la 2e est synthétique (homonyme dans un
@@ -148,5 +148,44 @@ describe("parseMonths — l'ordre ne dépend pas de squashnet", () => {
     </select>`;
     expect(parseMonths(html)).toEqual(["2026-07-07", "2026-06-02", "2024-05-06"]);
     expect(parseLatestMonth(html)).toBe("2026-07-07");
+  });
+});
+
+// Audit 2026-10, point 14 : la pagination dit si la page 1 est tout le résultat.
+describe("isRankingTruncated", () => {
+  it("une seule page (« 1 ») → complet", () => {
+    expect(isRankingTruncated(wrap(ROW_JEROME))).toBe(false);
+  });
+  it("plusieurs pages → tronqué", () => {
+    const html = wrap(ROW_JEROME).replace(
+      "<div class='div-pages'><a href='#'>1</a></div>",
+      "<div class='div-pages'><a href='#'>1</a><a href='#'>2</a><a href='#'>3</a></div>",
+    );
+    expect(isRankingTruncated(html)).toBe(true);
+  });
+  it("pas de bloc de pagination → complet", () => {
+    expect(isRankingTruncated("<div id='results'></div>")).toBe(false);
+  });
+});
+
+// Audit 2026-10, point 15 : même politique que calendar.ts — une classe utilitaire ajoutée par
+// squashnet ne doit pas faire lire ZÉRO ligne.
+describe("parseRankingFragment — classes lues au jeton près", () => {
+  it("lit une ligne et ses champs malgré des classes supplémentaires", () => {
+    const html = wrap(
+      ROW_JEROME.replace("<div class='row ranking'>", "<div class='row ranking mt-1'>").replace(
+        "<div class='div-rank-name'>",
+        "<div class='div-rank-name text-start'>",
+      ),
+    );
+    const rows = parseRankingFragment(html);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ name: "COURTAUT JEROME", clt: "5A", licence: "0124215" });
+  });
+
+  it("« rang » ne lit pas « rangM »", () => {
+    const [r] = parseRankingFragment(wrap(ROW_JEROME));
+    expect(r.rang).toBe("3184");
+    expect(r.rangM).toBe("3603");
   });
 });
