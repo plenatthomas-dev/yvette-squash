@@ -12,6 +12,9 @@ import InterclubFollow from "@/components/InterclubFollow";
 import InterclubLive from "@/components/InterclubLive";
 import InterclubTally from "@/components/InterclubTally";
 import { InterclubAvailability } from "@/components/InterclubAvailability";
+import MatchDuration from "@/components/MatchDuration";
+import { fixtureDurationMs, formatDuration } from "@/lib/interclub-duree";
+import { useMinuteClock } from "@/lib/useMinuteClock";
 import { CLUB_TZ } from "@/lib/time";
 import { downloadFixtureIcs } from "@/lib/ics";
 import type { TieOutcome } from "@/lib/interclub-db";
@@ -179,6 +182,9 @@ type MatchRow = {
   scorerName: string | null;
   isMine: boolean;
   scorerStale: boolean;
+  /** Premier point et point décisif, posés par le marquage en direct. ISO, `null` si inconnus. */
+  startedAt: string | null;
+  finishedAt: string | null;
   /** Instantané du jeu en cours, publié par le marqueur. `null` hors direct. */
   live: {
     current: { home: number; away: number };
@@ -1452,6 +1458,9 @@ function FixtureDialog({
   const [confirmDel, setConfirmDel] = useState(false);
   /** La FICHE de la rencontre est-elle en cours de correction ? (date, heure, lieu…) */
   const [editHead, setEditHead] = useState(false);
+  // La durée d'un simple EN COURS doit avancer à l'écran : la fiche, elle, n'est pas sondée.
+  const now = useMinuteClock(fixture.matches.some((m) => m.status === "live" && m.startedAt));
+  const fixtureMs = fixtureDurationMs(fixture.matches);
 
   // Un joueur ne dispute qu'UN simple par rencontre. On retient donc qui est déjà pris, et par
   // quel simple, pour le griser dans le sélecteur — plutôt que de le proposer, de le laisser
@@ -1618,6 +1627,9 @@ function FixtureDialog({
         {fixture.score.home}–{fixture.score.away}{" "}
         <span className="muted tiny">
           {FIXTURE_STATUS_LABEL[fixtureDisplayStatus(fixture, todayISO())]}
+          {/* Du premier point au point décisif du dernier simple — seulement si tous ont été
+              marqués en direct (cf. `fixtureDurationMs`). */}
+          {fixtureMs !== null && ` en ${formatDuration(fixtureMs)}`}
         </span>
       </p>
       {/* La fiche dit la MÊME chose que la carte, calculée par la même fonction : deux écrans
@@ -1675,7 +1687,10 @@ function FixtureDialog({
             ) : (
               <button className="ic-match" onClick={() => setEditing(m.id)}>
                 <span className="ic-match-head">
-                  <span className="ic-order">Simple {m.order}</span>
+                  <span className="ic-order">
+                    Simple {m.order}
+                    <MatchDuration match={m} now={now} />
+                  </span>
                   <span className={`ic-status ic-${m.status}`}>
                     <span className="sr-only">État : </span>
                     {MATCH_STATUS_LABEL[m.status] ?? m.status}

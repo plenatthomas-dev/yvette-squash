@@ -10,6 +10,7 @@ import {
   scorerIsStale,
   serializeLive,
 } from "@/lib/interclub-db";
+import { liveGameTimes, liveMatchTimes } from "@/lib/interclub-duree";
 import { interclubChanged } from "@/lib/interclub-gate";
 import {
   notifyFixtureDone,
@@ -214,6 +215,10 @@ export async function PUT(
       }
 
       const winner = sequenceWinner(parsed, m.interclub.bestOf);
+      const status = winner ? "done" : parsed.length || enJeu ? "live" : "pending";
+      // Une seule heure pour toute l'écriture : le jeu et le match qu'il clôt finissent au même
+      // instant, et deux `new Date()` les auraient séparés de quelques millisecondes.
+      const now = new Date();
 
       // Les jeux ne sont réécrits QUE s'ils ont bougé.
       const same =
@@ -221,6 +226,7 @@ export async function PUT(
         m.games.every((g, i) => g.pointsHome === parsed[i].home && g.pointsAway === parsed[i].away);
 
       if (!same) {
+        const times = liveGameTimes(m.games, parsed, now);
         await tx.interclubGame.deleteMany({ where: { matchId: mid } });
         if (parsed.length) {
           await tx.interclubGame.createMany({
@@ -229,7 +235,7 @@ export async function PUT(
               number: i + 1,
               pointsHome: g.home,
               pointsAway: g.away,
-              finishedAt: new Date(),
+              finishedAt: times[i],
             })),
           });
         }
@@ -248,11 +254,12 @@ export async function PUT(
           // La prise RESTE au marqueur après la victoire : il doit pouvoir annuler le point
           // décisif. Elle se périme d'elle-même au bout de SCORER_STALE_MS.
           scorerId: session.userId,
-          scorerClaimedAt: new Date(), // toute écriture rafraîchit la prise
+          scorerClaimedAt: now, // toute écriture rafraîchit la prise
           liveJson: winner || !snapshot ? null : serializeLive(snapshot),
           gamesHome: parsed.length ? home : null,
           gamesAway: parsed.length ? away : null,
-          status: winner ? "done" : parsed.length || enJeu ? "live" : "pending",
+          status,
+          ...liveMatchTimes(m, { status, games: parsed.length }, now),
         },
       });
 

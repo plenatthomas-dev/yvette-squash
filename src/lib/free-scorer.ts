@@ -12,6 +12,7 @@
 // ne doivent jamais partager un journal.
 
 import { isValidBestOf, normalizeColor, replay, type ScoreEvent, type Side } from "@/lib/interclub";
+import { elapsedMs, type MatchTimes } from "@/lib/interclub-duree";
 
 /** Le match libre en cours — un seul à la fois. */
 export const CURRENT_KEY = "free:current";
@@ -29,13 +30,34 @@ export type FreeSide = { name: string; color: string | null };
 
 export type FreeMatch = {
   id: string;
-  /** Horodatage (ms) du début : sert au tri et à la péremption de l'historique. */
+  /**
+   * Horodatage (ms) de la CRÉATION du match : sert au tri et à la péremption de l'historique.
+   * Ce n'est pas le début du jeu — on crée le match avant l'échauffement. Cf. `firstPointAt`.
+   */
   startedAt: number;
   home: FreeSide;
   away: FreeSide;
   bestOf: 3 | 5;
   events: ScoreEvent[];
+  /**
+   * Premier point et point décisif (ms, horloge de CE téléphone), d'où le chrono et la durée
+   * (cf. `interclub-duree.ts`). Facultatifs : un match gardé par une version antérieure n'en a
+   * pas, et n'aura jamais de durée — plutôt qu'une durée inventée.
+   */
+  firstPointAt?: number | null;
+  finishedAt?: number | null;
 };
+
+/** Les heures d'un match, sous la forme qu'attend `interclub-duree.ts`. */
+export function timesOf(m: FreeMatch): MatchTimes<number> {
+  return { startedAt: m.firstPointAt ?? null, finishedAt: m.finishedAt ?? null };
+}
+
+/** Durée d'un match TERMINÉ et mesuré, en ms ; `null` sinon. */
+export function freeMatchDurationMs(m: FreeMatch): number | null {
+  const t = timesOf(m);
+  return t.finishedAt === null ? null : elapsedMs(t.startedAt, t.finishedAt, t.finishedAt);
+}
 
 /** Nom saisi → nom affichable : espaces réduits, borné, repli si vide. */
 export function cleanName(v: unknown, fallback: string): string {
@@ -73,7 +95,16 @@ export function parseMatch(raw: unknown): FreeMatch | null {
   if (typeof o.startedAt !== "number" || !Number.isFinite(o.startedAt)) return null;
   if (!home || !away || !isValidBestOf(o.bestOf)) return null;
   if (!Array.isArray(o.events) || !o.events.every(isEvent)) return null;
-  return { id: o.id, startedAt: o.startedAt, home, away, bestOf: o.bestOf, events: o.events };
+  const m: FreeMatch = { id: o.id, startedAt: o.startedAt, home, away, bestOf: o.bestOf, events: o.events };
+  // Les heures ne sont reprises que LISIBLES, et seulement si elles y sont : un match relu revient
+  // tel quel. Une heure abîmée n'invalide pas le match — on perd la durée, pas le score.
+  if (isInstant(o.firstPointAt)) m.firstPointAt = o.firstPointAt;
+  if (isInstant(o.finishedAt)) m.finishedAt = o.finishedAt;
+  return m;
+}
+
+function isInstant(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v);
 }
 
 /** Écarte les matchs de plus de `HISTORY_TTL_DAYS` jours et borne à `MAX_HISTORY`. */

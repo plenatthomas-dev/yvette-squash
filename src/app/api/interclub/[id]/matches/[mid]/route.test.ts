@@ -877,3 +877,37 @@ describe("manual corrections compare the original score snapshot", () => {
     expect(h.deletedGames).toBe(0);
   });
 });
+
+// Seul le marquage en direct horodate (cf. `interclub-duree.ts`). La saisie après coup arrive
+// quand tout est fini : elle n'invente aucune heure, et ne détruit pas celles qui ont été mesurées.
+describe("PATCH .../matches/{mid} — heures", () => {
+  const FIN_JEU_1 = new Date("2026-10-15T18:40:00Z");
+
+  it("un jeu corrigé garde l'heure mesurée en direct, un jeu ajouté n'en reçoit pas", async () => {
+    h.match = {
+      ...freshMatch(),
+      games: [{ number: 1, pointsHome: 11, pointsAway: 5, finishedAt: FIN_JEU_1 }],
+      gamesHome: 1,
+      gamesAway: 0,
+    };
+    await PATCH(
+      patch({
+        games: [{ home: 11, away: 7 }, { home: 11, away: 3 }],
+        knownGameCount: 1,
+        knownGames: [{ home: 11, away: 5 }],
+      }),
+      ctx,
+    );
+    expect(h.createdGames?.map((g) => g.finishedAt)).toEqual([FIN_JEU_1, null]);
+  });
+
+  it("ne pose ni début ni fin de match", async () => {
+    await PATCH(
+      patch({ games: [{ home: 11, away: 5 }, { home: 11, away: 8 }, { home: 11, away: 9 }] }),
+      ctx,
+    );
+    expect(h.updated).toMatchObject({ status: "done" });
+    expect(h.updated).not.toHaveProperty("startedAt");
+    expect(h.updated).not.toHaveProperty("finishedAt");
+  });
+});

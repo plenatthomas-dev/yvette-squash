@@ -481,3 +481,59 @@ describe("PUT .../live — fraîcheur du CONTENU, pas seulement du nombre", () =
     expect(res.status).toBe(200);
   });
 });
+
+// La durée du match : seul le direct la mesure (cf. `interclub-duree.ts`, où vivent les règles
+// fines). On vérifie ici le branchement — que la route pose bien ce que le module calcule.
+describe("PUT .../live — durée du match", () => {
+  const DEBUT = new Date(Date.now() - 40 * 60_000);
+  const FIN = new Date(Date.now() - 2 * 60_000);
+  const premierPoint = { current: { home: 1, away: 0 }, serving: "home", servingBox: "right" };
+
+  it("pose le début au premier point", async () => {
+    h.match = freshMatch({ status: "pending", startedAt: null, finishedAt: null });
+    await PUT(put({ games: [], live: premierPoint }), ctx);
+    expect(h.updated?.startedAt).toBeInstanceOf(Date);
+    expect(h.updated?.finishedAt).toBeNull();
+  });
+
+  it("ne pose PAS de début sur la désignation du serveur à 0-0", async () => {
+    h.match = freshMatch({ status: "pending", startedAt: null, finishedAt: null });
+    const engage = { current: { home: 0, away: 0 }, serving: "home", servingBox: "right" };
+    await PUT(put({ games: [], live: engage }), ctx);
+    expect(h.updated?.startedAt).toBeNull();
+  });
+
+  it("pose la fin au point décisif, sans toucher au début", async () => {
+    h.match = freshMatch({ games: asRows(WIN.slice(0, 2)), startedAt: DEBUT, finishedAt: null });
+    await PUT(put({ games: WIN }), ctx);
+    expect(h.updated?.startedAt).toBe(DEBUT);
+    expect(h.updated?.finishedAt).toBeInstanceOf(Date);
+    // Le même instant que la prise : une seule heure pour toute l'écriture.
+    expect(h.updated?.finishedAt).toBe(h.updated?.scorerClaimedAt);
+  });
+
+  it("ne déplace pas la fin quand le marqueur renvoie le même état", async () => {
+    h.match = freshMatch({ status: "done", games: asRows(WIN), startedAt: DEBUT, finishedAt: FIN });
+    await PUT(put({ games: WIN }), ctx);
+    expect(h.updated?.finishedAt).toBe(FIN);
+  });
+
+  it("efface la fin quand le point décisif est annulé", async () => {
+    h.match = freshMatch({ status: "done", games: asRows(WIN), startedAt: DEBUT, finishedAt: FIN });
+    await PUT(put({ games: WIN.slice(0, 2), knownGameCount: 3, live: liveSnap }), ctx);
+    expect(h.updated?.finishedAt).toBeNull();
+    expect(h.updated?.startedAt).toBe(DEBUT);
+  });
+
+  it("un jeu déjà fini garde son heure quand le suivant se termine", async () => {
+    const FIN_JEU_1 = new Date(Date.now() - 30 * 60_000);
+    h.match = freshMatch({
+      games: [{ pointsHome: 11, pointsAway: 5, finishedAt: FIN_JEU_1 }],
+      startedAt: DEBUT,
+    });
+    await PUT(put({ games: [{ home: 11, away: 5 }, { home: 9, away: 11 }] }), ctx);
+    expect(h.createdGames?.[0].finishedAt).toBe(FIN_JEU_1);
+    expect(h.createdGames?.[1].finishedAt).toBeInstanceOf(Date);
+    expect(h.createdGames?.[1].finishedAt).not.toBe(FIN_JEU_1);
+  });
+});
