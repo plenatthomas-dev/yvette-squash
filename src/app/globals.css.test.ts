@@ -225,4 +225,16 @@ describe("les panneaux du marquage passent PAR-DESSUS le tableau", () => {
     // moment précis — celui où tout le monde regarde l'écran.
     expect(regleDe(".ics-history")).toMatch(/min-height/);
   });
+
+  it("⚠️ …et cette place vaut UNE LIGNE PLEINE : réserve et hauteur de ligne sont égales", () => {
+    // La réserve était de 1.3em quand une ligne de texte y faisait 1.5em (hauteur de ligne de
+    // Pico) : mesuré 23,2 px vide contre 26,8 px pleine. Le tableau sautait donc quand même, au
+    // premier jeu — et le chrono, qui loge dans cette ligne, l'aurait fait sauter au premier
+    // point. Les deux valeurs doivent rester égales.
+    const regle = regleDe(".ics-history");
+    const reserve = /min-height\s*:\s*([\d.]+)em/.exec(regle)?.[1];
+    const ligne = /line-height\s*:\s*([\d.]+)\s*;/.exec(regle)?.[1];
+    expect(reserve).toBeDefined();
+    expect(ligne).toBe(reserve);
+  });
 });

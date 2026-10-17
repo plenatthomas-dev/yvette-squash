@@ -204,8 +204,8 @@ recherche avant de forcer la valeur »).
 | `InterclubTeam` | Les équipes de l'asso. Une **table**, pas des colonnes `equipe1/equipe2` : une 3ᵉ équipe ne coûtera qu'une ligne. Semées idempotemment par la migration. |
 | `InterclubGuest` | Joueur du championnat **sans compte** sur l'appli. `name`, unique dans son équipe, et son classement à deux étages : le **rapprochement squashnet** (`snClt`, `snRangM`, `snStatus`…) et la **correction admin** (`cltOverride`, `rangMOverride`), prioritaire. « Sans compte » ne veut pas dire « sans licence » : ces joueurs disputent le même championnat, donc la fédération les connaît. |
 | `Interclub` | La rencontre. `opponent` est un **texte libre** — on ne tient pas d'annuaire des clubs adverses. `startNotifiedAt` / `doneNotifiedAt` sont des **marqueurs d'annonce**, pas des dates d'affichage : rien ne les lit hors des gardes de notification. |
-| `InterclubMatch` | Un simple. Porte `homeUserId` **ou** `homeGuestId` (contrainte `CHECK`, jamais les deux), la prise de marquage, et l'instantané du direct (`liveJson`). |
-| `InterclubGame` | Un jeu **terminé**. `@@unique([matchId, number])`. |
+| `InterclubMatch` | Un simple. Porte `homeUserId` **ou** `homeGuestId` (contrainte `CHECK`, jamais les deux), la prise de marquage, l'instantané du direct (`liveJson`), et sa durée (`startedAt` / `finishedAt`, cf. « La durée d'un simple »). |
+| `InterclubGame` | Un jeu **terminé**. `@@unique([matchId, number])`. `finishedAt` : l'heure où le direct l'a vu se finir, NULL pour un jeu saisi après coup. |
 | `InterclubFollow` | Abonnement d'un membre au suivi d'une équipe. Index `(teamId, level)` : le chemin critique est la requête inverse, « qui prévenir pour l'équipe 2 ? ». |
 
 ### Trois décisions à connaître avant de toucher au schéma
@@ -312,6 +312,55 @@ et le serveur l'acceptait jadis comme un début — ce qui ramenait les deux eff
 porte de derrière, en consommant DÉFINITIVEMENT `startNotifiedAt` (le vrai début ne notifiait donc
 plus jamais). Le score de l'instantané est stocké dans les deux cas : le serveur désigné ne se
 perd pas, seul le statut attend le premier point.
+
+### La durée d'un simple (depuis le 17/10/2026)
+
+Sur la fiche d'une rencontre, chaque simple marqué en direct affiche sa durée à côté de son
+numéro (« Simple 1 · 42 min »). Pendant le match, c'est le temps écoulé depuis le premier point,
+qui avance tout seul. Une fois tous les simples terminés et mesurés, la rencontre affiche aussi
+la sienne, du premier point au dernier (« Terminée en 2 h 35 »). Les règles sont dans
+`src/lib/interclub-duree.ts`, un module pur et testé :
+
+- **Seul le direct horodate.** `PUT …/live` pose `startedAt` au passage `pending` → `live`,
+  c'est-à-dire au premier point, et `finishedAt` au point décisif. L'heure est celle du
+  **serveur**, jamais celle du téléphone. La saisie après coup (`PATCH`) n'invente aucune heure
+  et n'en efface aucune : corriger 11-5 en 11-7 ne change pas la durée d'un match bien mesuré.
+- **Dans le doute, rien.** Pas de début si la première écriture porte déjà un jeu terminé : le
+  téléphone comptait hors ligne et le vrai premier point est perdu. Pas de durée au-delà de
+  3 h pour un simple ou de 8 h pour une rencontre : ce serait un oubli, pas un match. Une durée
+  fausse se lirait comme une mesure.
+- **Annuler défait.** Le premier point annulé efface le début, et le point décisif annulé efface
+  la fin. Un renvoi du même état (reprise après coupure) ne déplace rien.
+- **Les jeux gardent leur heure.** Les deux routes effacent et recréent la liste des jeux. Avant
+  ce changement, chaque jeu recevait l'heure de l'écriture, donc tous portaient celle du
+  dernier. Désormais un jeu inchangé (ou corrigé) garde la sienne. Cette heure n'est pas encore
+  affichée.
+
+**Pas dans le panneau « En direct ».** Mesuré à 360 px, « #1 · 18 min » faisait chevaucher les
+noms et le score de la ligne. La carte ouvre la fiche d'un appui, et la durée s'y lit.
+
+**Le chrono de l'écran de marquage** (`MatchClock`, interclub et marqueur libre). Il se met à
+jour chaque seconde à droite de la ligne des jeux (« 18:42 »), part au premier point, se fige au
+point décisif, et n'apparaît pas avant. Il suit les mêmes règles (`liveMatchTimes`), mais avec
+l'**horloge du téléphone** : il doit partir au premier appui, même sans réseau. Les heures sont
+gardées à côté du journal (`ic:time:<match>`), donc un rechargement ne remet pas le chrono à
+zéro. Un match repris sur un autre téléphone reprend l'heure du serveur. Le chrono et la fiche
+peuvent donc différer de quelques secondes, le temps d'une synchro.
+
+Il loge dans la ligne des jeux, et non dans l'en-tête, parce que cette ligne a déjà sa hauteur
+réservée. Dans l'en-tête, il aurait ajouté une ligne au rappel du match au premier point, et le
+tableau aurait sauté. ⚠️ Cette réserve était d'ailleurs fausse : `min-height: 1.3em` contre une
+ligne de texte en `1.5em` héritée de Pico, mesuré 23,2 px vide et 26,8 px pleine. Le tableau
+sautait donc déjà de 0,2em au premier jeu terminé. `.ics-history` porte maintenant sa propre
+hauteur de ligne (1.3), et la ligne fait la même hauteur dans les cinq cas mesurés.
+
+**Marqueur libre.** Même chrono pendant le match. Le match terminé garde ses deux heures
+(`firstPointAt`, `finishedAt` dans `FreeMatch`, sur le téléphone), ce qui donne « Match terminé en
+42 min », la durée dans l'historique et sur l'image partagée. Les matchs d'avant ce changement
+n'en ont pas.
+
+Les matchs joués avant ce changement n'ont aucune heure exploitable et n'afficheront jamais de
+durée.
 
 ### Au bord du terrain — ce que l'écran fait sans qu'on le lui demande
 
@@ -1103,6 +1152,10 @@ inventerait des écarts.
   `opponentTeams`, `estDesigne`, et `awayLineupConflict` — l'ordre des simples ADVERSES, qui
   délègue à `lineupOrderConflict` plutôt que de la recopier. Pur, donc employé **par l'écran**
   autant que par les routes : ce que le menu grise, le serveur le refuse, et réciproquement
+- `src/lib/interclub-duree.ts` — la **durée d'un simple** : quelles heures `PUT …/live` pose
+  (`liveMatchTimes`, `liveGameTimes`), ce qu'une correction conserve (`correctedGameTimes`), et
+  ce que l'écran en affiche (`matchDurationMs`, `fixtureDurationMs`, `formatDuration`). Cf. « La
+  durée d'un simple »
 
 **Côté base**
 - `src/lib/interclub-db.ts` — sérialisation, score de rencontre, statut déduit, péremption de la

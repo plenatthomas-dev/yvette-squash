@@ -370,6 +370,9 @@ export function serializeInterclub(f: FullInterclub, userId: string | null, isAd
       scorerName: m.scorer ? (m.scorer.nickname ?? m.scorer.displayName) : null,
       isMine: !!userId && m.scorerId === userId,
       scorerStale: scorerIsStale(m.scorerClaimedAt),
+      // Heures du marquage en direct (cf. `interclub-duree.ts`) : NULL quand on ne sait pas.
+      startedAt: m.startedAt?.toISOString() ?? null,
+      finishedAt: m.finishedAt?.toISOString() ?? null,
       updatedAt: m.updatedAt.toISOString(),
     };
   });

@@ -333,3 +333,75 @@ describe("Tournoi — « 🎯 Marquer »", () => {
     expect(screen.getByText("Qui engage ?")).toBeTruthy();
   });
 });
+
+// LE CHRONO. Il part au PREMIER POINT — pas à « Commencer », qu'on tape avant l'échauffement, ni
+// à la désignation du serveur — et se fige au point décisif. Horloge du téléphone, gardée avec le
+// journal : un rechargement ne le remet pas à zéro.
+describe("FreeScorer — le chrono", () => {
+  const toast = vi.fn();
+  const T0 = new Date("2026-10-17T18:00:00Z").getTime();
+  const chrono = () => document.querySelector(".ics-clock")?.textContent ?? null;
+
+  beforeEach(() => {
+    // Seuls l'heure et les intervalles sont simulés : le reste de l'écran garde ses vrais minuteurs.
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"], now: T0 });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function commencer() {
+    render(<FreeScorer toast={toast} />);
+    fireEvent.change(screen.getByLabelText("Joueur 1"), { target: { value: "Paul" } });
+    fireEvent.change(screen.getByLabelText("Joueur 2"), { target: { value: "Marc" } });
+    clic(bouton("Commencer"));
+  }
+
+  it("part au premier point, se fige au point décisif, et la durée reste dans l'historique", () => {
+    commencer();
+    engager("Paul");
+    expect(chrono()).toBeNull();
+
+    points("Paul", 1);
+    expect(chrono()).toBe("0:00");
+    act(() => {
+      vi.advanceTimersByTime(7 * 60_000);
+    });
+    expect(chrono()).toBe("7:00");
+
+    points("Paul", 21);
+    expect(screen.getByText(/Paul l'emporte/)).toBeTruthy();
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(chrono()).toBe("7:00");
+
+    clic(bouton("Terminer"));
+    expect(screen.getByText("Match terminé en 7 min")).toBeTruthy();
+    const hist = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
+    expect(hist[0]).toMatchObject({ firstPointAt: T0, finishedAt: T0 + 7 * 60_000 });
+  });
+
+  it("un rechargement en plein match garde le chrono", () => {
+    commencer();
+    engager("Paul");
+    points("Paul", 1);
+    act(() => {
+      vi.advanceTimersByTime(2 * 60_000);
+    });
+
+    cleanup();
+    render(<FreeScorer toast={toast} />);
+    clic(bouton("Reprendre"));
+    expect(chrono()).toBe("2:00");
+  });
+
+  it("annuler le premier point efface le chrono", () => {
+    commencer();
+    engager("Paul");
+    points("Paul", 1);
+    expect(chrono()).toBe("0:00");
+    clic(bouton("↶ Annuler"));
+    expect(chrono()).toBeNull();
+  });
+});

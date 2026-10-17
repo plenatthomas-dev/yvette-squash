@@ -13,8 +13,10 @@ import {
   type ScoreEvent,
   type Side,
 } from "@/lib/interclub";
+import { liveMatchTimes, matchPhase, type MatchTimes } from "@/lib/interclub-duree";
 import { useBreakTimer } from "@/lib/useBreakTimer";
 import { keepAwake } from "@/lib/wake-lock";
+import MatchClock from "./MatchClock";
 import ScoreBoard, { hapticFor } from "./ScoreBoard";
 
 // Écran de marquage, au bord du terrain. Trois partis pris commandent tout le reste :
@@ -33,6 +35,11 @@ const LOG_PREFIX = "ic:log:";
 // journal : les journaux déjà posés sur les téléphones du club restent lisibles tels quels, et
 // son absence se traite comme « on ne sait pas ».
 const ACK_PREFIX = "ic:ack:";
+// Les heures du chrono (premier point, point décisif), en ms. Clé séparée pour la même raison
+// que `ACK_PREFIX` : un journal posé par une version antérieure reste lisible, et l'absence de
+// cette clé se lit « on prend celles du serveur ».
+const TIME_PREFIX = "ic:time:";
+const NO_TIMES: MatchTimes<number> = { startedAt: null, finishedAt: null };
 
 type MatchInfo = {
   id: string;
@@ -52,7 +59,40 @@ type MatchInfo = {
    * appareil, la fiche montrait 7-7 et le marquage repartait de 0-0.
    */
   live: { current: { home: number; away: number }; serving: Side | null; servingBox: Box | null } | null;
+  /**
+   * Heures posées par le SERVEUR (ISO), pour reprendre le chrono d'un match entamé sur un autre
+   * téléphone. Facultatives : sans elles, le chrono part du premier point marqué ici.
+   */
+  startedAt?: string | null;
+  finishedAt?: string | null;
 };
+
+/** ISO → ms, `null` si absent ou illisible. */
+function toMs(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function loadTimes(matchId: string): MatchTimes<number> | null {
+  try {
+    const raw = localStorage.getItem(TIME_PREFIX + matchId);
+    if (!raw) return null;
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    const ms = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+    return { startedAt: ms(o?.startedAt), finishedAt: ms(o?.finishedAt) };
+  } catch {
+    return null;
+  }
+}
+
+function saveTimes(matchId: string, times: MatchTimes<number>) {
+  try {
+    localStorage.setItem(TIME_PREFIX + matchId, JSON.stringify(times));
+  } catch {
+    // Même parti pris que `saveLog` : le chrono se perd au rechargement, le compte continue.
+  }
+}
 
 function loadLog(matchId: string): ScoreEvent[] | null {
   try {
@@ -78,6 +118,7 @@ export function clearLog(matchId: string) {
   try {
     localStorage.removeItem(LOG_PREFIX + matchId);
     localStorage.removeItem(ACK_PREFIX + matchId);
+    localStorage.removeItem(TIME_PREFIX + matchId);
   } catch {
     /* sans importance */
   }
@@ -173,6 +214,11 @@ export default function InterclubScorer({
   const [ready, setReady] = useState(false);
   const [offline, setOffline] = useState(false);
   const { remaining, startBreak, stopBreak } = useBreakTimer();
+  // Le chrono, tenu comme le journal : état pour l'affichage, référence pour les appuis
+  // rapprochés. Horloge de CE téléphone — il part au premier appui, réseau ou pas (cf.
+  // `interclub-duree.ts` sur les deux horloges).
+  const [times, setTimes] = useState<MatchTimes<number>>(NO_TIMES);
+  const timesRef = useRef<MatchTimes<number>>(NO_TIMES);
 
   const state = replay(events, bestOf);
   const needed = winGamesFor(bestOf);
@@ -204,6 +250,14 @@ export default function InterclubScorer({
       );
     eventsRef.current = seed;
     setEvents(seed);
+    // Les heures suivent le journal : les nôtres s'il vient d'ici, celles du serveur sinon — un
+    // match entamé sur un autre téléphone reprend son chrono où il en était.
+    const t = (local ? loadTimes(match.id) : null) ?? {
+      startedAt: toMs(match.startedAt),
+      finishedAt: toMs(match.finishedAt),
+    };
+    timesRef.current = t;
+    setTimes(t);
     // Sur quel état du serveur ce journal est-il bâti ? Amorcé depuis le serveur, la réponse
     // est immédiate. Repris d'un journal local, elle a été notée au dernier envoi réussi ; à
     // défaut — journal d'avant cette clé, stockage vidé — on retient ce que le journal lui-même
@@ -213,8 +267,8 @@ export default function InterclubScorer({
     setReady(true);
     // `match.live` figure ici comme `match.games` : le verrou `seededFor` empêche de toute
     // façon un second amorçage, et les lister honnêtement vaut mieux qu'une exception de lint
-    // qui masquerait le jour où le verrou disparaîtrait.
-  }, [match.id, match.games, match.live, bestOf]);
+    // qui masquerait le jour où le verrou disparaîtrait. Même chose pour les heures.
+  }, [match.id, match.games, match.live, match.startedAt, match.finishedAt, bestOf]);
 
   useEffect(() => {
     if (ready) saveLog(match.id, events);
@@ -426,6 +480,15 @@ export default function InterclubScorer({
     eventsRef.current = next;
     setEvents(next);
 
+    const nextTimes = liveMatchTimes(
+      { status: matchPhase(before), ...timesRef.current },
+      { status: matchPhase(after), games: after.games.length },
+      Date.now(),
+    );
+    timesRef.current = nextTimes;
+    setTimes(nextTimes);
+    saveTimes(match.id, nextTimes);
+
     const gameEnded = after.games.length > before.games.length;
     const finished = after.status === "done";
 
@@ -518,6 +581,7 @@ export default function InterclubScorer({
       onSkipBreak={stopBreak}
       onBack={() => void finish()}
       onFinish={() => void finish()}
+      clock={<MatchClock times={times} />}
     />
   );
 }
