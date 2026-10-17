@@ -46,6 +46,18 @@ export const FORUM_EVENT_POLL = "poll";
 
 let client: Pusher | null = null;
 let configFailed = false;
+/** Un échec de diffusion a-t-il déjà été journalisé par cette instance ? (cf. `broadcastForum`) */
+let echecSignale = false;
+
+/**
+ * Délai maximal d'une requête au courtier. SANS LUI, LE CLIENT N'EN A AUCUN : la bibliothèque
+ * `pusher` n'arme son `AbortController` que si `timeout` est fourni (lib/requests.js). Or
+ * `broadcastForum` est ATTENDU par les routes du fil, après l'écriture en base : un courtier qui
+ * ne répond plus tiendrait la réponse au membre — message pourtant enregistré — jusqu'à
+ * l'expiration de la fonction. Cinq secondes laissent une marge très large à un aller-retour
+ * normal vers le cluster `eu`, et restent supportables pour qui vient d'appuyer sur « Envoyer ».
+ */
+const DELAI_COURTIER_MS = 5_000;
 
 /**
  * Instancie le client au premier besoin, une seule fois — succès comme échec sont mémorisés,
@@ -64,7 +76,7 @@ function broker(): Pusher | null {
     return null;
   }
   try {
-    client = new Pusher({ appId, key, secret, cluster, useTLS: true });
+    client = new Pusher({ appId, key, secret, cluster, useTLS: true, timeout: DELAI_COURTIER_MS });
     return client;
   } catch {
     configFailed = true;
@@ -123,8 +135,18 @@ export async function broadcastForum(event: string, payload: unknown): Promise<v
   if (!p) return;
   try {
     await p.trigger(FORUM_CHANNEL, event, payload);
-  } catch {
-    /* le fil marche sans : rien à signaler à l'utilisateur */
+  } catch (e) {
+    // Rien à signaler à l'UTILISATEUR — le fil marche sans. Mais un `catch` muet rendait aussi
+    // la panne invisible à l'EXPLOITANT : clé révoquée, quota épuisé ou délai dépassé, le temps
+    // réel pouvait être mort depuis des semaines sans une ligne dans les journaux Vercel.
+    //
+    // UNE fois par instance seulement : un courtier en panne échoue à CHAQUE message, et
+    // répéter la même ligne noierait les journaux sans rien apprendre de plus. Une instance
+    // neuve (démarrage à froid, redéploiement) le redira si la panne dure.
+    if (!echecSignale) {
+      echecSignale = true;
+      console.warn("[forum] diffusion temps réel impossible — le fil continue sans", e);
+    }
   }
 }
 
@@ -133,4 +155,5 @@ export async function broadcastForum(event: string, payload: unknown): Promise<v
 export function resetForumRealtimeForTests(): void {
   client = null;
   configFailed = false;
+  echecSignale = false;
 }

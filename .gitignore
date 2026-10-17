@@ -41,6 +41,9 @@ Sec_Arch_analysis_Gemini.md
 yvette-squash-analyse-securite.md
 .vercel
 .env*
+# … sauf le modèle, qui ne contient AUCUN secret et DOIT rester suivi : sans cette exception,
+# `.env*` l'attrape aussi, et un futur `git add` le laisserait silencieusement de côté.
+!.env.example
 
 # impeccable — le live mode écrit des artefacts d'EXÉCUTION dans .impeccable/live/
 # (journal d'injection, état de session). Seule sa config est versionnée.
@@ -53,6 +56,10 @@ yvette-squash-analyse-securite.md
 
 # fil de travail local (notes de session, jamais un livrable)
 fil.md
+
+# sondes jetables lancées à la main (`npx tsx sonde-….mts`) pour mesurer un comportement
+# réel — course, délai, réponse d'un service. Un outil de diagnostic, pas un livrable.
+sonde-*.mts
 
 # Application Android (TWA, cf. android/README.md) — sorties de compilation. La clé d'upload
 # vit HORS du dépôt (~/.android-keys) : les deux dernières lignes ne sont qu'un filet.
