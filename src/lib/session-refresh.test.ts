@@ -27,8 +27,17 @@ vi.mock("./db", () => ({ prisma: { session: {
     return { count: 1 };
   }),
   deleteMany: vi.fn(),
+  // Lecture de `getResaTokenForUser` / `createResaSessionFromUser` (session la plus récente).
+  findFirst: vi.fn(async () => ({ ...h.row })),
+  create: vi.fn(),
 } } }));
-import { getSession, refreshBackoffMs, ResaRefreshTransientError } from "./session";
+import {
+  getSession,
+  getResaTokenForUser,
+  createResaSessionFromUser,
+  refreshBackoffMs,
+  ResaRefreshTransientError,
+} from "./session";
 import { prisma } from "./db";
 import { ResaAuthRejectedError, ResaUnavailableError } from "./resamania/client";
 
@@ -101,9 +110,18 @@ it("ResaMania en 503 au rafraîchissement : session CONSERVÉE, verrou relâché
   );
   vi.spyOn(console, "warn").mockImplementation(() => {});
 
-  const err = await getSession("sid").catch((e) => e);
+  // `getSession` n'en fait plus une exception (elle faisait tomber en 500 TOUTES les routes,
+  // forum compris) : la session est rendue, authentifiée, sans jeton, avec l'indicateur qui la
+  // distingue d'un compte « email seul ».
+  const s = await getSession("sid");
 
-  expect(err).toBeInstanceOf(ResaRefreshTransientError);
+  expect(s).toEqual({
+    userId: "u1",
+    displayName: "Alice",
+    email: "a@example.fr",
+    resa: null,
+    resaUnavailable: true,
+  });
   expect(prisma.session.deleteMany).not.toHaveBeenCalled();
   // Verrou rendu tout de suite : la requête suivante retente sans attendre la reprise d'un
   // verrou abandonné (60 s)…
@@ -126,4 +144,42 @@ it("refresh token refusé (400 invalid_grant) : session supprimée, reconnexion 
   expect(prisma.session.deleteMany).toHaveBeenCalledWith({
     where: { id: "sid", refreshClaimedAt: expect.any(Date) },
   });
+});
+
+// Les DEUX autres portes du jeton, elles, LAISSENT remonter l'erreur passagère : leur `null`
+// déclenche des actes définitifs (« ta délégation ne fonctionne plus », « ta connexion
+// ResaMania a expiré »), qu'une panne de ResaMania ne doit pas produire. Leurs appelants
+// (crons, délégation, biométrie) traitent l'exception eux-mêmes.
+
+it("getResaTokenForUser : panne passagère → ResaRefreshTransientError (pas null), session gardée", async () => {
+  h.refresh.mockImplementation(() => Promise.reject(new ResaUnavailableError("down", 503)));
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  const err = await getResaTokenForUser("u1").catch((e) => e);
+
+  expect(err).toBeInstanceOf(ResaRefreshTransientError);
+  expect(prisma.session.deleteMany).not.toHaveBeenCalled();
+  expect(h.row.refreshClaimedAt).toBeNull();
+});
+
+it("createResaSessionFromUser : panne passagère → erreur, rien transféré ni supprimé", async () => {
+  h.refresh.mockImplementation(() => Promise.reject(new ResaUnavailableError("down", 503)));
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  const err = await createResaSessionFromUser("u1").catch((e) => e);
+
+  expect(err).toBeInstanceOf(ResaRefreshTransientError);
+  expect(prisma.session.create).not.toHaveBeenCalled();
+  expect(prisma.session.deleteMany).not.toHaveBeenCalled();
+});
+
+it("getSession : une erreur de la BASE n'est pas déguisée en panne ResaMania", async () => {
+  // Seule l'erreur passagère typée devient `resaUnavailable` ; une base à terre doit continuer
+  // de remonter (isDbUnavailable → 503 « maintenance » chez les appelants).
+  // Cast : le mock rend une Promise ordinaire, pas une PrismaPromise — sans incidence ici.
+  vi.mocked(prisma.session.updateMany).mockImplementationOnce(
+    (() => Promise.reject(new Error("Can't reach database server"))) as never,
+  );
+
+  await expect(getSession("sid")).rejects.toThrow("Can't reach database server");
 });

@@ -55,64 +55,23 @@ class CookieJar {
 }
 
 // ----------------------------------------------------------------------------
-//  Erreurs TYPÉES — l'appelant doit pouvoir distinguer « ResaMania dit non » de « ResaMania
-//  ne répond pas », et les deux de « on ne sait pas si ResaMania a fait l'écriture ».
+//  Erreurs TYPÉES — définies dans ./errors (cf. le POURQUOI en tête de ce fichier-là, et
+//  pourquoi il est séparé). Ré-exportées ici : les appelants historiques importent toujours
+//  `ResaUnavailableError`, `isResaAuthRejected`… depuis ce module.
 // ----------------------------------------------------------------------------
-//
-// POURQUOI. Avant, tout échec était un `Error` anonyme. Conséquence la plus grave : un 503
-// passager au moment de rafraîchir le jeton passait pour un refresh token révoqué, et la
-// session du membre était SUPPRIMÉE (cf. session.ts, resolveResaToken) — déconnexion forcée
-// pour une panne de quelques secondes chez eux. Côté login, une panne ResaMania était comptée
-// comme une tentative échouée par l'anti-brute-force.
-//
-// Chaque classe porte un `code` stable en plus de sa classe : les tests mockent ce module
-// (vi.mock) et un `instanceof` sur une classe absente du mock lèverait ; les gardes
-// `isResa…` ci-dessous ne lisent que le `code`, ce qui marche aussi à travers deux copies du
-// module (bundles distincts).
-
-/** ResaMania REFUSE l'authentification : mauvais identifiants, refresh token révoqué/expiré
- *  (400/401, `invalid_grant`). Réessayer ne changera rien : il faut se reconnecter. */
-export class ResaAuthRejectedError extends Error {
-  readonly code = "RESA_AUTH_REJECTED";
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = "ResaAuthRejectedError";
-  }
-}
-
-/** ResaMania INDISPONIBLE : 5xx, 429, erreur réseau, délai dépassé, réponse illisible.
- *  Passager par nature : on garde tout en l'état et on réessaiera. */
-export class ResaUnavailableError extends Error {
-  readonly code = "RESA_UNAVAILABLE";
-  constructor(
-    message: string,
-    readonly status?: number,
-    options?: { cause?: unknown },
-  ) {
-    super(message, options);
-    this.name = "ResaUnavailableError";
-  }
-}
-
-/** Écriture (réservation / annulation) partie vers ResaMania SANS réponse exploitable (délai
- *  dépassé, connexion coupée) : elle a PU aboutir. Ni succès ni échec — l'appelant doit dire
- *  « vérifie le planning », surtout pas « échec, réessaie » (doublon) ni « c'est fait ». */
-export class ResaOutcomeUnknownError extends Error {
-  readonly code = "RESA_OUTCOME_UNKNOWN";
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = "ResaOutcomeUnknownError";
-  }
-}
-
-const codeOf = (e: unknown): unknown =>
-  e && typeof e === "object" ? (e as { code?: unknown }).code : undefined;
-export const isResaAuthRejected = (e: unknown): e is ResaAuthRejectedError =>
-  codeOf(e) === "RESA_AUTH_REJECTED";
-export const isResaUnavailable = (e: unknown): e is ResaUnavailableError =>
-  codeOf(e) === "RESA_UNAVAILABLE";
-export const isResaOutcomeUnknown = (e: unknown): e is ResaOutcomeUnknownError =>
-  codeOf(e) === "RESA_OUTCOME_UNKNOWN";
+import {
+  ResaAuthRejectedError,
+  ResaUnavailableError,
+  ResaOutcomeUnknownError,
+} from "./errors";
+export {
+  ResaAuthRejectedError,
+  ResaUnavailableError,
+  ResaOutcomeUnknownError,
+  isResaAuthRejected,
+  isResaUnavailable,
+  isResaOutcomeUnknown,
+} from "./errors";
 
 // Timeout par requête ResaMania : sans lui, une connexion calée pend jusqu'au timeout réseau
 // (~60 s) — la vue Semaine se bloque (le jour concerné doit retomber sur son snapshot, cf.
@@ -641,6 +600,11 @@ export async function findAttendeeId(
       },
     },
   );
+  // Même règle pour un 5xx / 429 : « ResaMania ne répond pas » n'est pas « aucune résa ». Sans
+  // cette garde, une panne passagère faisait répondre à /api/cancel-slot « Réservation
+  // introuvable côté ResaMania » (404) — faux, et décourageant : le membre croyait sa résa
+  // disparue alors qu'il suffisait de réessayer quelques secondes plus tard.
+  assertUpstreamUp(res, "Attendees");
   if (!res.ok) return null;
   const j = await readJson<{
     "hydra:member"?: Array<{ "@id": string; contactId?: string; state?: string }>;

@@ -47,7 +47,10 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
-  if (!session.resa) {
+  // Contrôle de RÔLE, pas d'usage du jeton (créer un tournoi n'appelle pas ResaMania) : un
+  // compte ResaMania dont le jeton est momentanément irrafraîchissable (`resaUnavailable`)
+  // reste un compte ResaMania, il n'a pas à lire « Compte email seul » pendant une panne.
+  if (!session.resa && !session.resaUnavailable) {
     return NextResponse.json(
       { error: "Compte email seul : la création de tournoi est réservée aux comptes ResaMania." },
       { status: 403 },

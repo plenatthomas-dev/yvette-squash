@@ -111,6 +111,11 @@ export async function GET(req: NextRequest) {
   const dates = weekDates(date);
 
   // --- Compte « email seul » (sans jeton) : agrégat des snapshots par jour, puis annotation. ---
+  //
+  // Sert AUSSI un compte ResaMania au jeton momentanément irrafraîchissable (`resaUnavailable`,
+  // panne passagère) : c'est exactement le repli que le chemin live applique déjà, jour par
+  // jour, quand un fetch ResaMania échoue — ici les sept jours d'un coup, puisqu'aucun ne peut
+  // être lu. Chaque jour porte `cached`, comme pour un jour en échec du chemin live.
   if (!session.resa) {
     const snaps = await prisma.planningSnapshot.findMany({ where: { date: { in: dates } } });
     const byDate = new Map(snaps.map((s) => [s.date, s]));

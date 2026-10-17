@@ -161,6 +161,25 @@ describe("book / cancel — écriture sans réponse = résultat INCONNU", () => 
   });
 });
 
+describe("findAttendeeId — « introuvable » et « indisponible » ne se confondent plus", () => {
+  it("ResaMania en 503 → ResaUnavailableError, et non null (« aucune résa »)", async () => {
+    fetchMock.mockResolvedValue(json({}, 503));
+    const err = await client.findAttendeeId(expired(), "/t/class_events/1").catch((e) => e);
+    expect(client.isResaUnavailable(err)).toBe(true);
+  });
+
+  it("délai dépassé → ResaUnavailableError (lecture : pas de « résultat inconnu »)", async () => {
+    failFetch(new DOMException("The operation timed out.", "TimeoutError"));
+    const err = await client.findAttendeeId(expired(), "/t/class_events/1").catch((e) => e);
+    expect(client.isResaUnavailable(err)).toBe(true);
+  });
+
+  it("404 reçu → null, comme avant (la ressource n'existe vraiment pas)", async () => {
+    fetchMock.mockResolvedValue(json({}, 404));
+    expect(await client.findAttendeeId(expired(), "/t/class_events/1")).toBeNull();
+  });
+});
+
 describe("login — refus et panne ne se ressemblent plus", () => {
   it("formulaire renvoyé sans code d'autorisation → refus d'authentification", async () => {
     // Mauvais mot de passe : ResaMania répond normalement mais ne délivre aucun code.

@@ -77,3 +77,43 @@ describe("GET /api/planning — date", () => {
     expect(h.getPlanningWithMeta.mock.calls[0][0]).toBe("2026-10-18");
   });
 });
+
+// PANNE RESAMANIA PASSAGÈRE (`resaUnavailable`) : pas de jeton, donc pas de lecture live. On
+// sert le snapshot — comme à un compte « email seul » — plutôt qu'une erreur, avec un bandeau
+// qui dit la vraie raison (et non « mis à jour par un membre connecté à ResaMania »).
+describe("GET /api/planning — ResaMania momentanément injoignable", () => {
+  beforeEach(() => {
+    h.getSession.mockResolvedValue({ userId: "u1", resa: null, resaUnavailable: true });
+  });
+
+  it("sert le snapshot, sans appeler ResaMania ni réconcilier, avec un bandeau de panne", async () => {
+    h.snapFind.mockResolvedValueOnce({
+      payloadJson: JSON.stringify(planning("2026-10-17")),
+      updatedAt: new Date("2026-10-17T16:05:00Z"),
+    } as never);
+
+    const res = await GET(req("?date=2026-10-17"));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.cached).toBe(true);
+    // 16:05 UTC = 18:05 à Paris (heure d'été) : la date du cache est lue en heure du club.
+    expect(body.notice).toContain("ResaMania ne répond pas");
+    expect(body.notice).toContain("18:05");
+    expect(h.getPlanningWithMeta).not.toHaveBeenCalled();
+    expect(h.reconcile).not.toHaveBeenCalled();
+    expect(h.snapUpsert).not.toHaveBeenCalled();
+  });
+
+  it("aucun snapshot pour ce jour : planning vide, bandeau de panne (pas « pas encore chargé »)", async () => {
+    const body = await (await GET(req("?date=2026-10-17"))).json();
+    expect(body.slots).toEqual([]);
+    expect(body.notice).toMatch(/^ResaMania ne répond pas/);
+  });
+
+  it("compte « email seul » ordinaire : bandeau inchangé", async () => {
+    h.getSession.mockResolvedValue({ userId: "u1", resa: null });
+    const body = await (await GET(req("?date=2026-10-17"))).json();
+    expect(body.notice).toBe("Planning pas encore chargé par un membre connecté à ResaMania.");
+  });
+});

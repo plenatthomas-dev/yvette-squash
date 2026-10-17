@@ -111,7 +111,9 @@ export async function GET(req: NextRequest) {
     // Compte « email seul » (sans ResaMania) : l'IHM masque alors la gestion des
     // dépenses (création/édition/suppression). Lecture, remboursements, messagerie
     // et validation restent possibles. Le serveur reste la source de vérité (403).
-    emailOnly: session.resa === null,
+    // Même définition que `isEmailOnly` (lib/tricount-guard) : un compte ResaMania dont le jeton
+    // est momentanément irrafraîchissable (`resaUnavailable`) n'est PAS « email seul ».
+    emailOnly: session.resa === null && !session.resaUnavailable,
     // Reste-t-il des tricounts plus anciens à charger ? (bouton « Charger plus »)
     hasMore,
     // Mon solde et mon nombre de dettes sur TOUT l'historique — indépendants de `limit`, donc

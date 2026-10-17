@@ -14,6 +14,9 @@ const h = vi.hoisted(() => ({
   authorized: true,
   alerts: [] as Array<Record<string, unknown>>,
   resa: null as null | { accessToken: string },
+  // Jeton PAR MEMBRE quand un test en a besoin (panne pour l'un, jeton frais pour l'autre) ;
+  // sinon `resa` vaut pour tout le monde.
+  tokenFor: null as null | ((userId: string) => Promise<unknown>),
   getPlanning: vi.fn(),
   sessionUpdate: vi.fn(),
   sessionFindFirst: vi.fn(),
@@ -40,7 +43,11 @@ vi.mock("@/lib/db", () => ({
     session: { update: h.sessionUpdate, findFirst: h.sessionFindFirst },
   },
 }));
-vi.mock("@/lib/session", () => ({ getResaTokenForUser: vi.fn(async () => h.resa) }));
+vi.mock("@/lib/session", () => ({
+  getResaTokenForUser: vi.fn((userId: string) =>
+    h.tokenFor ? h.tokenFor(userId) : Promise.resolve(h.resa),
+  ),
+}));
 vi.mock("@/lib/resamania/client", () => ({ getPlanning: h.getPlanning }));
 vi.mock("@/lib/push", () => ({ pushToUser: h.pushToUser, pushConfigured: () => true }));
 vi.mock("@/lib/cron-auth", () => ({ cronAuthorized: () => h.authorized }));
@@ -57,6 +64,8 @@ vi.mock("@/lib/alerts-gate", async (importOriginal) => ({
 }));
 
 import { GET } from "./route";
+import { recordCronRun } from "@/lib/cron-run";
+import { ResaRefreshTransientError } from "@/lib/resamania/errors";
 
 const req = () => ({} as NextRequest);
 // Un créneau demain : l'alerte ne doit pas être écartée comme « déjà passée ». Date du CLUB,
@@ -78,6 +87,7 @@ beforeEach(() => {
   h.authorized = true;
   h.pending = true;
   h.resa = { accessToken: "jeton-en-clair-valide" };
+  h.tokenFor = null;
   h.alerts = [{ id: "a1", userId: "u1", date: tomorrow(), hm: "18:00", active: true }];
   h.getPlanning.mockResolvedValue({ slots: [] });
   // `vi.clearAllMocks()` n'efface que les APPELS, pas les implémentations posées par
@@ -324,5 +334,69 @@ describe("GET /api/cron/check-alerts — durée de vie et urgence du push", () =
     await GET(req());
     const [, payload] = h.pushToUser.mock.calls[0] as unknown as [string, PushPayload];
     expect(payload.ttl).toBe(60);
+  });
+});
+
+// RÉGRESSION de f44b690 : `getResaTokenForUser` LÈVE sur une panne passagère de ResaMania (au
+// lieu de supprimer la session et rendre null). Hors de tout try, la première exception
+// interrompait la passe entière : plus aucune alerte vérifiée, pour personne, tant que la
+// panne durait — et le heartbeat ne disait rien.
+describe("GET /api/cron/check-alerts — jeton en panne passagère", () => {
+  it("saute ce membre, vérifie les SUIVANTS, ne désactive pas son alerte, compte « reportée »", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    h.alerts = [
+      { id: "a1", userId: "u-panne", date: tomorrow(), hm: "18:00", active: true },
+      { id: "a2", userId: "u-ok", date: tomorrow(), hm: "18:00", active: true },
+    ];
+    h.tokenFor = (userId) =>
+      userId === "u-panne"
+        ? Promise.reject(new ResaRefreshTransientError("ResaMania momentanément indisponible"))
+        : Promise.resolve({ accessToken: "jeton-ok" });
+    h.getPlanning.mockResolvedValue({ slots: [{ startsAt: at18(), bookable: true }] });
+
+    const res = await GET(req());
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ checked: 2, notified: 1, reportes: 1 });
+    // Le membre suivant a bien été servi…
+    expect(h.pushToUser).toHaveBeenCalledTimes(1);
+    expect(h.pushToUser).toHaveBeenCalledWith("u-ok", expect.anything());
+    // …et l'alerte du membre en panne reste ACTIVE : seule a2 a été désactivée.
+    expect(h.slotAlertUpdate).toHaveBeenCalledTimes(1);
+    expect(h.slotAlertUpdate.mock.calls[0][0]).toMatchObject({ where: { id: "a2" } });
+    // Le heartbeat le dit.
+    expect(vi.mocked(recordCronRun)).toHaveBeenCalledWith(
+      "check-alerts",
+      true,
+      expect.stringContaining("1 reportée(s)"),
+    );
+  });
+
+  it("une erreur NON passagère sur un membre ne prive pas non plus les autres de leur vérification", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    h.alerts = [
+      { id: "a1", userId: "u-casse", date: tomorrow(), hm: "18:00", active: true },
+      { id: "a2", userId: "u-ok", date: tomorrow(), hm: "18:00", active: true },
+    ];
+    h.tokenFor = (userId) =>
+      userId === "u-casse"
+        ? Promise.reject(new Error("Can't reach database server"))
+        : Promise.resolve({ accessToken: "jeton-ok" });
+    h.getPlanning.mockResolvedValue({ slots: [{ startsAt: at18(), bookable: true }] });
+
+    const res = await GET(req());
+
+    expect(res.status).toBe(200);
+    expect(h.pushToUser).toHaveBeenCalledTimes(1);
+    expect(await res.json()).toMatchObject({ reportes: 1 });
+  });
+
+  it("aucun report : `reportes: 0` et heartbeat inchangé", async () => {
+    await GET(req());
+    expect(vi.mocked(recordCronRun)).toHaveBeenCalledWith(
+      "check-alerts",
+      true,
+      expect.not.stringContaining("reportée"),
+    );
   });
 });

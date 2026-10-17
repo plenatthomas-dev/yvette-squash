@@ -295,3 +295,62 @@ describe("POST /api/book — l'alerte du créneau réservé est désactivée", (
     expect(h.alertUpdateMany).not.toHaveBeenCalled();
   });
 });
+
+// PANNES RESAMANIA. Deux situations, deux consignes OPPOSÉES (cf. lib/resamania/responses.ts) :
+// rien n'est parti → 503 « réessaie » ; la réservation est partie sans réponse → 504 « vérifie
+// le planning », SURTOUT PAS « réessaie » (2ᵉ terrain possible).
+describe("POST /api/book — pannes ResaMania", () => {
+  it("réservation partie sans réponse → 504 outcome-unknown, cache vidé, journal NON écrit", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { ResaOutcomeUnknownError } = await import("@/lib/resamania/errors");
+    h.book.mockImplementation(() =>
+      Promise.reject(new ResaOutcomeUnknownError("ResaMania n'a pas répondu à temps")),
+    );
+
+    const res = await POST(postReq(BODY));
+
+    expect(res.status).toBe(504);
+    const body = await res.json();
+    expect(body).toEqual({
+      error: "La réservation n'a pas pu être confirmée : vérifie le planning.",
+      code: "outcome-unknown",
+    });
+    // Le geste à NE PAS suggérer : réessayer prendrait peut-être un 2ᵉ terrain.
+    expect(body.error).not.toMatch(/réessaie/i);
+    // La grille que le membre va regarder doit être celle de ResaMania, pas la photo d'avant.
+    expect(h.invalidatePlanningCache).toHaveBeenCalled();
+    // Pas de résa peut-être fantôme au journal : la réconciliation du planning tranchera.
+    expect(h.upsert).not.toHaveBeenCalled();
+    expect(h.alertUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("planning injoignable avant de réserver → 503 « réessaie », rien réservé", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { ResaUnavailableError } = await import("@/lib/resamania/errors");
+    h.getPlanning.mockImplementation(() =>
+      Promise.reject(new ResaUnavailableError("Planning : ResaMania indisponible (503)", 503)),
+    );
+
+    const res = await POST(postReq(BODY));
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      error: "ResaMania ne répond pas, réessaie dans un instant.",
+      code: "resa-unavailable",
+    });
+    expect(h.book).not.toHaveBeenCalled();
+  });
+
+  it("relaie le `code` du contexte d'action (jeton momentanément irrafraîchissable)", async () => {
+    h.acting = {
+      ok: false,
+      status: 503,
+      error: "ResaMania ne répond pas, réessaie dans un instant.",
+      code: "resa-unavailable",
+    };
+    const res = await POST(postReq(BODY));
+    expect(res.status).toBe(503);
+    expect((await res.json()).code).toBe("resa-unavailable");
+    expect(h.book).not.toHaveBeenCalled();
+  });
+});

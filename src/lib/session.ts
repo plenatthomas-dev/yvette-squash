@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { prisma } from "./db";
 import { encrypt, decrypt } from "./crypto";
 import { ensureFresh, isResaAuthRejected } from "./resamania/client";
+import { ResaRefreshTransientError, isResaRefreshTransient } from "./resamania/errors";
 import type { ResaIdentity, ResaSession } from "./resamania/types";
 import type { User, Prisma } from "@prisma/client";
 
@@ -177,6 +178,11 @@ export async function createEmailSession(userId: string, tx: Prisma.TransactionC
  * Renvoie l'id de cookie de la nouvelle session, ou `null` si aucune session ResaMania n'est
  * exploitable (jamais connecté à ResaMania, session > 30 j, ou refresh token révoqué/expiré) —
  * l'appelant doit alors retomber sur un autre mode (session email, ou mot de passe ResaMania).
+ *
+ * LÈVE `ResaRefreshTransientError` si le rafraîchissement échoue de façon passagère : la
+ * session source est alors intacte (rien n'est transféré ni supprimé) et une nouvelle tentative
+ * dans quelques secondes réussira. Surtout pas `null`, qui ferait dire « ta connexion ResaMania
+ * a expiré » à un membre dont le lien est parfaitement valide.
  */
 export async function createResaSessionFromUser(userId: string): Promise<string | null> {
   const src = await prisma.session.findFirst({
@@ -210,16 +216,15 @@ export async function createResaSessionFromUser(userId: string): Promise<string 
  * (attente épuisée), ou ResaMania est indisponible au moment du rafraîchissement (5xx, 429,
  * réseau, délai). Dans les deux cas la session est CONSERVÉE — la requête suivante réessaiera.
  *
- * Même chemin que l'attente épuisée d'origine (une erreur levée, que `getSession` laisse
- * remonter), désormais typé pour qu'un appelant puisse le reconnaître (`instanceof`) et
- * répondre « réessaie » plutôt qu'un 500.
+ * Définie dans `resamania/errors` (avec un `code` stable, reconnu par `isResaRefreshTransient`
+ * même quand un test remplace ce module-ci par une fabrique) et ré-exportée ici pour les
+ * appelants historiques.
+ *
+ * Qui la voit encore : `getResaTokenForUser` (crons, délégation) et `createResaSessionFromUser`
+ * (biométrie) la LAISSENT remonter — leurs appelants savent quoi faire d'un « réessaie plus
+ * tard ». `getSession`, lui, ne la lève plus : il la traduit en `resaUnavailable` (voir là).
  */
-export class ResaRefreshTransientError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = "ResaRefreshTransientError";
-  }
-}
+export { ResaRefreshTransientError };
 
 export interface AppSession {
   userId: string;
@@ -234,7 +239,37 @@ export interface AppSession {
    * le défaut reste fail-safe.
    */
   email: string | null;
-  resa: ResaSession | null; // null = session « email seul » (sans ResaMania)
+  /**
+   * Jeton ResaMania exploitable, ou `null`. ⚠️ `null` a DEUX sens, que `resaUnavailable`
+   * départage :
+   *  - `resaUnavailable` absent → session « email seul » (jamais eu de ResaMania) ;
+   *  - `resaUnavailable: true`  → compte ResaMania dont le jeton n'a pas pu être rafraîchi à
+   *    l'instant (panne passagère) : PAS un compte email seul.
+   */
+  resa: ResaSession | null;
+  /**
+   * `true` quand la session porte des jetons ResaMania mais que leur rafraîchissement vient
+   * d'échouer de façon PASSAGÈRE (ResaMania en panne, ou rafraîchissement concurrent qui
+   * s'éternise) — `resa` vaut alors `null`. Absent dans tous les autres cas.
+   *
+   * POURQUOI UN INDICATEUR PLUTÔT QU'UNE EXCEPTION. `getSession` est appelée par une
+   * cinquantaine de routes ; l'immense majorité (forum, tricount, interclub, présences…) n'a
+   * que faire du jeton ResaMania. Lever ici transformait une panne de ResaMania en 500 sur
+   * TOUTE l'appli — forum compris — pour tout membre dont le jeton expirait pendant la panne.
+   * Avec l'indicateur, ces routes fonctionnent normalement, et seules celles qui ont besoin du
+   * jeton s'en soucient : réservation et annulation répondent 503 « réessaie »
+   * (resolveActingContext), le planning se replie sur son snapshot.
+   *
+   * POURQUOI PAS SIMPLEMENT `resa: null`. Plusieurs écrans et routes lisent `resa === null`
+   * comme « compte email seul » (/api/auth/me → `mode`/`canBook`, tricount, tournois,
+   * délégations). Sans indicateur distinct, une panne de trente secondes faisait basculer
+   * l'interface en lecture seule et afficher « Compte email seul » à un membre ResaMania. Tout
+   * test de `resa` à des fins de RÔLE doit donc aussi regarder ce champ.
+   *
+   * Optionnel (et non `boolean` obligatoire) pour ne pas obliger chaque fabrique de session des
+   * tests à le mentionner : l'absence vaut « non ».
+   */
+  resaUnavailable?: true;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -438,7 +473,14 @@ function touchLastSeen(sid: string, now: Date): Promise<unknown> {
   });
 }
 
-/** Récupère la session depuis l'id de cookie, en rafraîchissant le token ResaMania si besoin. */
+/**
+ * Récupère la session depuis l'id de cookie, en rafraîchissant le token ResaMania si besoin.
+ *
+ * Ne lève PAS sur une panne passagère de ResaMania au rafraîchissement : la session est rendue
+ * sans jeton, avec `resaUnavailable: true` (cf. `AppSession.resaUnavailable` pour le pourquoi).
+ * Une erreur de la BASE, elle, remonte telle quelle (isDbUnavailable → 503 « maintenance »
+ * chez les appelants qui le gèrent) : ce n'est pas le même incident.
+ */
 export async function getSession(sid: string | undefined): Promise<AppSession | null> {
   if (!sid) return null;
   const s = await prisma.session.findUnique({ where: { id: sid }, include: { user: true } });
@@ -448,14 +490,20 @@ export async function getSession(sid: string | undefined): Promise<AppSession | 
     return null;
   }
 
-  const resa = await resolveResaToken(s);
+  const base = { userId: s.userId, displayName: s.user.displayName, email: s.user.email };
+  let resa: ResaSession | null | undefined;
+  try {
+    resa = await resolveResaToken(s);
+  } catch (e) {
+    // Seule l'erreur PASSAGÈRE typée est absorbée ; tout le reste (base…) remonte.
+    if (!isResaRefreshTransient(e)) throw e;
+    // La session reste VALIDE (rien n'a été supprimé, le verrou est relâché) : le membre est
+    // bien authentifié, seul le jeton ResaMania manque pour l'instant. La prochaine requête
+    // retentera le rafraîchissement.
+    return { ...base, resa: null, resaUnavailable: true };
+  }
   if (resa === null) return null; // jeton irrécupérable → session invalidée (déjà supprimée)
-  return {
-    userId: s.userId,
-    displayName: s.user.displayName,
-    email: s.user.email,
-    resa: resa ?? null,
-  };
+  return { ...base, resa: resa ?? null };
 }
 
 /**
@@ -465,6 +513,12 @@ export async function getSession(sid: string | undefined): Promise<AppSession | 
  * la requête du DÉLÉGUÉ qui déclenche ce refresh, pas une action du délégant.
  * `null` si aucune session ResaMania utilisable n'existe (jamais connecté via ResaMania,
  * session expirée, ou jeton irrécupérable).
+ *
+ * LÈVE `ResaRefreshTransientError` sur une panne passagère — volontairement, contrairement à
+ * `getSession` : `null` déclenche chez les appelants des actes définitifs (le cron keep-alive
+ * prévient le délégant que sa délégation « ne fonctionne plus », resolveActingContext répond
+ * « session du délégant plus valide »). Une panne de ResaMania ne doit produire ni l'un ni
+ * l'autre ; chaque appelant traite donc l'exception (report au passage suivant, ou 503).
  */
 export async function getResaTokenForUser(userId: string): Promise<ResaSession | null> {
   const s = await prisma.session.findFirst({

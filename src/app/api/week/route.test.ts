@@ -9,10 +9,11 @@ import type { NextRequest } from "next/server";
 //    lire que le nom.
 
 const h = vi.hoisted(() => ({
-  session: null as null | { userId: string; resa?: unknown },
+  session: null as null | { userId: string; resa?: unknown; resaUnavailable?: true },
   snapFindMany: vi.fn(),
   bookingFindMany: vi.fn(),
   attendanceFindMany: vi.fn(),
+  getPlanning: vi.fn(),
 }));
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
@@ -23,7 +24,7 @@ vi.mock("@/lib/db", () => ({
     attendance: { findMany: h.attendanceFindMany },
   },
 }));
-vi.mock("@/lib/resamania/client", () => ({ getPlanning: vi.fn(), getStudios: vi.fn() }));
+vi.mock("@/lib/resamania/client", () => ({ getPlanning: h.getPlanning, getStudios: vi.fn() }));
 vi.mock("@/lib/planning-annotate", () => ({ loadAnnotationUsers: vi.fn(async () => []) }));
 
 import { GET } from "./route";
@@ -89,5 +90,20 @@ describe("GET /api/week — lecture des membres", () => {
     expect(h.attendanceFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ include: { user: { select: { displayName: true } } } }),
     );
+  });
+});
+
+// PANNE RESAMANIA PASSAGÈRE (`resaUnavailable`) : sans jeton, aucune lecture live — la semaine
+// est servie depuis les snapshots, exactement le repli que le chemin live applique déjà à un
+// jour en échec. Pas d'erreur, pas d'appel à ResaMania.
+describe("GET /api/week — ResaMania momentanément injoignable", () => {
+  it("sert les 7 jours depuis les snapshots, marqués `cached`, sans appeler ResaMania", async () => {
+    h.session = { userId: "u1", resa: null, resaUnavailable: true };
+    const res = await GET(get("?date=2026-10-15"));
+    expect(res.status).toBe(200);
+    const days = (await res.json()) as { planning: { cached?: boolean } }[];
+    expect(days).toHaveLength(7);
+    expect(days.every((d) => d.planning.cached)).toBe(true);
+    expect(h.getPlanning).not.toHaveBeenCalled();
   });
 });

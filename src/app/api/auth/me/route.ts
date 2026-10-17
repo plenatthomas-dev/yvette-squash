@@ -67,8 +67,19 @@ export async function GET(req: NextRequest) {
     listed: me?.listed ?? true,
     handle,
     // Pilote l'UI : "email" = session sans ResaMania (lecture seule, pas de réservation).
-    mode: session.resa ? "resamania" : "email",
-    canBook: !!session.resa,
+    //
+    // ⚠️ `resaUnavailable` compte comme ResaMania : c'est un compte ResaMania dont le jeton n'a
+    // pas pu être rafraîchi À L'INSTANT (panne passagère, cf. AppSession.resaUnavailable). Le
+    // classer « email » faisait basculer tout l'écran en lecture seule — boutons « Réserver »
+    // masqués, bandeau « compte email seul » — le temps d'une panne de ResaMania. On garde
+    // l'interface telle quelle : une réservation tentée pendant la panne reçoit un 503 lisible
+    // (« ResaMania ne répond pas, réessaie dans un instant »), ce qui dit la vérité.
+    mode: session.resa || session.resaUnavailable ? "resamania" : "email",
+    canBook: !!session.resa || !!session.resaUnavailable,
+    // Présent (et `true`) seulement pendant une telle panne : de quoi afficher un bandeau
+    // « ResaMania ne répond pas » si l'écran le souhaite. Absent sinon, pour ne rien changer à
+    // la réponse ordinaire.
+    ...(session.resaUnavailable ? { resaUnavailable: true } : {}),
     isAdmin,
     // `[]` pour l'écrasante majorité des membres : l'onglet est ABSENT, pas grisé. On ne montre
     // pas une porte qu'on ne peut pas ouvrir.

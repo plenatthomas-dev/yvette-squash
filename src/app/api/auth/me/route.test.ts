@@ -13,6 +13,7 @@ const h = vi.hoisted(() => ({
     displayName: string;
     email: string | null;
     resa: unknown;
+    resaUnavailable?: true;
   },
   users: [] as Record<string, unknown>[],
   select: null as null | Record<string, unknown>,
@@ -142,5 +143,27 @@ describe("GET /api/auth/me", () => {
     );
     expect((await GET(req())).status).toBe(200);
     expect(demarrees).toBe(3);
+  });
+});
+
+// PANNE RESAMANIA PASSAGÈRE : `getSession` rend la session SANS jeton mais avec
+// `resaUnavailable`. Si /me la lisait comme une session « email seul », tout l'écran basculait
+// en lecture seule (boutons « Réserver » masqués, bandeau « compte email seul ») le temps de la
+// panne — exactement ce qu'on veut éviter à un membre ResaMania.
+describe("GET /api/auth/me — ResaMania momentanément injoignable", () => {
+  it("reste en mode ResaMania (canBook conservé) et signale la panne", async () => {
+    h.session = { ...h.session!, resa: null, resaUnavailable: true };
+    const body = await (await GET(req())).json();
+    expect(body.mode).toBe("resamania");
+    expect(body.canBook).toBe(true);
+    expect(body.resaUnavailable).toBe(true);
+  });
+
+  it("un vrai compte « email seul » reste « email », sans indicateur de panne", async () => {
+    h.session = { ...h.session!, resa: null };
+    const body = await (await GET(req())).json();
+    expect(body.mode).toBe("email");
+    expect(body.canBook).toBe(false);
+    expect(body).not.toHaveProperty("resaUnavailable");
   });
 });

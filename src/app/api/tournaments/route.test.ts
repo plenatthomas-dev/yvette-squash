@@ -11,7 +11,7 @@ import { MIN_PLAYERS, MAX_PLAYERS } from "@/lib/tournament";
 
 const h = vi.hoisted(() => ({
   featureOn: true,
-  session: null as null | { userId: string; resa?: unknown },
+  session: null as null | { userId: string; resa?: unknown; resaUnavailable?: true },
   users: [] as { id: string; displayName: string; nickname: string | null }[],
   findMany: vi.fn(async (_args: Record<string, unknown>) => [] as unknown[]),
   create: vi.fn(async (_args: { data: Record<string, unknown> }) => ({ id: "t-neuf" })),
@@ -183,6 +183,15 @@ describe("POST /api/tournaments — les neuf refus", () => {
       error: "Compte email seul : la création de tournoi est réservée aux comptes ResaMania.",
     });
     expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it("compte ResaMania pendant une panne passagère (`resaUnavailable`) : PAS traité en email seul", async () => {
+    // Contrôle de rôle, pas d'usage du jeton : la panne de ResaMania n'a pas à bloquer la
+    // création d'un tournoi, ni à afficher « Compte email seul » à un membre ResaMania.
+    h.session = { userId: "u1", resa: null, resaUnavailable: true };
+    const res = await POST(post(corps()));
+    expect(res.status).not.toBe(403);
+    expect(h.create).toHaveBeenCalled();
   });
 
   it.each([

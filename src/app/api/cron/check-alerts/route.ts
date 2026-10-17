@@ -8,6 +8,7 @@ import { recordCronRun } from "@/lib/cron-run";
 import { alertsPending, alertsChanged, alertHorizonISO, noteCronAlive } from "@/lib/alerts-gate";
 import { fmtTime, toInstant } from "@/lib/time";
 import { BOOK_ACTION } from "@/lib/notification-actions";
+import { isResaRefreshTransient } from "@/lib/resamania/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -141,13 +142,38 @@ export async function GET(req: NextRequest) {
   let checked = 0;
   let notified = 0;
   let deactivated = 0;
+  // Alertes dont le membre n'a pas pu être traité À CE PASSAGE faute de jeton ResaMania
+  // (rafraîchissement en panne passagère) : elles restent actives et seront revues au passage
+  // suivant (~4 min). Compté à part pour que le heartbeat dise « ResaMania toussait » au lieu
+  // de laisser croire à une passe complète.
+  let reportes = 0;
 
   for (const [key, group] of groups) {
     const [userId, date] = key.split("|");
     checked += group.length;
 
     // Jeton déchiffré et rafraîchi si besoin (et rechiffré en base) par session.ts.
-    const resa = await getResaTokenForUser(userId);
+    //
+    // try/catch PAR MEMBRE : `getResaTokenForUser` LÈVE désormais sur une panne passagère
+    // (au lieu de supprimer la session et rendre null). Sans ce filet, la première alerte d'un
+    // membre au jeton expiré pendant une panne interrompait TOUTE la passe — les alertes des
+    // membres suivants, dont le jeton était peut-être frais, n'étaient plus vérifiées du tout.
+    // On saute ce membre pour ce passage, SANS désactiver son alerte : le terrain peut encore
+    // se libérer, et le jeton se rafraîchira au prochain tour.
+    let resa;
+    try {
+      resa = await getResaTokenForUser(userId);
+    } catch (e) {
+      reportes += group.length;
+      // Une erreur NON passagère (base…) est rare et mérite d'être vue ; elle ne doit pas
+      // pour autant priver les autres membres de leur vérification.
+      if (isResaRefreshTransient(e)) {
+        console.warn(`[check-alerts] jeton de ${userId} reporté (ResaMania indisponible)`);
+      } else {
+        console.error(`[check-alerts] jeton de ${userId} illisible, membre sauté:`, e);
+      }
+      continue;
+    }
     if (!resa) continue;
 
     // Les terrains libres, par horaire : TOUS, et pas seulement le fait qu'il y en ait un. Le
@@ -215,6 +241,10 @@ export async function GET(req: NextRequest) {
   // état. Un seul appel en fin de passe plutôt qu'un par alerte — l'invalidation est globale.
   if (expired.length > 0 || deactivated > 0) alertsChanged();
 
-  await recordCronRun("check-alerts", true, `${notified} notif(s), ${checked} vérifiée(s)`);
-  return NextResponse.json({ checked, notified, expired: expired.length });
+  await recordCronRun(
+    "check-alerts",
+    true,
+    `${notified} notif(s), ${checked} vérifiée(s)${reportes ? `, ${reportes} reportée(s)` : ""}`,
+  );
+  return NextResponse.json({ checked, notified, expired: expired.length, reportes });
 }

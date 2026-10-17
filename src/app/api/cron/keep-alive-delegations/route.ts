@@ -4,6 +4,7 @@ import { getResaTokenForUser } from "@/lib/session";
 import { cronAuthorized } from "@/lib/cron-auth";
 import { recordCronRun } from "@/lib/cron-run";
 import { pushToUser } from "@/lib/push";
+import { isResaRefreshTransient } from "@/lib/resamania/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,10 +31,35 @@ export async function GET(req: NextRequest) {
 
   let refreshed = 0;
   let failed = 0;
+  // Délégants dont l'état n'a pas pu être établi À CE PASSAGE (ResaMania en panne au moment du
+  // rafraîchissement) : ni « ok », ni « KO ». Le passage suivant retentera.
+  let reportes = 0;
   for (const { delegatorId } of delegations) {
     // getResaTokenForUser rafraîchit et persiste si besoin, ou renvoie null si le jeton
-    // est irrécupérable (session révoquée ailleurs, expirée…).
-    const resa = await getResaTokenForUser(delegatorId);
+    // est irrécupérable (session révoquée ailleurs, expirée…). Il LÈVE sur une panne
+    // passagère — ce qui, hors de ce try, interrompait toute la boucle : les délégants
+    // suivants n'étaient plus rafraîchis du tout, et c'est justement ce rafraîchissement
+    // régulier qui empêche leur jeton de devenir irrécupérable.
+    let resa;
+    try {
+      resa = await getResaTokenForUser(delegatorId);
+    } catch (e) {
+      // SURTOUT PAS la notification « ta délégation ne fonctionne plus » : la session du
+      // délégant est intacte, seul ResaMania est injoignable. L'envoyer sur une panne était
+      // le faux positif d'avant f44b690 — un membre invité à « se reconnecter » pour rien,
+      // chaque fois que ResaMania toussait pendant le passage du cron.
+      // Même retenue pour une erreur non passagère (base…) : on ne sait rien de l'état de
+      // la délégation, donc on ne dit rien au membre ; on le trace pour nous.
+      reportes++;
+      if (isResaRefreshTransient(e)) {
+        console.warn(
+          `[keep-alive-delegations] délégant ${delegatorId} reporté (ResaMania indisponible)`,
+        );
+      } else {
+        console.error(`[keep-alive-delegations] délégant ${delegatorId} sauté:`, e);
+      }
+      continue;
+    }
     if (resa) {
       refreshed++;
       continue;
@@ -82,7 +108,7 @@ export async function GET(req: NextRequest) {
   await recordCronRun(
     "keep-alive-delegations",
     true,
-    `${refreshed} ok, ${failed} KO, ${ended} finie(s)`,
+    `${refreshed} ok, ${failed} KO, ${reportes} reporté(s), ${ended} finie(s)`,
   );
-  return NextResponse.json({ delegators: delegations.length, refreshed, failed, ended });
+  return NextResponse.json({ delegators: delegations.length, refreshed, failed, reportes, ended });
 }

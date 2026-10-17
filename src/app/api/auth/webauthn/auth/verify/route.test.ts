@@ -12,6 +12,8 @@ const h = vi.hoisted(() => ({
   verifyResult: { verified: true, authenticationInfo: { newCounter: 5 } } as unknown,
   verifyThrows: false,
   resaSid: "resa-sid" as string | null,
+  // Erreur levée par createResaSessionFromUser à la place d'un sid (panne ResaMania…).
+  resaThrows: null as null | Error,
   emailSid: null as string | null,
   passkeyUpdate: vi.fn(),
   recordAttempt: vi.fn(),
@@ -32,7 +34,9 @@ vi.mock("@/lib/client-ip", () => ({ clientIp: () => "1.2.3.4" }));
 // export et casserait la route pour une raison sans rapport avec ce qu'on teste ici.
 vi.mock("@/lib/session", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/session")>()),
-  createResaSessionFromUser: vi.fn(async () => h.resaSid),
+  createResaSessionFromUser: vi.fn(() =>
+    h.resaThrows ? Promise.reject(h.resaThrows) : Promise.resolve(h.resaSid),
+  ),
   createEmailSession: vi.fn(async () => h.emailSid),
 }));
 vi.mock("@/lib/webauthn", () => ({
@@ -91,6 +95,7 @@ beforeEach(() => {
   h.verifyResult = { verified: true, authenticationInfo: { newCounter: 5 } };
   h.verifyThrows = false;
   h.resaSid = "resa-sid";
+  h.resaThrows = null;
   h.emailSid = null;
   h.passkeyUpdate.mockReset().mockResolvedValue({});
   h.recordAttempt.mockReset().mockResolvedValue(undefined);
@@ -175,5 +180,46 @@ describe("POST /api/auth/webauthn/auth/verify", () => {
     const body = (await res.json()) as { code?: string; username?: string };
     expect(body.code).toBe("resa_expired");
     expect(body.username).toBe("jean@club.fr");
+  });
+});
+
+// PANNE RESAMANIA PASSAGÈRE pendant la restauration : la biométrie a réussi, le lien ResaMania
+// est valide, seul ResaMania est injoignable. Ni 409 « connexion expirée » (faux, et il pousse à
+// retaper un mot de passe pour rien), ni 500.
+describe("POST /api/auth/webauthn/auth/verify — ResaMania injoignable", () => {
+  it("repli sur la session e-mail si le compte en a une, signalé par `resaUnavailable`", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { ResaRefreshTransientError } = await import("@/lib/resamania/errors");
+    h.resaThrows = new ResaRefreshTransientError("ResaMania momentanément indisponible");
+    h.emailSid = "email-sid";
+
+    const res = await POST(postReq(goodBody));
+
+    expect(res.status).toBe(200);
+    expect(res.cookies.get("sid")?.value).toBe("email-sid");
+    expect(await res.json()).toEqual({ displayName: "Jean", resaUnavailable: true });
+  });
+
+  it("503 « réessaie » sans repli possible — ni 409 « expirée », ni tentative comptée", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { ResaRefreshTransientError } = await import("@/lib/resamania/errors");
+    h.resaThrows = new ResaRefreshTransientError("ResaMania momentanément indisponible");
+    (h.passkey!.user as Record<string, unknown>).passwordHash = null;
+
+    const res = await POST(postReq(goodBody));
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      error: "ResaMania ne répond pas, réessaie dans un instant.",
+      code: "resa-unavailable",
+    });
+    expect(clears(res)).toBe(true);
+    expect(res.cookies.get("sid")).toBeUndefined();
+    expect(h.recordAttempt).not.toHaveBeenCalled();
+  });
+
+  it("une erreur NON passagère (base…) n'est pas maquillée en panne ResaMania", async () => {
+    h.resaThrows = new Error("Can't reach database server");
+    await expect(POST(postReq(goodBody))).rejects.toThrow("database");
   });
 });

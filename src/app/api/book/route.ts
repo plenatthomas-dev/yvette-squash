@@ -10,6 +10,8 @@ import { refreshSnapshotFromResa } from "@/lib/planning-snapshot";
 import { appBlockForUserId, appBlockedResponse } from "@/lib/app-block";
 import { readJsonBody } from "@/lib/http-tx";
 import { otherAccountResponse } from "@/lib/notification-actions";
+import { isResaOutcomeUnknown, isResaUnavailable } from "@/lib/resamania/errors";
+import { outcomeUnknownResponse, resaUnavailableResponse } from "@/lib/resamania/responses";
 
 export const runtime = "nodejs";
 
@@ -59,7 +61,11 @@ export async function POST(req: NextRequest) {
     "La réservation nécessite une connexion ResaMania.",
   );
   if (!acting.ok) {
-    return NextResponse.json({ error: acting.error }, { status: acting.status });
+    // `code` relayé quand il existe (« resa-unavailable » : 503 de panne ResaMania).
+    return NextResponse.json(
+      { error: acting.error, ...(acting.code ? { code: acting.code } : {}) },
+      { status: acting.status },
+    );
   }
   const { resa, bookingOwnerId, actingUserId } = acting.ctx;
 
@@ -92,6 +98,9 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     // Même doctrine que /api/planning : le détail amont est journalisé, jamais renvoyé.
     console.error("[book] planning illisible:", e);
+    // ResaMania injoignable (réseau, délai, 5xx) : la consigne commune « réessaie dans un
+    // instant », en 503. Rien n'a été réservé — réessayer est sans danger.
+    if (isResaUnavailable(e)) return resaUnavailableResponse();
     return NextResponse.json(
       { error: "Planning momentanément indisponible — réessaie dans un instant." },
       { status: 502 },
@@ -134,7 +143,27 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const r = await book(resa, classEventId);
+  let r;
+  try {
+    r = await book(resa, classEventId);
+  } catch (e) {
+    // ÉCRITURE PARTIE SANS RÉPONSE (délai de 15 s, connexion coupée) : la résa a PEUT-ÊTRE
+    // été prise. Trois réponses fausses à éviter :
+    //  - « échec, réessaie » → si elle a abouti, le membre en prend une 2ᵉ (autre terrain,
+    //    même horaire) ou se heurte à « déjà réservé » sans comprendre ;
+    //  - « c'est fait » → peut-être faux ;
+    //  - écrire le journal → on y inscrirait peut-être une résa fantôme. On ne l'écrit PAS :
+    //    la réconciliation du planning (lib/booking-reconcile.ts) tranchera sur l'état réel
+    //    à la prochaine lecture fraîche.
+    // On vide le cache planning pour que la grille que le membre va regarder soit celle de
+    // ResaMania, et non la photo d'avant l'écriture.
+    if (isResaOutcomeUnknown(e)) {
+      console.warn("[book] réservation partie sans réponse, résultat inconnu:", e);
+      invalidatePlanningCache();
+      return outcomeUnknownResponse("La réservation");
+    }
+    throw e;
+  }
   if (!r.ok) {
     // 2) Filet de sécurité : ResaMania bloque aussi (has-overlapping-slots) si la résa
     //    en conflit n'était pas connue en base (faite ailleurs).

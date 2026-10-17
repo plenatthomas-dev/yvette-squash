@@ -4,6 +4,7 @@ import { login, getPlanning } from "@/lib/resamania/client";
 import { cronAuthorized } from "@/lib/cron-auth";
 import { recordCronRun } from "@/lib/cron-run";
 import { SNAPSHOT_RETENTION_DAYS } from "@/lib/retention";
+import { isResaAuthRejected, isResaUnavailable } from "@/lib/resamania/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,15 +15,25 @@ const DAYS_AHEAD = 14; // on préchauffe hier → aujourd'hui + 14 jours
 // Jeton ResaMania d'un compte « de service » DÉDIÉ (identifiants en variables d'env) :
 // le cron se connecte lui-même à chaque passage → indépendant des sessions des membres,
 // aucune interférence avec elles, et une couverture garantie du cache.
-async function serviceToken(): Promise<string | null> {
+//
+// Ce cron n'utilise NI `getSession` NI `getResaTokenForUser` : il n'est donc pas touché par
+// `ResaRefreshTransientError`. Son `login()` est déjà sous try/catch (aucune exception ne sort
+// d'ici) ; ce qui change avec les erreurs typées de client.ts, c'est qu'on peut enfin DIRE au
+// tableau de bord pourquoi le préchauffage n'a pas eu lieu — « ResaMania en panne, ça
+// reviendra » n'appelle pas la même réaction que « mot de passe du compte de service refusé »,
+// qui ne se réparera jamais tout seul.
+async function serviceToken(): Promise<{ token: string } | { reason: string }> {
   const username = process.env.RESA_CRON_USER;
   const password = process.env.RESA_CRON_PASSWORD;
-  if (!username || !password) return null;
+  if (!username || !password) return { reason: "compte de service ResaMania non configuré" };
   try {
     const resa = await login({ username, password });
-    return resa.accessToken;
-  } catch {
-    return null;
+    return { token: resa.accessToken };
+  } catch (e) {
+    if (isResaUnavailable(e)) return { reason: "ResaMania indisponible, reporté au prochain passage" };
+    if (isResaAuthRejected(e)) return { reason: "compte de service ResaMania : identifiants refusés" };
+    console.error("[warm-planning] connexion du compte de service en échec:", e);
+    return { reason: "compte de service ResaMania KO" };
   }
 }
 
@@ -67,10 +78,11 @@ export async function GET(req: NextRequest) {
   // amont et les snapshots — qui portent le contactId de tiers — s'accumuleraient sans fin.
   const purged = await purgeOldSnapshots();
 
-  const token = await serviceToken();
-  if (!token) {
-    // Signal de santé ResaMania pour le tableau de bord : le compte de service ne se connecte pas.
-    await recordCronRun("warm-planning", false, "compte de service ResaMania KO");
+  const service = await serviceToken();
+  if (!("token" in service)) {
+    // Signal de santé ResaMania pour le tableau de bord : le compte de service ne se connecte
+    // pas, avec la raison (panne passagère, identifiants refusés, non configuré).
+    await recordCronRun("warm-planning", false, service.reason);
     return NextResponse.json({
       warmed: 0,
       purged,
@@ -81,6 +93,7 @@ export async function GET(req: NextRequest) {
   const dates: string[] = [];
   for (let o = -1; o <= DAYS_AHEAD; o++) dates.push(dayISO(o));
 
+  const { token } = service;
   let warmed = 0;
   for (const date of dates) {
     try {

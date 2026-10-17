@@ -17,6 +17,8 @@ import {
   challengeCookieOptions,
 } from "@/lib/webauthn";
 import { appBlockForEmail, appBlockedResponse } from "@/lib/app-block";
+import { isResaRefreshTransient } from "@/lib/resamania/errors";
+import { RESA_UNAVAILABLE_CODE, RESA_UNAVAILABLE_MESSAGE } from "@/lib/resamania/responses";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -123,9 +125,35 @@ export async function POST(req: NextRequest) {
   //  1) ResaMania restaurée (option A : refresh token réutilisé) → accès complet ;
   //  2) sinon, compte avec connexion email vérifiée → session email-seule (lecture seule) ;
   //  3) sinon → refresh ResaMania mort et pas d'email : reconnexion par mot de passe requise.
-  let sid = await createResaSessionFromUser(passkey.userId);
+  //
+  // PANNE RESAMANIA PASSAGÈRE au moment de restaurer la session : `createResaSessionFromUser`
+  // LÈVE (sa session source est intacte, rien n'a été transféré). On la distingue du `null`
+  // (lien vraiment expiré) pour ne pas afficher le 409 « ta connexion ResaMania a expiré,
+  // reconnecte-toi avec ton mot de passe » à un membre dont le lien est parfaitement valide.
+  //  - compte avec connexion email → même repli qu'au 2) : le membre entre tout de suite
+  //    (forum, tricount… marchent) ; la session ResaMania source reste en réserve, une
+  //    prochaine connexion biométrique la restaurera ;
+  //  - sinon → 503 « réessaie dans un instant » (rien n'est compté comme tentative ratée : la
+  //    biométrie, elle, a réussi).
+  let sid: string | null = null;
+  let resaDown = false;
+  try {
+    sid = await createResaSessionFromUser(passkey.userId);
+  } catch (e) {
+    if (!isResaRefreshTransient(e)) throw e; // base en panne, etc. : pas une panne ResaMania
+    console.warn(`[webauthn] restauration ResaMania reportée (user ${passkey.userId}) :`, e);
+    resaDown = true;
+  }
   if (!sid && passkey.user.passwordHash && passkey.user.emailVerifiedAt) {
     sid = await createEmailSession(passkey.userId);
+  }
+  if (!sid && resaDown) {
+    const res = NextResponse.json(
+      { error: RESA_UNAVAILABLE_MESSAGE, code: RESA_UNAVAILABLE_CODE },
+      { status: 503, headers: { "Retry-After": "5" } },
+    );
+    res.cookies.set(CHALLENGE_COOKIE, "", challengeCookieOptions(0)); // défi à usage unique
+    return res;
   }
   if (!sid) {
     // Le passkey ÉTAIT valide (la biométrie a réussi) : ce n'est pas un échec biométrique, mais
@@ -148,7 +176,13 @@ export async function POST(req: NextRequest) {
     return res;
   }
 
-  const res = NextResponse.json({ displayName: passkey.user.displayName });
+  // `resaUnavailable` : session e-mail ouverte FAUTE de ResaMania joignable (et non parce que le
+  // compte n'a pas de ResaMania) — l'écran peut le dire plutôt que de laisser croire à un
+  // passage définitif en « email seul ». Absent dans le cas normal.
+  const res = NextResponse.json({
+    displayName: passkey.user.displayName,
+    ...(resaDown ? { resaUnavailable: true } : {}),
+  });
   res.cookies.set("sid", sid, {
     httpOnly: true,
     sameSite: "lax",
