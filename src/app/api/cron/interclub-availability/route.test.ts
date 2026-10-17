@@ -42,7 +42,10 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@/lib/features-server", () => ({ getFeatures: async () => ({ interclub: h.interclub }) }));
 vi.mock("@/lib/cron-auth", () => ({ cronAuthorized: () => h.authorized }));
-vi.mock("@/lib/cron-run", () => ({ recordCronRun: vi.fn() }));
+vi.mock("@/lib/cron-run", () => ({
+  recordCronRun: vi.fn(),
+  runCron: (_n: string, fn: () => Promise<unknown>) => fn(),
+}));
 // Importé pour être INSPECTÉ : ce cron l'appelait deux fois, et `recordCronRun` étant un upsert
 // d'une seule ligne par cron, le second appel effaçait le premier.
 // Aujourd'hui est FIGÉ : un test qui dépend de la date du jour passe en octobre et échoue en

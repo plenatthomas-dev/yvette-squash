@@ -503,3 +503,35 @@ it("⚠️ espace ses appels, comme les trois autres consommateurs de squashnet"
   const { DELAI_MS } = await import("./refresh");
   expect(DELAI_MS).toBeGreaterThanOrEqual(500);
 });
+
+// Audit 2026-10, point 7 : `maxDuration` coupait la passe en plein milieu, sans heartbeat, et
+// toujours sur les mêmes joueurs (ceux de fin de liste).
+describe("refreshRankings — budget de temps", () => {
+  it("budget épuisé d'emblée → personne n'est engagé, tout est « non atteint »", async () => {
+    h.members = [
+      { id: "u1", displayName: "Jean Dupont" },
+      { id: "u2", displayName: "Paul Martin" },
+    ];
+    const res = await refreshRankings({ ...SANS_PAUSE, budgetMs: 0 });
+    expect(res.unreached).toBe(2);
+    expect(h.searchRanking).not.toHaveBeenCalled();
+    expect(summarizeRefresh(res)).toMatchObject({ ok: false, info: expect.stringContaining("2 non atteint(s)") });
+  });
+
+  it("ceux qui n'ont pas encore le classement de la période passent EN PREMIER", async () => {
+    h.findMany.mockImplementation(async () => [
+      { id: "u1", displayName: "Jean Dupont", squashnetRanking: { licence: "1", month: "2026-07-07" } },
+      { id: "u2", displayName: "Paul Martin", squashnetRanking: { licence: "2", month: "2026-06-07" } },
+    ]);
+    h.searchRanking.mockResolvedValue([]);
+    await refreshRankings(SANS_PAUSE);
+    expect(h.searchRanking.mock.calls[0][0]).toMatch(/martin/i);
+  });
+
+  it("sans budget, aucun champ `unreached`", async () => {
+    h.members = [{ id: "u1", displayName: "Jean Dupont" }];
+    h.searchRanking.mockResolvedValue([row("DUPONT JEAN")]);
+    const res = await refreshRankings(SANS_PAUSE);
+    expect(res.unreached).toBeUndefined();
+  });
+});

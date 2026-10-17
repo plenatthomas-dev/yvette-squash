@@ -331,6 +331,22 @@ model CronRun {
   info      String? // résumé court, ex. "14/16 jours", "2 notif(s)"
 }
 
+// Erreurs non rattrapées (audit 2026-10, point 10) : les logs du plan Hobby ne vivent qu'environ
+// une heure, et rien ne gardait la trace d'un écran d'erreur vu par un membre. Une ligne par
+// erreur, côté navigateur (`app/error.tsx`, `global-error.tsx`) ou serveur
+// (`instrumentation.ts` → `onRequestError`). Lue dans /admin, purgée à 30 jours.
+model ErrorReport {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  source    String // "client" | "server"
+  message   String // tronqué à 500 caractères
+  digest    String? // empreinte Next.js de l'erreur serveur (relie l'écran au log)
+  path      String? // page ou route concernée
+  userAgent String?
+
+  @@index([createdAt])
+}
+
 // Historique des demandes de compte/réinitialisation TRAITÉES (étape 3 de l'admin) : trace
 // append-only, découplée du cycle de vie des jetons `EmailToken` (qui sont purgés à
 // expiration/consommation). Une ligne par décision, pour la traçabilité côté admin.

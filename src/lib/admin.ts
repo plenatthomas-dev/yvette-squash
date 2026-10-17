@@ -61,7 +61,7 @@ export function isAdminSession(session: { userId: string; email: string | null }
 export async function requireAdmin(
   req: NextRequest,
 ): Promise<{ userId: string; email: string } | null> {
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) return null;
   const user = await prisma.user.findUnique({
     where: { id: session.userId },

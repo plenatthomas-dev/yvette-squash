@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cronAuthorized } from "@/lib/cron-auth";
-import { recordCronRun } from "@/lib/cron-run";
+import { recordCronRun, runCron } from "@/lib/cron-run";
 import { getFeatures } from "@/lib/features-server";
 import { prisma } from "@/lib/db";
 import { refreshTeamStandings, teamsDueForStandings } from "@/lib/interclub-standings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// 300 s : la limite des fonctions Vercel (Fluid compute, plan Hobby compris). 60 s coupait les
+// passes longues en plein milieu — toujours les mêmes membres, ceux de fin de liste.
+export const maxDuration = 300;
 
 // ============================================================================
 //  GET /api/cron/interclub-standings — relit le classement après un match.
@@ -35,7 +37,7 @@ export const maxDuration = 60;
 //  « interclub-standings » de /admin date du dernier passage UTILE.
 // ============================================================================
 
-export async function GET(req: NextRequest) {
+async function handle(req: NextRequest) {
   if (!cronAuthorized(req)) {
     return NextResponse.json({ error: "Interdit" }, { status: 401 });
   }
@@ -94,3 +96,7 @@ export async function GET(req: NextRequest) {
   );
   return NextResponse.json({ teams: teams.length, refreshed, empty, failed });
 }
+
+// Filet commun (cf. lib/cron-run) : une exception laisse une trace `ok: false` au lieu du
+// « ok » de la veille.
+export const GET = (req: NextRequest) => runCron("interclub-standings", () => handle(req));

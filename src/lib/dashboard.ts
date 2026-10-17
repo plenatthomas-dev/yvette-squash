@@ -2,7 +2,8 @@
 // membres, sessions, alertes, santé ResaMania (via le heartbeat des crons), file d'attente.
 
 import { prisma } from "./db";
-import { listCronRuns } from "./cron-run";
+import { listCronRuns, cronHealth } from "./cron-run";
+import { recentErrors } from "./error-report";
 import { getFeatures } from "./features-server";
 import { NOTIF_STATE_WINDOW_DAYS, summarizeNotifStates } from "./notif-state";
 
@@ -25,6 +26,7 @@ export async function getDashboard() {
     bookingsResa,
     features,
     notifRows,
+    errors,
   ] = await Promise.all([
     prisma.user.count(),
     prisma.user.count({ where: { disabledAt: { not: null } } }),
@@ -54,6 +56,9 @@ export async function getDashboard() {
       where: { updatedAt: { gte: notifSince }, user: { disabledAt: null } },
       select: { userId: true, permission: true, subscribed: true, platform: true },
     }),
+    // Les dernières erreurs non rattrapées (cf. lib/error-report) : best-effort, une table
+    // absente (migration pas encore jouée) ne doit pas faire tomber le tableau de bord.
+    recentErrors(10).catch(() => []),
   ]);
 
   return {
@@ -72,11 +77,15 @@ export async function getDashboard() {
     // « 100 % via l'appli » là où la question n'a simplement jamais été posée.
     externalDetection: features.externalBookings,
     notifs: summarizeNotifStates(notifRows),
-    crons: crons.map((c) => ({
+    errors: errors.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() })),
+    // `late` : dernier passage plus vieux que la cadence attendue (cf. CRON_CADENCES). Un cron
+    // qui ne passe plus restait sinon vert indéfiniment, sur son dernier « ok ».
+    crons: cronHealth(crons, now.getTime()).map((c) => ({
       name: c.name,
-      lastRunAt: c.lastRunAt.toISOString(),
+      lastRunAt: c.lastRunAt?.toISOString() ?? null,
       ok: c.ok,
       info: c.info,
+      late: c.late,
     })),
   };
 }

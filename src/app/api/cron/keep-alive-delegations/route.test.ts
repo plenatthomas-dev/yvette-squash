@@ -29,7 +29,10 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/session", () => ({ getResaTokenForUser: h.tokenFor }));
 vi.mock("@/lib/cron-auth", () => ({ cronAuthorized: () => true }));
-vi.mock("@/lib/cron-run", () => ({ recordCronRun: h.recordCronRun }));
+vi.mock("@/lib/cron-run", () => ({
+  recordCronRun: h.recordCronRun,
+  runCron: (_n: string, fn: () => Promise<unknown>) => fn(),
+}));
 vi.mock("@/lib/push", () => ({ pushToUser: h.pushToUser }));
 
 import { GET } from "./route";

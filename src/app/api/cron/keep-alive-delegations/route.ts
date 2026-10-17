@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getResaTokenForUser } from "@/lib/session";
 import { cronAuthorized } from "@/lib/cron-auth";
-import { recordCronRun } from "@/lib/cron-run";
+import { recordCronRun, runCron } from "@/lib/cron-run";
 import { pushToUser } from "@/lib/push";
 import { isResaRefreshTransient } from "@/lib/resamania/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// 300 s : la limite des fonctions Vercel (Fluid compute, plan Hobby compris). 60 s coupait les
+// passes longues en plein milieu — toujours les mêmes membres, ceux de fin de liste.
+export const maxDuration = 300;
 
 // GET /api/cron/keep-alive-delegations
 // Rafraîchit le jeton ResaMania de chaque DÉLÉGANT ayant une délégation active (idée 4),
@@ -18,7 +20,7 @@ export const maxDuration = 60;
 // avant que le délégué n'en ait besoin. Scope volontairement étroit (délégations actives
 // seulement, pas tous les membres) pour rester discret sur une API rétro-ingénierée
 // (contrainte 1, cf. docs/idees-developpement.md).
-export async function GET(req: NextRequest) {
+async function handle(req: NextRequest) {
   if (!cronAuthorized(req)) {
     return NextResponse.json({ error: "Interdit" }, { status: 401 });
   }
@@ -105,10 +107,16 @@ export async function GET(req: NextRequest) {
     ended++;
   }
 
+  // Rouge si AUCUN délégant n'a pu être traité (ResaMania en panne pendant tout le passage) :
+  // le prochain passage est dans 24 h, et c'est justement le moment où un jeton peut mourir.
   await recordCronRun(
     "keep-alive-delegations",
-    true,
+    !(delegations.length > 0 && reportes === delegations.length),
     `${refreshed} ok, ${failed} KO, ${reportes} reporté(s), ${ended} finie(s)`,
   );
   return NextResponse.json({ delegators: delegations.length, refreshed, failed, reportes, ended });
 }
+
+// Filet commun (cf. lib/cron-run) : une exception laisse une trace `ok: false` au lieu du
+// « ok » de la veille.
+export const GET = (req: NextRequest) => runCron("keep-alive-delegations", () => handle(req));

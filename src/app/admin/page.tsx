@@ -25,7 +25,7 @@ type PendingRequest = {
   createdAt: string;
 };
 
-type CronRun = { name: string; lastRunAt: string; ok: boolean; info: string | null };
+type CronRun = { name: string; lastRunAt: string | null; ok: boolean; info: string | null; late?: boolean };
 
 /**
  * Ce qu'il faut savoir d'un joueur pour dire s'il est alignable : son classement, son rang
@@ -274,6 +274,7 @@ type Dashboard = {
   // Absent tant que le serveur déployé ne le calcule pas encore (déploiement en cours).
   notifs?: NotifSummary;
   crons: CronRun[];
+  errors?: { createdAt: string; source: string; message: string; digest: string | null; path: string | null }[];
 };
 
 function purposeLabel(p: PendingRequest["purpose"]): string {
@@ -1193,6 +1194,7 @@ export default function AdminPage() {
         skipped?: number;
         failed?: number;
         bulkMoveBlocked?: boolean;
+        unreached?: number;
         error?: string;
       };
       if (!res.ok) {
@@ -1209,7 +1211,8 @@ export default function AdminPage() {
         `${cleared ? `, ${cleared} retiré${cleared > 1 ? "s" : ""}` : ""}` +
         `${skipped ? `, ${skipped} ignoré${skipped > 1 ? "s" : ""} (non concluant)` : ""}` +
         `${failed ? `, ${failed} échec${failed > 1 ? "s" : ""} (base)` : ""}` +
-        ` sur ${members} membre${members > 1 ? "s" : ""} listé${members > 1 ? "s" : ""}.`;
+        ` sur ${members} membre${members > 1 ? "s" : ""} listé${members > 1 ? "s" : ""}.` +
+        (data.unreached ? ` Temps écoulé : ${data.unreached} restant(s), reclique pour continuer.` : "");
       // On reprend le `ok` de la route (échec base, blocage anti-effacement, OU squashnet muet
       // = tous ignorés) plutôt que de recomposer le critère ici. Le blocage a un message dédié.
       const succeeded = data.ok ?? true;
@@ -1352,15 +1355,20 @@ export default function AdminPage() {
                   <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
                     {dash.crons.map((c) => (
                       <li key={c.name} className="tiny" style={{ display: "flex", gap: 6 }}>
-                        <span title={c.ok ? "OK" : "problème"}>{c.ok ? "🟢" : "🔴"}</span>
+                        <span title={c.late ? "en retard" : c.ok ? "OK" : "problème"}>
+                          {c.late ? "🟠" : c.ok ? "🟢" : "🔴"}
+                        </span>
                         <strong>{c.name}</strong>
                         <span className="muted">
-                          {new Date(c.lastRunAt).toLocaleString("fr-FR", {
-                            day: "numeric",
-                            month: "short",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                          {c.lastRunAt
+                            ? new Date(c.lastRunAt).toLocaleString("fr-FR", {
+                                day: "numeric",
+                                month: "short",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            : "jamais"}
+                          {c.late ? " · EN RETARD" : ""}
                           {c.info ? ` · ${c.info}` : ""}
                         </span>
                       </li>
@@ -1368,6 +1376,35 @@ export default function AdminPage() {
                   </ul>
                 )}
               </div>
+
+              {/* Erreurs non rattrapées (cf. lib/error-report) : 30 jours de mémoire, là où les
+                  logs du plan Hobby n'en gardent qu'une heure. */}
+              {dash.errors && dash.errors.length > 0 && (
+                <details style={{ marginTop: 10 }}>
+                  <summary className="tiny">
+                    ⚠️ {dash.errors.length} erreur{dash.errors.length > 1 ? "s" : ""} récente
+                    {dash.errors.length > 1 ? "s" : ""}
+                  </summary>
+                  <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                    {dash.errors.map((e, i) => (
+                      <li key={`${e.createdAt}-${i}`} className="tiny" style={{ wordBreak: "break-word" }}>
+                        <span className="muted">
+                          {new Date(e.createdAt).toLocaleString("fr-FR", {
+                            day: "numeric",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}{" "}
+                          · {e.source}
+                          {e.path ? ` · ${e.path}` : ""}
+                        </span>{" "}
+                        {e.message}
+                        {e.digest ? <span className="muted"> ({e.digest})</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             </section>
           )}
 

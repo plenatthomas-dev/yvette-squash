@@ -1,5 +1,10 @@
 import { createRequire } from "node:module";
 import { withBotId } from "botid/next/config";
+import { assertProductionEnv } from "./src/lib/env-check.mjs";
+
+// Une production mal configurée (CREDENTIALS_SECRET absente…) ne se déploie pas : cf.
+// env-check.mjs. Sans effet hors `VERCEL_ENV=production`.
+assertProductionEnv();
 
 // Identifiant de build, figé UNE FOIS à la compilation (jamais recalculé au runtime) et
 // inliné aussi bien côté client que côté serveur via `env` ci-dessous. Sert à détecter un

@@ -52,7 +52,7 @@ async function voter(req: NextRequest, params: Promise<{ id: string }>) {
   if (!(await getFeatures()).forum) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
   const { id: pollId } = await params;
@@ -140,7 +140,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!(await getFeatures()).forum) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
   const raw = await readJsonBody(req);

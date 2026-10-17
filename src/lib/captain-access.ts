@@ -78,7 +78,7 @@ async function garde(
       response: NextResponse.json({ error: "Fonction indisponible" }, { status: 404 }),
     };
   }
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return { ok: false, response: NextResponse.json({ error: "Non authentifié" }, { status: 401 }) };
   }

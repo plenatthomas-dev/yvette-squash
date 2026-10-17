@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
   if (!(await getFeatures()).biometry) {
     return fail(404, "Fonction indisponible");
   }
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return fail(401, "Non authentifié");
   }

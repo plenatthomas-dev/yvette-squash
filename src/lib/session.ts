@@ -529,14 +529,18 @@ function touchLastSeen(sid: string, now: Date): Promise<unknown> {
 }
 
 /**
- * Récupère la session depuis l'id de cookie, en rafraîchissant le token ResaMania si besoin.
+ * Récupère la session depuis l'id de cookie, en rafraîchissant le token ResaMania si besoin
+ * (sauf `{ resa: false }` : voir plus bas).
  *
  * Ne lève PAS sur une panne passagère de ResaMania au rafraîchissement : la session est rendue
  * sans jeton, avec `resaUnavailable: true` (cf. `AppSession.resaUnavailable` pour le pourquoi).
  * Une erreur de la BASE, elle, remonte telle quelle (isDbUnavailable → 503 « maintenance »
  * chez les appelants qui le gèrent) : ce n'est pas le même incident.
  */
-export async function getSession(sid: string | undefined): Promise<AppSession | null> {
+export async function getSession(
+  sid: string | undefined,
+  opts: { resa?: boolean } = {},
+): Promise<AppSession | null> {
   if (!sid) return null;
   const s = await prisma.session.findUnique({ where: { id: sid }, include: { user: true } });
   if (!s) return null;
@@ -546,6 +550,14 @@ export async function getSession(sid: string | undefined): Promise<AppSession | 
   }
 
   const base = { userId: s.userId, displayName: s.user.displayName, email: s.user.email };
+  // `{ resa: false }` : la route n'a pas besoin du jeton ResaMania (forum, tricount, interclub…).
+  // On ne tente donc PAS de le rafraîchir — pendant une panne de ResaMania, chaque requête y
+  // perdait jusqu'à ~8 s de délais de garde pour rien (audit 2026-10, point 11). Un compte
+  // ResaMania est rendu comme pendant une panne (`resaUnavailable: true`), ce qui garde le sens
+  // « ce n'est PAS un compte email seul » aux appelants qui le testent.
+  if (opts.resa === false) {
+    return s.refreshTokenEnc ? { ...base, resa: null, resaUnavailable: true } : { ...base, resa: null };
+  }
   let resa: ResaSession | null | undefined;
   try {
     resa = await resolveResaToken(s);

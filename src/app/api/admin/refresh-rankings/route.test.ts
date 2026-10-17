@@ -103,8 +103,11 @@ describe("POST /api/admin/refresh-rankings", () => {
       failed: 0,
       pointFailed: 0,
       bulkMoveBlocked: false,
+      unreached: 0,
     });
     expect(h.refreshRankings).toHaveBeenCalledOnce();
+    // Un budget de temps, tenu sous `maxDuration` : la route rend la main avec ce qui est fait.
+    expect(h.refreshRankings).toHaveBeenCalledWith({ budgetMs: expect.any(Number) });
     // Clé distincte de « warm-rankings » : ne pas masquer une panne du cron planifié.
     expect(h.recordCronRun).toHaveBeenCalledWith("warm-rankings-manuel", true, expect.any(String));
     expect(h.recordCronRun).not.toHaveBeenCalledWith("warm-rankings", expect.anything(), expect.anything());
