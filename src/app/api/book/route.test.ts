@@ -15,17 +15,24 @@ const h = vi.hoisted(() => ({
   upsert: vi.fn(),
   book: vi.fn(),
   getPlanning: vi.fn(),
+  invalidatePlanningCache: vi.fn(),
+  alertUpdateMany: vi.fn(),
+  alertsChanged: vi.fn(),
 }));
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
 vi.mock("@/lib/db", () => ({
-  prisma: { booking: { findFirst: h.findFirst, upsert: h.upsert } },
+  prisma: {
+    booking: { findFirst: h.findFirst, upsert: h.upsert },
+    slotAlert: { updateMany: h.alertUpdateMany },
+  },
 }));
 vi.mock("@/lib/resamania/client", () => ({
   book: h.book,
   getPlanning: h.getPlanning,
-  invalidatePlanningCache: vi.fn(),
+  invalidatePlanningCache: h.invalidatePlanningCache,
 }));
+vi.mock("@/lib/alerts-gate", () => ({ alertsChanged: h.alertsChanged }));
 vi.mock("@/lib/validation", () => ({
   isClassEventId: (v: unknown) => typeof v === "string" && v.length > 0,
 }));
@@ -72,6 +79,9 @@ beforeEach(() => {
   h.upsert.mockReset().mockResolvedValue({});
   h.book.mockReset().mockImplementation(async () => h.bookResult);
   h.getPlanning.mockReset().mockResolvedValue({ slots: [CRENEAU] });
+  h.invalidatePlanningCache.mockReset();
+  h.alertUpdateMany.mockReset().mockResolvedValue({ count: 0 });
+  h.alertsChanged.mockReset();
 });
 
 describe("POST /api/book (délégation)", () => {
@@ -219,5 +229,69 @@ describe("POST /api/book — le créneau vient du planning, jamais du navigateur
     // Le détail amont reste côté serveur (même doctrine que /api/planning).
     expect((await res.json()).error).not.toContain("503");
     expect(h.book).not.toHaveBeenCalled();
+  });
+});
+
+// Après `book()` réussi, LE TERRAIN EST RÉSERVÉ chez ResaMania. Une erreur base sur le journal
+// rendait un 500 au corps vide — le membre croyait la réservation ratée et réessayait — et
+// sautait la purge du cache planning, qui montrait encore le terrain libre.
+describe("POST /api/book — journal en panne après une réservation réussie", () => {
+  it("répond quand même le succès, avec journalSynced: false, et trace l'erreur", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    h.upsert.mockRejectedValue(new Error("Can't reach database server"));
+    const res = await POST(postReq(BODY));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, state: "validated", journalSynced: false });
+    expect(err).toHaveBeenCalled();
+  });
+
+  it("purge le cache planning même si le journal échoue", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    h.upsert.mockRejectedValue(new Error("Can't reach database server"));
+    await POST(postReq(BODY));
+    expect(h.invalidatePlanningCache).toHaveBeenCalled();
+  });
+
+  it("journalSynced: true quand tout s'est bien passé", async () => {
+    expect(await (await POST(postReq(BODY))).json()).toEqual({
+      ok: true,
+      state: "validated",
+      journalSynced: true,
+    });
+  });
+});
+
+// Un membre en liste d'attente sur un créneau, qui finit par le réserver lui-même : son alerte
+// n'a plus d'objet. Sans ça, le cron le notifiait plus tard pour un créneau qu'il avait déjà.
+describe("POST /api/book — l'alerte du créneau réservé est désactivée", () => {
+  it("désactive l'alerte du PROPRIÉTAIRE sur ce jour et cet horaire (heure du club)", async () => {
+    h.alertUpdateMany.mockResolvedValue({ count: 1 });
+    await POST(postReq(BODY));
+    // CRENEAU.startsAt = 18:00Z le 11 juillet = 20:00 à Paris (heure d'été) : la clé `hm` est
+    // l'heure du club, comme à la création de l'alerte (page.tsx, onWatch).
+    expect(h.alertUpdateMany).toHaveBeenCalledWith({
+      where: { userId: "delegator", active: true, date: "2026-07-11", hm: "20:00" },
+      data: { active: false },
+    });
+    expect(h.alertsChanged).toHaveBeenCalled(); // la porte du cron peut se refermer
+  });
+
+  it("n'invalide pas la porte du cron quand il n'y avait pas d'alerte", async () => {
+    await POST(postReq(BODY));
+    expect(h.alertsChanged).not.toHaveBeenCalled();
+  });
+
+  it("un échec ici ne fait pas échouer la réservation", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    h.alertUpdateMany.mockRejectedValue(new Error("base injoignable"));
+    const res = await POST(postReq(BODY));
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
+  });
+
+  it("ne touche à aucune alerte si ResaMania refuse la réservation", async () => {
+    h.bookResult = { ok: false, error: "complet" };
+    await POST(postReq(BODY));
+    expect(h.alertUpdateMany).not.toHaveBeenCalled();
   });
 });

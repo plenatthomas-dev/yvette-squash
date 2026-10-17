@@ -5,6 +5,8 @@ import { prisma } from "@/lib/db";
 import { baseHandle, buildHandleMap } from "@/lib/handle";
 import { loadAnnotationUsers } from "@/lib/planning-annotate";
 import { weekDates } from "@/lib/week";
+import { isRealDateISO } from "@/lib/time";
+import { alertTodayISO } from "@/lib/alerts-gate";
 import type { PlanningDay } from "@/lib/resamania/types";
 
 export const runtime = "nodejs";
@@ -40,7 +42,10 @@ async function annotateWeek(
     }),
     prisma.attendance.findMany({
       where: { classEventId: { in: allSlotIds } },
-      include: { user: true },
+      // Le nom seul : `include: { user: true }` ramenait la ligne User ENTIÈRE (hash de mot de
+      // passe, e-mail, jetons…) pour chaque présence de la semaine, alors qu'on n'en lit que
+      // `displayName` (repli de `baseHandle` ci-dessous).
+      include: { user: { select: { displayName: true } } },
     }),
   ]);
   const handleMap = buildHandleMap(users);
@@ -93,9 +98,16 @@ export async function GET(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
-  const date =
-    new URL(req.url).searchParams.get("date") ??
-    new Date().toISOString().slice(0, 10);
+  // Date par défaut : AUJOURD'HUI À L'HEURE DU CLUB. `new Date().toISOString()` donne la date
+  // UTC — la veille entre minuit et 2 h à Paris, soit la semaine précédente un lundi matin.
+  const param = new URL(req.url).searchParams.get("date");
+  // Jour réel exigé : `weekDates("abc")` lève `RangeError` (toISOString d'une date invalide),
+  // hors du `try` plus bas → 500 au lieu d'un refus explicite.
+  // Chaîne vide (« ?date= ») traitée comme absente, comme dans /api/bookings.
+  if (param && !isRealDateISO(param)) {
+    return NextResponse.json({ error: "Date invalide" }, { status: 400 });
+  }
+  const date = param || alertTodayISO();
   const dates = weekDates(date);
 
   // --- Compte « email seul » (sans jeton) : agrégat des snapshots par jour, puis annotation. ---

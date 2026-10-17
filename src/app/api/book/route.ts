@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { book, getPlanning, invalidatePlanningCache } from "@/lib/resamania/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { isRealDateISO } from "@/lib/time";
+import { fmtTime, isRealDateISO } from "@/lib/time";
+import { alertsChanged } from "@/lib/alerts-gate";
 import { isClassEventId } from "@/lib/validation";
 import { resolveActingContext } from "@/lib/delegation";
 import { refreshSnapshotFromResa } from "@/lib/planning-snapshot";
@@ -149,45 +150,91 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: r.error }, { status: 409 });
   }
 
+  // ─── À PARTIR D'ICI, LE TERRAIN EST RÉSERVÉ CHEZ RESAMANIA ─────────────────────────────
+  //
+  // Rien de ce qui suit ne doit plus faire répondre une erreur : le membre réessaierait une
+  // réservation qui a abouti (→ « déjà réservé », ou pire, un 2ᵉ terrain via un autre créneau).
+  //
+  // Le créneau vient de passer « réservé » : purge le cache planning pour que la prochaine
+  // lecture reflète tout de suite l'état réel (sinon jusqu'à 20 s à le voir encore libre).
+  // AVANT l'écriture en base, et plus après : une base en panne faisait sauter cette ligne,
+  // et le planning montrait encore libre un terrain qu'on venait de prendre.
+  invalidatePlanningCache();
+
   // Upsert sur la clé unique (userId, classEventId) : réserver un créneau déjà présent
   // dans le journal (ex. annulé puis re-réservé) repasse la même ligne en "booked" au
   // lieu de créer un doublon. La contrainte @@unique garantit l'unicité côté base.
-  await prisma.booking.upsert({
-    where: {
-      userId_classEventId: { userId: bookingOwnerId, classEventId },
-    },
-    update: {
-      attendeeId: r.attendeeId ?? null,
-      courtName: creneau.courtName,
-      startsAt: new Date(creneau.startsAt),
-      endsAt: new Date(creneau.endsAt),
-      status: "booked",
-      actingUserId,
-      // Repasser la source à "app" est OBLIGATOIRE : la ligne réutilisée peut avoir été
-      // marquée "resamania" par la réconciliation (résa faite hors appli, puis annulée,
-      // puis refaite ici). Sans ça, l'upsert garderait l'ancienne origine et la résa
-      // resterait comptée « hors appli » alors qu'elle vient d'être faite dans l'appli.
-      source: "app",
-    },
-    create: {
-      userId: bookingOwnerId,
-      attendeeId: r.attendeeId ?? null,
-      classEventId,
-      // `?? "?"` a disparu des deux côtés : un créneau du planning porte toujours un nom de
-      // terrain, et il n'y a plus d'autre source.
-      courtName: creneau.courtName,
-      startsAt: new Date(creneau.startsAt),
-      endsAt: new Date(creneau.endsAt),
-      status: "booked",
-      actingUserId,
-      // Explicite bien que le défaut du schéma suffirait : c'est ICI qu'est l'unique
-      // chemin de réservation « via l'appli », autant que ça se lise sans ouvrir le schéma.
-      source: "app",
-    },
-  });
-  // Le créneau vient de passer « réservé » : purge le cache planning pour que la prochaine
-  // lecture reflète tout de suite l'état réel (sinon jusqu'à 20 s à le voir encore libre).
-  invalidatePlanningCache();
+  //
+  // Protégé : une erreur base ici rendait un 500 au corps vide alors que la réservation
+  // existait bel et bien chez ResaMania. On journalise et on répond le succès, avec
+  // `journalSynced: false`. La ligne manquante n'est rattrapée que si le flag
+  // `externalBookings` est actif (lib/booking-reconcile.ts, sens 2), et alors marquée
+  // « resamania » : un trou du journal reste possible, mais il vaut mieux qu'un faux échec.
+  let journalSynced = true;
+  try {
+    await prisma.booking.upsert({
+      where: {
+        userId_classEventId: { userId: bookingOwnerId, classEventId },
+      },
+      update: {
+        attendeeId: r.attendeeId ?? null,
+        courtName: creneau.courtName,
+        startsAt: new Date(creneau.startsAt),
+        endsAt: new Date(creneau.endsAt),
+        status: "booked",
+        actingUserId,
+        // Repasser la source à "app" est OBLIGATOIRE : la ligne réutilisée peut avoir été
+        // marquée "resamania" par la réconciliation (résa faite hors appli, puis annulée,
+        // puis refaite ici). Sans ça, l'upsert garderait l'ancienne origine et la résa
+        // resterait comptée « hors appli » alors qu'elle vient d'être faite dans l'appli.
+        source: "app",
+      },
+      create: {
+        userId: bookingOwnerId,
+        attendeeId: r.attendeeId ?? null,
+        classEventId,
+        // `?? "?"` a disparu des deux côtés : un créneau du planning porte toujours un nom de
+        // terrain, et il n'y a plus d'autre source.
+        courtName: creneau.courtName,
+        startsAt: new Date(creneau.startsAt),
+        endsAt: new Date(creneau.endsAt),
+        status: "booked",
+        actingUserId,
+        // Explicite bien que le défaut du schéma suffirait : c'est ICI qu'est l'unique
+        // chemin de réservation « via l'appli », autant que ça se lise sans ouvrir le schéma.
+        source: "app",
+      },
+    });
+  } catch (e) {
+    journalSynced = false;
+    console.error("[book] réservation faite chez ResaMania, journal non écrit:", e);
+  }
+
+  // Le membre vient d'obtenir le créneau : son alerte « préviens-moi si un terrain se libère »
+  // sur ce même jour et ce même horaire n'a plus d'objet. Sans ça, le cron le notifierait plus
+  // tard pour un créneau qu'il a déjà — et le bouton « Réserver » de la notification lui ferait
+  // tenter un 2ᵉ terrain au même horaire (refusé, « un seul terrain par horaire »).
+  // Clé identique à celle posée par l'écran (page.tsx, onWatch) et lue par le cron :
+  // `date` = les 10 premiers caractères de l'instant du créneau, `hm` = heure du club.
+  // Alerte du PROPRIÉTAIRE de la résa (le délégant en cas de délégation) : c'est lui qui a le
+  // créneau. Désactivée (et non supprimée), comme le fait le cron après notification.
+  // Best-effort : la réservation est faite, un échec ici ne doit pas la faire paraître ratée.
+  try {
+    const { count } = await prisma.slotAlert.updateMany({
+      where: {
+        userId: bookingOwnerId,
+        active: true,
+        date: creneau.startsAt.slice(0, 10),
+        hm: fmtTime(creneau.startsAt),
+      },
+      data: { active: false },
+    });
+    // Peut-être la dernière alerte active du club : la porte du cron doit se refermer
+    // (cf. lib/alerts-gate.ts). Rien à invalider si rien n'a changé.
+    if (count > 0) alertsChanged();
+  } catch (e) {
+    console.warn("[book] désactivation de l'alerte du créneau réservé échouée:", e);
+  }
 
   // Réservation AU NOM d'un délégant : le délégataire peut être un compte « email seul » qui
   // ne lit que le snapshot. On le rafraîchit avec le jeton du délégant (déjà en main) pour que
@@ -196,5 +243,5 @@ export async function POST(req: NextRequest) {
   if (actingUserId) {
     await refreshSnapshotFromResa(creneau.startsAt.slice(0, 10), resa, bookingOwnerId);
   }
-  return NextResponse.json({ ok: true, state: r.state });
+  return NextResponse.json({ ok: true, state: r.state, journalSynced });
 }

@@ -21,6 +21,33 @@ function prettyDate(date: string): string {
   });
 }
 
+/**
+ * Instant (ms) du début du créneau `date` + `hm`, lus en heure du club — ou `null` si la paire
+ * ne désigne pas un instant réel. Ne lève JAMAIS : voir l'usage dans le classement de `GET`.
+ */
+function debutCreneauMs(date: string, hm: string): number | null {
+  try {
+    const t = new Date(toInstant(`${date}T${hm}:00`)).getTime();
+    return Number.isFinite(t) ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+// Durée de vie de la notification « terrain libéré » chez le service push. Au-delà du début du
+// créneau elle n'a plus d'objet (et le défaut de web-push est de QUATRE SEMAINES : un téléphone
+// éteint la recevrait à son réveil, pour un créneau passé depuis longtemps). Plafond d'une heure :
+// un terrain libre se reprend vite, une alerte vieille d'une heure est probablement fausse.
+// Plancher d'une minute : un TTL de 0 se traduit par « livrer tout de suite ou jeter », ce qui
+// perd la notification au moindre téléphone en veille profonde.
+const ALERTE_TTL_MIN_S = 60;
+const ALERTE_TTL_MAX_S = 3600;
+
+function ttlAlerteS(debutMs: number, now: number): number {
+  const s = Math.floor((debutMs - now) / 1000);
+  return Math.min(ALERTE_TTL_MAX_S, Math.max(ALERTE_TTL_MIN_S, s));
+}
+
 // NB : la récupération du jeton ResaMania d'un joueur passe par `getResaTokenForUser`
 // (session.ts), comme le cron keep-alive-delegations. Ce fichier en avait sa PROPRE copie,
 // qui oubliait de déchiffrer le jeton lu et de rechiffrer le jeton rafraîchi — voir l'historique.
@@ -72,10 +99,21 @@ export async function GET(req: NextRequest) {
   const now = Date.now();
   const expired: typeof allAlerts = [];
   const alerts: typeof allAlerts = [];
+  // Début de chaque créneau surveillé, en instant absolu : sert au classement ci-dessous ET au
+  // TTL de la notification (inutile de la livrer une fois le créneau commencé).
+  const debutMs = new Map<string, number>();
   for (const a of allAlerts) {
-    const passee = new Date(toInstant(`${a.date}T${a.hm}:00`)).getTime() <= now;
-    if (passee || a.date > horizon) expired.push(a);
-    else alerts.push(a);
+    const debut = debutCreneauMs(a.date, a.hm);
+    // Une alerte ILLISIBLE (date ou horaire impossible, écrit avant que POST /api/alerts ne
+    // valide autre chose que la forme) part en expiration silencieuse. `toInstant` lève sur une
+    // telle valeur, et cette boucle est hors de tout `try` : une seule ligne fautive faisait
+    // tomber le cron à chaque passage, pour tout le club, sans jamais être désactivée.
+    if (debut === null || debut <= now || a.date > horizon) {
+      expired.push(a);
+    } else {
+      debutMs.set(a.id, debut);
+      alerts.push(a);
+    }
   }
   if (expired.length > 0) {
     await prisma.slotAlert.updateMany({
@@ -143,6 +181,12 @@ export async function GET(req: NextRequest) {
         body: `${quand} — tu étais en liste d'attente, file réserver !`,
         url: `/?date=${a.date}&view=day`,
         tag: `alert-${a.id}`,
+        // Urgence HAUTE : chaque seconde compte face aux autres membres, et une urgence normale
+        // laisse Android différer la livraison d'un téléphone en veille (Doze). TTL calé sur le
+        // début du créneau, cf. ttlAlerteS.
+        // `Date.now()` et non `now` : la passe peut durer (un appel planning par membre et par jour).
+        ttl: ttlAlerteS(debutMs.get(a.id) ?? Date.now(), Date.now()),
+        urgency: "high",
         // « Réserver » réserve SANS ouvrir l'appli ni redemander confirmation : c'est le geste
         // que la notification réclame, et chaque seconde compte face aux autres membres. Le
         // service worker (public/sw.js) poste à /api/book, qui relit le planning comme pour
