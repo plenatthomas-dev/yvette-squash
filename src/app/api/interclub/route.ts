@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
 import { prisma } from "@/lib/db";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminSession } from "@/lib/admin";
 import { readJsonBody } from "@/lib/http-tx";
 import { isRealDateISO } from "@/lib/time";
 import { interclubChanged } from "@/lib/interclub-gate";
@@ -162,7 +162,7 @@ export async function GET(req: NextRequest) {
     hasMore,
     teams: equipes,
     fixtures,
-    canCreate: isAdminEmail(session.email),
+    canCreate: isAdminSession(session),
   });
 }
 
@@ -178,7 +178,7 @@ export async function POST(req: NextRequest) {
   const access = await requireInterclubMember(req);
   if (!access.ok) return access.response;
   const { session } = access;
-  if (!isAdminEmail(session.email)) {
+  if (!isAdminSession(session)) {
     return NextResponse.json(
       { error: "Les rencontres viennent du calendrier de la ligue" },
       { status: 403 },

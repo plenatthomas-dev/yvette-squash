@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { prisma } from "./db";
 import { encrypt, decrypt } from "./crypto";
-import { ensureFresh, isResaAuthRejected } from "./resamania/client";
+import { ensureFresh, isResaAuthRejected, isOwnClub } from "./resamania/client";
 import { ResaRefreshTransientError, isResaRefreshTransient } from "./resamania/errors";
 import type { ResaIdentity, ResaSession } from "./resamania/types";
 import type { User, Prisma } from "@prisma/client";
@@ -57,6 +57,13 @@ export async function resolveUser(input: {
             `[session] email ResaMania déjà porté par un autre compte (user ${owner.id}) : ` +
               `user ${byContact.id} garde son adresse actuelle`,
           );
+        } else if (isAllowlistedAdminEmail(email)) {
+          // Une adresse de l'allowlist admin ne s'ADOPTE pas par simple changement chez
+          // ResaMania : rien ne garantit qu'ils l'aient vérifiée, et l'adopter donnerait les
+          // droits d'admin (audit 2026-10, point 1). Un admin rattache la ligne à la main.
+          console.warn(
+            `[session] user ${byContact.id} : nouvelle adresse ResaMania dans ADMIN_EMAILS, non adoptée`,
+          );
         } else {
           nextEmail = email;
         }
@@ -85,6 +92,23 @@ export async function resolveUser(input: {
       // "cancelled" (cf. api/planning : bookerContactId ≠ user.contactId).
       // Sûr vis-à-vis de l'unicité de `contactId` : si une AUTRE ligne le portait déjà,
       // l'étape 1 (jointure par contactId) l'aurait trouvée et on ne serait pas ici.
+      //
+      // ⚠️ Mais JAMAIS EN SILENCE quand la ligne en portait déjà un autre (audit 2026-10,
+      // point 1) : l'e-mail que renvoie ResaMania fait foi pour l'identité, et un compte
+      // ResaMania tout neuf créé avec l'adresse d'un autre membre — admin compris — se serait
+      // greffé sur sa ligne. Le rattachement d'un contactId EXISTANT se fait donc seulement
+      // pendant une migration de club annoncée (`RESA_CONTACT_RELINK=1`, à retirer ensuite) ;
+      // hors de cette fenêtre, la connexion est refusée et journalisée.
+      if (contactId && byEmail.contactId && byEmail.contactId !== contactId) {
+        if (process.env.RESA_CONTACT_RELINK !== "1") {
+          console.warn(
+            `[session] user ${byEmail.id} : contactId ResaMania différent de celui enregistré, ` +
+              "connexion refusée (RESA_CONTACT_RELINK=1 pour une migration de club)",
+          );
+          throw new LoginRefusedError("identity_conflict");
+        }
+        console.warn(`[session] user ${byEmail.id} : contactId ResaMania RÉÉCRIT (RESA_CONTACT_RELINK=1)`);
+      }
       const attach = contactId && byEmail.contactId !== contactId ? { contactId } : {};
       // Connexion ResaMania retombant sur une ligne « email seul » → email désormais prouvé.
       const verify = contactId && !byEmail.emailVerifiedAt ? { emailVerifiedAt: now } : {};
@@ -118,8 +142,39 @@ export class AccountDisabledError extends Error {
   }
 }
 
+/**
+ * Levée par `createSession` / `resolveUser` quand ResaMania a bien authentifié la personne mais
+ * que l'appli refuse de lui ouvrir une session (audit 2026-10, points 1 et 2) :
+ *  - `foreign_club`       : compte d'un AUTRE club du même tenant ResaMania ;
+ *  - `blocked`            : adresse dans la blocklist de modération ;
+ *  - `identity_conflict`  : l'adresse est déjà liée à un autre compte ResaMania.
+ * La route de login la traduit en 403 — jamais comptée comme mauvais mot de passe.
+ */
+export class LoginRefusedError extends Error {
+  constructor(readonly reason: "foreign_club" | "blocked" | "identity_conflict") {
+    super(`LOGIN_REFUSED:${reason}`);
+    this.name = "LoginRefusedError";
+  }
+}
+
+/** Adresse de l'allowlist `ADMIN_EMAILS` (lecture locale : `admin.ts` importe ce module). */
+function isAllowlistedAdminEmail(email: string): boolean {
+  return (process.env.ADMIN_EMAILS ?? "")
+    .split(/[\s,;]+/)
+    .some((e) => e && normalizeEmail(e) === email);
+}
+
 /** Crée un User (via réconciliation email) + une session ResaMania. Renvoie l'id de cookie. */
 export async function createSession(resa: ResaSession): Promise<string> {
+  // N'importe quel compte du TENANT ResaMania s'authentifie chez eux, y compris ceux des autres
+  // clubs : on n'ouvre l'appli qu'aux comptes du nôtre (le chemin e-mail, lui, est sur
+  // invitation). Et la blocklist de modération vaut pour les deux chemins.
+  if (!isOwnClub(resa.identity.clubId)) throw new LoginRefusedError("foreign_club");
+  const resaEmail = resa.identity.email ? normalizeEmail(resa.identity.email) : "";
+  if (resaEmail && (await prisma.emailBlock.findUnique({ where: { email: resaEmail } }))) {
+    throw new LoginRefusedError("blocked");
+  }
+
   // Purge opportuniste : les sessions expirées ne sont sinon supprimées que si leur
   // propre cookie revient un jour — elles s'accumuleraient avec leurs refresh tokens.
   await prisma.session.deleteMany({ where: { expiresAt: { lt: new Date() } } });

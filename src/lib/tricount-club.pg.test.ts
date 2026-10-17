@@ -33,12 +33,15 @@ let PATCH: typeof import("@/app/api/tricount/expenses/[id]/route").PATCH;
 let transfererAuMembre: typeof import("./tricount-club").transfererAuMembre;
 
 const MARQUEUR = "PG-TEST-tricount-club";
-// Des dates qu'aucun autre fichier n'emploie : `Tricount.date` est unique.
-const J1 = "2099-03-01";
-const J2 = "2099-03-02";
-const J3 = "2099-03-03";
-const J4 = "2099-03-04";
-const J5 = "2099-03-05";
+// Des dates qu'aucun autre fichier n'emploie : `Tricount.date` est unique. Elles restent dans la
+// plage que la route accepte (`dateSaisieRecevable` : deux ans autour d'aujourd'hui) — une date
+// fixe en 2099 se faisait refuser « Date invalide » avant d'avoir rien mesuré.
+const jour = (n: number) => new Date(Date.now() + (600 + n) * 864e5).toISOString().slice(0, 10);
+const J1 = jour(1);
+const J2 = jour(2);
+const J3 = jour(3);
+const J4 = jour(4);
+const J5 = jour(5);
 const DATES = [J1, J2, J3, J4, J5];
 let alice = "";
 let membre = "";

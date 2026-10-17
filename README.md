@@ -132,8 +132,10 @@ créneau redevient réservable, puis désactive l'alerte. L'abonnement de l'appa
    > **échouer le déploiement**. C'est pourquoi les six crons de `vercel.json` tournent tous
    > au plus une fois par jour (quatre quotidiens, un hebdomadaire, un mensuel). Pour une vraie fréquence courte, il faut le plan **Pro** ou un
    > cron externe gratuit (ex. cron-job.org) appelant
-   > `https://<app>/api/cron/check-alerts?token=$CRON_SECRET` — c'est déjà la solution retenue
-   > pour le keep-alive Neon (cf. `docs/neon-keep-alive.md`).
+   > `https://<app>/api/cron/check-alerts` avec l'en-tête `Authorization: Bearer $CRON_SECRET`
+   > (onglet « Advanced » → « Headers » de cron-job.org) — c'est déjà la solution retenue pour
+   > le keep-alive Neon (cf. `docs/neon-keep-alive.md`). Le secret en query string (`?token=`)
+   > n'est plus accepté : il finissait dans les logs d'accès.
 4. Le **build** crée les tables `PushSubscription` / `SlotAlert` : il joue les migrations
    lui-même (cf. « Migrations » ci-dessous).
 

@@ -302,6 +302,20 @@ export async function ensureFresh(session: ResaSession): Promise<ResaSession> {
   return { ...tokens, identity: session.identity };
 }
 
+/**
+ * Le club d'un compte est-il le nôtre ? Compare le DERNIER segment de l'IRI
+ * (« /omafitness/clubs/2345 » ≡ « 2345 »), pour ne pas dépendre du préfixe de tenant.
+ * `RESA_CLUB_CHECK=off` coupe le contrôle — échappatoire si ResaMania change le format du
+ * claim et refuse tout le monde. Un club vide (claim absent) retombe sur `CLUB_ID` à la
+ * lecture de l'identité : il passe.
+ */
+export function isOwnClub(clubId: string | null | undefined): boolean {
+  if (process.env.RESA_CLUB_CHECK === "off") return true;
+  const last = (iri: string) => iri.trim().replace(/\/+$/, "").split("/").pop() ?? "";
+  if (!clubId) return true;
+  return last(clubId) === last(CLUB_ID);
+}
+
 /** Déduit l'identité (contactId, etc.) à partir du JWT + d'un appel /contact_users. */
 async function resolveIdentity(accessToken: string): Promise<ResaIdentity> {
   const claims = decodeJwt(accessToken) as {

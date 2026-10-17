@@ -378,6 +378,9 @@ export default function AdminPage() {
   const [requests, setRequests] = useState<PendingRequest[]>([]);
   // Lien généré à l'approbation, à transmettre à la personne (par id de demande).
   const [links, setLinks] = useState<Record<string, string>>({});
+  // Demandes approuvées dont le lien est parti par e-mail (adresse affichée pour confirmation).
+  const [sentTo, setSentTo] = useState<string[]>([]);
+  const [reqError, setReqError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -539,9 +542,20 @@ export default function AdminPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, action }),
       });
-      const data = (await res.json()) as { link?: string };
-      if (!res.ok) return;
-      if (action === "approve" && data.link) {
+      const data = (await res.json().catch(() => ({}))) as {
+        link?: string;
+        sent?: boolean;
+        email?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        setReqError(data.error ?? "Action impossible pour le moment.");
+        return;
+      }
+      setReqError(null);
+      if (action === "approve" && data.sent) {
+        setSentTo((l) => [...l, data.email ?? ""]);
+      } else if (action === "approve" && data.link) {
         setLinks((m) => ({ ...m, [id]: data.link! }));
       }
       // Dans tous les cas la demande quitte la file (approuvée → lien affiché ; rejetée → retirée).
@@ -1387,9 +1401,21 @@ export default function AdminPage() {
           <section className="adm-carte" style={{ marginBottom: 18 }}>
             <h2 className="adm-carte-titre">📥 Demandes en attente</h2>
             <p className="muted tiny">
-              Approuve une demande pour générer son lien, puis transmets-le à la personne
-              (WhatsApp, SMS…). Le lien ne s'affiche qu'une seule fois.
+              Approuver envoie le lien par e-mail à l&apos;adresse de la demande : c&apos;est ce
+              qui prouve que la personne la possède. Sans envoi d&apos;e-mail configuré, seul le lien
+              d&apos;une inscription s&apos;affiche ici (une seule fois).
             </p>
+
+            {reqError && (
+              <p className="notice error" role="alert">
+                {reqError}
+              </p>
+            )}
+            {sentTo.map((email, i) => (
+              <p key={`${email}-${i}`} className="notice info" role="status">
+                Lien envoyé par e-mail à <strong>{email}</strong>.
+              </p>
+            ))}
 
             {/* Liens générés (demandes tout juste approuvées) */}
             {Object.entries(links).map(([id, link]) => (
@@ -1404,7 +1430,7 @@ export default function AdminPage() {
               </div>
             ))}
 
-            {requests.length === 0 && Object.keys(links).length === 0 && (
+            {requests.length === 0 && Object.keys(links).length === 0 && sentTo.length === 0 && (
               <p className="muted" style={{ marginBottom: 0 }}>Aucune demande en attente.</p>
             )}
 

@@ -43,7 +43,7 @@ vi.mock("@/lib/features-server", () => ({
   getFeatures: async () => ({ interclub: h.interclub }),
 }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
-vi.mock("@/lib/admin", () => ({ isAdminEmail: vi.fn(() => h.admin) }));
+vi.mock("@/lib/admin", () => ({ isAdminSession: vi.fn(() => h.admin) }));
 vi.mock("@/lib/db", () => ({
   prisma: {
     interclubTeam: {

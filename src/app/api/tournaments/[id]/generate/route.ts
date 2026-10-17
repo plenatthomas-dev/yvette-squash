@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminSession } from "@/lib/admin";
 import { getFeatures } from "@/lib/features-server";
 import { HttpError, httpErrorResponse, readJsonBody, serializableTransaction } from "@/lib/http-tx";
 import { proposeFormats } from "@/lib/tournament";
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         include: { players: true },
       });
       if (!tournament) throw new HttpError(404, "Tournoi introuvable");
-      if (tournament.createdById !== session.userId && !isAdminEmail(session.email)) {
+      if (tournament.createdById !== session.userId && !isAdminSession(session)) {
         throw new HttpError(403, "Seul le créateur peut générer le tableau");
       }
       if (tournament.status !== "draft") throw new HttpError(409, "Tournoi déjà généré");

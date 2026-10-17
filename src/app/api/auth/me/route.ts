@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { buildHandleMap } from "@/lib/handle";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminSession } from "@/lib/admin";
 import { countPendingRequests } from "@/lib/email-auth";
 import { getAppBlock } from "@/lib/settings";
 import { getFeatures } from "@/lib/features-server";
@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
   //    aller-retour vers Neon. Elles partent maintenant ensemble.
   //
   // Admin (allowlist ADMIN_EMAILS) : pilote l'entrée « Admin » + son badge de demandes en attente.
-  const isAdmin = isAdminEmail(session.email);
+  const isAdmin = isAdminSession(session);
   const [users, pendingRequests, block, captainOf] = await Promise.all([
     prisma.user.findMany({
       select: { id: true, displayName: true, nickname: true, listed: true, createdAt: true },

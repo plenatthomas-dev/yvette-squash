@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminSession } from "@/lib/admin";
 import { prisma } from "@/lib/db";
 import { MAX_RENCONTRES } from "@/lib/interclub-opponents-db";
 import { fraicheurPour, refreshRosters } from "@/lib/interclub-roster-db";
@@ -56,7 +56,7 @@ export const maxDuration = 60;
 export async function POST(req: NextRequest) {
   const access = await requireInterclubMember(req);
   if (!access.ok) return access.response;
-  const admin = isAdminEmail(access.session.email);
+  const admin = isAdminSession(access.session);
 
   const teamId = req.nextUrl.searchParams.get("teamId") || undefined;
   const fixtureId = req.nextUrl.searchParams.get("fixtureId") || undefined;

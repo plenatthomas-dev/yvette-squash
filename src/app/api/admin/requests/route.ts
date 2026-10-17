@@ -2,11 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { getFeatures } from "@/lib/features-server";
 import { requireAdmin } from "@/lib/admin";
 import { addBlock } from "@/lib/moderation";
+import { emailConfigured } from "@/lib/email";
 import {
   listPendingRequests,
   approveRequest,
   rejectRequest,
   authLinkFor,
+  pendingRequestPurpose,
+  revertApproval,
+  sendResetEmail,
+  sendSignupApprovedEmail,
 } from "@/lib/email-auth";
 
 export const runtime = "nodejs";
@@ -26,7 +31,11 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/admin/requests  { id, action: "approve" | "reject" | "reject-block" }
-// approve      → régénère un lien à transmettre à la personne (renvoyé une seule fois) ;
+// approve      → régénère un lien et l'ENVOIE PAR E-MAIL à l'adresse de la demande : c'est le
+//                seul canal qui prouve que le demandeur possède l'adresse. Sans e-mail configuré,
+//                une inscription rend encore le lien à l'admin (invitation) ; une
+//                réinitialisation est refusée — transmise par WhatsApp/SMS à « quelqu'un qui dit
+//                être X », elle livrait le compte de X, admin compris (audit 2026-10, point 3) ;
 // reject       → supprime la demande (journalisée dans l'historique) ;
 // reject-block → rejette ET bloque l'e-mail (réinscription abusive).
 export async function POST(req: NextRequest) {
@@ -50,12 +59,39 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
   if (body.action === "approve") {
+    const mail = emailConfigured();
+    if (!mail && (await pendingRequestPurpose(body.id)) === "reset") {
+      return NextResponse.json(
+        {
+          error:
+            "Réinitialisation impossible sans envoi d'e-mail configuré : le lien doit partir vers l'adresse du compte, pas être transmis à la main.",
+        },
+        { status: 409 },
+      );
+    }
     const approved = await approveRequest(body.id, admin.userId);
     if (!approved) {
       return NextResponse.json({ error: "Demande introuvable ou déjà traitée." }, { status: 404 });
     }
     const link = authLinkFor(req.nextUrl.origin, approved.purpose, approved.token);
-    return NextResponse.json({ ok: true, link, email: approved.email, purpose: approved.purpose });
+    if (!mail) {
+      return NextResponse.json({ ok: true, link, email: approved.email, purpose: approved.purpose });
+    }
+    try {
+      if (approved.purpose === "reset") {
+        await sendResetEmail(approved.email, req.nextUrl.origin, approved.token);
+      } else {
+        await sendSignupApprovedEmail(approved.email, link);
+      }
+    } catch (e) {
+      console.error("[admin/requests] envoi du lien impossible:", (e as Error).message);
+      await revertApproval(body.id);
+      return NextResponse.json(
+        { error: "L'e-mail n'a pas pu partir : la demande reste en attente, réessaie plus tard." },
+        { status: 502 },
+      );
+    }
+    return NextResponse.json({ ok: true, sent: true, email: approved.email, purpose: approved.purpose });
   }
   return NextResponse.json({ error: "Action inconnue." }, { status: 400 });
 }

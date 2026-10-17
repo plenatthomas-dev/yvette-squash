@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
 import { HttpError, httpErrorResponse, readJsonBody, serializableTransaction } from "@/lib/http-tx";
 import { Prisma } from "@prisma/client";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminSession } from "@/lib/admin";
 import {
   isColorValue,
   lineupComplete,
@@ -114,7 +114,7 @@ export async function PATCH(
   // version en émettait un depuis l'INTÉRIEUR de la transaction, et sur le client global —
   // donc une seconde connexion mobilisée pendant qu'une transaction Serializable en détenait
   // déjà une, motif classique d'interblocage sur un pool serverless étroit.
-  const admin = isAdminEmail(session.email);
+  const admin = isAdminSession(session);
 
   // Ce qu'il y aura à ANNONCER, calculé dans la transaction et consommé après elle : notifier
   // depuis l'intérieur enverrait la notification même si la transaction était finalement

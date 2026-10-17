@@ -19,13 +19,17 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "./db";
-import { isAdminEmail } from "./admin";
+import { isAdminUser } from "./admin";
 import { getAppBlock, type AppBlock } from "./settings";
 
 /** Blocage applicable à cet identifiant, ou `null` (appli ouverte, ou demandeur admin). */
 export async function appBlockForEmail(email: string | null | undefined): Promise<AppBlock | null> {
-  if (isAdminEmail(email)) return null; // l'admin n'est jamais bloqué
-  return getAppBlock();
+  const block = await getAppBlock();
+  if (!block || !email) return block; // appli ouverte : aucune lecture de plus
+  // L'admin n'est jamais bloqué. Avant connexion on ne connaît que l'e-mail : on retrouve la
+  // ligne pour que `ADMIN_USER_IDS` (identifiant stable) décide, et pas l'adresse seule.
+  const user = await prisma.user.findUnique({ where: { email }, select: { id: true, email: true } });
+  return isAdminUser(user ?? { id: "", email }) ? null : block;
 }
 
 /** Blocage applicable à ce membre connecté, ou `null` (appli ouverte, ou membre admin). */
@@ -34,9 +38,9 @@ export async function appBlockForUserId(userId: string): Promise<AppBlock | null
   if (!block) return null; // appli ouverte : on s'arrête ici, sans requête supplémentaire
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { email: true },
+    select: { id: true, email: true },
   });
-  return isAdminEmail(user?.email) ? null : block;
+  return isAdminUser(user) ? null : block;
 }
 
 /**

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireAdmin, isAdminEmail } from "@/lib/admin";
+import { requireAdmin, isAdminUser } from "@/lib/admin";
 import { listMembers, deleteBlockersFor, deleteBlockersMessage } from "@/lib/members";
 import { getFeatures } from "@/lib/features-server";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
     if (target.id === admin.userId) {
       return NextResponse.json({ error: "Tu ne peux pas agir sur ton propre compte." }, { status: 400 });
     }
-    if (isAdminEmail(target.email)) {
+    if (isAdminUser(target)) {
       return NextResponse.json({ error: "Ce compte est administrateur." }, { status: 400 });
     }
   }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminSession } from "@/lib/admin";
 import { getFeatures } from "@/lib/features-server";
 import { isMissingRecord } from "@/lib/http-tx";
 import { broadcastForum, FORUM_EVENT_DELETED } from "@/lib/forum-realtime";
@@ -33,7 +33,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     where: { id },
     select: { id: true, authorId: true },
   });
-  if (!message || (message.authorId !== session.userId && !isAdminEmail(session.email))) {
+  if (!message || (message.authorId !== session.userId && !isAdminSession(session))) {
     return NextResponse.json({ error: "Message introuvable" }, { status: 404 });
   }
 

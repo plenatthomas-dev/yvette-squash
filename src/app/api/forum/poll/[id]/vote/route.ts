@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminSession } from "@/lib/admin";
 import { getFeatures } from "@/lib/features-server";
 import { readJsonBody, serializableTransaction, httpErrorResponse } from "@/lib/http-tx";
 import { relireSondage } from "@/lib/forum-db";
@@ -155,7 +155,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   });
   // 404 confondu avec 403, comme la suppression d'un message : distinguer les deux
   // apprendrait à un curieux quels identifiants existent.
-  if (!poll || (poll.message.authorId !== session.userId && !isAdminEmail(session.email))) {
+  if (!poll || (poll.message.authorId !== session.userId && !isAdminSession(session))) {
     return NextResponse.json({ error: "Sondage introuvable" }, { status: 404 });
   }
 

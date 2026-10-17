@@ -412,6 +412,10 @@ export default function MembersPage() {
                     {m.nickname ? ` (${m.nickname})` : ""}
                   </div>
                   <div className="muted tiny">{m.email ?? "sans e-mail"}</div>
+                  {/* L'id stable, à reporter dans ADMIN_USER_IDS (cf. lib/admin). */}
+                  <div className="muted tiny">
+                    id : <code>{m.id}</code>
+                  </div>
                 </div>
 
                 {/* Statut */}

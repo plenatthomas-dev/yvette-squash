@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminSession } from "@/lib/admin";
 import { getFeatures } from "@/lib/features-server";
 import { readJsonBody, isForeignKeyViolation } from "@/lib/http-tx";
 import { parseForumBody, forumPreview, MAX_FORUM_LEN, JOURNAL_FORUM } from "@/lib/forum";
@@ -79,7 +79,7 @@ export async function GET(req: NextRequest) {
   });
   const identite = {
     meId: session.userId,
-    admin: isAdminEmail(session.email),
+    admin: isAdminSession(session),
     // Son propre nom, pour que l'affichage OPTIMISTE d'une réaction porte le bon libellé avant
     // même que le courtier ait renvoyé le delta.
     meName: moi?.displayName ?? "Moi",

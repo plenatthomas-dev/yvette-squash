@@ -5,30 +5,57 @@ import { pushToUser, pushConfigured } from "./push";
 import type { TokenPurpose } from "./email-auth";
 
 /**
- * Droits admin par ALLOWLIST d'e-mails (variable d'env `ADMIN_EMAILS`, séparés par virgule
- * ou espace). Volontairement sans colonne en base ni UI de gestion : pour une petite asso, la
- * liste tient dans une variable d'env Vercel, et le défaut « fail-safe » est le bon — si
- * ADMIN_EMAILS est vide/absent, PERSONNE n'est admin (l'espace d'admin reste fermé).
+ * Droits admin par ALLOWLIST, en variables d'env (jamais NEXT_PUBLIC_* → lisibles uniquement
+ * côté serveur). Volontairement sans colonne en base ni UI de gestion : pour une petite asso,
+ * la liste tient dans une variable d'env Vercel, et le défaut « fail-safe » est le bon — si
+ * aucune liste n'est posée, PERSONNE n'est admin (l'espace d'admin reste fermé).
  *
- * NB : ce n'est pas NEXT_PUBLIC_* → lisible uniquement côté serveur (jamais exposé au client).
+ * DEUX listes, par ordre de préférence :
+ *  - `ADMIN_USER_IDS` : ids de `User` (cuid), séparés par virgule ou espace. Identifiant
+ *    STABLE : il ne bouge pas quand ResaMania renvoie un autre e-mail. Quand elle est posée,
+ *    ELLE SEULE fait foi.
+ *  - `ADMIN_EMAILS` : l'ancien mécanisme, gardé tant que la première n'est pas renseignée.
+ *    Faible : l'e-mail que renvoie ResaMania fait foi pour l'identité, et un compte ResaMania
+ *    qui s'attribue l'adresse d'un admin (sans vérification chez eux) s'y greffait — l'audit
+ *    2026-10 (point 1). Les ids se lisent dans /admin/membres.
  */
-function adminEmails(): Set<string> {
-  return new Set(
-    (process.env.ADMIN_EMAILS ?? "")
-      .split(/[\s,;]+/)
-      .map((e) => normalizeEmail(e))
-      .filter(Boolean),
-  );
+function splitList(raw: string | undefined): string[] {
+  return (raw ?? "").split(/[\s,;]+/).map((e) => e.trim()).filter(Boolean);
 }
 
+function adminEmails(): Set<string> {
+  return new Set(splitList(process.env.ADMIN_EMAILS).map((e) => normalizeEmail(e)).filter(Boolean));
+}
+
+function adminIds(): Set<string> {
+  return new Set(splitList(process.env.ADMIN_USER_IDS));
+}
+
+/**
+ * Vrai si cet e-mail est dans `ADMIN_EMAILS`. ⚠️ Ne décide plus seul dès qu'`ADMIN_USER_IDS`
+ * est posée : passer par `isAdminUser` / `isAdminSession`, qui connaissent l'id.
+ */
 export function isAdminEmail(email: string | null | undefined): boolean {
   if (!email) return false;
   return adminEmails().has(normalizeEmail(email));
 }
 
+/** Le membre (id + e-mail) est-il admin ? `ADMIN_USER_IDS` d'abord, `ADMIN_EMAILS` à défaut. */
+export function isAdminUser(user: { id: string; email: string | null | undefined } | null | undefined): boolean {
+  if (!user) return false;
+  const ids = adminIds();
+  if (ids.size > 0) return ids.has(user.id);
+  return isAdminEmail(user.email);
+}
+
+/** Raccourci pour une session déjà lue (`getSession` rend `userId` et `email`). */
+export function isAdminSession(session: { userId: string; email: string | null } | null | undefined): boolean {
+  return !!session && isAdminUser({ id: session.userId, email: session.email });
+}
+
 /**
  * Vérifie que la requête vient d'un admin connecté. Renvoie `{ userId, email }` si oui,
- * `null` sinon (session absente/expirée, ou email hors allowlist). À appeler en tête de
+ * `null` sinon (session absente/expirée, ou hors allowlist). À appeler en tête de
  * chaque route /api/admin/*.
  */
 export async function requireAdmin(
@@ -40,12 +67,12 @@ export async function requireAdmin(
     where: { id: session.userId },
     select: { email: true },
   });
-  if (!user?.email || !isAdminEmail(user.email)) return null;
+  if (!user?.email || !isAdminUser({ id: session.userId, email: user.email })) return null;
   return { userId: session.userId, email: user.email };
 }
 
 /**
- * Ids des Users admin (ceux dont l'email est dans l'allowlist), pour les notifier.
+ * Ids des Users admin, pour les notifier.
  *
  * EXPORTÉE parce qu'elle avait déjà un jumeau. Le cron du calendrier chargeait TOUS les emails
  * du club — dans sa boucle, une fois par équipe — pour n'en retenir que deux ou trois en
@@ -56,10 +83,11 @@ export async function requireAdmin(
  * déjà le jumeau du cron.
  */
 export async function adminUserIds(): Promise<string[]> {
+  const ids = [...adminIds()];
   const emails = [...adminEmails()];
-  if (emails.length === 0) return [];
+  if (ids.length === 0 && emails.length === 0) return [];
   const users = await prisma.user.findMany({
-    where: { email: { in: emails }, disabledAt: null },
+    where: ids.length > 0 ? { id: { in: ids }, disabledAt: null } : { email: { in: emails }, disabledAt: null },
     select: { id: true },
   });
   return users.map((u) => u.id);

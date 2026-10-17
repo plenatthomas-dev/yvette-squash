@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminSession } from "@/lib/admin";
 import { requireInterclubMember } from "@/lib/interclub-access";
 import { httpErrorResponse, readJsonBody, serializableTransaction } from "@/lib/http-tx";
 import {
@@ -26,7 +26,7 @@ export const dynamic = "force-dynamic";
 //  les autres, et c'est tout l'intérêt par rapport à un fil de discussion.
 //
 //  L'ADMIN PASSE, rattaché à une équipe ou non, comme partout ailleurs
-//  (`isAdminEmail`). C'est lui qui pose les rosters : lui fermer les réponses
+//  (`isAdminSession`). C'est lui qui pose les rosters : lui fermer les réponses
 //  de l'équipe 1 parce qu'il joue en 2 — ou ne joue pas — l'empêchait de voir
 //  qu'il manque un joueur, et de relayer la réponse de quelqu'un qui l'a appelé.
 //  Ce qu'il écrit reste borné par le ROSTER (le sujet doit être de l'équipe) et
@@ -69,7 +69,7 @@ async function loadContext(req: NextRequest, id: string): Promise<Context> {
     return { ok: false, response: NextResponse.json({ error: "Rencontre introuvable" }, { status: 404 }) };
   }
 
-  if (isAdminEmail(session.email)) return { ok: true, session, fixture };
+  if (isAdminSession(session)) return { ok: true, session, fixture };
 
   const me = await prisma.user.findUnique({
     where: { id: session.userId },

@@ -38,7 +38,8 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@/lib/admin", () => ({
   requireAdmin: vi.fn(async () => h.admin),
-  isAdminEmail: (e: string | null | undefined) => (e ? h.adminEmails.has(e) : false),
+  isAdminUser: (u: { email?: string | null } | null | undefined) =>
+    u?.email ? h.adminEmails.has(u.email) : false,
 }));
 // Le flag est résolu à chaud côté serveur (env + override en base) : on mocke l'état effectif.
 vi.mock("@/lib/features-server", () => ({

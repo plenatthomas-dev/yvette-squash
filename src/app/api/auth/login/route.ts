@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { login, isResaAuthRejected } from "@/lib/resamania/client";
-import { createSession, AccountDisabledError, normalizeEmail } from "@/lib/session";
+import { createSession, AccountDisabledError, LoginRefusedError, normalizeEmail } from "@/lib/session";
 import { clientIp } from "@/lib/client-ip";
 import { prisma } from "@/lib/db";
 import { isDbUnavailable, dbUnavailableResponse } from "@/lib/db-error";
@@ -118,6 +118,16 @@ export async function POST(req: NextRequest) {
           { error: "Ce compte a été désactivé. Contacte un responsable du club." },
           { status: 403 },
         );
+      }
+      if (e instanceof LoginRefusedError) {
+        console.warn("[login] connexion refusée:", e.reason);
+        const error =
+          e.reason === "foreign_club"
+            ? "Ce compte ResaMania n'est pas rattaché au club. L'appli est réservée à ses membres."
+            : e.reason === "identity_conflict"
+              ? "Cette adresse est déjà liée à un autre compte ResaMania. Contacte un responsable du club."
+              : "Connexion refusée. Contacte un responsable du club.";
+        return NextResponse.json({ error }, { status: 403 });
       }
       // Base injoignable : on la laisse remonter à la garde externe (→ 503 « maintenance »).
       if (isDbUnavailable(e)) throw e;
