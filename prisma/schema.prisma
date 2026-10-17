@@ -1037,6 +1037,9 @@ model Interclub {
   // deux heures plus tôt, puis renvoyait le résultat final à tous les abonnés.
   startNotifiedAt        DateTime?
   doneNotifiedAt         DateTime?
+  // Le score ANNONCÉ par la notification de fin (« 3-1 », migration 65). Une correction après
+  // coup qui change le résultat renvoie une notification rectificative et le remplace.
+  doneNotifiedScore      String?
   // Mêmes MARQUEURS, pour l'appel de disponibilité et sa relance. Ils sont ce qui distingue
   // « personne n'a encore été prévenu » de « tout le monde l'a été » : sans eux, un cron
   // quotidien redemanderait chaque matin à la même équipe si elle est disponible.
@@ -1047,8 +1050,11 @@ model Interclub {
   // lieu et l'adresse à ceux qui sont ALIGNÉS, la veille au matin. C'est l'information qui
   // manquait : entre J-3 et le coup d'envoi, plus rien ne partait.
   eveRemindedAt          DateTime?
-  createdById            String
-  createdBy              User                    @relation("InterclubCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  // SetNull (migration 62) : supprimer le membre qui a saisi la rencontre ne la supprime pas,
+  // et ne bloque plus la suppression du membre. Une rencontre sans créateur reste modifiable
+  // par les admins.
+  createdById            String?
+  createdBy              User?                   @relation("InterclubCreator", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt              DateTime                @default(now())
   matches                InterclubMatch[]
   availability           InterclubAvailability[]
@@ -1140,6 +1146,16 @@ model InterclubMatch {
   // pas d'heure, et ces colonnes n'en inventent pas.
   startedAt       DateTime?
   finishedAt      DateTime?
+  // RÉVISION DU MARQUAGE (migration 63) : +1 à chaque écriture des jeux ou du jeu en cours.
+  // Le marqueur annonce la révision sur laquelle son journal est bâti ; si la base en a une
+  // autre, quelqu'un — un autre appareil, y compris du MÊME compte — a écrit entre-temps, et
+  // l'envoi est refusé (`stale-live`) au lieu d'écraser. Cf. `PUT …/live`.
+  liveRev         Int             @default(0)
+  // ISSUE PARTICULIÈRE (migration 64) : « forfait » (un joueur absent) ou « abandon » (blessure
+  // en cours de match), et le côté qui GAGNE (« home » | « away »). NULL = match joué. Le score
+  // en jeux (`gamesHome`/`gamesAway`) porte alors le résultat attribué.
+  outcome         String?
+  outcomeWinner   String?
   updatedAt       DateTime        @updatedAt
   games           InterclubGame[]
 

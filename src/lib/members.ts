@@ -177,38 +177,30 @@ export async function listMembers(): Promise<MemberRow[]> {
 }
 
 // Relations `Restrict` qui BLOQUENT la suppression d'un membre : supprimer ne doit jamais
-// effacer en douce un historique d'argent (dépenses/parts Tricount), un tournoi créé ni une
-// rencontre interclub créée. Les autres relations sont en Cascade (sessions, résas, présences,
-// alertes…) ou SetNull (participations à un tournoi d'un autre, simples joués…) et se règlent
-// toutes seules.
+// effacer en douce un historique d'argent (dépenses/parts Tricount) ni un tournoi créé. Les
+// autres relations sont en Cascade (sessions, résas, présences, alertes…) ou SetNull
+// (participations à un tournoi d'un autre, simples joués, rencontres interclub saisies…) et se
+// règlent toutes seules.
 //
-// CETTE LISTE DOIT SUIVRE LE SCHÉMA, et elle l'a déjà raté : `Interclub.createdBy` est en
-// RESTRICT depuis la migration 34, mais n'était pas compté ici — supprimer un membre qui avait
-// saisi une seule rencontre rendait un 500 nu (P2003) au lieu du 409 explicatif. Le test
-// `members.test.ts` relit désormais `prisma/schema.prisma` et échoue si une relation bloquante
-// vers `User` n'est pas comptée ci-dessous.
+// CETTE LISTE DOIT SUIVRE LE SCHÉMA, et elle l'a déjà raté : `Interclub.createdBy` était en
+// RESTRICT depuis la migration 34 sans être compté ici — supprimer un membre qui avait saisi une
+// seule rencontre rendait un 500 nu (P2003). La migration 62 l'a passé en SetNull. Le test
+// `members.test.ts` relit `prisma/schema.prisma` et échoue si une relation bloquante vers `User`
+// n'est pas comptée ci-dessous.
 export type DeleteBlockers = {
   expenses: number; // dépenses payées OU saisies par le membre
   shares: number; // parts de dépense portées par le membre
   tournaments: number; // tournois qu'il a créés
-  interclubs: number; // rencontres interclub qu'il a créées (saisie ou import du calendrier)
 };
 
 /** Compte les dépendances bloquantes. `total > 0` ⇒ la suppression est refusée (désactiver plutôt). */
 export async function deleteBlockersFor(userId: string): Promise<DeleteBlockers & { total: number }> {
-  const [expenses, shares, tournaments, interclubs] = await Promise.all([
+  const [expenses, shares, tournaments] = await Promise.all([
     prisma.expense.count({ where: { OR: [{ payerId: userId }, { creatorId: userId }] } }),
     prisma.expenseShare.count({ where: { userId } }),
     prisma.tournament.count({ where: { createdById: userId } }),
-    prisma.interclub.count({ where: { createdById: userId } }),
   ]);
-  return {
-    expenses,
-    shares,
-    tournaments,
-    interclubs,
-    total: expenses + shares + tournaments + interclubs,
-  };
+  return { expenses, shares, tournaments, total: expenses + shares + tournaments };
 }
 
 /**
@@ -219,9 +211,6 @@ export function deleteBlockersMessage(b: DeleteBlockers): string {
   const parts: string[] = [];
   if (b.expenses + b.shares > 0) parts.push("des dépenses Tricount");
   if (b.tournaments > 0) parts.push(b.tournaments > 1 ? "des tournois créés" : "un tournoi créé");
-  if (b.interclubs > 0) {
-    parts.push(b.interclubs > 1 ? "des rencontres interclub créées" : "une rencontre interclub créée");
-  }
   const quoi =
     parts.length === 0
       ? "un historique"

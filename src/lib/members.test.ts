@@ -107,7 +107,6 @@ describe("deleteBlockersFor ↔ prisma/schema.prisma", () => {
       "Expense.creatorId",
       "Expense.payerId",
       "ExpenseShare.userId",
-      "Interclub.createdById",
       "Tournament.createdById",
     ]);
 
@@ -123,15 +122,21 @@ describe("deleteBlockersFor ↔ prisma/schema.prisma", () => {
 });
 
 describe("deleteBlockersFor", () => {
-  it("compte les rencontres interclub créées, et les ajoute au total", async () => {
+  it("additionne dépenses, parts et tournois", async () => {
     h.counts = { expense: 2, expenseShare: 3, tournament: 1, interclub: 4 };
     expect(await deleteBlockersFor("u1")).toEqual({
       expenses: 2,
       shares: 3,
       tournaments: 1,
-      interclubs: 4,
-      total: 10,
+      total: 6,
     });
+  });
+
+  // Migration 62 : une rencontre saisie ne bloque plus (SetNull).
+  it("ne compte PLUS les rencontres interclub créées", async () => {
+    h.counts = { interclub: 4 };
+    expect((await deleteBlockersFor("u1")).total).toBe(0);
+    expect(h.calls.some((c) => c.model === "interclub")).toBe(false);
   });
 
   it("total 0 quand rien ne bloque", async () => {
@@ -140,15 +145,15 @@ describe("deleteBlockersFor", () => {
 });
 
 describe("deleteBlockersMessage", () => {
-  const zero = { expenses: 0, shares: 0, tournaments: 0, interclubs: 0 };
+  const zero = { expenses: 0, shares: 0, tournaments: 0 };
 
   it("nomme ce qui bloque, au singulier comme au pluriel", () => {
-    expect(deleteBlockersMessage({ ...zero, interclubs: 1 })).toBe(
-      "Suppression impossible : ce membre a une rencontre interclub créée. Désactive-le plutôt.",
+    expect(deleteBlockersMessage({ ...zero, tournaments: 1 })).toBe(
+      "Suppression impossible : ce membre a un tournoi créé. Désactive-le plutôt.",
     );
-    expect(deleteBlockersMessage({ ...zero, shares: 2, tournaments: 2, interclubs: 3 })).toBe(
-      "Suppression impossible : ce membre a des dépenses Tricount, des tournois créés et des " +
-        "rencontres interclub créées. Désactive-le plutôt.",
+    expect(deleteBlockersMessage({ ...zero, shares: 2, tournaments: 2 })).toBe(
+      "Suppression impossible : ce membre a des dépenses Tricount et des tournois créés. " +
+        "Désactive-le plutôt.",
     );
   });
 });

@@ -185,6 +185,11 @@ type MatchRow = {
   /** Premier point et point décisif, posés par le marquage en direct. ISO, `null` si inconnus. */
   startedAt: string | null;
   finishedAt: string | null;
+  /** Révision du marquage (cf. `PUT …/live`). */
+  liveRev?: number;
+  /** Forfait / abandon, et le côté qui l'emporte. Absents ou `null` : match joué. */
+  outcome?: "forfait" | "abandon" | null;
+  outcomeWinner?: "home" | "away" | null;
   /** Instantané du jeu en cours, publié par le marqueur. `null` hors direct. */
   live: {
     current: { home: number; away: number };
@@ -1693,7 +1698,11 @@ function FixtureDialog({
                   </span>
                   <span className={`ic-status ic-${m.status}`}>
                     <span className="sr-only">État : </span>
-                    {MATCH_STATUS_LABEL[m.status] ?? m.status}
+                    {m.outcome
+                      ? `${m.outcome === "forfait" ? "Forfait" : "Abandon"} · ${
+                          m.outcomeWinner === "home" ? fixture.team.name : fixture.opponent
+                        } gagne`
+                      : (MATCH_STATUS_LABEL[m.status] ?? m.status)}
                   </span>
                 </span>
                 {/* L'ÉQUIPE QUI REÇOIT EN PREMIER, à la demande du club : c'est l'ordre de la
@@ -2095,6 +2104,12 @@ function MatchEditor({
   // décrivait plus l'écran.
   const [knownGameCount] = useState(match.games.length);
   const [knownGames] = useState(() => match.games.map((g) => ({ home: g.home, away: g.away })));
+  // ISSUE PARTICULIÈRE (audit 2026-10, point 18) : sans elle, un simple où un joueur manque ne
+  // se close jamais, ni la rencontre avec lui. « forfait:home » = forfait, NOUS l'emportons.
+  const [issue, setIssue] = useState<string>(
+    match.outcome && match.outcomeWinner ? `${match.outcome}:${match.outcomeWinner}` : "",
+  );
+  const [issueKind, issueWinner] = issue ? (issue.split(":") as ["forfait" | "abandon", "home" | "away"]) : [null, null];
 
   const setGame = (i: number, side: "home" | "away", v: string) => {
     // La case vide est un état légitime, pas une valeur refusée.
@@ -2304,10 +2319,31 @@ function MatchEditor({
       {recoit ? blocNous : blocEux}
       {recoit ? blocEux : blocNous}
 
-      <p className="tiny muted ic-games-hint">
-        Jeux, dans l&apos;ordre. {winGamesFor(bestOf)} jeux gagnants.
-      </p>
-      {games.map((g, i) => (
+      <label className="ic-field">
+        <span className="tiny muted">Issue</span>
+        <select value={issue} onChange={(e) => setIssue(e.target.value)} aria-label="Issue du simple">
+          <option value="">Match joué</option>
+          <option value="forfait:home">Forfait de {opponentTeamName} (nous gagnons)</option>
+          <option value="forfait:away">Forfait de notre joueur ({teamName} perd)</option>
+          <option value="abandon:home">Abandon de {opponentTeamName} en cours de match</option>
+          <option value="abandon:away">Abandon de notre joueur en cours de match</option>
+        </select>
+      </label>
+      {issueKind === "forfait" && (
+        <p className="tiny muted ic-games-hint">
+          Forfait : le simple se clôt sans jeu, {winGamesFor(bestOf)}-0 pour{" "}
+          {issueWinner === "home" ? teamName : opponentTeamName}.
+        </p>
+      )}
+
+      {issueKind !== "forfait" && (
+        <p className="tiny muted ic-games-hint">
+          {issueKind === "abandon"
+            ? "Jeux TERMINÉS avant l'abandon, dans l'ordre. La victoire est attribuée à l'autre joueur."
+            : <>Jeux, dans l&apos;ordre. {winGamesFor(bestOf)} jeux gagnants.</>}
+        </p>
+      )}
+      {issueKind !== "forfait" && games.map((g, i) => (
         <div className="ic-game-row" key={i}>
           <span className="tiny muted">Jeu {i + 1}</span>
           {(recoit ? (["home", "away"] as const) : (["away", "home"] as const)).map((cote, k) => (
@@ -2334,7 +2370,7 @@ function MatchEditor({
         </div>
       ))}
 
-      {games.length < bestOf && (
+      {issueKind !== "forfait" && games.length < bestOf && (
         <button
           type="button"
           className="secondary ic-add-game"
@@ -2373,7 +2409,7 @@ function MatchEditor({
         </button>
         <button
           type="button"
-          disabled={busy || !!problem}
+          disabled={busy || (issueKind !== "forfait" && !!problem)}
           onClick={() =>
             onSave({
               // Un joueur choisi : le serveur fige son nom d'affichage et vérifie au passage
@@ -2388,7 +2424,15 @@ function MatchEditor({
               awayColor: awayColor || null,
               // Les lignes vides ou inachevées ne partent pas : `problem` a déjà bloqué les
               // secondes, les premières sont juste des lignes qu'on a ouvertes sans s'en servir.
-              games: playedGames(nums),
+              // Un forfait part SANS jeu (le serveur refuserait le contraire).
+              ...(issueKind === "forfait" ? {} : { games: playedGames(nums) }),
+              // L'issue ne part que si elle est posée, ou qu'on en retire une : un simple
+              // ordinaire garde exactement le corps d'avant.
+              ...(issueKind
+                ? { outcome: issueKind, outcomeWinner: issueWinner }
+                : match.outcome
+                  ? { outcome: null }
+                  : {}),
               // Combien de jeux cet écran avait sous les yeux en s'ouvrant. Le serveur refuse
               // d'écrire si la base en compte un autre nombre : entre l'ouverture du
               // formulaire et l'enregistrement, quelqu'un a pu clore un jeu au bord du terrain,
