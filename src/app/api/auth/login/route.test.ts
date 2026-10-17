@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   createSession: vi.fn(async (_resa: unknown) => "sid"),
   // Réglage `block` lu par la garde « appli fermée ». `null` = appli ouverte (défaut).
   appSetting: vi.fn(async () => null as { value: string } | null),
+  isBot: false,
   LoginRefusedError: class extends Error {
     constructor(readonly reason: string) {
       super(reason);
@@ -39,6 +40,7 @@ vi.mock("@/lib/resamania/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/resamania/client")>()),
   login: h.login,
 }));
+vi.mock("botid/server", () => ({ checkBotId: vi.fn(async () => ({ isBot: h.isBot })) }));
 vi.mock("@/lib/session", () => ({
   createSession: h.createSession,
   normalizeEmail: (s: string) => s.trim().toLowerCase(),
@@ -157,6 +159,21 @@ describe("POST /api/auth/login — rate limiting", () => {
       expect(h.create).not.toHaveBeenCalled();
     },
   );
+
+  it("refuse un robot (BotID) sans appeler ResaMania", async () => {
+    h.isBot = true;
+    const res = await POST(req(creds, { "x-real-ip": "1.2.3.4" }));
+    h.isBot = false;
+    expect(res.status).toBe(403);
+    expect(h.login).not.toHaveBeenCalled();
+  });
+
+  // Audit 2026-10, point 23 : pas de connexion forcée depuis un autre site (login CSRF).
+  it("refuse un POST venu d'un autre site, sans appeler ResaMania", async () => {
+    const res = await POST(req(creds, { "x-real-ip": "1.2.3.4", "sec-fetch-site": "cross-site" }));
+    expect(res.status).toBe(403);
+    expect(h.login).not.toHaveBeenCalled();
+  });
 
   it("borne la longueur des entrées (400) sans rien lire ni appeler", async () => {
     const long = await POST(req({ username: "a".repeat(255), password: "pw" }));

@@ -91,4 +91,23 @@ describe.skipIf(SANS_BASE)("SUR VRAIE BASE — contraintes d'intégrité de l'au
     expect(parts.reduce((t, p) => t + p.amountCents, 0)).toBe(3000);
     expect(parts.some((p) => p.userId === u.id)).toBe(true);
   });
+
+  it("68 : un défi WebAuthn ne se consomme qu'une fois", async () => {
+    const { consumeChallenge } = await import("./webauthn");
+    const defi = { challenge: `${MARQUEUR}-${Date.now()}`, exp: Date.now() + 300_000 };
+    expect(await consumeChallenge(defi)).toBe(true);
+    expect(await consumeChallenge(defi)).toBe(false);
+  });
+
+  it("24 : une session ancienne (identifiant en clair) est retrouvée puis renommée sous son empreinte", async () => {
+    process.env.CREDENTIALS_SECRET ||= Buffer.alloc(32, 3).toString("base64");
+    const { getSession } = await import("./session");
+    const { hashSessionId } = await import("./crypto");
+    const sid = `${MARQUEUR}-ancienne-${Date.now()}`;
+    await prisma.session.create({ data: { id: sid, userId: a, expiresAt: new Date(Date.now() + 864e5) } });
+    expect((await getSession(sid))?.userId).toBe(a);
+    expect(await prisma.session.findUnique({ where: { id: sid } })).toBeNull();
+    expect(await prisma.session.findUnique({ where: { id: hashSessionId(sid) } })).not.toBeNull();
+    expect((await getSession(sid))?.userId).toBe(a);
+  });
 });

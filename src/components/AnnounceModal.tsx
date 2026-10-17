@@ -1,9 +1,13 @@
 "use client";
 
 // Modale d'annonce : quand on clique sur la notification push « annonce à tous » (envoyée
-// depuis /admin), l'appli s'ouvre sur /?announce=1&t=…&b=… et ce composant ré-affiche le
-// message dans une boîte, refermable (croix, bouton, ou clic sur le fond). Stateless : tout
-// est porté par l'URL, rien à charger. Nettoie l'URL à la fermeture (pas de ré-affichage au refresh).
+// depuis /admin), l'appli s'ouvre sur /?announce=<id> et ce composant relit le message CHEZ LE
+// SERVEUR, puis l'affiche dans une boîte refermable (croix, bouton, ou clic sur le fond).
+// Nettoie l'URL à la fermeture (pas de ré-affichage au refresh).
+//
+// L'URL portait autrefois le titre et le texte (`t`, `b`), affichés tels quels sous l'en-tête
+// officiel : n'importe qui pouvait fabriquer un lien vers un faux message du club (audit
+// 2026-10, point 25). Ces paramètres sont désormais ignorés.
 
 import { useEffect, useState } from "react";
 import { Dialog } from "./Dialog";
@@ -12,12 +16,18 @@ export default function AnnounceModal() {
   const [ann, setAnn] = useState<{ title: string; body: string } | null>(null);
 
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search);
-    if (p.get("announce") !== "1") return;
-    const title = (p.get("t") ?? "").trim();
-    const body = (p.get("b") ?? "").trim();
-    if (!title && !body) return;
-    setAnn({ title, body });
+    const id = new URLSearchParams(window.location.search).get("announce");
+    if (!id || id === "1") return;
+    let vivant = true;
+    fetch(`/api/announce?id=${encodeURIComponent(id)}`)
+      .then((r) => (r.ok ? (r.json() as Promise<{ title?: string; body?: string }>) : null))
+      .then((a) => {
+        if (vivant && a && (a.title || a.body)) setAnn({ title: a.title ?? "", body: a.body ?? "" });
+      })
+      .catch(() => {});
+    return () => {
+      vivant = false;
+    };
   }, []);
 
   const close = () => {

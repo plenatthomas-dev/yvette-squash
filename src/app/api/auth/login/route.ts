@@ -6,6 +6,8 @@ import { prisma } from "@/lib/db";
 import { isDbUnavailable, dbUnavailableResponse } from "@/lib/db-error";
 import { appBlockForEmail, appBlockedResponse } from "@/lib/app-block";
 import { MAX_PASSWORD_LEN } from "@/lib/email-auth";
+import { crossSiteRefusal } from "@/lib/same-origin";
+import { checkBotId } from "botid/server";
 
 export const runtime = "nodejs";
 
@@ -32,6 +34,15 @@ const MAX_USERNAME_LEN = 254;
 
 // POST /api/auth/login { username, password }
 export async function POST(req: NextRequest) {
+  // Connexion forcée depuis un autre site (login CSRF) : refusée d'emblée (cf. lib/same-origin).
+  const ailleurs = crossSiteRefusal(req);
+  if (ailleurs) return ailleurs;
+  // Anti-bot invisible (Vercel BotID), avant tout appel à ResaMania : un robot qui essaie des
+  // mots de passe en masse ferait aussi blocklister nos IP par ResaMania. Même garde que
+  // auth/email/register ; la route est déclarée dans src/instrumentation-client.ts.
+  if ((await checkBotId()).isBot) {
+    return NextResponse.json({ error: "Requête refusée." }, { status: 403 });
+  }
   const { username, password } = await req.json().catch(() => ({}));
   if (typeof username !== "string" || typeof password !== "string" || !username || !password) {
     return NextResponse.json(

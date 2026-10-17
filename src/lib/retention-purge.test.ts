@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const tables = ["planningSnapshot", "appNotification", "forumMessage", "requestLog", "emailBlock", "notifDeviceState", "errorReport"] as const;
+const tables = ["planningSnapshot", "appNotification", "forumMessage", "requestLog", "emailBlock", "notifDeviceState", "webauthnChallengeUse", "errorReport"] as const;
 const h = vi.hoisted(() => ({ calls: {} as Record<string, unknown[]> }));
 vi.mock("./db", () => {
   const prisma: Record<string, { deleteMany: (a: unknown) => Promise<{ count: number }> }> = {};
-  for (const t of ["planningSnapshot", "appNotification", "forumMessage", "requestLog", "emailBlock", "notifDeviceState", "errorReport"]) {
+  for (const t of ["planningSnapshot", "appNotification", "forumMessage", "requestLog", "emailBlock", "notifDeviceState", "webauthnChallengeUse", "errorReport"]) {
     prisma[t] = {
       deleteMany: async (a: unknown) => {
         (h.calls[t] ??= []).push(a);
@@ -29,7 +29,7 @@ describe("purgeRetention — la durée annoncée est tenue même sans trafic", (
     const r = await purgeRetention(now);
     for (const t of tables) expect(h.calls[t]).toHaveLength(1);
     expect(r.forumMessage).toBe(0);
-    expect(purgedTotal(r)).toBe(12);
+    expect(purgedTotal(r)).toBe(14);
   });
 
   it("bornes : snapshots à J-7 (date), cloche à 30 jours, fil à 12 mois", async () => {

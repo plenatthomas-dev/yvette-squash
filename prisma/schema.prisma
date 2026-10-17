@@ -349,6 +349,17 @@ model ErrorReport {
   @@index([createdAt])
 }
 
+// Défis WebAuthn DÉJÀ CONSOMMÉS (audit 2026-10, point 24). Le défi vit dans un cookie chiffré
+// de 5 minutes ; effacer le cookie après usage ne suffit pas — une réponse capturée avec son
+// cookie restait rejouable jusqu'à l'échéance. On garde l'empreinte du défi jusqu'à son
+// échéance : un second usage heurte la clé primaire. Purgé par `purgeRetention`.
+model WebauthnChallengeUse {
+  hash      String   @id // sha256 du défi
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
 // Historique des demandes de compte/réinitialisation TRAITÉES (étape 3 de l'admin) : trace
 // append-only, découplée du cycle de vie des jetons `EmailToken` (qui sont purgés à
 // expiration/consommation). Une ligne par décision, pour la traçabilité côté admin.

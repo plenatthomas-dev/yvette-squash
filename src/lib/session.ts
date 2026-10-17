@@ -1,12 +1,44 @@
 import { randomBytes } from "node:crypto";
 import { prisma } from "./db";
-import { encrypt, decrypt } from "./crypto";
+import { encrypt, decrypt, hashSessionId } from "./crypto";
 import { ensureFresh, isResaAuthRejected, isOwnClub } from "./resamania/client";
 import { ResaRefreshTransientError, isResaRefreshTransient } from "./resamania/errors";
 import type { ResaIdentity, ResaSession } from "./resamania/types";
 import type { User, Prisma } from "@prisma/client";
 
 const SESSION_DAYS = 30;
+
+/**
+ * L'identifiant de cookie et la clé de la ligne `Session` ne sont plus la même chose : seule
+ * l'empreinte HMAC du cookie est stockée (cf. `crypto.hashSessionId`). Les sessions ouvertes
+ * avant ce changement portent encore l'identifiant en clair : elles sont retrouvées sous lui,
+ * puis RENOMMÉES sous leur empreinte au passage (migration paresseuse, sans déconnecter
+ * personne). Après 30 jours, plus aucune n'existe et la seconde lecture ne trouve jamais rien.
+ */
+function sessionKeys(sid: string): string[] {
+  return [hashSessionId(sid), sid];
+}
+
+/** Ouvre une session neuve : rend l'identifiant de COOKIE, stocke son empreinte. */
+function newSessionIds(): { sid: string; key: string } {
+  const sid = randomBytes(24).toString("base64url");
+  return { sid, key: hashSessionId(sid) };
+}
+
+async function findSessionWithUser(sid: string) {
+  const [key, legacy] = sessionKeys(sid);
+  const row = await prisma.session.findUnique({ where: { id: key }, include: { user: true } });
+  if (row) return row;
+  const old = await prisma.session.findUnique({ where: { id: legacy }, include: { user: true } });
+  if (!old) return null;
+  // Best-effort : un échec laisse la ligne lisible sous l'ancien nom, rien ne casse — et l'on
+  // rend alors l'identifiant RÉEL, celui sur lequel les écritures qui suivent doivent porter.
+  const renamed = await prisma.session
+    .update({ where: { id: legacy }, data: { id: key } })
+    .then(() => true)
+    .catch(() => false);
+  return renamed ? { ...old, id: key } : old;
+}
 
 function nameOf(id: ResaIdentity): string {
   return `${id.givenName} ${id.familyName}`.trim() || id.email || "Joueur";
@@ -190,10 +222,10 @@ export async function createSession(resa: ResaSession): Promise<string> {
   // Trace la dernière connexion (repère les comptes inactifs côté admin).
   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
-  const id = randomBytes(24).toString("base64url");
+  const { sid: id, key } = newSessionIds();
   await prisma.session.create({
     data: {
-      id,
+      id: key,
       userId: user.id,
       accessToken: encrypt(resa.accessToken),
       refreshTokenEnc: encrypt(resa.refreshToken),
@@ -211,10 +243,10 @@ export async function createEmailSession(userId: string, tx: Prisma.TransactionC
   // Trace la dernière connexion (le refus des comptes désactivés est fait en amont, dans la
   // route de login email qui a déjà chargé le User).
   await tx.user.update({ where: { id: userId }, data: { lastLoginAt: new Date() } });
-  const id = randomBytes(24).toString("base64url");
+  const { sid: id, key } = newSessionIds();
   await tx.session.create({
     data: {
-      id,
+      id: key,
       userId,
       expiresAt: new Date(Date.now() + SESSION_DAYS * 864e5),
       // accessToken / refreshTokenEnc / tokenExpiresAt / identityJson restent NULL
@@ -248,11 +280,11 @@ export async function createResaSessionFromUser(userId: string): Promise<string 
   const resa = await resolveResaToken(src); // rafraîchit + persiste sur src si besoin
   if (!resa) return null; // jeton irrécupérable → repli à l'appelant
 
-  const id = randomBytes(24).toString("base64url");
+  const { sid: id, key } = newSessionIds();
   // Crée D'ABORD la nouvelle ligne (on ne perd jamais les jetons), puis retire la source.
   await prisma.session.create({
     data: {
-      id,
+      id: key,
       userId,
       accessToken: encrypt(resa.accessToken),
       refreshTokenEnc: encrypt(resa.refreshToken),
@@ -495,8 +527,8 @@ export async function getLiveSessionUserId(sid: string | undefined): Promise<str
   // dépendance série → un seul aller-retour de latence. L'échec de l'écriture est avalé : marquer
   // l'activité ne doit jamais faire échouer l'affichage (bannière publique).
   const [s] = await Promise.all([
-    prisma.session.findUnique({
-      where: { id: sid },
+    prisma.session.findFirst({
+      where: { id: { in: sessionKeys(sid) } },
       select: { userId: true, expiresAt: true, user: { select: { disabledAt: true } } },
     }),
     touchLastSeen(sid, now).catch(() => {}),
@@ -521,7 +553,7 @@ function touchLastSeen(sid: string, now: Date): Promise<unknown> {
   const cutoff = new Date(now.getTime() - LAST_SEEN_THROTTLE_MS);
   return prisma.user.updateMany({
     where: {
-      sessions: { some: { id: sid, expiresAt: { gt: now } } },
+      sessions: { some: { id: { in: sessionKeys(sid) }, expiresAt: { gt: now } } },
       OR: [{ lastSeenAt: null }, { lastSeenAt: { lt: cutoff } }],
     },
     data: { lastSeenAt: now },
@@ -542,10 +574,10 @@ export async function getSession(
   opts: { resa?: boolean } = {},
 ): Promise<AppSession | null> {
   if (!sid) return null;
-  const s = await prisma.session.findUnique({ where: { id: sid }, include: { user: true } });
+  const s = await findSessionWithUser(sid);
   if (!s) return null;
   if (s.expiresAt <= new Date() || s.user.disabledAt) {
-    await prisma.session.delete({ where: { id: sid } }).catch(() => {});
+    await prisma.session.delete({ where: { id: s.id } }).catch(() => {});
     return null;
   }
 
@@ -632,7 +664,10 @@ export async function getResaSessionExpiry(userId: string): Promise<Date | null>
  */
 export async function destroySession(sid: string | undefined): Promise<void> {
   if (!sid) return;
-  const s = await prisma.session.findUnique({ where: { id: sid } }).catch(() => null);
+  const [key, legacy] = sessionKeys(sid);
+  const s =
+    (await prisma.session.findUnique({ where: { id: key } }).catch(() => null)) ??
+    (await prisma.session.findUnique({ where: { id: legacy } }).catch(() => null));
   if (!s) return;
 
   // Ordre volontaire : on crée la réserve AVANT de supprimer, pour ne jamais perdre les
@@ -642,7 +677,7 @@ export async function destroySession(sid: string | undefined): Promise<void> {
     await prisma.session
       .create({
         data: {
-          id: randomBytes(24).toString("base64url"),
+          id: newSessionIds().key,
           userId: s.userId,
           accessToken: s.accessToken,
           refreshTokenEnc: s.refreshTokenEnc,
@@ -654,5 +689,5 @@ export async function destroySession(sid: string | undefined): Promise<void> {
       .catch(() => {});
   }
 
-  await prisma.session.delete({ where: { id: sid } }).catch(() => {});
+  await prisma.session.delete({ where: { id: s.id } }).catch(() => {});
 }

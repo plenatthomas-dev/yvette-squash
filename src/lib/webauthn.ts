@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { encrypt, decrypt } from "./crypto";
 import { prisma } from "./db";
@@ -50,6 +51,23 @@ export function openChallenge(
     return p;
   } catch {
     return null;
+  }
+}
+
+/**
+ * CONSOMME un défi : vrai la première fois, faux s'il a déjà servi (audit 2026-10, point 24).
+ * Effacer le cookie après usage ne suffisait pas : une réponse capturée AVEC son cookie restait
+ * rejouable pendant les 5 minutes du défi. L'empreinte est gardée jusqu'à l'échéance du défi ;
+ * un second usage heurte la clé primaire. Une base en panne refuse (fail-closed) : mieux vaut
+ * une connexion biométrique à refaire qu'un rejeu possible.
+ */
+export async function consumeChallenge(p: { challenge: string; exp: number }): Promise<boolean> {
+  const hash = createHash("sha256").update(p.challenge).digest("hex");
+  try {
+    await prisma.webauthnChallengeUse.create({ data: { hash, expiresAt: new Date(p.exp) } });
+    return true;
+  } catch {
+    return false;
   }
 }
 

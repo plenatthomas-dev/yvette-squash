@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
 import { pushToAll, pushConfigured } from "@/lib/push";
+import { saveAnnouncement } from "@/lib/settings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +16,8 @@ const MAX_BODY = 300;
 // admins (allowlist ADMIN_EMAILS) — indépendant du flag `emailLogin` : le push est une
 // capacité de base, pas liée à la connexion par e-mail.
 export async function POST(req: NextRequest) {
-  if (!(await requireAdmin(req))) {
+  const admin = await requireAdmin(req);
+  if (!admin) {
     return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
   }
   if (!pushConfigured()) {
@@ -34,9 +36,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Titre ou message trop long." }, { status: 400 });
   }
 
-  // URL de clic : porte l'annonce en paramètres → au clic sur la notif, l'appli s'ouvre et
-  // ré-affiche le message dans une modale (cf. AnnounceModal). Stateless : rien à stocker.
-  const url = `/?${new URLSearchParams({ announce: "1", t: title, b: body }).toString()}`;
+  // URL de clic : un IDENTIFIANT, jamais le texte. Au clic, l'appli s'ouvre et la modale relit
+  // l'annonce chez le serveur (cf. AnnounceModal, settings.saveAnnouncement) : un lien fabriqué
+  // à la main ne peut plus afficher un faux message officiel du club.
+  const id = await saveAnnouncement(title, body, admin.userId);
+  const url = `/?${new URLSearchParams({ announce: id }).toString()}`;
   // tag fixe : une nouvelle annonce remplace la précédente non lue plutôt que d'empiler.
   const { recipients, sent } = await pushToAll({
     title,

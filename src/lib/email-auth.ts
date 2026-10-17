@@ -12,7 +12,7 @@
 
 import { randomBytes } from "node:crypto";
 import { prisma } from "./db";
-import { hashToken } from "./crypto";
+import { hashToken, tokenHashCandidates } from "./crypto";
 import { sendEmail } from "./email";
 import { logRequestDecision } from "./moderation";
 import { serializableTransaction } from "./http-tx";
@@ -126,7 +126,7 @@ export async function findEmailToken(token: string, purpose: TokenPurpose) {
   if (!token) return null;
   return prisma.emailToken.findFirst({
     where: {
-      tokenHash: hashToken(token),
+      tokenHash: { in: tokenHashCandidates(token) },
       purpose,
       expiresAt: { gt: new Date() },
       approvedAt: { not: null },
@@ -231,7 +231,11 @@ export function authLinkFor(_origin: string, _purpose: TokenPurpose, token: stri
 export async function findApprovedToken(token: string) {
   if (!token) return null;
   return prisma.emailToken.findFirst({
-    where: { tokenHash: hashToken(token), expiresAt: { gt: new Date() }, approvedAt: { not: null } },
+    where: {
+      tokenHash: { in: tokenHashCandidates(token) },
+      expiresAt: { gt: new Date() },
+      approvedAt: { not: null },
+    },
     orderBy: { createdAt: "desc" },
   });
 }

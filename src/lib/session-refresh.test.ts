@@ -6,7 +6,11 @@ const h = vi.hoisted(() => ({
     expiresAt: new Date(), identityJson: "{}", user: { displayName: "Alice", email: "a@example.fr", disabledAt: null } },
   refresh: vi.fn(),
 }));
-vi.mock("./crypto", () => ({ encrypt: (s: string) => s, decrypt: (s: string) => s }));
+vi.mock("./crypto", () => ({
+  encrypt: (s: string) => s,
+  decrypt: (s: string) => s,
+  hashSessionId: (s: string) => `h:${s}`,
+}));
 // Les erreurs typées et leurs gardes sont les VRAIES : c'est leur classement que session.ts
 // consulte pour décider de supprimer (refus) ou de garder (panne passagère) la session.
 vi.mock("./resamania/client", async (importOriginal) => ({

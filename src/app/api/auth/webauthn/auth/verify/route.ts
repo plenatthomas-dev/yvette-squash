@@ -15,10 +15,12 @@ import {
   recordPasskeyAttempt,
   CHALLENGE_COOKIE,
   challengeCookieOptions,
+  consumeChallenge,
 } from "@/lib/webauthn";
 import { appBlockForEmail, appBlockedResponse } from "@/lib/app-block";
 import { isResaRefreshTransient } from "@/lib/resamania/errors";
 import { RESA_UNAVAILABLE_CODE, RESA_UNAVAILABLE_MESSAGE } from "@/lib/resamania/responses";
+import { crossSiteRefusal } from "@/lib/same-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,6 +30,9 @@ const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 jours (aligné sur la connexion
 // POST /api/auth/webauthn/auth/verify — vérifie l'assertion du passkey et ouvre une session
 // « email seul ». Le passkey découvrable identifie le compte (via son credentialId).
 export async function POST(req: NextRequest) {
+  // Connexion forcée depuis un autre site (login CSRF) : refusée d'emblée (cf. lib/same-origin).
+  const ailleurs = crossSiteRefusal(req);
+  if (ailleurs) return ailleurs;
   // Réponse d'échec : efface TOUJOURS le défi. Un défi est à USAGE UNIQUE — le laisser vivre
   // jusqu'à son TTL après une cérémonie ratée permettrait de le rejouer. (Sur les tout premiers
   // échecs, il n'y a pas encore de cookie de défi : l'effacer est alors sans effet, donc sûr.)
@@ -113,6 +118,12 @@ export async function POST(req: NextRequest) {
     await recordPasskeyAttempt(ip);
     console.warn(`[webauthn] assertion non vérifiée (passkey ${passkey.id}, user ${passkey.userId})`);
     return fail(401, "Connexion biométrique non vérifiée.");
+  }
+  // Défi à usage UNIQUE, côté serveur aussi : un cookie + une réponse capturés ne se rejouent
+  // pas dans les 5 minutes du défi (cf. `consumeChallenge`).
+  if (!(await consumeChallenge(chal))) {
+    await recordPasskeyAttempt(ip);
+    return fail(401, "Connexion biométrique déjà utilisée — réessaie.");
   }
 
   // Compteur anti-rejeu : on mémorise la nouvelle valeur (0 pour beaucoup de passkeys, c'est ok).

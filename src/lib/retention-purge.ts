@@ -39,6 +39,7 @@ export async function purgeRetention(now: number = Date.now()): Promise<PurgeRep
     ["requestLog", () => prisma.requestLog.deleteMany({ where: { createdAt: { lt: before(MODERATION_RETENTION_MS) } } })],
     ["emailBlock", () => prisma.emailBlock.deleteMany({ where: { createdAt: { lt: before(MODERATION_RETENTION_MS) } } })],
     ["notifDeviceState", () => prisma.notifDeviceState.deleteMany({ where: { updatedAt: { lt: before(NOTIF_STATE_RETENTION_MS) } } })],
+    ["webauthnChallengeUse", () => prisma.webauthnChallengeUse.deleteMany({ where: { expiresAt: { lt: new Date(now) } } })],
     ["errorReport", () => prisma.errorReport.deleteMany({ where: { createdAt: { lt: before(ERROR_REPORT_RETENTION_DAYS * DAY) } } })],
   ];
   const report: PurgeReport = {};

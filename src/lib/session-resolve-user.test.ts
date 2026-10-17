@@ -19,7 +19,11 @@ const h = vi.hoisted(() => ({
 vi.mock("./db", () => ({
   prisma: { user: { findUnique: h.findUnique, update: h.update, create: vi.fn() } },
 }));
-vi.mock("./crypto", () => ({ encrypt: (s: string) => s, decrypt: (s: string) => s }));
+vi.mock("./crypto", () => ({
+  encrypt: (s: string) => s,
+  decrypt: (s: string) => s,
+  hashSessionId: (s: string) => `h:${s}`,
+}));
 vi.mock("./resamania/client", () => ({ ensureFresh: vi.fn() }));
 
 import { resolveUser } from "./session";

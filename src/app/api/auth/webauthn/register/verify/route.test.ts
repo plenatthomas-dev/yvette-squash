@@ -5,6 +5,7 @@ import type { NextRequest } from "next/server";
 // compte, stockage de l'état de sauvegarde (backedUp / deviceType), effacement du défi à usage
 // unique et idempotence sur credential déjà enrôlé. Frontières mockées.
 const h = vi.hoisted(() => ({
+  challengeFresh: true,
   biometry: true,
   session: { userId: "u1" } as null | { userId: string },
   challenge: { challenge: "chal", type: "reg", userId: "u1" } as
@@ -39,6 +40,7 @@ vi.mock("@/lib/webauthn", () => ({
   deviceLabelFromUA: () => "iPhone · Safari",
   CHALLENGE_COOKIE: "wa_chal",
   challengeCookieOptions: () => ({ path: "/" }),
+  consumeChallenge: async () => h.challengeFresh,
 }));
 vi.mock("@/lib/db", () => ({
   prisma: {

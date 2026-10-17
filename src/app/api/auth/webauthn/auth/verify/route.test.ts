@@ -5,6 +5,7 @@ import type { NextRequest } from "next/server";
 // USAGE UNIQUE (cookie toujours effacé), credential inconnu/désactivé, échec de vérification, et
 // l'échelle de session (ResaMania → email → mur 409). Toutes les frontières sont mockées.
 const h = vi.hoisted(() => ({
+  challengeFresh: true,
   biometry: true,
   rateLimited: false,
   challenge: { challenge: "chal", type: "auth" } as null | { challenge: string; type: string },
@@ -46,6 +47,7 @@ vi.mock("@/lib/webauthn", () => ({
   recordPasskeyAttempt: h.recordAttempt,
   CHALLENGE_COOKIE: "wa_chal",
   challengeCookieOptions: () => ({ path: "/" }),
+  consumeChallenge: async () => h.challengeFresh,
 }));
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -223,5 +225,17 @@ describe("POST /api/auth/webauthn/auth/verify — ResaMania injoignable", () => 
   it("une erreur NON passagère (base…) n'est pas maquillée en panne ResaMania", async () => {
     h.resaThrows = new Error("Can't reach database server");
     await expect(POST(postReq(goodBody))).rejects.toThrow("database");
+  });
+});
+
+// Audit 2026-10, point 24 : un cookie de défi + une réponse capturés ne se rejouent pas.
+describe("POST /api/auth/webauthn/auth/verify — défi à usage unique", () => {
+  it("défi déjà consommé → 401, aucune session ouverte", async () => {
+    h.challengeFresh = false;
+    const res = await POST(postReq(goodBody));
+    h.challengeFresh = true;
+    expect(res.status).toBe(401);
+    expect(res.cookies.get("sid")).toBeUndefined();
+    expect(h.recordAttempt).toHaveBeenCalled();
   });
 });
