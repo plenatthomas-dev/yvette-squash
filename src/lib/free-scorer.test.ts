@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   cleanName,
+  freeMatchDurationMs,
   HISTORY_TTL_DAYS,
   MAX_HISTORY,
   parseMatch,
@@ -111,5 +112,27 @@ describe("resultLine — le texte partagé", () => {
 
   it("match pas commencé", () => {
     expect(resultLine(match())).toBe("Paul 0-0 Marc (en cours)");
+  });
+});
+
+describe("heures du chrono — gardées avec le match", () => {
+  it("relit le premier point et le point décisif", () => {
+    const m = match({ firstPointAt: NOW, finishedAt: NOW + 42 * 60_000 });
+    expect(parseMatch(JSON.parse(JSON.stringify(m)))).toEqual(m);
+  });
+
+  it("une heure abîmée coûte la durée, pas le match", () => {
+    const relu = parseMatch({ ...match(), firstPointAt: "hier", finishedAt: null });
+    expect(relu).not.toBeNull();
+    expect(relu?.firstPointAt).toBeUndefined();
+  });
+
+  it("la durée d'un match terminé et chronométré", () => {
+    expect(freeMatchDurationMs(match({ firstPointAt: NOW, finishedAt: NOW + 42 * 60_000 }))).toBe(42 * 60_000);
+  });
+
+  it("aucune durée sans fin, ni pour un match d'avant le chrono", () => {
+    expect(freeMatchDurationMs(match({ firstPointAt: NOW }))).toBeNull();
+    expect(freeMatchDurationMs(match())).toBeNull();
   });
 });

@@ -582,3 +582,59 @@ describe("InterclubScorer — une contention n'accuse personne", () => {
     expect(dits).toMatch(/simultanée/i);
   });
 });
+
+// LE CHRONO DE L'ÉCRAN DE MARQUAGE. Horloge du téléphone : il part au premier appui, réseau ou
+// pas. Le serveur pose de son côté sa propre heure (`PUT …/live`) — c'est elle que la fiche de la
+// rencontre affiche, et celle qu'on reprend pour un match entamé sur un autre téléphone.
+describe("InterclubScorer — le chrono", () => {
+  const T0 = new Date("2026-10-17T19:00:00Z").getTime();
+  const chrono = () => document.querySelector(".ics-clock")?.textContent ?? null;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"], now: T0 });
+    vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("part au premier point, pas à la désignation du serveur, et se garde sur le téléphone", async () => {
+    const { getByText, container } = monteVierge({ id: "m-chrono" });
+    await souffle();
+    fireEvent.click(getByText("Thomas sert"));
+    await souffle();
+    expect(chrono()).toBeNull();
+
+    fireEvent.click(container.querySelectorAll(".ics-side")[0]);
+    await souffle();
+    expect(chrono()).toBe("0:00");
+    act(() => {
+      vi.advanceTimersByTime(65_000);
+    });
+    expect(chrono()).toBe("1:05");
+    expect(JSON.parse(localStorage.getItem("ic:time:m-chrono") ?? "{}")).toMatchObject({ startedAt: T0 });
+  });
+
+  it("reprend l'heure du serveur pour un match entamé sur un autre téléphone", async () => {
+    vi.setSystemTime(T0 + 10 * 60_000);
+    monteVierge({
+      id: "m-chrono-2",
+      games: [{ number: 1, home: 11, away: 5 }],
+      startedAt: new Date(T0).toISOString(),
+    });
+    await souffle();
+    expect(chrono()).toBe("10:00");
+  });
+
+  it("n'en invente pas pour un match entamé dont personne ne connaît le début", async () => {
+    // Un 7-7 saisi ailleurs, sans heure de début : le point suivant n'est PAS le premier.
+    const { container } = monteVierge({
+      id: "m-chrono-3",
+      live: { current: { home: 7, away: 7 }, serving: "home", servingBox: "right" },
+    });
+    await souffle();
+    fireEvent.click(container.querySelectorAll(".ics-side")[0]);
+    await souffle();
+    expect(chrono()).toBeNull();
+  });
+});

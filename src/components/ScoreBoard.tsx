@@ -76,6 +76,7 @@ export default function ScoreBoard({
   finishLabel = "Terminer",
   finishBusy = false,
   first = "home",
+  clock,
 }: {
   state: MatchState;
   bestOf: number;
@@ -110,6 +111,11 @@ export default function ScoreBoard({
    * et l'annulation ignorent tout de cet ordre.
    */
   first?: Side;
+  /**
+   * Le chrono du match (`<MatchClock>`), posé à droite de la ligne des jeux. Passé tout fait par
+   * l'appelant, qui seul sait d'où viennent les heures : ce composant ne fait que le placer.
+   */
+  clock?: ReactNode;
 }) {
   // Le retour d'Android fait ce que fait « ← Retour » : l'appelant enregistre, puis quitte.
   useCloseRequest(onBack);
@@ -226,14 +232,23 @@ export default function ScoreBoard({
       {/* TOUJOURS RENDUE, même vide (sa hauteur est réservée en CSS). Conditionner son
           affichage faisait sauter le tableau d'un cran au premier jeu terminé, et toute la
           typographie des cases avec lui — elle se règle en requêtes de conteneur sur la case,
-          donc sur sa hauteur. */}
+          donc sur sa hauteur.
+
+          LE CHRONO Y LOGE, à droite, pour la même raison : cette ligne a déjà sa hauteur. Dans
+          l'en-tête, il aurait fait passer le rappel du match sur une ligne de plus au premier
+          point — et le tableau aurait sauté exactement à ce moment-là. Trois colonnes (CSS) :
+          les jeux restent centrés sur l'écran, pas sur ce qui reste à côté du chrono. */}
       <p className="ics-history">
-        {state.games.map((g: GameScore, i: number) => (
-          <span key={i}>
-            {paire(g)[0]}-{paire(g)[1]}
-            {i < state.games.length - 1 ? " · " : ""}
-          </span>
-        ))}
+        <span aria-hidden="true" />
+        <span>
+          {state.games.map((g: GameScore, i: number) => (
+            <span key={i}>
+              {paire(g)[0]}-{paire(g)[1]}
+              {i < state.games.length - 1 ? " · " : ""}
+            </span>
+          ))}
+        </span>
+        <span className="ics-history-clock">{clock}</span>
       </p>
 
       <div className="ics-board">

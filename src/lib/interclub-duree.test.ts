@@ -1,11 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
   correctedGameTimes,
+  elapsedMs,
   fixtureDurationMs,
   formatDuration,
   liveGameTimes,
   liveMatchTimes,
   matchDurationMs,
+  matchPhase,
   MAX_MATCH_MS,
 } from "./interclub-duree";
 
@@ -184,5 +186,57 @@ describe("formatDuration", () => {
     [155 * MIN, "2 h 35"],
   ])("%i ms → %s", (ms, attendu) => {
     expect(formatDuration(ms)).toBe(attendu);
+  });
+});
+
+describe("matchPhase — la règle de statut de la route, côté écran", () => {
+  const etat = (status: "live" | "done", games: number, home: number, away: number) => ({
+    status,
+    games: Array.from({ length: games }, () => ({ home: 11, away: 5 })),
+    current: { home, away },
+  });
+
+  it("0-0 sans jeu : pas commencé, même serveur désigné", () => {
+    expect(matchPhase(etat("live", 0, 0, 0))).toBe("pending");
+  });
+
+  it("dès le premier point, ou dès qu'un jeu est fini", () => {
+    expect(matchPhase(etat("live", 0, 0, 1))).toBe("live");
+    expect(matchPhase(etat("live", 1, 0, 0))).toBe("live");
+  });
+
+  it("terminé au point décisif", () => {
+    expect(matchPhase(etat("done", 3, 0, 0))).toBe("done");
+  });
+});
+
+describe("liveMatchTimes — en millisecondes, pour le chrono du téléphone", () => {
+  it("suit les mêmes règles qu'avec des Date", () => {
+    const t0 = T0.getTime();
+    expect(liveMatchTimes({ status: "pending", startedAt: null, finishedAt: null }, { status: "live", games: 0 }, t0)).toEqual({
+      startedAt: t0,
+      finishedAt: null,
+    });
+    expect(liveMatchTimes({ status: "live", startedAt: t0, finishedAt: null }, { status: "done", games: 2 }, t0 + 5)).toEqual({
+      startedAt: t0,
+      finishedAt: t0 + 5,
+    });
+  });
+});
+
+describe("elapsedMs", () => {
+  const t0 = T0.getTime();
+
+  it("court jusqu'à maintenant tant que le match n'est pas fini", () => {
+    expect(elapsedMs(t0, null, t0 + 90_000)).toBe(90_000);
+  });
+
+  it("s'arrête à la fin, quel que soit maintenant", () => {
+    expect(elapsedMs(t0, t0 + 60_000, t0 + 999_999)).toBe(60_000);
+  });
+
+  it("rien sans début, ni au-delà de trois heures", () => {
+    expect(elapsedMs(null, null, t0)).toBeNull();
+    expect(elapsedMs(t0, null, t0 + MAX_MATCH_MS + 1)).toBeNull();
   });
 });

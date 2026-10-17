@@ -10,8 +10,9 @@
 // dans la foulée du geste de l'utilisateur. Safari iOS retire ce droit si un `await` s'intercale
 // trop longtemps ; générer l'image sans attendre le garde intact.
 
-import { summarize, type FreeMatch } from "@/lib/free-scorer";
+import { freeMatchDurationMs, summarize, type FreeMatch } from "@/lib/free-scorer";
 import { resolveColor } from "@/lib/interclub";
+import { formatDuration } from "@/lib/interclub-duree";
 
 /** Largeur de l'image, en px. 1080 : le format carré/portrait des messageries, net sur tout écran. */
 export const CARD_WIDTH = 1080;
@@ -80,7 +81,11 @@ export function renderScoreCard(m: FreeMatch, logo?: HTMLImageElement | null): H
   // --- en-tête : logo, nom du club, date -------------------------------------------------------
   // Les matchs de tournoi entrent dans l'historique sous l'id `trn-<match>` (cf. Tournament).
   const genre = m.id.startsWith("trn-") ? "Tournoi" : "Match amical";
-  drawHeader(ctx, `${s.done ? genre : "Match en cours"} · ${prettyDate(m.startedAt)}`, logo);
+  // La durée, quand le match a été chronométré : « Match amical · sam. 17 oct. · 42 min ». Le
+  // sous-titre passe par `fitText`, il ne peut pas déborder.
+  const dureeMs = freeMatchDurationMs(m);
+  const duree = dureeMs === null ? "" : ` · ${formatDuration(dureeMs)}`;
+  drawHeader(ctx, `${s.done ? genre : "Match en cours"} · ${prettyDate(m.startedAt)}${duree}`, logo);
 
   // --- tableau de marque ------------------------------------------------------------------------
   const cardX = PAD;

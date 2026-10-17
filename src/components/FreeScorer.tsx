@@ -16,6 +16,7 @@ import {
 import {
   cleanName,
   CURRENT_KEY,
+  freeMatchDurationMs,
   loadHistory,
   loadMatch,
   newId,
@@ -25,14 +26,17 @@ import {
   saveHistory,
   saveMatch,
   summarize,
+  timesOf,
   type FreeMatch,
 } from "@/lib/free-scorer";
+import { formatDuration, liveMatchTimes, matchPhase, type MatchTimes } from "@/lib/interclub-duree";
 import { canvasToPng, renderScoreCard, scoreFileName } from "@/lib/score-image";
 import { shareImage } from "@/lib/share-image";
 import { useBreakTimer } from "@/lib/useBreakTimer";
 import { keepAwake } from "@/lib/wake-lock";
 import ColorPicker from "./ColorPicker";
 import { ShareIcon, TrashIcon } from "./icons";
+import MatchClock from "./MatchClock";
 import ScoreBoard, { hapticFor } from "./ScoreBoard";
 
 type Toast = (type: "ok" | "err" | "info", msg: string) => void;
@@ -83,9 +87,19 @@ export function FreeScoringSession({
   const eventsRef = useRef<ScoreEvent[]>(match.events);
   const [busy, setBusy] = useState(false);
   const { remaining, startBreak, stopBreak } = useBreakTimer();
+  // Les heures du chrono, tenues comme le journal : état pour l'affichage, référence pour les
+  // appuis rapprochés. Mêmes règles que le serveur pour l'interclub (`liveMatchTimes`).
+  const [times, setTimes] = useState<MatchTimes<number>>(() => timesOf(match));
+  const timesRef = useRef<MatchTimes<number>>(timesOf(match));
 
   const state = replay(events, bestOf);
-  const snapshot = (): FreeMatch => ({ ...match, events: eventsRef.current });
+  const withTimes = (evts: ScoreEvent[], t: MatchTimes<number>): FreeMatch => ({
+    ...match,
+    events: evts,
+    firstPointAt: t.startedAt,
+    finishedAt: t.finishedAt,
+  });
+  const snapshot = (): FreeMatch => withTimes(eventsRef.current, timesRef.current);
 
   useEffect(() => keepAwake(), []);
 
@@ -94,11 +108,18 @@ export function FreeScoringSession({
     const next = build(prev);
     const before = replay(prev, bestOf);
     const after = replay(next, bestOf);
+    const nextTimes = liveMatchTimes(
+      { status: matchPhase(before), ...timesRef.current },
+      { status: matchPhase(after), games: after.games.length },
+      Date.now(),
+    );
     eventsRef.current = next;
+    timesRef.current = nextTimes;
     setEvents(next);
+    setTimes(nextTimes);
     // Sauvé À CHAQUE APPUI, synchrone : un rechargement ou un onglet tué par le système entre
-    // deux échanges ne doit rien coûter.
-    saveMatch(storageKey, { ...match, events: next });
+    // deux échanges ne doit rien coûter — le chrono non plus.
+    saveMatch(storageKey, withTimes(next, nextTimes));
     hapticFor(before, after);
     if (after.games.length > before.games.length && after.status !== "done") startBreak();
   }
@@ -143,6 +164,7 @@ export function FreeScoringSession({
       onFinish={() => void finish()}
       finishLabel={finishLabel}
       finishBusy={busy}
+      clock={<MatchClock times={times} />}
     />
   );
 }
@@ -153,6 +175,12 @@ function prettyDay(ms: number): string {
     day: "numeric",
     month: "short",
   });
+}
+
+/** « 42 min » pour un match terminé et chronométré ; `null` sinon — et l'écran n'en dit rien. */
+function durationOf(m: FreeMatch): string | null {
+  const ms = freeMatchDurationMs(m);
+  return ms === null ? null : formatDuration(ms);
 }
 
 /**
@@ -405,7 +433,7 @@ export default function FreeScorer({ toast }: { toast: Toast }) {
 
       {last && (
         <article className="fs-card fs-last" aria-live="polite">
-          <h3>Match terminé</h3>
+          <h3>Match terminé{durationOf(last) && ` en ${durationOf(last)}`}</h3>
           <MatchScore m={last} />
           <button type="button" className="fs-share" onClick={() => share(last)}>
             <ShareIcon />
@@ -420,7 +448,10 @@ export default function FreeScorer({ toast }: { toast: Toast }) {
           <ul>
             {others.map((m) => (
               <li key={m.id}>
-                <span className="fs-date">{prettyDay(m.startedAt)}</span>
+                <span className="fs-date">
+                  {prettyDay(m.startedAt)}
+                  {durationOf(m) && ` · ${durationOf(m)}`}
+                </span>
                 <MatchScore m={m} />
                 <span className="fs-row-actions">
                   <button

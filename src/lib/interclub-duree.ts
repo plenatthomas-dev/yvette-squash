@@ -1,4 +1,4 @@
-// Durée des simples d'interclub. Module PUR (ni prisma, ni next) : les routes s'en servent pour
+// Durée d'un match de squash. Module PUR (ni prisma, ni next) : les routes s'en servent pour
 // poser les heures, les écrans pour les afficher — même contrat que `interclub.ts`.
 //
 // SEUL LE MARQUAGE EN DIRECT HORODATE. Il est le seul à voir le match se jouer : la saisie après
@@ -6,20 +6,35 @@
 // score ne dit rien de l'heure à laquelle il a été joué. Elle ne touche donc à aucune de ces
 // heures — une correction (11-5 devenu 11-7) ne change pas la durée d'un match bien mesuré.
 //
-// HEURE DU SERVEUR, jamais celle du téléphone : un appareil mal réglé de dix minutes fausserait
-// la durée d'autant, et rien ne permettrait de s'en apercevoir.
+// DEUX HORLOGES, ET C'EST VOULU. Ce qui est PARTAGÉ — la durée d'un simple d'interclub sur sa
+// fiche — prend l'heure du SERVEUR : un téléphone mal réglé de dix minutes la fausserait pour
+// tout le monde. Le CHRONO de l'écran de marquage, lui, prend l'heure du téléphone qui marque :
+// il doit partir au premier appui, même sans réseau, et début comme fin y viennent du même
+// appareil. Les deux suivent les mêmes règles (`liveMatchTimes`), et peuvent différer de
+// quelques secondes — le temps d'une synchro.
 //
 // DANS LE DOUTE, RIEN. Une durée fausse est pire qu'une durée absente : elle se lit comme une
 // mesure. Chaque fois que l'heure réelle ne peut pas être connue, on laisse NULL et l'écran se
 // tait.
 
-import type { GameScore } from "@/lib/interclub";
+import type { GameScore, MatchState } from "@/lib/interclub";
 
 export type MatchStatus = "pending" | "live" | "done";
 
-export interface MatchTimes {
-  startedAt: Date | null;
-  finishedAt: Date | null;
+/** Les deux heures d'un match : des `Date` côté serveur, des millisecondes au téléphone. */
+export interface MatchTimes<T = Date> {
+  startedAt: T | null;
+  finishedAt: T | null;
+}
+
+/**
+ * Où en est un match, au sens de la durée : `pending` tant qu'aucun point n'est joué — désigner
+ * le serveur à 0-0 n'est pas commencer —, `done` au point décisif. C'est la règle de statut de
+ * `PUT …/live`, appliquée à l'état que l'écran de marquage tient en main.
+ */
+export function matchPhase(s: Pick<MatchState, "status" | "games" | "current">): MatchStatus {
+  if (s.status === "done") return "done";
+  return s.games.length > 0 || s.current.home > 0 || s.current.away > 0 ? "live" : "pending";
 }
 
 /**
@@ -49,12 +64,15 @@ export const MAX_FIXTURE_MS = 8 * 3_600_000;
  *
  * - FIN : posée au passage à `done`, effacée si le marqueur annule le point décisif. Un renvoi
  *   du même état (reprise après coupure) ne la déplace pas.
+ *
+ * Générique sur le type de l'heure : la route y passe des `Date`, l'écran de marquage des
+ * millisecondes (`Date.now()`), qui se rangent telles quelles dans `localStorage`.
  */
-export function liveMatchTimes(
-  prev: { status: string } & MatchTimes,
+export function liveMatchTimes<T>(
+  prev: { status: string } & MatchTimes<T>,
   next: { status: MatchStatus; games: number },
-  now: Date,
-): MatchTimes {
+  now: T,
+): MatchTimes<T> {
   if (next.status === "pending") return { startedAt: null, finishedAt: null };
   const startedAt = prev.status === "pending" ? (next.games === 0 ? now : null) : prev.startedAt;
   const finishedAt =
@@ -108,6 +126,18 @@ export function correctedGameTimes(
 
 // --- Affichage -------------------------------------------------------------
 
+/**
+ * Temps de jeu en millisecondes, du premier point à la fin — ou à `now` tant que le match n'est
+ * pas fini. NULL sans début, ou quand le résultat n'est pas plausible (cf. `MAX_MATCH_MS`).
+ */
+export function elapsedMs(startedAt: number | null, finishedAt: number | null, now: number): number | null {
+  if (startedAt === null) return null;
+  const ms = (finishedAt ?? now) - startedAt;
+  if (!Number.isFinite(ms) || ms > MAX_MATCH_MS) return null;
+  // Négatif : horloge du téléphone en retard sur le serveur, au tout début du match.
+  return Math.max(0, ms);
+}
+
 export interface TimedMatch {
   status: string;
   startedAt: string | null;
@@ -116,18 +146,14 @@ export interface TimedMatch {
 
 /**
  * Durée d'un simple en millisecondes : terminé → fin moins début ; en cours → maintenant moins
- * début. NULL quand on ne sait pas, ou quand le résultat n'est pas plausible (cf. `MAX_MATCH_MS`).
+ * début. NULL quand on ne sait pas (cf. `elapsedMs`).
  */
 export function matchDurationMs(m: TimedMatch, now: number): number | null {
   if (!m.startedAt) return null;
   const start = Date.parse(m.startedAt);
-  let ms: number;
-  if (m.status === "live") ms = now - start;
-  else if (m.status === "done" && m.finishedAt) ms = Date.parse(m.finishedAt) - start;
-  else return null;
-  // Négatif : horloge du téléphone en retard sur le serveur, au tout début du match.
-  if (!Number.isFinite(ms) || ms > MAX_MATCH_MS) return null;
-  return Math.max(0, ms);
+  if (m.status === "live") return elapsedMs(start, null, now);
+  if (m.status === "done" && m.finishedAt) return elapsedMs(start, Date.parse(m.finishedAt), now);
+  return null;
 }
 
 /**

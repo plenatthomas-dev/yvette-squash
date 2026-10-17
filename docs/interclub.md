@@ -339,6 +339,26 @@ la sienne, du premier point au dernier (« Terminée en 2 h 35 »). Les règles 
 **Pas dans le panneau « En direct ».** Mesuré à 360 px, « #1 · 18 min » faisait chevaucher les
 noms et le score de la ligne. La carte ouvre la fiche d'un appui, et la durée s'y lit.
 
+**Le chrono de l'écran de marquage** (`MatchClock`, interclub et marqueur libre). Il se met à
+jour chaque seconde à droite de la ligne des jeux (« 18:42 »), part au premier point, se fige au
+point décisif, et n'apparaît pas avant. Il suit les mêmes règles (`liveMatchTimes`), mais avec
+l'**horloge du téléphone** : il doit partir au premier appui, même sans réseau. Les heures sont
+gardées à côté du journal (`ic:time:<match>`), donc un rechargement ne remet pas le chrono à
+zéro. Un match repris sur un autre téléphone reprend l'heure du serveur. Le chrono et la fiche
+peuvent donc différer de quelques secondes, le temps d'une synchro.
+
+Il loge dans la ligne des jeux, et non dans l'en-tête, parce que cette ligne a déjà sa hauteur
+réservée. Dans l'en-tête, il aurait ajouté une ligne au rappel du match au premier point, et le
+tableau aurait sauté. ⚠️ Cette réserve était d'ailleurs fausse : `min-height: 1.3em` contre une
+ligne de texte en `1.5em` héritée de Pico, mesuré 23,2 px vide et 26,8 px pleine. Le tableau
+sautait donc déjà de 0,2em au premier jeu terminé. `.ics-history` porte maintenant sa propre
+hauteur de ligne (1.3), et la ligne fait la même hauteur dans les cinq cas mesurés.
+
+**Marqueur libre.** Même chrono pendant le match. Le match terminé garde ses deux heures
+(`firstPointAt`, `finishedAt` dans `FreeMatch`, sur le téléphone), ce qui donne « Match terminé en
+42 min », la durée dans l'historique et sur l'image partagée. Les matchs d'avant ce changement
+n'en ont pas.
+
 Les matchs joués avant ce changement n'ont aucune heure exploitable et n'afficheront jamais de
 durée.
 
