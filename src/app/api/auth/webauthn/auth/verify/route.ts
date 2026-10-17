@@ -130,11 +130,12 @@ export async function POST(req: NextRequest) {
   // LÈVE (sa session source est intacte, rien n'a été transféré). On la distingue du `null`
   // (lien vraiment expiré) pour ne pas afficher le 409 « ta connexion ResaMania a expiré,
   // reconnecte-toi avec ton mot de passe » à un membre dont le lien est parfaitement valide.
-  //  - compte avec connexion email → même repli qu'au 2) : le membre entre tout de suite
-  //    (forum, tricount… marchent) ; la session ResaMania source reste en réserve, une
-  //    prochaine connexion biométrique la restaurera ;
-  //  - sinon → 503 « réessaie dans un instant » (rien n'est compté comme tentative ratée : la
-  //    biométrie, elle, a réussi).
+  // → 503 « réessaie dans un instant », SANS repli sur la session email, même quand le compte en
+  // a une : décision produit (2026-10-17), si ResaMania ne marche pas, l'appli ne marche pas. Un
+  // repli aurait posé un cookie « email seul » de 30 jours et laissé le membre en lecture seule
+  // jusqu'à sa prochaine connexion biométrique, sans qu'il comprenne pourquoi. La session
+  // ResaMania source reste intacte : réessayer dans un instant suffit. Rien n'est compté comme
+  // tentative ratée — la biométrie, elle, a réussi.
   let sid: string | null = null;
   let resaDown = false;
   try {
@@ -144,10 +145,10 @@ export async function POST(req: NextRequest) {
     console.warn(`[webauthn] restauration ResaMania reportée (user ${passkey.userId}) :`, e);
     resaDown = true;
   }
-  if (!sid && passkey.user.passwordHash && passkey.user.emailVerifiedAt) {
+  if (!sid && !resaDown && passkey.user.passwordHash && passkey.user.emailVerifiedAt) {
     sid = await createEmailSession(passkey.userId);
   }
-  if (!sid && resaDown) {
+  if (resaDown) {
     const res = NextResponse.json(
       { error: RESA_UNAVAILABLE_MESSAGE, code: RESA_UNAVAILABLE_CODE },
       { status: 503, headers: { "Retry-After": "5" } },
@@ -176,13 +177,7 @@ export async function POST(req: NextRequest) {
     return res;
   }
 
-  // `resaUnavailable` : session e-mail ouverte FAUTE de ResaMania joignable (et non parce que le
-  // compte n'a pas de ResaMania) — l'écran peut le dire plutôt que de laisser croire à un
-  // passage définitif en « email seul ». Absent dans le cas normal.
-  const res = NextResponse.json({
-    displayName: passkey.user.displayName,
-    ...(resaDown ? { resaUnavailable: true } : {}),
-  });
+  const res = NextResponse.json({ displayName: passkey.user.displayName });
   res.cookies.set("sid", sid, {
     httpOnly: true,
     sameSite: "lax",

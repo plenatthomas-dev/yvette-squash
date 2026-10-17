@@ -187,7 +187,9 @@ describe("POST /api/auth/webauthn/auth/verify", () => {
 // est valide, seul ResaMania est injoignable. Ni 409 « connexion expirée » (faux, et il pousse à
 // retaper un mot de passe pour rien), ni 500.
 describe("POST /api/auth/webauthn/auth/verify — ResaMania injoignable", () => {
-  it("repli sur la session e-mail si le compte en a une, signalé par `resaUnavailable`", async () => {
+  // Décision produit : si ResaMania ne marche pas, l'appli ne marche pas — pas de cookie
+  // « email seul » de 30 jours posé faute de mieux.
+  it("AUCUN repli sur la session e-mail, même quand le compte en a une : 503", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const { ResaRefreshTransientError } = await import("@/lib/resamania/errors");
     h.resaThrows = new ResaRefreshTransientError("ResaMania momentanément indisponible");
@@ -195,12 +197,12 @@ describe("POST /api/auth/webauthn/auth/verify — ResaMania injoignable", () => 
 
     const res = await POST(postReq(goodBody));
 
-    expect(res.status).toBe(200);
-    expect(res.cookies.get("sid")?.value).toBe("email-sid");
-    expect(await res.json()).toEqual({ displayName: "Jean", resaUnavailable: true });
+    expect(res.status).toBe(503);
+    expect(res.cookies.get("sid")).toBeUndefined();
+    expect(h.recordAttempt).not.toHaveBeenCalled();
   });
 
-  it("503 « réessaie » sans repli possible — ni 409 « expirée », ni tentative comptée", async () => {
+  it("503 « réessaie » sans compte e-mail — ni 409 « expirée », ni tentative comptée", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const { ResaRefreshTransientError } = await import("@/lib/resamania/errors");
     h.resaThrows = new ResaRefreshTransientError("ResaMania momentanément indisponible");
