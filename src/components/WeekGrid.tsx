@@ -6,6 +6,7 @@ import { fmtTime } from "@/lib/time";
 import { downloadIcs } from "@/lib/ics";
 import { useBottomBar } from "@/lib/useBottomBar";
 import { Dialog } from "./Dialog";
+import { rang } from "./PlanningGrid";
 
 function shortDay(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString("fr-FR", {
@@ -286,8 +287,14 @@ export function WeekGrid({
 
   return (
     <>
+      {/* Même consigne que la vue jour (PlanningGrid) : « Sélection multi créneau » était un
+          groupe nominal agrammatical qui n'indiquait ni comment cocher, ni comment sortir. La
+          semaine coche aussi par horaire (en-tête de ligne) — d'où la mention. */}
       {selMode && (
-        <p className="muted tiny selmode-hint">Sélection multi créneau</p>
+        <p className="muted tiny selmode-hint">
+          Touche les créneaux libres à réserver (ou une heure pour toute la semaine), puis
+          « Réserver » en bas. Retouche l&apos;icône de sélection pour quitter.
+        </p>
       )}
 
       <div className="grid-wrap">
@@ -515,7 +522,7 @@ export function WeekGrid({
                 <>
                   <span className="muted tiny">
                     🕒 Tu es en liste d'attente
-                    {sheetMyWait.position ? ` (${sheetMyWait.position}ᵉ)` : ""} ·{" "}
+                    {sheetMyWait.position ? ` (${rang(sheetMyWait.position)})` : ""} ·{" "}
                     {sheetWaitCount} en attente
                   </span>
                   {canWatch && (

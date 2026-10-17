@@ -6,6 +6,7 @@ import { getFeatures } from "@/lib/features-server";
 import { readJsonBody, serializableTransaction, httpErrorResponse } from "@/lib/http-tx";
 import { relireSondage } from "@/lib/forum-db";
 import { broadcastForum, FORUM_EVENT_POLL } from "@/lib/forum-realtime";
+import { gesteRefuse } from "@/lib/geste-debit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,11 @@ export const dynamic = "force-dynamic";
 // boucle n'épuise pas seulement Neon, il fait taire le temps réel du fil pour tout le club
 // jusqu'au lendemain. Large comme les autres — cocher soixante fois en dix minutes n'arrive pas
 // à quelqu'un qui répond à « qui vient jeudi ? ».
+//
+// Compté en GESTES dans un journal à part (cf. lib/geste-debit.ts), et non sur les voix : le
+// vote EFFACE les cases du membre avant de reposer les siennes, si bien que les voix vivantes
+// d'un client qui boucle ne dépassaient jamais le nombre d'options — le 429 ne partait jamais.
+// La fenêtre ne doit pas dépasser 15 min (purge de la table partagée, vérifiée à l'appel).
 const WINDOW_MS = 10 * 60_000;
 const MAX_PER_WINDOW = 60;
 
@@ -84,13 +90,12 @@ async function voter(req: NextRequest, params: Promise<{ id: string }>) {
   // `skipDuplicates` en ceinture : il rend l'insertion inoffensive si une ligne identique
   // subsiste malgré tout, sans jamais masquer un conflit réel (la clé est (option, membre) —
   // un doublon EST le même vote).
-  // Compté sur les VOIX du membre, servi par `@@index([userId, createdAt])`. C'est un plafond
-  // de gestes, pas de voix retenues : un vote qui remplace un vote compte pour un de plus, et
-  // c'est bien le geste qu'on veut borner.
-  const recent = await prisma.forumPollVote.count({
-    where: { userId: session.userId, createdAt: { gte: new Date(Date.now() - WINDOW_MS) } },
-  });
-  if (recent >= MAX_PER_WINDOW) {
+  // Un plafond de GESTES, et il les compte enfin : chaque vote accepté laisse une ligne dans le
+  // journal, que le vote suivant n'efface pas. L'ancienne version comptait les voix encore
+  // présentes en base et se disait déjà « plafond de gestes » — mais le `deleteMany` ci-dessous
+  // effaçait justement ce qu'elle comptait : décocher/recocher la même case à l'infini laissait
+  // le compteur à une voix, et chaque clic diffusait un événement Pusher.
+  if (await gesteRefuse(`forum-vote:${session.userId}`, WINDOW_MS, MAX_PER_WINDOW)) {
     return NextResponse.json({ error: "Trop de votes d'un coup." }, { status: 429 });
   }
 

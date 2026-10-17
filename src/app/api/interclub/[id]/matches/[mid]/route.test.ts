@@ -234,6 +234,44 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
     expect(h.createdGames).toBeNull();
   });
 
+  // Le jeu en cours (`liveJson`) décrit la suite des jeux ENREGISTRÉS. Une saisie partielle qui
+  // les change le laissait en place : la fiche affichait l'ancien 6-4 derrière les jeux
+  // ressaisis, l'average le comptait, et le marqueur suivant le reprenait.
+  it("une saisie partielle qui change les jeux efface le jeu en cours", async () => {
+    h.match = { ...freshMatch(), status: "live", liveJson: '{"current":{"home":6,"away":4}}' };
+    const res = await PATCH(patch({ games: [{ home: 11, away: 5 }] }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.updated).toMatchObject({ status: "live", liveJson: null });
+  });
+
+  it("vider les jeux efface aussi le jeu en cours", async () => {
+    h.match = {
+      ...freshMatch(),
+      status: "live",
+      games: [{ number: 1, pointsHome: 11, pointsAway: 5 }],
+      gamesHome: 1,
+      gamesAway: 0,
+      liveJson: '{"current":{"home":6,"away":4}}',
+    };
+    const res = await PATCH(patch({ games: [], knownGameCount: 1 }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.updated).toMatchObject({ status: "pending", liveJson: null });
+  });
+
+  it("renvoyer les MÊMES jeux laisse le jeu en cours en place", async () => {
+    h.match = {
+      ...freshMatch(),
+      status: "live",
+      games: [{ number: 1, pointsHome: 11, pointsAway: 5 }],
+      gamesHome: 1,
+      gamesAway: 0,
+      liveJson: '{"current":{"home":6,"away":4}}',
+    };
+    const res = await PATCH(patch({ games: [{ home: 11, away: 5 }], knownGameCount: 1 }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.updated).not.toHaveProperty("liveJson");
+  });
+
   it("refuse un score impossible pour le format (4e jeu après un 3-0)", async () => {
     const res = await PATCH(
       patch({

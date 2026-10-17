@@ -5,6 +5,15 @@ import type { PlanningDay, Slot } from "@/lib/resamania/types";
 import { fmtTime } from "@/lib/time";
 import { useBottomBar } from "@/lib/useBottomBar";
 
+/**
+ * Rang en liste d'attente : « 1er », « 2e », « 3e »… Il s'écrivait « 1ᵉ » — forme fautive, le
+ * premier rang est le seul à avoir la sienne — et en lettres modificatrices, que certains
+ * lecteurs d'écran épellent. Partagé avec WeekGrid, qui affiche le même rang.
+ */
+export function rang(n: number): string {
+  return n === 1 ? "1er" : `${n}e`;
+}
+
 // Déclenche l'action au clavier (Entrée / Espace) sur les cellules cliquables.
 function onKey(fn: () => void) {
   return (e: KeyboardEvent) => {
@@ -266,7 +275,7 @@ export function PlanningGrid({
                             : () => onWatch?.(planning.slots.find((s) => s.startsAt === t)!);
                       if (count === 0 && !act) return null;
                       const label = mine
-                        ? `Tu es en liste d'attente${mine.position ? ` (${mine.position}ᵉ)` : ""}${watchable ? " — cliquer pour te retirer" : ""}`
+                        ? `Tu es en liste d'attente${mine.position ? ` (${rang(mine.position)})` : ""}${watchable ? " — cliquer pour te retirer" : ""}`
                         : attending
                           ? `Tu es déjà +1 sur ce créneau${count ? ` · ${count} en attente` : ""}`
                           : `Créneau complet — se mettre en liste d'attente${count ? ` (${count} en attente)` : ""}`;

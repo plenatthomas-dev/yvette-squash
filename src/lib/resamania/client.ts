@@ -54,6 +54,90 @@ class CookieJar {
   }
 }
 
+// ----------------------------------------------------------------------------
+//  Erreurs TYPÉES — définies dans ./errors (cf. le POURQUOI en tête de ce fichier-là, et
+//  pourquoi il est séparé). Ré-exportées ici : les appelants historiques importent toujours
+//  `ResaUnavailableError`, `isResaAuthRejected`… depuis ce module.
+// ----------------------------------------------------------------------------
+import {
+  ResaAuthRejectedError,
+  ResaUnavailableError,
+  ResaOutcomeUnknownError,
+} from "./errors";
+export {
+  ResaAuthRejectedError,
+  ResaUnavailableError,
+  ResaOutcomeUnknownError,
+  isResaAuthRejected,
+  isResaUnavailable,
+  isResaOutcomeUnknown,
+} from "./errors";
+
+// Timeout par requête ResaMania : sans lui, une connexion calée pend jusqu'au timeout réseau
+// (~60 s) — la vue Semaine se bloque (le jour concerné doit retomber sur son snapshot, cf.
+// /api/week), un login reste suspendu, et surtout un rafraîchissement de jeton garde son
+// verrou (cf. session.ts) pendant tout ce temps. Avec, l'appel échoue vite en
+// `ResaUnavailableError`, que les appelants traitent comme passagère.
+const RESA_FETCH_TIMEOUT_MS = 8_000;
+// Écritures (POST réservation / annulation) : délai PLUS LONG. Couper trop tôt une écriture
+// qui aurait abouti produit un résultat inconnu — pire, pour le membre, que quelques
+// secondes d'attente de plus.
+const RESA_WRITE_TIMEOUT_MS = 15_000;
+
+/** Statuts amont qui disent « réessaie plus tard » et non « non ». */
+const isUpstreamDown = (status: number) => status >= 500 || status === 429;
+
+/**
+ * `fetch` vers ResaMania avec délai ; erreur réseau ou délai dépassé → `ResaUnavailableError`.
+ * Le signal couvre aussi la lecture du CORPS : un corps qui n'arrive jamais rejette de même,
+ * d'où `readJson` pour les lectures de corps.
+ */
+async function resaFetch(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs = RESA_FETCH_TIMEOUT_MS,
+): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+  } catch (e) {
+    const kind = e instanceof Error ? e.name : "erreur réseau";
+    throw new ResaUnavailableError(`ResaMania injoignable (${kind})`, undefined, { cause: e });
+  }
+}
+
+/** Lit un corps JSON ; corps coupé, illisible ou délai dépassé = amont indisponible. */
+async function readJson<T>(res: Response, what: string): Promise<T> {
+  try {
+    return (await res.json()) as T;
+  } catch (e) {
+    throw new ResaUnavailableError(`${what} : réponse illisible`, res.status, { cause: e });
+  }
+}
+
+/** Lève `ResaUnavailableError` si l'amont répond « plus tard » (5xx / 429). */
+function assertUpstreamUp(res: Response, what: string): void {
+  if (isUpstreamDown(res.status)) {
+    throw new ResaUnavailableError(`${what} : ResaMania indisponible (${res.status})`, res.status);
+  }
+}
+
+/**
+ * Écriture : toute rupture APRÈS envoi possible (délai, connexion coupée) = résultat inconnu.
+ * On ne cherche pas à distinguer « jamais partie » (DNS, connexion refusée) de « partie puis
+ * coupée » : la cause réseau n'est pas fiable d'un runtime à l'autre, et se tromper dans le
+ * sens « échec » ferait réessayer une résa peut-être déjà prise.
+ */
+async function resaWrite(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await resaFetch(url, init, RESA_WRITE_TIMEOUT_MS);
+  } catch (e) {
+    throw new ResaOutcomeUnknownError(
+      "ResaMania n'a pas répondu à temps : résultat de l'opération inconnu",
+      { cause: e },
+    );
+  }
+}
+
 function decodeJwt(token: string): Record<string, unknown> {
   const parts = token.split(".");
   if (parts.length !== 3) throw new Error("access_token n'est pas un JWT");
@@ -80,24 +164,28 @@ export async function login(creds: ResaCredentials): Promise<ResaSession> {
       body,
     });
 
+  // Chaque étape vérifie que l'amont n'est pas EN PANNE (5xx / 429) : sinon le flux se
+  // terminerait « sans code » et la panne passerait pour de mauvais identifiants — comptée par
+  // l'anti-brute-force de la route de login alors que le membre n'y est pour rien.
+
   // 1) page de login -> cookie de session
-  jar.absorb(
-    await fetch(`${API}/oauth/login/${TENANT}?${AUTH_QS}&locale=fr`, {
-      redirect: "manual",
-      headers: { accept: "*/*" },
-    }),
-  );
+  const r1 = await resaFetch(`${API}/oauth/login/${TENANT}?${AUTH_QS}&locale=fr`, {
+    redirect: "manual",
+    headers: { accept: "*/*" },
+  });
+  assertUpstreamUp(r1, "login (page)");
+  jar.absorb(r1);
 
   // 2) étape identifiant
-  jar.absorb(
-    await fetch(
-      `${API}/oauth/login/${TENANT}?${AUTH_QS}&locale=fr`,
-      form(`login_step_login[username]=${encodeURIComponent(creds.username)}`),
-    ),
+  const r2 = await resaFetch(
+    `${API}/oauth/login/${TENANT}?${AUTH_QS}&locale=fr`,
+    form(`login_step_login[username]=${encodeURIComponent(creds.username)}`),
   );
+  assertUpstreamUp(r2, "login (identifiant)");
+  jar.absorb(r2);
 
   // 3) étape mot de passe (login_check)
-  const r3 = await fetch(
+  const r3 = await resaFetch(
     `${API}/${TENANT}/oauth/login_check?${AUTH_QS}`,
     form(
       `_username=${encodeURIComponent(creds.username)}&_password=${encodeURIComponent(
@@ -105,6 +193,7 @@ export async function login(creds: ResaCredentials): Promise<ResaSession> {
       )}`,
     ),
   );
+  assertUpstreamUp(r3, "login (mot de passe)");
   jar.absorb(r3);
 
   // 4) suivre les redirections jusqu'au code d'autorisation
@@ -117,58 +206,100 @@ export async function login(creds: ResaCredentials): Promise<ResaSession> {
       break;
     }
     const u = loc.startsWith("http") ? loc : API + loc;
-    const r = await fetch(u, {
+    const r = await resaFetch(u, {
       redirect: "manual",
       headers: { cookie: jar.header(), accept: "*/*" },
     });
+    assertUpstreamUp(r, "login (redirection)");
     jar.absorb(r);
     loc = r.headers.get("location");
   }
   if (!code) {
-    throw new Error("Identifiants invalides ou flux de connexion interrompu.");
+    // Amont joignable à chaque étape mais pas de code : ResaMania a renvoyé vers son
+    // formulaire, c'est-à-dire refusé ces identifiants.
+    throw new ResaAuthRejectedError("Identifiants invalides ou flux de connexion interrompu.");
   }
 
-  // 5) échange code -> token
-  const session = await exchangeToken(
+  // 5) échange code -> token, puis identité (indispensable à la réservation)
+  const tokens = await exchangeToken(
     `grant_type=authorization_code&client_id=${CLIENT_ID}&client_secret=${encodeURIComponent(
       CLIENT_SECRET,
     )}&code=${code}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`,
   );
-  return session;
+  const identity = await resolveIdentity(tokens.accessToken);
+  return { ...tokens, identity };
 }
 
-async function exchangeToken(body: string): Promise<ResaSession> {
-  const res = await fetch(`${API}/${TENANT}/oauth/v2/token`, {
+type ResaTokens = Omit<ResaSession, "identity">;
+
+/**
+ * Appel au point d'échange OAuth (code → jetons, ou refresh → jetons). Ne résout PAS
+ * l'identité : au rafraîchissement, l'appelant la possède déjà, et l'appel /contact_users
+ * qu'on faisait ici était jeté (session.ts gardait l'ancienne identité) — un aller-retour
+ * inutile, et surtout une occasion de plus d'échouer APRÈS que ResaMania a fait tourner le
+ * refresh token, perdant le nouveau.
+ *
+ * Classement des échecs :
+ *  - 5xx / 429 / réseau / délai / corps illisible → `ResaUnavailableError` (passager) ;
+ *  - 400 / 401 → `ResaAuthRejectedError` (jeton révoqué, code expiré, `invalid_grant`…),
+ *    SAUF `invalid_client` : c'est NOTRE couple RESA_CLIENT_ID/SECRET qui est refusé, pas le
+ *    membre — le traiter en refus d'authentification supprimerait TOUTES les sessions au fil
+ *    des rafraîchissements pour une erreur de configuration. Il est classé « indisponible » :
+ *    la session est gardée, et la connexion répond 503 sans compter de tentative ;
+ *  - autre statut → `Error` simple (inattendu ; les appelants ne le traitent pas en refus).
+ */
+async function exchangeToken(body: string): Promise<ResaTokens> {
+  const res = await resaFetch(`${API}/${TENANT}/oauth/v2/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body,
   });
   if (!res.ok) {
+    assertUpstreamUp(res, "Échange de token");
+    let oauthError = "";
+    try {
+      oauthError = String(((await res.json()) as { error?: unknown }).error ?? "");
+    } catch {
+      /* corps non-JSON : on classe sur le seul statut */
+    }
+    if ((res.status === 400 || res.status === 401) && oauthError !== "invalid_client") {
+      throw new ResaAuthRejectedError(
+        `Échange de token refusé (${res.status}${oauthError ? ` ${oauthError}` : ""})`,
+      );
+    }
+    if (oauthError === "invalid_client") {
+      throw new ResaUnavailableError(
+        "Échange de token : client OAuth refusé (invalid_client) — vérifier RESA_CLIENT_ID/SECRET",
+        res.status,
+      );
+    }
     throw new Error(`Échange de token échoué (${res.status})`);
   }
-  const tok = (await res.json()) as {
+  const tok = await readJson<{
     access_token: string;
     refresh_token: string;
     expires_in: number;
-  };
-  const identity = await resolveIdentity(tok.access_token);
+  }>(res, "Échange de token");
   return {
     accessToken: tok.access_token,
     refreshToken: tok.refresh_token,
     expiresAt: Date.now() + (tok.expires_in - 60) * 1000, // marge de 60 s
-    identity,
   };
 }
 
-/** Rafraîchit la session si le token a (presque) expiré. */
+/**
+ * Rafraîchit la session si le token a (presque) expiré. L'identité est CONSERVÉE telle quelle
+ * (aucun appel /contact_users) : cf. `exchangeToken`. Lève `ResaAuthRejectedError` si le
+ * refresh token est refusé, `ResaUnavailableError` si ResaMania ne répond pas.
+ */
 export async function ensureFresh(session: ResaSession): Promise<ResaSession> {
   if (Date.now() < session.expiresAt) return session;
-  const refreshed = await exchangeToken(
+  const tokens = await exchangeToken(
     `grant_type=refresh_token&client_id=${CLIENT_ID}&client_secret=${encodeURIComponent(
       CLIENT_SECRET,
     )}&refresh_token=${encodeURIComponent(session.refreshToken)}`,
   );
-  return refreshed;
+  return { ...tokens, identity: session.identity };
 }
 
 /** Déduit l'identité (contactId, etc.) à partir du JWT + d'un appel /contact_users. */
@@ -207,31 +338,26 @@ async function resolveIdentity(accessToken: string): Promise<ResaIdentity> {
 //  Helpers API authentifiés (Bearer)
 // ----------------------------------------------------------------------------
 async function apiGet<T>(path: string, token: string): Promise<T> {
-  const res = await fetch(`${API}/${TENANT}${path}`, {
+  const res = await resaFetch(`${API}/${TENANT}${path}`, {
     headers: { authorization: `Bearer ${token}`, accept: "application/json" },
   });
+  assertUpstreamUp(res, `GET ${path}`);
   if (!res.ok) throw new Error(`GET ${path} -> ${res.status}`);
-  return (await res.json()) as T;
+  return readJson<T>(res, `GET ${path}`);
 }
-
-// Timeout par requête ResaMania (studios/planning) : sans lui, une connexion calée pend
-// jusqu'au timeout réseau (~60 s) et bloque toute la vue Semaine. Avec, elle échoue vite et
-// le jour concerné retombe sur son snapshot (cf. /api/week, Promise.allSettled).
-const RESA_FETCH_TIMEOUT_MS = 8_000;
 
 // Cache des noms de courts (studios). On demande du ld+json pour obtenir les @id (IRI),
 // que le format json simple omet.
 let studiosCache: { iri: string; name: string }[] | null = null;
 export async function getStudios(token: string): Promise<Map<string, string>> {
   if (!studiosCache) {
-    const res = await fetch(
+    const res = await resaFetch(
       `${API}/${TENANT}/studios?club=${encodeURIComponent(CLUB_ID)}`,
       {
         headers: {
           authorization: `Bearer ${token}`,
           accept: "application/ld+json",
         },
-        signal: AbortSignal.timeout(RESA_FETCH_TIMEOUT_MS),
       },
     );
     // Ne JAMAIS mettre en cache un échec ou un résultat vide : sinon `[]` (qui n'est pas
@@ -240,9 +366,9 @@ export async function getStudios(token: string): Promise<Map<string, string>> {
     // une map vide pour CET appel (le planning s'affiche quand même) et on réessaiera au
     // prochain — auto-guérison dès que /studios répond à nouveau correctement.
     if (!res.ok) return new Map();
-    const data = (await res.json()) as {
+    const data = await readJson<{
       "hydra:member"?: Array<{ "@id": string; name: string }>;
-    };
+    }>(res, "Studios");
     const members = data["hydra:member"] ?? [];
     if (members.length === 0) return new Map();
     studiosCache = members.map((s) => ({
@@ -281,7 +407,35 @@ export function invalidatePlanningCache(date?: string): void {
   else planningCache.clear();
 }
 
+/**
+ * Planning + d'où vient la donnée. `getPlanning` (ci-dessous) n'en rend que le planning.
+ *
+ * POURQUOI ces métadonnées ne sont pas DANS `PlanningDay` : /api/planning sérialise le
+ * planning pour le snapshot et ne le réécrit que s'il a changé (comparaison du JSON). Un
+ * horodatage dedans changerait à chaque lecture amont et ferait réécrire le gros JSON à
+ * chaque affichage — exactement l'écriture que cette comparaison épargne à Neon.
+ */
+export interface PlanningFetch {
+  planning: PlanningDay;
+  /** Instant (epoch ms) où la donnée a été DEMANDÉE à ResaMania — la « photo » du planning.
+   *  Pris AVANT l'appel : une écriture faite pendant l'aller-retour peut y manquer. */
+  fetchedAt: number;
+  /** `true` si servi par le cache mémoire : donnée vieille de ≤ 20 s, antérieure peut-être à
+   *  une écriture faite entre-temps sur une AUTRE instance (dont ce cache ne sait rien). */
+  fromCache: boolean;
+}
+
+/** Planning d'un jour (cf. `getPlanningWithMeta` pour l'horodatage de la donnée). */
 export async function getPlanning(
+  date: string,
+  accessToken?: string,
+  studios?: Map<string, string>,
+  fresh?: boolean,
+): Promise<PlanningDay> {
+  return (await getPlanningWithMeta(date, accessToken, studios, fresh)).planning;
+}
+
+export async function getPlanningWithMeta(
   date: string,
   accessToken?: string,
   // Map studios pré-chargée (vue Semaine : évite 7 appels /studios concurrents).
@@ -298,16 +452,16 @@ export async function getPlanning(
   // où l'utilisateur attend un résultat — et surtout aucune requête base supplémentaire,
   // contrairement à un cache partagé qui pèserait sur le quota Neon.
   fresh?: boolean,
-): Promise<PlanningDay> {
+): Promise<PlanningFetch> {
   if (USE_MOCK || !accessToken) {
-    return mockPlanning(date, CLUB_ID);
+    return { planning: mockPlanning(date, CLUB_ID), fetchedAt: Date.now(), fromCache: false };
   }
 
   const cached = fresh ? undefined : planningCache.get(date);
   if (cached && Date.now() - cached.at < PLANNING_TTL_MS) {
     // Clone OBLIGATOIRE : les appelants MUTENT les slots (annotation par joueur, snapshot).
     // Servir l'objet caché tel quel polluerait le cache avec l'annotation d'un autre joueur.
-    return structuredClone(cached.data);
+    return { planning: structuredClone(cached.data), fetchedAt: cached.at, fromCache: true };
   }
 
   const studioMap = studios ?? (await getStudios(accessToken));
@@ -319,18 +473,21 @@ export async function getPlanning(
   params.set("startedAt[before]", `${date}T23:59:59`);
   params.set("itemsPerPage", "300");
 
+  // Instant de la photo, pris AVANT l'appel (cf. PlanningFetch.fetchedAt) ; c'est aussi lui
+  // qui date l'entrée de cache, donc le TTL court depuis la demande et non la réponse.
+  const fetchedAt = Date.now();
   // On demande du ld+json : le json simple omet le champ @id (l'IRI), indispensable pour réserver.
-  const res = await fetch(`${API}/${TENANT}/class_events?${params}`, {
+  const res = await resaFetch(`${API}/${TENANT}/class_events?${params}`, {
     headers: {
       authorization: `Bearer ${accessToken}`,
       accept: "application/ld+json",
     },
-    signal: AbortSignal.timeout(RESA_FETCH_TIMEOUT_MS),
   });
+  assertUpstreamUp(res, "Planning");
   if (!res.ok) throw new Error(`Planning indisponible (${res.status})`);
-  const json = (await res.json()) as {
+  const json = await readJson<{
     "hydra:member"?: RawEvent[];
-  };
+  }>(res, "Planning");
   const events: RawEvent[] = Array.isArray(json)
     ? json
     : (json["hydra:member"] ?? []);
@@ -363,13 +520,19 @@ export async function getPlanning(
 
   const result: PlanningDay = { date, clubId: CLUB_ID, courts, slots };
   // On met en cache un CLONE (l'original est renvoyé et sera muté par l'appelant).
-  planningCache.set(date, { at: Date.now(), data: structuredClone(result) });
-  return result;
+  planningCache.set(date, { at: fetchedAt, data: structuredClone(result) });
+  return { planning: result, fetchedAt, fromCache: false };
 }
 
 // ----------------------------------------------------------------------------
 //  RÉSERVATION
 // ----------------------------------------------------------------------------
+/**
+ * Réserve un créneau. Rend `{ ok: false }` sur un REFUS de ResaMania (réponse reçue), et LÈVE
+ * `ResaOutcomeUnknownError` si la requête est partie sans réponse exploitable (délai de 15 s
+ * dépassé, connexion coupée) : la résa a pu être prise, l'appelant doit inviter à vérifier le
+ * planning plutôt qu'à réessayer.
+ */
 export async function book(
   session: ResaSession,
   classEventIri: string,
@@ -384,7 +547,7 @@ export async function book(
     contactCreatedAt: id.contactCreatedAt,
     classEvent: classEventIri,
   };
-  const res = await fetch(`${API}/${TENANT}/attendees`, {
+  const res = await resaWrite(`${API}/${TENANT}/attendees`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${session.accessToken}`,
@@ -407,8 +570,15 @@ export async function book(
     }
     return { ok: false, error: msg };
   }
-  const j = (await res.json()) as { "@id": string; state: string };
-  return { ok: true, attendeeId: j["@id"], state: j.state };
+  // 201 reçu : la résa EST prise. Si le corps n'arrive pas (délai écoulé pendant sa lecture)
+  // ou est illisible, on rend quand même un succès, sans attendeeId — l'annulation sait le
+  // retrouver après coup (findAttendeeId). Lever ici ferait croire à un échec une résa faite.
+  try {
+    const j = (await res.json()) as { "@id"?: string; state?: string };
+    return { ok: true, attendeeId: j["@id"], state: j.state };
+  } catch {
+    return { ok: true };
+  }
 }
 
 /**
@@ -419,7 +589,9 @@ export async function findAttendeeId(
   session: ResaSession,
   classEventIri: string,
 ): Promise<string | null> {
-  const res = await fetch(
+  // Lecture : délai ordinaire ; réseau/délai → `ResaUnavailableError` (et non `null`, qui
+  // signifie « aucune résa active trouvée » et ferait conclure à tort à son absence).
+  const res = await resaFetch(
     `${API}/${TENANT}/attendees?classEvent=${encodeURIComponent(classEventIri)}`,
     {
       headers: {
@@ -428,10 +600,15 @@ export async function findAttendeeId(
       },
     },
   );
+  // Même règle pour un 5xx / 429 : « ResaMania ne répond pas » n'est pas « aucune résa ». Sans
+  // cette garde, une panne passagère faisait répondre à /api/cancel-slot « Réservation
+  // introuvable côté ResaMania » (404) — faux, et décourageant : le membre croyait sa résa
+  // disparue alors qu'il suffisait de réessayer quelques secondes plus tard.
+  assertUpstreamUp(res, "Attendees");
   if (!res.ok) return null;
-  const j = (await res.json()) as {
+  const j = await readJson<{
     "hydra:member"?: Array<{ "@id": string; contactId?: string; state?: string }>;
-  };
+  }>(res, "Attendees");
   // ResaMania conserve l'HISTORIQUE des attendees : après plusieurs cycles résa/annulation
   // sur le même créneau, plusieurs lignes coexistent pour le même contact (des "canceled"
   // + au plus une active). On IGNORE les annulées, sinon on retomberait sur une ligne déjà
@@ -443,6 +620,10 @@ export async function findAttendeeId(
   return mine.length ? mine[mine.length - 1]["@id"] : null;
 }
 
+/**
+ * Annule une résa. Même contrat que `book` : `{ ok: false }` sur refus reçu,
+ * `ResaOutcomeUnknownError` levée si la transition est partie sans réponse (15 s).
+ */
 export async function cancel(
   session: ResaSession,
   attendeeIri: string,
@@ -450,7 +631,7 @@ export async function cancel(
   // attendeeIri = "/lecomplexbures/attendees/116343527"
   // L'annulation n'est PAS un DELETE (⇒ 403) : c'est une transition de machine à états
   // (workflow Symfony). POST /attendees/{id}/transitions {"transition":"cancel"} → 201, state="canceled".
-  const res = await fetch(`${API}${attendeeIri}/transitions`, {
+  const res = await resaWrite(`${API}${attendeeIri}/transitions`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${session.accessToken}`,

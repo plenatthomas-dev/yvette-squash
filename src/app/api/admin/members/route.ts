@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireAdmin, isAdminEmail } from "@/lib/admin";
-import { listMembers, deleteBlockersFor } from "@/lib/members";
+import { listMembers, deleteBlockersFor, deleteBlockersMessage } from "@/lib/members";
 import { getFeatures } from "@/lib/features-server";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
 import { doublonsAppli } from "@/lib/interclub-federal";
@@ -298,11 +298,7 @@ export async function POST(req: NextRequest) {
     const blockers = await deleteBlockersFor(target.id);
     if (blockers.total > 0) {
       return NextResponse.json(
-        {
-          error:
-            "Suppression impossible : ce membre a un historique (dépenses/tournois). Désactive-le plutôt.",
-          blockers,
-        },
+        { error: deleteBlockersMessage(blockers), blockers },
         { status: 409 },
       );
     }

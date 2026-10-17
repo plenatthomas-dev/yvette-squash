@@ -1,5 +1,7 @@
 import { prisma } from "./db";
 import { getResaTokenForUser } from "./session";
+import { isResaRefreshTransient } from "./resamania/errors";
+import { RESA_UNAVAILABLE_CODE, RESA_UNAVAILABLE_MESSAGE } from "./resamania/responses";
 import { getFeatures } from "./features-server";
 import { DELEGATION_SCOPE, DELEGATION_DURATIONS_H } from "./delegation-shared";
 import type { AppSession } from "./session";
@@ -58,13 +60,34 @@ export interface ActingContext {
 
 type ActingResult =
   | { ok: true; ctx: ActingContext }
-  | { ok: false; status: number; error: string };
+  // `code` : présent seulement quand l'écran doit pouvoir distinguer le refus (aujourd'hui,
+  // la panne ResaMania passagère). Les appelants le relaient tel quel dans le corps JSON.
+  | { ok: false; status: number; error: string; code?: string };
+
+/** Refus « ResaMania ne répond pas » : même texte et même code que `resaUnavailableResponse`. */
+const RESA_UNAVAILABLE: ActingResult = {
+  ok: false,
+  status: 503,
+  error: RESA_UNAVAILABLE_MESSAGE,
+  code: RESA_UNAVAILABLE_CODE,
+};
 
 /**
  * Résout le contexte d'action pour book/cancel-slot/bookings : soit sa propre session
  * ResaMania (cas normal), soit celle d'un délégant si `onBehalfOf` est fourni ET couvert
  * par une délégation active (idée 4). `selfRequiredMessage` est le message d'erreur du
  * chemin normal (préservé tel quel par appelant, cf. messages historiques de chaque route).
+ *
+ * PANNE RESAMANIA PASSAGÈRE → 503 « réessaie dans un instant », sur les deux chemins :
+ *  - délégation : `getResaTokenForUser` LÈVE `ResaRefreshTransientError`. On la TRADUIT ici
+ *    plutôt que de la laisser remonter : les trois appelants (book, cancel-slot, bookings/[id])
+ *    relaient déjà `{ status, error }` tels quels, et c'est le seul endroit où ils obtiennent
+ *    le jeton. La laisser filer aurait obligé chacun à l'attraper — trois copies du même
+ *    try/catch, et un 500 le jour où une quatrième route l'oublierait. Surtout pas le 409
+ *    « session du délégant plus valide » : elle l'est, ResaMania est juste injoignable.
+ *  - soi-même : `getSession` a rendu `resaUnavailable` (jeton momentanément irrafraîchissable).
+ *    Sans ce test, `!session.resa` ci-dessous répondrait 403 « nécessite une connexion
+ *    ResaMania » à un membre qui EN A une.
  */
 export async function resolveActingContext(
   session: AppSession,
@@ -86,7 +109,13 @@ export async function resolveActingContext(
         error: "Délégation introuvable, expirée ou révoquée.",
       };
     }
-    const delegatorResa = await getResaTokenForUser(onBehalfOf);
+    let delegatorResa;
+    try {
+      delegatorResa = await getResaTokenForUser(onBehalfOf);
+    } catch (e) {
+      if (isResaRefreshTransient(e)) return RESA_UNAVAILABLE;
+      throw e; // base en panne, etc. : pas une panne ResaMania, on ne la maquille pas
+    }
     if (!delegatorResa) {
       return {
         ok: false,
@@ -99,6 +128,7 @@ export async function resolveActingContext(
       ctx: { resa: delegatorResa, bookingOwnerId: onBehalfOf, actingUserId: session.userId },
     };
   }
+  if (session.resaUnavailable) return RESA_UNAVAILABLE;
   if (!session.resa) {
     return { ok: false, status: 403, error: selfRequiredMessage };
   }

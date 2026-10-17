@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { NextRequest } from "next/server";
 
 const h = vi.hoisted(() => ({
@@ -115,6 +115,25 @@ function rencontre(over: Record<string, unknown> = {}) {
   };
 }
 
+// LE DÉLAI ENTRE DEUX RECHERCHES (600 ms, `DELAI_MS` dans la route) EST JOUÉ SUR UNE HORLOGE
+// FACTICE. Il est voulu en production — c'est lui qui nous garde invisibles chez squashnet — mais
+// ici chaque vérification en paie jusqu'à sept, et le fichier attendait 16,7 s pour rien.
+//
+// `nextTimerAsync` avance l'horloge jusqu'au prochain minuteur dès que la file des tâches est
+// vide : la route attend toujours ses 600 ms, simplement sans qu'elles durent. Rien n'est donc
+// retouché dans la route, et le délai reste vérifié plus bas (« espace ses appels »).
+//
+// `Date` est simulé AVEC `setTimeout`, et c'est ce qui rend ce contrôle possible : `Date.now()`
+// avance exactement de ce que les minuteurs ont attendu. L'horloge factice part de l'heure
+// réelle, donc `todayISO()` reste le jour du test.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  vi.setTimerTickMode("nextTimerAsync");
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 beforeEach(() => {
   h.access = { ok: true };
   h.fixture = rencontre();
@@ -169,6 +188,23 @@ describe("POST /api/captain/check/{id}", () => {
     for (const call of h.searchRanking.mock.calls) {
       expect(call[1]).toEqual({ month: "2026-09-07" });
     }
+  });
+
+  // LE DÉLAI EST JOUÉ SUR UNE HORLOGE FACTICE (cf. tête de fichier) : sans ce test, on pourrait
+  // le supprimer de la route sans qu'aucun autre ne rougisse. C'est pourtant lui qui fait de
+  // nous un visiteur discret chez squashnet plutôt qu'une rafale de huit requêtes.
+  it("espace ses appels à squashnet d'au moins 600 ms, et n'attend pas avant le premier", async () => {
+    const instants: number[] = [];
+    const avant = Date.now();
+    h.searchRanking.mockImplementation(async (q: string) => {
+      instants.push(Date.now());
+      return q === "Dupont" ? [ligne("DUPONT JEAN")] : [ligne("MARTIN PAUL", "Squash Club de Rennes")];
+    });
+    await POST(req(), ctx());
+    expect(instants).toHaveLength(2);
+    // Le premier part sans attendre : l'attente PRÉCÈDE chaque appel suivant, pas le premier.
+    expect(instants[0] - avant).toBeLessThan(600);
+    expect(instants[1] - instants[0]).toBeGreaterThanOrEqual(600);
   });
 
   it("mutualise UNE recherche entre deux joueurs du même nom de famille", async () => {

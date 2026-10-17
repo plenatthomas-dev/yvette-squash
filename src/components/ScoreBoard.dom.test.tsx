@@ -143,3 +143,79 @@ describe("ScoreBoard — le carré de service", () => {
     expect(container.querySelector(".ics-cell > .ics-box")).not.toBeNull();
   });
 });
+
+// ============================================================================
+//  LES BANNIÈRES D'INSTALLATION S'EFFACENT PENDANT LE MARQUAGE
+// ============================================================================
+describe("ScoreBoard — rien ne se pose sur le tableau", () => {
+  it("pose `data-scoring` sur <body> tant que l'écran est ouvert, et le retire en sortant", () => {
+    // La règle CSS `body[data-scoring] .install-banner { display: none }` fait le reste : la
+    // bannière (z-index 900) recouvrait la case du bas, celle qu'on tape sans regarder.
+    const { unmount } = monte("home");
+    expect(document.body.hasAttribute("data-scoring")).toBe(true);
+    unmount();
+    expect(document.body.hasAttribute("data-scoring")).toBe(false);
+  });
+});
+
+// ============================================================================
+//  LECTEUR D'ÉCRAN : CE QUE LA CASE MONTRE, CE QUE LE POINT CHANGE
+// ============================================================================
+describe("ScoreBoard — accessibilité", () => {
+  it("chaque case garde l'action pour nom, et dit son score en description", () => {
+    const { getByRole } = monte("home");
+    const thomas = getByRole("button", { name: "Point pour Thomas" });
+    // 7-5, Thomas mène 2 jeux à 1 et n'est pas encore à une balle de jeu.
+    expect(thomas).toHaveProperty("disabled", false);
+    expect(getByRole("button", { name: "Point pour Thomas", description: "7 points, 2 jeux" })).toBe(thomas);
+    expect(getByRole("button", { name: "Point pour Gérard", description: "5 points, 1 jeu" })).toBeTruthy();
+  });
+
+  it("la description dit la balle de match — l'information que la case affiche en gros", () => {
+    const { getByRole } = monte("home", etat({ current: { home: 10, away: 4 } }));
+    expect(
+      getByRole("button", { name: "Point pour Thomas", description: "10 points, 2 jeux, balle de match" }),
+    ).toBeTruthy();
+  });
+
+  it("une région polie annonce le score, dans l'ordre affiché, et suit le point suivant", () => {
+    const { container, rerender } = monte("away");
+    const live = container.querySelector('[aria-live="polite"]');
+    expect(live?.textContent).toBe("Gérard 5, Thomas 7. Jeux : 1 à 2.");
+    rerender(
+      <ScoreBoard
+        state={etat({ current: { home: 10, away: 5 } })}
+        bestOf={5}
+        homeName="Thomas"
+        awayName="Gérard"
+        homeColor={null}
+        awayColor={null}
+        meta="Match #1"
+        canUndo
+        remaining={0}
+        onPoint={vi.fn()}
+        onFirstServe={vi.fn()}
+        onToggleBox={vi.fn()}
+        onUndo={vi.fn()}
+        onSkipBreak={vi.fn()}
+        onBack={vi.fn()}
+        onFinish={vi.fn()}
+        first="away"
+      />,
+    );
+    expect(live?.textContent).toBe("Gérard 5, Thomas 10. Jeux : 1 à 2. Balle de match pour Thomas.");
+  });
+
+  it("annonce le vainqueur une fois le match fini", () => {
+    const fini = etat({ status: "done", winner: "away", gamesWon: { home: 1, away: 3 }, current: { home: 0, away: 0 } });
+    expect(monte("home", fini).container.querySelector('[aria-live="polite"]')?.textContent).toBe(
+      "Fin du match : Gérard gagne 3 jeux à 1.",
+    );
+  });
+
+  it("est un dialogue MODAL, et porte le focus sur « ← Retour » à l'ouverture", () => {
+    const { getByRole } = monte("home");
+    expect(getByRole("dialog", { name: "Marquage du match" }).getAttribute("aria-modal")).toBe("true");
+    expect(document.activeElement).toBe(getByRole("button", { name: "← Retour" }));
+  });
+});

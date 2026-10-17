@@ -19,7 +19,8 @@ vi.mock("@/components/SettingsButton", () => ({ SettingsButton: () => null }));
 vi.mock("@/components/PasskeyEnrollPrompt", () => ({ PasskeyEnrollPrompt: () => null }));
 vi.mock("@/components/PrivacyNotice", () => ({ PrivacyNotice: () => null, InfoIcon: () => null }));
 vi.mock("@/components/AnnouncementBanner", () => ({ recheckBanner: vi.fn() }));
-vi.mock("@/lib/apiFetch", () => ({ reportMaintenance: vi.fn() }));
+// Le vrai module (callApi, userMessage…), sauf la bannière de maintenance, neutralisée.
+vi.mock("@/lib/apiFetch", async (orig) => ({ ...(await orig<typeof import("@/lib/apiFetch")>()), reportMaintenance: vi.fn() }));
 vi.mock("@/lib/sound", () => ({ unlockAudio: vi.fn(), playSuccessJingle: vi.fn(), playError: vi.fn(), playAlert: vi.fn() }));
 vi.mock("@/lib/notif-report", () => ({ reportNotifState: vi.fn(async () => {}) }));
 vi.mock("@/lib/pushClient", () => ({
@@ -132,5 +133,18 @@ describe("le menu ⋯ face à une fonction coupée", () => {
     const item = await screen.findByTestId(`item-${key}`);
     expect(item.textContent).toBe(label);
     expect(item.dataset.soon).toBe("1");
+  });
+});
+
+// LE BOUTON DE RETOUR NOMME L'ÉCRAN OUVERT — Le fil compris. Il s'affichait sans nom sur le Fil :
+// `SPECIAL_LABEL` n'avait pas d'entrée `forum`, et un `Record<string, string>` ne s'en plaignait
+// pas. Le type couvre désormais toutes les vues plein écran.
+describe("bouton de retour au planning", () => {
+  it("affiche « Le fil » sur le fil de discussion", async () => {
+    h.features = { forum: true };
+    window.history.replaceState(null, "", "/?date=2026-09-10&view=forum");
+    render(<Home />);
+    const retour = await screen.findByRole("button", { name: "Retour au planning" });
+    expect(retour.textContent).toContain("Le fil");
   });
 });

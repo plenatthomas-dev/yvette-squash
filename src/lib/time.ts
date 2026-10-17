@@ -91,6 +91,18 @@ export function stampFR(iso: string): string {
 }
 
 /**
+ * Date du jour (`AAAA-MM-JJ`) en heure MURALE du club.
+ *
+ * `new Date().toISOString().slice(0, 10)` rend la date UTC : sur Vercel, entre minuit et 1 h
+ * (2 h l'été) à Paris, c'est encore la veille. Même calcul que `alertTodayISO`
+ * (lib/alerts-gate) et `todayISO` (lib/interclub-gate) ; il vit ici, dans le module qui porte
+ * la règle, pour les appelants qui n'ont rien à faire de ces deux domaines.
+ */
+export function clubTodayISO(now: Date = new Date()): string {
+  return now.toLocaleDateString("en-CA", { timeZone: CLUB_TZ });
+}
+
+/**
  * Une chaîne `AAAA-MM-JJ` désigne-t-elle un jour QUI EXISTE ?
  *
  * La forme ne suffit pas : `2026-13-45` et `2026-02-31` passent une expression régulière et

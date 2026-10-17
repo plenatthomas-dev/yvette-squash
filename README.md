@@ -24,8 +24,8 @@ Next.js API routes  ──►  Adaptateur ResaMania (src/lib/resamania/client.ts
 (proxy serveur :                                    │
  contourne le CORS,                                 ▼
  garde les secrets)                          Base de données (Prisma)
-                                             • Users (joueurs)
-                                             • ResaAccount (identifiants chiffrés)
+                                             • User (joueurs)
+                                             • Session (jetons ResaMania chiffrés)
                                              • Booking (journal « qui a réservé quoi »)
 ```
 
@@ -36,10 +36,10 @@ Next.js API routes  ──►  Adaptateur ResaMania (src/lib/resamania/client.ts
   un conteneur jetable en local. `schema.prisma` déclare `provider = "postgresql"` : SQLite
   n'est pas une option, et ne l'a pas été depuis longtemps. Une base de développement d'un
   autre moteur que celui de production ne prouverait de toute façon rien des migrations.
-- **Secrets** : les mots de passe ResaMania sont chiffrés en **AES-256-GCM** (`src/lib/crypto.ts`),
-  jamais stockés en clair. Deux modes possibles (voir Roadmap) :
-  - _sur l'appareil_ : rien côté serveur, réservation à la demande seulement ;
-  - _chiffrés en base_ : nécessaire pour la **réservation programmée** (« réserver dès l'ouverture »).
+- **Secrets** : le mot de passe ResaMania n'est **jamais stocké** — il ne sert qu'au login, qui
+  rend des jetons OAuth. Ce sont ces jetons (accès et rafraîchissement) que la table `Session`
+  conserve, chiffrés en **AES-256-GCM** (`src/lib/crypto.ts`, `src/lib/session.ts`). Les comptes
+  « email seul » ont, eux, un mot de passe propre à l'appli, haché avec scrypt.
 
 ### Le truc important
 ResaMania ne dit pas **qui** a réservé un créneau (juste libre/réservé). La vue « quels amis
@@ -65,22 +65,43 @@ npm run dev                 # http://localhost:3000
 jetable ci-dessus, et la prudence avec toute commande `prisma` lancée à la main.
 
 Tant que `RESA_USE_MOCK="1"`, le planning affiché est **factice** : l'UI est pleinement
-fonctionnelle pour le développement, sans toucher à ResaMania.
+fonctionnelle pour le développement, sans toucher à ResaMania. ⚠️ `.env.example` le livre à
+`"0"` (vraies données) : le passer à `"1"` dans `.env` pour développer sans ResaMania. Le
+mode factice ne remplace que la **lecture du planning** (`getPlanning`) — la connexion, la
+réservation et l'annulation parlent toujours à la vraie API.
 
 ---
 
-## Brancher l'API ResaMania (étape clé)
+## Tester l'adaptateur ResaMania
 
-1. **Capturer un HAR** d'une session connectée (login → planning → éventuellement une réservation).
-   Voir les instructions données dans le chat ; le fichier `*.har` est gitignoré (il contient
-   mot de passe + jetons).
-2. Compléter les 3 fonctions de `src/lib/resamania/client.ts` (blocs `⚠️ À COMPLÉTER DEPUIS LE HAR`) :
-   `login()`, `getPlanning()`, `book()`.
-3. Tester sans l'UI :
-   ```bash
-   RESA_USE_MOCK=0 RESA_TEST_USER="..." RESA_TEST_PASS="..." npm run resa:test
-   ```
-4. Passer `RESA_USE_MOCK="0"` dans `.env` → l'appli utilise les vraies données.
+L'adaptateur (`src/lib/resamania/client.ts`) est **en production** : login OAuth2, planning,
+réservation et annulation sont implémentés et validés en direct. Il n'y a plus rien à
+compléter — cette section disait autrefois de remplir des blocs « À COMPLÉTER DEPUIS LE HAR »,
+qui n'existent plus depuis longtemps.
+
+Ce qui reste utile, c'est de **vérifier qu'il parle toujours à ResaMania** — l'API est interne
+et peut changer sans préavis (cf. « Cadre » plus haut). Un script le fait sans passer par l'UI,
+en **lecture seule** (login puis planning du jour, aucune réservation) :
+
+```bash
+# Avec le .env du poste (identifiants OAuth RESA_CLIENT_ID / RESA_CLIENT_SECRET compris) :
+RESA_TEST_USER="..." RESA_TEST_PASS="..." node --env-file=.env --import tsx scripts/resa-test.ts
+
+# Ou par le raccourci npm — qui, lui, NE LIT PAS .env : toutes les variables RESA_* doivent
+# alors être présentes dans l'environnement du shell.
+RESA_TEST_USER="..." RESA_TEST_PASS="..." npm run resa:test
+```
+
+⚠️ **`RESA_USE_MOCK` ne doit pas valoir `"1"`** pour ce test : le planning lu serait le planning
+factice, et le script réussirait sans avoir rien prouvé de l'API.
+
+Le script affiche le joueur reconnu, le nombre de terrains et de créneaux, et l'identifiant du
+premier créneau — ce dernier doit avoir la forme `/lecomplexbures/class_events/<nombre>`, la
+seule que les routes `/api/book` et `/api/cancel-slot` acceptent (`src/lib/validation.ts`).
+
+Si l'API a changé, c'est une capture réseau (`*.har`) d'une session connectée sur le site
+membre qui permet de retrouver la nouvelle forme des appels. Le fichier est **gitignoré** :
+il contient mot de passe et jetons.
 
 ---
 
@@ -108,8 +129,8 @@ créneau redevient réservable, puis désactive l'alerte. L'abonnement de l'appa
 3. **Planifier le cron** — `vercel.json` déclare `/api/cron/check-alerts` à **`0 7 * * *`**,
    soit une fois par jour.
    > ⚠️ Le plan **Hobby** limite les crons à 1×/jour : une expression sub-quotidienne fait
-   > **échouer le déploiement**. C'est pourquoi les six crons de `vercel.json` sont tous
-   > quotidiens ou mensuels. Pour une vraie fréquence courte, il faut le plan **Pro** ou un
+   > **échouer le déploiement**. C'est pourquoi les six crons de `vercel.json` tournent tous
+   > au plus une fois par jour (quatre quotidiens, un hebdomadaire, un mensuel). Pour une vraie fréquence courte, il faut le plan **Pro** ou un
    > cron externe gratuit (ex. cron-job.org) appelant
    > `https://<app>/api/cron/check-alerts?token=$CRON_SECRET` — c'est déjà la solution retenue
    > pour le keep-alive Neon (cf. `docs/neon-keep-alive.md`).

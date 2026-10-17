@@ -12,6 +12,8 @@ const h = vi.hoisted(() => ({
   findFirst: vi.fn(),
   // Jeton ResaMania du délégant (getResaTokenForUser).
   delegatorResa: null as null | Record<string, unknown>,
+  // Erreur que lève getResaTokenForUser à la place de rendre un jeton (panne, base…).
+  delegatorThrows: null as null | Error,
 }));
 
 // Le flag est résolu à chaud côté serveur (env + override en base) : on mocke l'état effectif.
@@ -26,9 +28,15 @@ vi.mock("./features-server", () => ({
   }),
 }));
 vi.mock("./db", () => ({ prisma: { delegation: { findFirst: h.findFirst } } }));
-vi.mock("./session", () => ({ getResaTokenForUser: vi.fn(async () => h.delegatorResa) }));
+vi.mock("./session", () => ({
+  // Rejet construit À L'APPEL (et non `mockRejectedValue`), comme ailleurs dans le dépôt.
+  getResaTokenForUser: vi.fn(() =>
+    h.delegatorThrows ? Promise.reject(h.delegatorThrows) : Promise.resolve(h.delegatorResa),
+  ),
+}));
 
 import { resolveActingContext, isDelegationActive } from "./delegation";
+import { ResaRefreshTransientError } from "./resamania/errors";
 
 const RESA_ME = { accessToken: "tok-me" } as never;
 const me: AppSession = { userId: "me", displayName: "Moi", email: "moi@example.com", resa: RESA_ME };
@@ -40,6 +48,7 @@ beforeEach(() => {
   h.activeDelegation = { id: "del-1" };
   h.findFirst.mockReset().mockImplementation(async () => h.activeDelegation);
   h.delegatorResa = { accessToken: "tok-delegant" };
+  h.delegatorThrows = null;
 });
 
 describe("resolveActingContext — chemin normal (sans onBehalfOf)", () => {
@@ -114,6 +123,35 @@ describe("resolveActingContext — au nom d'un délégant (onBehalfOf)", () => {
     h.activeDelegation = null;
     const r = await resolveActingContext(me, "delegator", MSG);
     expect(r.ok).toBe(false);
+  });
+});
+
+// Panne ResaMania PASSAGÈRE : ni « connexion ResaMania requise » (403), ni « session du
+// délégant plus valide » (409) — deux constats faux qui poussent le membre à se reconnecter
+// pour rien. Un 503 « réessaie », avec un code que l'écran peut reconnaître.
+describe("resolveActingContext — panne ResaMania passagère", () => {
+  const UNAVAILABLE = {
+    ok: false,
+    status: 503,
+    error: "ResaMania ne répond pas, réessaie dans un instant.",
+    code: "resa-unavailable",
+  };
+
+  it("délégation : jeton du délégant momentanément irrafraîchissable → 503, pas 409", async () => {
+    h.delegatorThrows = new ResaRefreshTransientError("ResaMania momentanément indisponible");
+    const r = await resolveActingContext(me, "delegator", MSG);
+    expect(r).toEqual(UNAVAILABLE);
+  });
+
+  it("délégation : une erreur NON passagère (base…) n'est pas maquillée en panne ResaMania", async () => {
+    h.delegatorThrows = new Error("Can't reach database server");
+    await expect(resolveActingContext(me, "delegator", MSG)).rejects.toThrow("database");
+  });
+
+  it("soi-même : session `resaUnavailable` → 503, et non le 403 « email seul »", async () => {
+    const meResaDown: AppSession = { ...meEmailOnly, resaUnavailable: true };
+    const r = await resolveActingContext(meResaDown, undefined, MSG);
+    expect(r).toEqual(UNAVAILABLE);
   });
 });
 

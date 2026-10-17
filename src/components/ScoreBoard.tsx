@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { useCloseRequest } from "@/lib/useCloseRequest";
 import {
   ballPoint,
@@ -54,6 +54,26 @@ export function hapticFor(before: MatchState, after: MatchState) {
     navigator.vibrate?.(gameEnded ? [40, 70, 40] : 30);
   }
 }
+
+/** « 0 point », « 1 point », « 7 points » — le pluriel français commence à 2. */
+const points = (n: number) => `${n} point${n > 1 ? "s" : ""}`;
+/** « 0 jeu », « 1 jeu », « 2 jeux ». */
+const jeux = (n: number) => `${n} jeu${n > 1 ? "x" : ""}`;
+
+/**
+ * Attribut posé sur `<body>` tant que l'écran de marquage est ouvert.
+ *
+ * LE MÊME CANAL QUE `data-bottombar` (cf. lib/useBottomBar), POUR LA MÊME RAISON : les bannières
+ * d'installation (InstallAppPrompt, AndroidAppPrompt) sont montées dans le LAYOUT, loin de cet
+ * écran, en `position: fixed` à z-index 900 — et `.ics` était à 30. Elles se posaient donc
+ * PAR-DESSUS la case du bas, soit la moitié du tableau sur laquelle on tape sans regarder : un
+ * appui au bord du terrain pouvait ouvrir la popup d'installation au lieu de marquer le point.
+ *
+ * Pas `useBottomBar(true)` : sa sémantique est « une barre d'action est collée en bas », et il
+ * pose aussi `--bottombar-h`, qui REMONTE les toasts de 64 px. Il n'y a ici aucune barre à
+ * éviter ; les toasts n'ont pas à bouger. Un attribut dédié dit ce qui se passe vraiment.
+ */
+export const SCORING_ATTR = "data-scoring";
 
 export default function ScoreBoard({
   state,
@@ -119,6 +139,25 @@ export default function ScoreBoard({
 }) {
   // Le retour d'Android fait ce que fait « ← Retour » : l'appelant enregistre, puis quitte.
   useCloseRequest(onBack);
+
+  // Bannières d'installation masquées pendant le marquage (cf. SCORING_ATTR et globals.css).
+  useEffect(() => {
+    document.body.setAttribute(SCORING_ATTR, "1");
+    return () => document.body.removeAttribute(SCORING_ATTR);
+  }, []);
+
+  // C'EST UN DIALOGUE MODAL, ET IL LE DIT. `role="dialog"` seul laissait le lecteur d'écran
+  // sur l'élément qui avait ouvert l'écran — un bouton désormais recouvert par un plein écran —
+  // et libre de naviguer dans la page cachée dessous. `aria-modal` borne la lecture à l'écran
+  // de marquage ; le focus, lui, est porté sur « ← Retour » à l'ouverture : la sortie est la
+  // première chose qu'on doit pouvoir trouver, et c'est le premier élément de l'ordre de
+  // lecture. Une seule fois, au montage — pas à chaque point, qui ne doit déplacer personne.
+  const backRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    backRef.current?.focus({ preventScroll: true });
+  }, []);
+  const uid = useId();
+
   const second: Side = first === "home" ? "away" : "home";
   /** Une paire de valeurs d'un jeu, dans l'ordre affiché. */
   const paire = (g: { home: number; away: number }) => (first === "home" ? [g.home, g.away] : [g.away, g.home]);
@@ -150,14 +189,26 @@ export default function ScoreBoard({
     const won = isHome ? state.gamesWon.home : state.gamesWon.away;
     const serving = state.serving === who && state.servingBox !== null;
     const droite = state.servingBox === "right";
+    const descId = `${uid}-${who}`;
     return (
       <div className="ics-cell" key={who}>
+        {/* CE QUE LA CASE AFFICHE, DIT AU LECTEUR D'ÉCRAN. L'`aria-label` remplace tout le
+            contenu du bouton : « Point pour Thomas » masquait les points, les jeux et la balle
+            de match — tout ce que la case montre en gros. On les rend par une DESCRIPTION
+            (lue après le nom) plutôt qu'en allongeant le nom : le nom reste l'action, stable
+            d'un point à l'autre, et c'est sur lui que s'appuient la commande vocale (« toucher
+            Point pour Thomas ») comme les tests des écrans qui embarquent ce tableau. */}
+        <span id={descId} hidden>
+          {points(pts)}, {jeux(won)}
+          {balle?.side === who ? `, ${balle.match ? "balle de match" : "balle de jeu"}` : ""}
+        </span>
         <button
           className="ics-side"
           style={c ? { background: c.bg, color: c.fg, borderColor: c.fg } : undefined}
           onClick={() => onPoint(who)}
           disabled={attendServeur || state.status === "done" || remaining > 0}
           aria-label={`Point pour ${name}`}
+          aria-describedby={descId}
         >
           <span className="ics-name">{name}</span>
           {/* Coin HAUT-DROIT, le seul des quatre qui restait libre : le score garde le centre
@@ -205,10 +256,28 @@ export default function ScoreBoard({
     );
   };
 
+  // L'ANNONCE DU SCORE, dans l'ordre affiché. Rien ne la disait : un point marqué changeait un
+  // chiffre à l'écran et rien d'autre, si bien qu'au lecteur d'écran on tapait à l'aveugle — sur
+  // le seul écran que les voyants, eux aussi, utilisent sans le regarder. Région POLIE : elle
+  // attend la fin de ce qui se lit, elle ne coupe pas l'annonce du bouton qu'on vient de toucher.
+  const nomDe = (who: Side) => (who === "home" ? homeName : awayName);
+  const ptsDe = (who: Side) => (who === "home" ? state.current.home : state.current.away);
+  const jeuxDe = (who: Side) => (who === "home" ? state.gamesWon.home : state.gamesWon.away);
+  const annonce =
+    state.status === "done"
+      ? `Fin du match : ${nomDe(state.winner ?? "home")} gagne ${Math.max(state.gamesWon.home, state.gamesWon.away)} jeux à ${Math.min(state.gamesWon.home, state.gamesWon.away)}.`
+      : `${nomDe(first)} ${ptsDe(first)}, ${nomDe(second)} ${ptsDe(second)}. ` +
+        `Jeux : ${jeuxDe(first)} à ${jeuxDe(second)}.` +
+        (balle ? ` ${balle.match ? "Balle de match" : "Balle de jeu"} pour ${nomDe(balle.side)}.` : "") +
+        (remaining > 0 ? " Pause entre les jeux." : "");
+
   return (
-    <div className="ics" role="dialog" aria-label="Marquage du match">
+    <div className="ics" role="dialog" aria-modal="true" aria-label="Marquage du match">
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {annonce}
+      </p>
       <header className="ics-head">
-        <button className="secondary" onClick={onBack}>
+        <button className="secondary" onClick={onBack} ref={backRef}>
           ← Retour
         </button>
         <span className="ics-meta" title={metaTitle}>

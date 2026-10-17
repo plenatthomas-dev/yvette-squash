@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import QRCode from "qrcode";
 import { Dialog } from "@/components/Dialog";
 
 // Bouton « partager » : Web Share natif (mobile) sinon copie du lien.
@@ -30,6 +29,14 @@ export function ShareModal({
     let cancelled = false;
 
     (async () => {
+      // `qrcode` CHARGÉ À LA DEMANDE, pas en tête de fichier. `page.tsx` importe ce composant
+      // statiquement : un import statique de la bibliothèque la mettait donc dans le paquet
+      // INITIAL de `/` — ~25 Ko minifiés (~10 Ko gzip, mesuré), téléchargés et analysés à
+      // chaque ouverture de l'appli pour une modale que presque personne n'ouvre. Ici, ils ne
+      // partent qu'au premier « Partager », et le navigateur les garde ensuite en cache.
+      const QRCode = await import("qrcode");
+      if (cancelled) return;
+
       // 1) QR dans un canvas temporaire (correction d'erreurs « H » → logo central OK).
       const qr = document.createElement("canvas");
       await QRCode.toCanvas(qr, appUrl(), {

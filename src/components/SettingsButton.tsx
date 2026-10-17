@@ -306,6 +306,10 @@ export function SettingsButton({
   const [busy, setBusy] = useState<string | null>(null);
   // Délégué dont on est en train de choisir la durée de prolongation (boutons inline).
   const [extending, setExtending] = useState<string | null>(null);
+  // Délégation dont on confirme la révocation (même confirmation en deux temps que « Retirer »
+  // un appareil). Révoquer coupe sur-le-champ le droit du délégué de réserver en mon nom — y
+  // compris s'il est au comptoir en train de le faire —, et le bouton touche « Prolonger ».
+  const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
   // Échéance de MA session ResaMania : plafond de fonctionnement des délégations
   // (30 j non glissants après connexion — cf. docs/delegation-droits.md). Intégrée à la
   // bulle « i » du titre de section (toujours accessible, même sans formulaire).
@@ -323,6 +327,12 @@ export function SettingsButton({
   // contexte). On exige aussi un passkey côté serveur, au cas où le marqueur local serait resté
   // alors que le passkey a été supprimé depuis un autre appareil.
   const [pkOnDevice, setPkOnDevice] = useState(false);
+  // CONFIRMATION EN DEUX TEMPS, sur le modèle d'« Abandonner » / « Oui, abandonner » du marqueur
+  // libre. « Retirer » supprimait la clé au premier appui, et rien ne se rattrape : il faut
+  // ensuite refaire l'enrôlement depuis l'appareil concerné — que l'on n'a pas forcément en main.
+  // Le bouton voisin « Renommer » est à 6 px : un appui de travers suffisait. L'id est celui de
+  // la ligne en attente de confirmation ; `null` = aucune.
+  const [confirmRemovePk, setConfirmRemovePk] = useState<string | null>(null);
   const enabledOnThisDevice = pkOnDevice && (passkeys?.length ?? 0) > 0;
   // Avertissement « risque de blocage » : le membre a au moins un passkey LIÉ à l'appareil
   // (backedUp=false) et AUCUN synchronisé (backedUp=true) → perdre l'appareil = perdre l'accès
@@ -345,6 +355,7 @@ export function SettingsButton({
     if (!open || !showPasskeys) return;
     passkeySupported().then(setPkSupported);
     setPkOnDevice(hasPasskeyOnDevice());
+    setConfirmRemovePk(null); // réouverture du panneau : pas de confirmation résiduelle
     loadPasskeys();
   }, [open, showPasskeys]);
 
@@ -407,11 +418,14 @@ export function SettingsButton({
         }
         return next;
       });
-      toast("ok", "Passkey supprimé.");
+      // Le vocabulaire de la section, pas celui de WebAuthn : on y parle d'appareils et de
+      // connexion biométrique, jamais de « passkey ».
+      toast("ok", "Appareil retiré de la connexion biométrique.");
     } catch (e) {
       toast("err", (e as Error).message);
     } finally {
       setPkBusy(false);
+      setConfirmRemovePk(null);
     }
   };
 
@@ -419,6 +433,7 @@ export function SettingsButton({
     if (!open || !delegation) return;
     let cancelled = false;
     setExtending(null); // réouverture du panneau : pas de choix de durée résiduel
+    setConfirmRevoke(null); // …ni de révocation en attente de confirmation
     setPickerOpen(false); // …ni sélection de délégués restée ouverte
     setPickedDelegates([]);
     setDelegateQuery("");
@@ -561,6 +576,7 @@ export function SettingsButton({
       toast("err", (e as Error).message);
     } finally {
       setBusy(null);
+      setConfirmRevoke(null);
     }
   };
 
@@ -885,20 +901,41 @@ export function SettingsButton({
                           </div>
                         ) : (
                           <div className="delegation-row-actions">
-                            <button
-                              className="secondary"
-                              onClick={() => setExtending(d.delegateId)}
-                              disabled={busy !== null}
-                            >
-                              Prolonger
-                            </button>
-                            <button
-                              className="secondary"
-                              onClick={() => revokeDelegation(d.id)}
-                              disabled={busy !== null}
-                            >
-                              {busy === d.id ? "…" : "Révoquer"}
-                            </button>
+                            {confirmRevoke === d.id ? (
+                              <>
+                                <button
+                                  className="danger"
+                                  onClick={() => revokeDelegation(d.id)}
+                                  disabled={busy !== null}
+                                >
+                                  {busy === d.id ? "…" : "Oui, révoquer"}
+                                </button>
+                                <button
+                                  className="secondary"
+                                  onClick={() => setConfirmRevoke(null)}
+                                  disabled={busy !== null}
+                                >
+                                  Non, garder
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  className="secondary"
+                                  onClick={() => setExtending(d.delegateId)}
+                                  disabled={busy !== null}
+                                >
+                                  Prolonger
+                                </button>
+                                <button
+                                  className="secondary"
+                                  onClick={() => setConfirmRevoke(d.id)}
+                                  disabled={busy !== null}
+                                >
+                                  Révoquer
+                                </button>
+                              </>
+                            )}
                           </div>
                         )}
                       </li>
@@ -1002,9 +1039,10 @@ export function SettingsButton({
                     <>
                       {showLockoutWarning && (
                         <p className="tiny" style={{ color: "var(--danger-fg)", margin: "0 0 8px" }}>
-                          ⚠️ Tes passkeys sont liés à cet appareil : si tu le perds, tu devras te
-                          reconnecter par mot de passe puis les réactiver. Astuce : ajoutes-en un
-                          sur un appareil qui synchronise tes passkeys (iCloud / Google).
+                          ⚠️ Ta connexion biométrique reste liée aux appareils où tu l'as
+                          activée : si tu les perds, tu devras te reconnecter par mot de passe
+                          puis la réactiver. Astuce : active-la aussi sur un appareil qui
+                          synchronise tes clés (iCloud / Google).
                         </p>
                       )}
                       <ul className="passkey-list">
@@ -1013,12 +1051,12 @@ export function SettingsButton({
                             <span className="tiny" style={{ minWidth: 0 }}>
                               🔐 {p.deviceLabel || "Cet appareil"}
                               {p.backedUp === true && (
-                                <span className="muted" title="Passkey synchronisé (iCloud / Google)">
+                                <span className="muted" title="Clé synchronisée (iCloud / Google)">
                                   {" · 🔁 synchronisé"}
                                 </span>
                               )}
                               {p.backedUp === false && (
-                                <span className="muted" title="Passkey lié à cet appareil uniquement">
+                                <span className="muted" title="Clé enregistrée sur cet appareil uniquement">
                                   {" · 📱 cet appareil"}
                                 </span>
                               )}
@@ -1037,22 +1075,43 @@ export function SettingsButton({
                               </span>
                             </span>
                             <span style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                              <button
-                                className="secondary"
-                                onClick={() => renamePasskey(p.id, p.deviceLabel)}
-                                disabled={pkBusy}
-                                title="Renommer cet appareil"
-                              >
-                                Renommer
-                              </button>
-                              <button
-                                className="secondary"
-                                onClick={() => removePasskey(p.id)}
-                                disabled={pkBusy}
-                                title="Retirer ce passkey"
-                              >
-                                Retirer
-                              </button>
+                              {confirmRemovePk === p.id ? (
+                                <>
+                                  <button
+                                    className="danger"
+                                    onClick={() => removePasskey(p.id)}
+                                    disabled={pkBusy}
+                                  >
+                                    {pkBusy ? "…" : "Oui, retirer"}
+                                  </button>
+                                  <button
+                                    className="secondary"
+                                    onClick={() => setConfirmRemovePk(null)}
+                                    disabled={pkBusy}
+                                  >
+                                    Non, garder
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    className="secondary"
+                                    onClick={() => renamePasskey(p.id, p.deviceLabel)}
+                                    disabled={pkBusy}
+                                    title="Renommer cet appareil"
+                                  >
+                                    Renommer
+                                  </button>
+                                  <button
+                                    className="secondary"
+                                    onClick={() => setConfirmRemovePk(p.id)}
+                                    disabled={pkBusy}
+                                    title="Retirer cet appareil de la connexion biométrique"
+                                  >
+                                    Retirer
+                                  </button>
+                                </>
+                              )}
                             </span>
                           </li>
                         ))}

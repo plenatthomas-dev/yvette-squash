@@ -33,6 +33,20 @@ const gmailReady = Boolean(GMAIL_USER && GMAIL_APP_PASSWORD);
 type MailConfig = { transporter: Transporter; from: string };
 let cached: MailConfig | null = null;
 
+/**
+ * Délais SMTP, posés explicitement sur les deux transports. Les défauts de nodemailer — 2 min
+ * pour établir la connexion, 30 s pour la salutation du serveur, 10 min d'inactivité — sont
+ * pensés pour un serveur qui tourne en continu, pas pour une fonction Vercel : un relais qui
+ * ne répond plus la tiendrait jusqu'à sa propre expiration, et le membre qui vient d'envoyer
+ * un commentaire attendrait une réponse qui ne viendra pas. Avec ces valeurs, l'envoi échoue
+ * en clair (et `sendEmail` lève, comme documenté) bien avant.
+ */
+const DELAIS_SMTP = {
+  connectionTimeout: 10_000,
+  greetingTimeout: 10_000,
+  socketTimeout: 20_000,
+} as const;
+
 /** Transport actif + adresse expéditrice (Brevo prioritaire, repli Gmail). `null` si rien. */
 function mailer(): MailConfig | null {
   if (cached) return cached;
@@ -43,6 +57,7 @@ function mailer(): MailConfig | null {
         port: 587, // STARTTLS
         secure: false,
         auth: { user: BREVO_SMTP_USER!, pass: BREVO_SMTP_KEY! },
+        ...DELAIS_SMTP,
       }),
       from: BREVO_SENDER!,
     };
@@ -53,6 +68,7 @@ function mailer(): MailConfig | null {
       transporter: nodemailer.createTransport({
         service: "gmail",
         auth: { user: GMAIL_USER!, pass: GMAIL_APP_PASSWORD! },
+        ...DELAIS_SMTP,
       }),
       from: GMAIL_USER!,
     };

@@ -5,6 +5,8 @@ import { prisma } from "@/lib/db";
 import { resolveActingContext } from "@/lib/delegation";
 import { refreshSnapshotFromResa } from "@/lib/planning-snapshot";
 import { appBlockForUserId, appBlockedResponse } from "@/lib/app-block";
+import { isResaOutcomeUnknown, isResaUnavailable } from "@/lib/resamania/errors";
+import { outcomeUnknownResponse, resaUnavailableResponse } from "@/lib/resamania/responses";
 
 export const runtime = "nodejs";
 
@@ -30,7 +32,11 @@ export async function DELETE(
     "L'annulation d'une réservation nécessite une connexion ResaMania.",
   );
   if (!acting.ok) {
-    return NextResponse.json({ error: acting.error }, { status: acting.status });
+    // `code` relayé quand il existe (« resa-unavailable » : 503 de panne ResaMania).
+    return NextResponse.json(
+      { error: acting.error, ...(acting.code ? { code: acting.code } : {}) },
+      { status: acting.status },
+    );
   }
   const { resa, bookingOwnerId, actingUserId } = acting.ctx;
 
@@ -43,7 +49,14 @@ export async function DELETE(
   // Rattrapage : si l'attendeeId n'a pas été mémorisé, on le retrouve via l'API.
   let attendeeId = booking.attendeeId;
   if (!attendeeId) {
-    attendeeId = await findAttendeeId(resa, booking.classEventId);
+    try {
+      attendeeId = await findAttendeeId(resa, booking.classEventId);
+    } catch (e) {
+      // ResaMania injoignable : ce n'est PAS « référence introuvable » (qui invite à annuler
+      // directement sur ResaMania). Lecture seule, rien n'a bougé : réessayer est sans danger.
+      if (isResaUnavailable(e)) return resaUnavailableResponse();
+      throw e;
+    }
     if (attendeeId) {
       await prisma.booking.update({ where: { id }, data: { attendeeId } });
     }
@@ -55,7 +68,22 @@ export async function DELETE(
     );
   }
 
-  const r = await cancel(resa, attendeeId);
+  let r;
+  try {
+    r = await cancel(resa, attendeeId);
+  } catch (e) {
+    // Annulation partie sans réponse : elle a PEUT-ÊTRE abouti. Ni « réessaie » (on retenterait
+    // une transition peut-être déjà faite — refusée, au mieux, avec un message incompréhensible)
+    // ni « annulée » (peut-être faux). Le journal reste « booked » : la réconciliation du
+    // planning le passera « cancelled » si le créneau s'est bien libéré. Cache vidé pour que
+    // la grille que le membre va consulter soit celle de ResaMania.
+    if (isResaOutcomeUnknown(e)) {
+      console.warn("[bookings] annulation partie sans réponse, résultat inconnu:", e);
+      invalidatePlanningCache();
+      return outcomeUnknownResponse("L'annulation");
+    }
+    throw e;
+  }
   if (!r.ok) {
     return NextResponse.json({ error: r.error }, { status: 409 });
   }

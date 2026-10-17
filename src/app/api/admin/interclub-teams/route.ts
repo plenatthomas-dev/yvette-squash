@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/admin";
+import { readJsonBody } from "@/lib/http-tx";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
 import { MAX_PLAYER_NAME_LEN } from "@/lib/interclub-db";
 import { parseClassementInput, parseRangMInput } from "@/lib/interclub-order";
@@ -121,7 +122,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Accès réservé" }, { status: 403 });
   }
 
-  const body = (await req.json().catch(() => ({}))) as {
+  // `readJsonBody` : un corps `null` passait `req.json().catch(() => ({}))` et faisait lever
+  // `body.action` — un 500 au lieu du 400 « action inconnue » (cf. `http-tx.ts`).
+  const body = (await readJsonBody(req)) as {
     action?: unknown;
     teamId?: unknown;
     guestId?: unknown;

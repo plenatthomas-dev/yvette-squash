@@ -247,6 +247,16 @@ describe("GET /api/interclub/{id}/availability", () => {
 });
 
 describe("PUT /api/interclub/{id}/availability", () => {
+  // `null`, `5`, `[]` sont du JSON VALIDE : `req.json().catch(() => ({}))` les laissait passer,
+  // et `body.forUserId` levait sur `null` — un 500 non géré au lieu du 400 de tout autre corps
+  // malformé. `readJsonBody` les ramène à `{}`.
+  it.each([null, 5, "x", [1, 2]])("répond 400, et non 500, à un corps JSON %j", async (corps) => {
+    const brut = { cookies: { get: () => undefined }, json: async () => corps } as unknown as NextRequest;
+    const res = await PUT(brut, ctx);
+    expect(res.status).toBe(400);
+    expect(h.created).toBeNull();
+  });
+
   it("enregistre ma propre réponse, signée de moi", async () => {
     const res = await PUT(req({ status: "yes", comment: "  je peux  " }), ctx);
     expect(res.status).toBe(200);

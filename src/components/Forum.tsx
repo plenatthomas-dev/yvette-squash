@@ -1633,7 +1633,7 @@ export default function Forum({
               onChange={(e) => onDraft(e.target.value)}
               placeholder="Écrire au club…"
               rows={1}
-              aria-label="Votre message"
+              aria-label="Ton message"
               /* Le clavier tactile affiche un RETOUR À LA LIGNE et non un « Envoyer » : sans
                  cela, sa touche promettrait un envoi que `onKeyDown` ne fait plus. */
               enterKeyHint="enter"

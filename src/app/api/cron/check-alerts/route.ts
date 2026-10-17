@@ -8,6 +8,7 @@ import { recordCronRun } from "@/lib/cron-run";
 import { alertsPending, alertsChanged, alertHorizonISO, noteCronAlive } from "@/lib/alerts-gate";
 import { fmtTime, toInstant } from "@/lib/time";
 import { BOOK_ACTION } from "@/lib/notification-actions";
+import { isResaRefreshTransient } from "@/lib/resamania/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,33 @@ function prettyDate(date: string): string {
     day: "numeric",
     month: "long",
   });
+}
+
+/**
+ * Instant (ms) du début du créneau `date` + `hm`, lus en heure du club — ou `null` si la paire
+ * ne désigne pas un instant réel. Ne lève JAMAIS : voir l'usage dans le classement de `GET`.
+ */
+function debutCreneauMs(date: string, hm: string): number | null {
+  try {
+    const t = new Date(toInstant(`${date}T${hm}:00`)).getTime();
+    return Number.isFinite(t) ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+// Durée de vie de la notification « terrain libéré » chez le service push. Au-delà du début du
+// créneau elle n'a plus d'objet (et le défaut de web-push est de QUATRE SEMAINES : un téléphone
+// éteint la recevrait à son réveil, pour un créneau passé depuis longtemps). Plafond d'une heure :
+// un terrain libre se reprend vite, une alerte vieille d'une heure est probablement fausse.
+// Plancher d'une minute : un TTL de 0 se traduit par « livrer tout de suite ou jeter », ce qui
+// perd la notification au moindre téléphone en veille profonde.
+const ALERTE_TTL_MIN_S = 60;
+const ALERTE_TTL_MAX_S = 3600;
+
+function ttlAlerteS(debutMs: number, now: number): number {
+  const s = Math.floor((debutMs - now) / 1000);
+  return Math.min(ALERTE_TTL_MAX_S, Math.max(ALERTE_TTL_MIN_S, s));
 }
 
 // NB : la récupération du jeton ResaMania d'un joueur passe par `getResaTokenForUser`
@@ -72,10 +100,21 @@ export async function GET(req: NextRequest) {
   const now = Date.now();
   const expired: typeof allAlerts = [];
   const alerts: typeof allAlerts = [];
+  // Début de chaque créneau surveillé, en instant absolu : sert au classement ci-dessous ET au
+  // TTL de la notification (inutile de la livrer une fois le créneau commencé).
+  const debutMs = new Map<string, number>();
   for (const a of allAlerts) {
-    const passee = new Date(toInstant(`${a.date}T${a.hm}:00`)).getTime() <= now;
-    if (passee || a.date > horizon) expired.push(a);
-    else alerts.push(a);
+    const debut = debutCreneauMs(a.date, a.hm);
+    // Une alerte ILLISIBLE (date ou horaire impossible, écrit avant que POST /api/alerts ne
+    // valide autre chose que la forme) part en expiration silencieuse. `toInstant` lève sur une
+    // telle valeur, et cette boucle est hors de tout `try` : une seule ligne fautive faisait
+    // tomber le cron à chaque passage, pour tout le club, sans jamais être désactivée.
+    if (debut === null || debut <= now || a.date > horizon) {
+      expired.push(a);
+    } else {
+      debutMs.set(a.id, debut);
+      alerts.push(a);
+    }
   }
   if (expired.length > 0) {
     await prisma.slotAlert.updateMany({
@@ -103,13 +142,38 @@ export async function GET(req: NextRequest) {
   let checked = 0;
   let notified = 0;
   let deactivated = 0;
+  // Alertes dont le membre n'a pas pu être traité À CE PASSAGE faute de jeton ResaMania
+  // (rafraîchissement en panne passagère) : elles restent actives et seront revues au passage
+  // suivant (~4 min). Compté à part pour que le heartbeat dise « ResaMania toussait » au lieu
+  // de laisser croire à une passe complète.
+  let reportes = 0;
 
   for (const [key, group] of groups) {
     const [userId, date] = key.split("|");
     checked += group.length;
 
     // Jeton déchiffré et rafraîchi si besoin (et rechiffré en base) par session.ts.
-    const resa = await getResaTokenForUser(userId);
+    //
+    // try/catch PAR MEMBRE : `getResaTokenForUser` LÈVE désormais sur une panne passagère
+    // (au lieu de supprimer la session et rendre null). Sans ce filet, la première alerte d'un
+    // membre au jeton expiré pendant une panne interrompait TOUTE la passe — les alertes des
+    // membres suivants, dont le jeton était peut-être frais, n'étaient plus vérifiées du tout.
+    // On saute ce membre pour ce passage, SANS désactiver son alerte : le terrain peut encore
+    // se libérer, et le jeton se rafraîchira au prochain tour.
+    let resa;
+    try {
+      resa = await getResaTokenForUser(userId);
+    } catch (e) {
+      reportes += group.length;
+      // Une erreur NON passagère (base…) est rare et mérite d'être vue ; elle ne doit pas
+      // pour autant priver les autres membres de leur vérification.
+      if (isResaRefreshTransient(e)) {
+        console.warn(`[check-alerts] jeton de ${userId} reporté (ResaMania indisponible)`);
+      } else {
+        console.error(`[check-alerts] jeton de ${userId} illisible, membre sauté:`, e);
+      }
+      continue;
+    }
     if (!resa) continue;
 
     // Les terrains libres, par horaire : TOUS, et pas seulement le fait qu'il y en ait un. Le
@@ -143,6 +207,12 @@ export async function GET(req: NextRequest) {
         body: `${quand} — tu étais en liste d'attente, file réserver !`,
         url: `/?date=${a.date}&view=day`,
         tag: `alert-${a.id}`,
+        // Urgence HAUTE : chaque seconde compte face aux autres membres, et une urgence normale
+        // laisse Android différer la livraison d'un téléphone en veille (Doze). TTL calé sur le
+        // début du créneau, cf. ttlAlerteS.
+        // `Date.now()` et non `now` : la passe peut durer (un appel planning par membre et par jour).
+        ttl: ttlAlerteS(debutMs.get(a.id) ?? Date.now(), Date.now()),
+        urgency: "high",
         // « Réserver » réserve SANS ouvrir l'appli ni redemander confirmation : c'est le geste
         // que la notification réclame, et chaque seconde compte face aux autres membres. Le
         // service worker (public/sw.js) poste à /api/book, qui relit le planning comme pour
@@ -171,6 +241,10 @@ export async function GET(req: NextRequest) {
   // état. Un seul appel en fin de passe plutôt qu'un par alerte — l'invalidation est globale.
   if (expired.length > 0 || deactivated > 0) alertsChanged();
 
-  await recordCronRun("check-alerts", true, `${notified} notif(s), ${checked} vérifiée(s)`);
-  return NextResponse.json({ checked, notified, expired: expired.length });
+  await recordCronRun(
+    "check-alerts",
+    true,
+    `${notified} notif(s), ${checked} vérifiée(s)${reportes ? `, ${reportes} reportée(s)` : ""}`,
+  );
+  return NextResponse.json({ checked, notified, expired: expired.length, reportes });
 }

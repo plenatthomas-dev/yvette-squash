@@ -23,9 +23,11 @@ const h = vi.hoisted(() => ({
   message: { id: "m1" } as null | { id: string },
   /** La réaction déjà posée par ce membre sur cet emoji, ou `null`. */
   existante: null as null | { id: string },
-  recentCount: 0,
-  /** Le `where` du dernier `count` : c'est lui qui borne la limite à UN membre. */
-  countWhere: null as null | Record<string, unknown>,
+  /**
+   * Le journal des gestes (`LoginAttempt`, cf. lib/geste-debit.ts), en mémoire. Il HONORE
+   * `ip`, `identifier` et les bornes de `createdAt` : une vraie rafale s'y mesure.
+   */
+  journal: [] as { ip: string; identifier: string; createdAt: Date }[],
   cree: null as null | Record<string, unknown>,
   supprime: null as null | string,
   diffuse: null as null | [string, Record<string, unknown>],
@@ -44,18 +46,37 @@ vi.mock("@/lib/forum-realtime", async (importOriginal) => ({
     h.diffuse = [event, payload];
   }),
 }));
+type WhereJournal = { ip?: string; identifier?: string; createdAt?: { gte?: Date; lt?: Date } };
+const dansJournal = (
+  l: { ip: string; identifier: string; createdAt: Date },
+  w: WhereJournal,
+) =>
+  (w.ip === undefined || l.ip === w.ip) &&
+  (w.identifier === undefined || l.identifier === w.identifier) &&
+  (!w.createdAt?.gte || l.createdAt >= w.createdAt.gte) &&
+  (!w.createdAt?.lt || l.createdAt < w.createdAt.lt);
+
 vi.mock("@/lib/db", () => ({
   prisma: {
     forumMessage: { findUnique: vi.fn(async () => h.message) },
+    // Le `where` est HONORÉ, et non ignoré : le remplacer par `{}` ferait de la limite un
+    // plafond global au club, et c'est le test « un seul membre » qui rougirait.
+    loginAttempt: {
+      create: vi.fn(async ({ data }: { data: { ip: string; identifier: string } }) => {
+        h.journal.push({ ...data, createdAt: new Date() });
+        return {};
+      }),
+      count: vi.fn(async ({ where }: { where: WhereJournal }) =>
+        h.journal.filter((l) => dansJournal(l, where)).length,
+      ),
+      deleteMany: vi.fn(async ({ where }: { where: WhereJournal }) => {
+        const avant = h.journal.length;
+        h.journal = h.journal.filter((l) => !dansJournal(l, where));
+        return { count: avant - h.journal.length };
+      }),
+    },
     forumReaction: {
       findUnique: vi.fn(async () => h.existante),
-      // Le `where` est CAPTURÉ, et non ignoré : le remplacer par `{}` dans la route ferait de
-      // la limite un plafond global au club — 120 réactions par dix minutes pour tout le
-      // monde — sans qu'aucun test de ce fichier ne rougisse.
-      count: vi.fn(async (args?: { where?: Record<string, unknown> }) => {
-        h.countWhere = args?.where ?? null;
-        return h.recentCount;
-      }),
       create: vi.fn(async (args: { data: Record<string, unknown> }) => {
         if (h.jette) throw h.jette;
         h.cree = args.data;
@@ -86,11 +107,10 @@ beforeEach(() => {
   h.session = { userId: "u1", displayName: "Thomas", email: "membre@example.com" };
   h.message = { id: "m1" };
   h.existante = null;
-  h.recentCount = 0;
+  h.journal = [];
   h.cree = null;
   h.supprime = null;
   h.diffuse = null;
-  h.countWhere = null;
   h.jette = null;
 });
 
@@ -223,20 +243,41 @@ describe("deux clics qui se croisent", () => {
 });
 
 describe("garde-fou d'emballement", () => {
-  it("compte les réactions d'UN SEUL membre, sur une fenêtre glissante", async () => {
-    await POST(req("👍"), ctx);
-    expect(h.countWhere?.userId).toBe("u1");
-    const gte = (h.countWhere?.createdAt as { gte: Date }).gte;
-    expect(Math.round((Date.now() - gte.getTime()) / 60_000)).toBe(10);
+  /** `n` gestes déjà journalisés, il y a `ilYa` ms. */
+  const prerempli = (n: number, ilYa = 0, identifier = "forum-react:u1") =>
+    Array.from({ length: n }, () => ({
+      ip: "geste", identifier, createdAt: new Date(Date.now() - ilYa),
+    }));
+
+  it("bascule ×120 : re-cliquer la même pastille à l'infini finit en 429", async () => {
+    // LE DÉFAUT : la limite comptait les réactions PRÉSENTES, or la bascule pose puis retire la
+    // même ligne — le compteur ne dépassait jamais 1, et chaque clic diffusait sur Pusher.
+    for (let i = 0; i < 120; i++) {
+      h.existante = i % 2 ? { id: "r1" } : null;
+      expect((await POST(req("👍"), ctx)).status).toBe(200);
+    }
+    h.cree = null;
+    h.supprime = null;
+    h.diffuse = null;
+    h.existante = null;
+    expect((await POST(req("👍"), ctx)).status).toBe(429);
+    expect(h.cree).toBeNull();
+    expect(h.supprime).toBeNull();
+    expect(h.diffuse).toBeNull();
   });
 
   it("laisse passer un usage normal", async () => {
-    h.recentCount = 119;
+    h.journal = prerempli(119);
+    expect((await POST(req(), ctx)).status).toBe(200);
+  });
+
+  it("compte les gestes d'UN SEUL membre, sur une fenêtre glissante de 10 min", async () => {
+    h.journal = [...prerempli(120, 0, "forum-react:u2"), ...prerempli(120, 10 * 60_000 + 1000)];
     expect((await POST(req(), ctx)).status).toBe(200);
   });
 
   it("refuse en 429 au-delà, sans écrire ni diffuser", async () => {
-    h.recentCount = 120;
+    h.journal = prerempli(120);
     expect((await POST(req(), ctx)).status).toBe(429);
     expect(h.cree).toBeNull();
     expect(h.diffuse).toBeNull();

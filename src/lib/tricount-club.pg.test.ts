@@ -34,11 +34,16 @@ let transfererAuMembre: typeof import("./tricount-club").transfererAuMembre;
 
 const MARQUEUR = "PG-TEST-tricount-club";
 // Des dates qu'aucun autre fichier n'emploie : `Tricount.date` est unique.
-const J1 = "2099-03-01";
-const J2 = "2099-03-02";
-const J3 = "2099-03-03";
-const J4 = "2099-03-04";
-const J5 = "2099-03-05";
+// Plus en 2099 : la route refuse désormais une date à plus de deux ans d'aujourd'hui
+// (lib/date-saisie.ts). On prend donc des jours à ~700 jours d'ici, recalculés à chaque passage
+// pour rester dans la plage quelle que soit la date du jour — et assez loin pour ne croiser
+// aucune date fixe des autres fichiers pg.
+const dansNJours = (n: number) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+const J1 = dansNJours(700);
+const J2 = dansNJours(701);
+const J3 = dansNJours(702);
+const J4 = dansNJours(703);
+const J5 = dansNJours(704);
 const DATES = [J1, J2, J3, J4, J5];
 let alice = "";
 let membre = "";

@@ -78,7 +78,11 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
-  if (!session.resa) {
+  // Contrôle de RÔLE : le délégant doit avoir une session ResaMania, dont le délégué empruntera
+  // le jeton. Pendant une panne passagère (`resaUnavailable`), cette session existe bel et
+  // bien — seul son rafraîchissement attend — : on laisse créer la délégation, elle servira
+  // dès que ResaMania répondra (le délégué recevra d'ici là un 503 « réessaie »).
+  if (!session.resa && !session.resaUnavailable) {
     return NextResponse.json(
       { error: "La délégation nécessite une connexion ResaMania." },
       { status: 403 },

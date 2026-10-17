@@ -194,7 +194,12 @@ export async function PUT(
       // pouvoir continuer sur un autre téléphone sans passer par un écran d'erreur.
       if (m.scorerId !== session.userId) {
         if (m.status === "done") {
-          throw new HttpError(409, "Ce match est terminé — passe par la correction du score");
+          // Code `match-done` : ce 409 est le TROISIÈME de cette route, et il demande au marqueur
+          // une troisième réaction. Sans code, l'écran le lisait comme « quelqu'un d'autre
+          // marque » — il gardait alors son journal À VIE et renvoyait le même refus à chaque
+          // réouverture. Ici le score final est enregistré : le journal ne sert plus à rien, on
+          // le jette et on ferme (cf. `InterclubScorer`).
+          throw new HttpError(409, "Ce match est terminé — passe par la correction du score", "match-done");
         }
         if (m.scorerId !== null && !scorerIsStale(m.scorerClaimedAt)) {
           throw new HttpError(409, "Quelqu'un d'autre marque ce match");

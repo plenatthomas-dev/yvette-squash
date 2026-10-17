@@ -81,7 +81,36 @@ export type PushPayload = {
   actions?: { action: string; title: string }[];
   /** Ce dont ces boutons ont besoin pour agir (créneau à réserver, rencontre…). Hors journal. */
   data?: Record<string, unknown>;
+  /**
+   * Durée (s) pendant laquelle le service push garde la notification pour un appareil
+   * injoignable (éteint, hors réseau). Défaut : DEFAULT_TTL_S. Consigne de TRANSPORT : n'est ni
+   * envoyée au service worker ni journalisée.
+   */
+  ttl?: number;
+  /**
+   * Priorité de livraison (en-tête `Urgency` du protocole Web Push). « high » demande au
+   * téléphone de se réveiller tout de suite (Android en Doze diffère sinon). Défaut : « normal ».
+   * Même statut que `ttl` : consigne de transport, hors charge utile.
+   */
+  urgency?: "very-low" | "low" | "normal" | "high";
 };
+
+/**
+ * TTL par défaut d'une notification : 24 h.
+ *
+ * Sans option, `web-push` pose QUATRE SEMAINES (DEFAULT_TTL de web-push-lib.js) : un téléphone
+ * rallumé après un mois de tiroir déversait des « Le match a commencé » et des « terrain libéré »
+ * périmés depuis longtemps. Une journée couvre la nuit d'un téléphone éteint ; le journal sous la
+ * cloche garde de toute façon la trace au-delà.
+ */
+const DEFAULT_TTL_S = 24 * 3600;
+
+/**
+ * Délai de socket (ms) d'un envoi. `web-push` n'en pose AUCUN par défaut : un service push qui
+ * ne répond pas tenait l'envoi — et, via les `Promise.all` de ce module, la route appelante —
+ * jusqu'au `maxDuration` de la fonction Vercel. Dix secondes, c'est déjà très long pour un push.
+ */
+const SEND_TIMEOUT_MS = 10_000;
 
 // Envoie une notif à TOUS les membres (annonce club, cf. espace admin). Un envoi par joueur
 // ayant au moins un abonnement (pushToUser dédoublonne les appareils et purge les abonnements
@@ -230,9 +259,13 @@ async function envoyerA(
     // notification (« Réserver », « Dispo »). Ces gestes agissent avec la session ouverte sur
     // l'appareil, et un abonnement survit à un changement de compte (cf. pushClient.ts,
     // `syncPushSubscription`) : sans lui, on réserverait au nom de celui qui tient le téléphone.
+    // `ttl` et `urgency` sont retirés de la charge utile : ce sont des en-têtes pour le service
+    // push, le service worker n'en a que faire.
+    const { ttl, urgency, ...contenu } = payload;
     await webpush.sendNotification(
       { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-      JSON.stringify({ ...payload, to: s.userId }),
+      JSON.stringify({ ...contenu, to: s.userId }),
+      { TTL: ttl ?? DEFAULT_TTL_S, urgency: urgency ?? "normal", timeout: SEND_TIMEOUT_MS },
     );
     return true;
   } catch (e) {

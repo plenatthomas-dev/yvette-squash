@@ -18,10 +18,28 @@ import type { PlanningDay } from "./resamania/types";
 //
 // Prudence commune aux deux sens : créneau hors planning courant ou booker inconnu → on ne
 // juge pas (on laisse l'état tel quel plutôt que de risquer un faux verdict).
+//
+// FRAÎCHEUR DE LA PHOTO. Le sens 1 est une écriture DESTRUCTIVE fondée sur une photo du
+// planning : une résa faite APRÈS la photo y apparaît forcément « libre ». Si la photo date de
+// 15 s (cache mémoire d'une instance) et qu'un membre vient de réserver via une AUTRE instance,
+// on annulerait dans le journal une résa bien réelle — et elle disparaîtrait de « Mes résas ».
+// D'où deux gardes : l'appelant ne réconcilie que sur une photo lue À L'INSTANT (cf.
+// api/planning, `fromCache`), et ici on ne JUGE PAS une ligne créée moins de
+// `PHOTO_MARGIN_MS` avant la photo (`fetchedAt`) ou après — la marge couvre le délai entre
+// l'écriture côté ResaMania et sa visibilité dans leur planning.
+// Limite connue : une RE-réservation repasse une ligne existante en "booked" sans toucher
+// `createdAt` (upsert de api/book) ; elle n'est couverte que par la première garde.
+const PHOTO_MARGIN_MS = 5_000;
+
 export async function reconcilePlanningWithBookings(
   planning: PlanningDay,
   date: string,
+  // Instant (epoch ms) de la photo du planning (cf. `getPlanningWithMeta`). Omis : aucune
+  // ligne n'est épargnée (comportement d'origine — réservé aux appelants qui savent que la
+  // photo est postérieure à toute écriture).
+  fetchedAt?: number,
 ): Promise<void> {
+  const judgedBefore = fetchedAt === undefined ? null : new Date(fetchedAt - PHOTO_MARGIN_MS);
   const bookings = await prisma.booking.findMany({
     where: {
       status: "booked",
@@ -36,9 +54,17 @@ export async function reconcilePlanningWithBookings(
 
   const stale: string[] = [];
   const activeEventIds = new Set<string>();
+  // Créneaux dont une résa est trop récente pour la photo : ni annulée, ni purgée de ses
+  // présences, ni candidate à la détection « hors appli » (elle vient de l'appli).
+  const tooRecentIds = new Set<string>();
   for (const b of bookings) {
     const slot = slotById.get(b.classEventId);
     if (!slot) continue; // hors planning courant
+    if (judgedBefore && b.createdAt > judgedBefore) {
+      tooRecentIds.add(b.classEventId);
+      activeEventIds.add(b.classEventId);
+      continue;
+    }
     if (slot.bookable) stale.push(b.id); // redevenu libre → annulé
     else if (slot.bookerContactId && slot.bookerContactId !== b.user.contactId) {
       stale.push(b.id); // pris par quelqu'un d'autre → notre résa a sauté
@@ -54,7 +80,9 @@ export async function reconcilePlanningWithBookings(
   }
 
   // Présences orphelines (créneau redevenu libre = résa annulée ailleurs) → purge.
-  const freeIds = planning.slots.filter((s) => s.bookable).map((s) => s.id);
+  const freeIds = planning.slots
+    .filter((s) => s.bookable && !tooRecentIds.has(s.id))
+    .map((s) => s.id);
   if (freeIds.length) {
     await prisma.attendance.deleteMany({ where: { classEventId: { in: freeIds } } });
   }

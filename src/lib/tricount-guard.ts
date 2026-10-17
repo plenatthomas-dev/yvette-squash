@@ -3,9 +3,14 @@ import type { AppSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { isSettled } from "@/lib/tricount";
 
-/** Un compte « email seul » n'a aucun jeton ResaMania rattaché (`resa === null`). */
+/**
+ * Un compte « email seul » n'a aucun jeton ResaMania rattaché (`resa === null`)… et n'est pas
+ * un compte ResaMania dont le jeton est momentanément irrafraîchissable (`resaUnavailable`,
+ * panne passagère) : sans cette nuance, une panne de ResaMania retirait à un membre ResaMania
+ * la gestion des dépenses avec le message « Compte email seul ».
+ */
 export function isEmailOnly(session: AppSession): boolean {
-  return session.resa === null;
+  return session.resa === null && !session.resaUnavailable;
 }
 
 /**

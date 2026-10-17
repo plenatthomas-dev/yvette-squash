@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { getActiveIncomingDelegations } from "@/lib/delegation";
 import { getFeatures } from "@/lib/features-server";
+import { isRealDateISO } from "@/lib/time";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
   const date = new URL(req.url).searchParams.get("date");
+  // Jour réel exigé : « ?date=abc » donnait `new Date("abcT00:00:00")`, date invalide que
+  // Prisma refuse en levant → 500 au lieu d'un refus explicite.
+  // Chaîne vide (« ?date= ») = pas de date : la route rendait déjà « à venir » dans ce cas.
+  if (date && !isRealDateISO(date)) {
+    return NextResponse.json({ error: "Date invalide" }, { status: 400 });
+  }
   const where = date
     ? {
         startsAt: {
@@ -25,7 +32,9 @@ export async function GET(req: NextRequest) {
 
   const bookings = await prisma.booking.findMany({
     where: { status: "booked", ...where },
-    include: { user: true },
+    // Le nom seul : la ligne User entière (hash de mot de passe, e-mail, jetons…) était lue
+    // pour chaque résa alors que la réponse n'en expose que `displayName`.
+    include: { user: { select: { displayName: true } } },
     orderBy: { startsAt: "asc" },
     take: 100,
   });
