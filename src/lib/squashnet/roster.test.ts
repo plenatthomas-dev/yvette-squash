@@ -58,7 +58,21 @@ describe("parseTeamRoster — le roster réel de Verrieres 2", () => {
       rang: 2158,
       rangM: 2269,
       registeredAt: "2025-09-22",
+      regiid: "584456",
     });
+  });
+
+  it("garde le `regiid` de chaque inscrit — la clé de sa fiche joueur", () => {
+    expect(roster.players.every((p) => /^\d+$/.test(p.regiid ?? ""))).toBe(true);
+    expect(new Set(roster.players.map((p) => p.regiid)).size).toBe(roster.players.length);
+  });
+
+  it("un roster rangé AVANT le `regiid` reste lisible", () => {
+    const ancien = {
+      ...roster,
+      players: roster.players.map(({ regiid: _r, ...p }) => p),
+    };
+    expect(estRoster(JSON.parse(JSON.stringify(ancien)))).toBe(true);
   });
 
   it("garde « NC » comme classement, et le rang qui va avec", () => {

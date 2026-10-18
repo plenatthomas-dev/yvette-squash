@@ -25,6 +25,7 @@ import { CLUB_TZ } from "@/lib/time";
 import { downloadFixtureIcs } from "@/lib/ics";
 import type { TieOutcome } from "@/lib/interclub-db";
 import { InterclubStats } from "@/components/InterclubStats";
+import InterclubTeamSheet from "@/components/InterclubTeamSheet";
 import { TrophyIcon } from "@/components/icons";
 import {
   FIXTURE_STATUS_LABEL,
@@ -349,7 +350,14 @@ function poulesAffichees(teams: Team[], visibles: Team[]): Poule[] {
  * sont eux qui départagent une égalité de points ; le détail gagnés–perdus est donné en toutes
  * lettres SOUS le tableau, pour nos équipes seulement, là où il se lit.
  */
-function StandingsTable({ poule }: { poule: Poule }) {
+function StandingsTable({
+  poule,
+  onOpenTeam,
+}: {
+  poule: Poule;
+  /** Toucher une équipe ouvre sa fiche : ses rencontres, leur détail, son effectif. */
+  onOpenTeam: (team: { snTeamId: string; name: string }) => void;
+}) {
   const { rows, standingsAt, ours } = poule;
   const nous = rows.filter((r) => r.snTeamId && ours.has(r.snTeamId));
   // Plusieurs de nos équipes dans le tableau : chaque rang, chaque stat porte son nom.
@@ -428,7 +436,19 @@ function StandingsTable({ poule }: { poule: Poule }) {
                 <tr key={`${r.rank}-${r.snTeamId ?? r.name}`} className={cestNous ? "is-us" : ""}>
                   <td className="ic-st-rank">{r.rank}</td>
                   <th scope="row" className="ic-st-team" title={r.name}>
-                    {r.name}
+                    {/* LE NOM EST UN BOUTON, pour TOUTES les équipes — les nôtres comprises : on
+                        y lit les mêmes choses. Sans identifiant fédéral, rien à ouvrir. */}
+                    {r.snTeamId ? (
+                      <button
+                        type="button"
+                        className="ic-st-link"
+                        onClick={() => onOpenTeam({ snTeamId: r.snTeamId as string, name: r.name })}
+                      >
+                        {r.name}
+                      </button>
+                    ) : (
+                      r.name
+                    )}
                     {cestNous && (
                       <span className="sr-only">
                         {plusieurs ? ` (notre ${nomDe(r)})` : " (notre équipe)"}
@@ -450,6 +470,11 @@ function StandingsTable({ poule }: { poule: Poule }) {
           </tbody>
         </table>
       </div>
+
+      {/* LE GESTE SE DIT : rien dans un tableau ne laisse deviner qu'une ligne s'ouvre. */}
+      <p className="ic-standings-hint muted tiny">
+        Touche une équipe pour voir ses rencontres, leur détail et son effectif.
+      </p>
 
       {/* LES AVERAGES, en toutes lettres et pour nous seulement. Ce sont eux qui départagent
           un nul 2-2 et deux équipes à égalité de points ; les noyer dans dix colonnes de plus
@@ -597,6 +622,8 @@ export default function Interclub({
   /** La route a-t-elle coupé la liste ? Affiché, jamais tu — cf. `loadList`. */
   const [truncated, setTruncated] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  /** La fiche d'une équipe de la poule, ouverte depuis le classement. */
+  const [sheet, setSheet] = useState<{ snTeamId: string; name: string } | null>(null);
   const [fixture, setFixture] = useState<Fixture | null>(null);
   const [creating, setCreating] = useState(false);
   /** Admin seulement : les rencontres viennent du calendrier de la ligue (cf. le POST). */
@@ -1015,7 +1042,7 @@ export default function Interclub({
           {toutes.length > 1 && p.ours.size === 1 && (
             <p className="ic-standings-team muted tiny">{[...p.ours.values()][0]}</p>
           )}
-          <StandingsTable poule={p} />
+          <StandingsTable poule={p} onOpenTeam={setSheet} />
         </div>
       ))}
 
@@ -1119,6 +1146,16 @@ export default function Interclub({
             );
           })}
         </ul>
+      )}
+
+      {sheet && (
+        <InterclubTeamSheet
+          key={sheet.snTeamId}
+          snTeamId={sheet.snTeamId}
+          name={sheet.name}
+          onClose={() => setSheet(null)}
+          onExpired={stableExpired}
+        />
       )}
 
       {creating && (

@@ -38,7 +38,7 @@ import { texte } from "./html";
 // ============================================================================
 
 /** Action AJAX de la section « Classement et rencontres ». */
-const STANDINGS_ACTION = "394242";
+export const STANDINGS_ACTION = "394242";
 
 /** Un couple gagné / perdu et son écart, tel que la fédération le publie. */
 export interface StandingTally {

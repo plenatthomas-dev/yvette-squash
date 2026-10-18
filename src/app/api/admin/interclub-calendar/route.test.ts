@@ -72,10 +72,10 @@ vi.mock("@/lib/squashnet/calendar", async (importOriginal) => ({
   }),
 }));
 
-vi.mock("@/lib/squashnet/standings", () => ({
-  fetchStandings: vi.fn(async () => {
+vi.mock("@/lib/squashnet/pool", () => ({
+  fetchPool: vi.fn(async () => {
     if (h.standingsThrows) throw new Error("réseau");
-    return h.standings;
+    return { standings: h.standings, ties: [], tiesError: null };
   }),
 }));
 

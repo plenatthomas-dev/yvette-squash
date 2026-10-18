@@ -114,6 +114,69 @@ describe("playerStats — sur la feuille officielle", () => {
   });
 });
 
+describe("playerStats — la liste des matchs de chaque joueur", () => {
+  const meta = (date: string, opponent = "Verrieres 2") => ({ date, teamName: "Équipe 1", opponent });
+  const avec = (side: "A" | "B" | null, date: string, ...lines: TieLine[]): OfficialFixture => ({
+    sheet: feuille(lines),
+    side,
+    meta: meta(date),
+  });
+
+  it("compte exactement MJ lignes, dont V gagnées — mêmes règles que les chiffres", () => {
+    const [r] = playerStats(
+      [
+        avec("A", "2026-10-08", simple()),
+        avec("A", "2026-10-15", simple({ winner: "B" })),
+        // Ni l'un ni l'autre ne comptent dans les chiffres : ils ne figurent pas dans la liste.
+        avec("A", "2026-10-22", simple({ winner: null })),
+        avec(null, "2026-10-29", simple()),
+      ],
+      parNom,
+    );
+    expect(r.matches).toHaveLength(r.played);
+    expect(r.matches.filter((m) => m.won)).toHaveLength(r.won);
+  });
+
+  it("date, équipe, adversaire et son équipe — du plus récent au plus ancien", () => {
+    const [r] = playerStats(
+      [
+        avec("A", "2026-10-08", simple({ a: { ...joueur("POPULU AXEL"), clt: "5A" }, b: { ...joueur("DETRY XAVIER"), clt: "5B" } })),
+        avec("A", "2026-10-15", simple({ label: "Homme 2", winner: "B" })),
+      ],
+      parNom,
+    );
+    expect(r.matches.map((m) => m.date)).toEqual(["2026-10-15", "2026-10-08"]);
+    expect(r.matches[1]).toEqual({
+      date: "2026-10-08",
+      teamName: "Équipe 1",
+      opponentTeam: "Verrieres 2",
+      opponentName: "Detry Xavier",
+      opponentClt: "5B",
+      // Notre joueur, ce soir-là, lu sur la même feuille.
+      clt: "5A",
+      label: "Homme 1",
+      won: true,
+      score: "11-6 11-3 8-11 11-0",
+    });
+    expect(r.matches[0]).toMatchObject({ label: "Homme 2", won: false });
+  });
+
+  it("RETOURNE le score quand nous sommes côté B : il se lit toujours de notre point de vue", () => {
+    // Côté B, notre joueur est DUPONT JEAN, qui perd 1-3 : la feuille écrit le score côté A.
+    const [r] = playerStats([avec("B", "2026-10-08", simple())], parNom);
+    expect(r.matches[0]).toMatchObject({
+      opponentName: "Populu Axel",
+      won: false,
+      score: "6-11 3-11 11-8 0-11",
+    });
+  });
+
+  it("sans la rencontre chez nous, la date de la feuille fait foi", () => {
+    const [r] = playerStats([{ sheet: feuille([simple()], { date: "2026-11-05" }), side: "A" }], parNom);
+    expect(r.matches[0]).toMatchObject({ date: "2026-11-05", teamName: null, opponentTeam: null });
+  });
+});
+
 describe("identityResolver — du nom fédéral au joueur de l'appli", () => {
   const thomas: AppPlayer = { kind: "member", id: "u1", name: "Tom", licence: "123A" };
   const invite: AppPlayer = { kind: "guest", id: "g1", name: "Jean Dupont", licence: null };

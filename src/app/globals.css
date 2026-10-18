@@ -4040,6 +4040,12 @@ body[data-scoring] .install-banner {
   flex-direction: column;
   gap: 10px;
 }
+/* Pico pose `ul li { list-style: square }`, qui vise le LI (0,0,2) et bat l'héritage du
+   `none` posé sur le UL : une puce carrée sortait devant chaque rencontre (même piège que
+   `.forum-list`, Forum.css). */
+.ic-list > li, .ic-matches > li {
+  list-style: none;
+}
 
 /* Ligne de rencontre / de match : un bouton pleine largeur, pas un lien — la cible doit
    rester confortable au pouce, l'appli se tient debout entre deux portes.
@@ -6486,4 +6492,352 @@ body[data-scoring] .install-banner {
    réponse à la question que se pose celui qui regarde un graphique sans courbe. */
 .rankhist-indice {
   margin: 0 0 10px;
+}
+
+/* ============================================================================
+   LA FICHE D'UNE ÉQUIPE DE LA POULE (InterclubTeamSheet) — rencontres, détail
+   d'une rencontre, effectif, matchs d'un joueur. Et la fenêtre des matchs d'un
+   joueur du club, ouverte depuis le tableau des statistiques.
+
+   Tout se pose dans une MODALE, donc sur une carte : les éléments de liste
+   s'ENFONCENT (`--sunken`) au lieu d'être des cartes de plus (Règle de la Carte
+   sur Carte). L'issue d'un match se dit par le FILET à gauche et le poids des
+   chiffres, comme sur la liste des rencontres — jamais par un voile (DESIGN.md).
+   ============================================================================ */
+
+/* Un nom qui s'ouvre, dans un tableau. Ni vert (le tableau en compterait dix) ni couleur de
+   lien : l'encre du tableau, soulignée d'un filet discret — assez pour qu'on devine qu'il se
+   touche, pas assez pour faire une colonne bleue. */
+.ic-st-link {
+  margin: 0;
+  padding: 0;
+  width: auto;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: var(--grid-line);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.ic-st-link:hover {
+  background: none;
+  color: inherit;
+  text-decoration-color: currentColor;
+}
+.ic-st-link:focus-visible,
+.ic-sheet-link:focus-visible,
+.ic-sheet-person:focus-visible {
+  outline: 2px solid var(--pico-primary);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+.ic-standings-hint {
+  margin: 8px 0 0;
+}
+
+/* Plus large que la modale par défaut (380px) : une rencontre aligne deux noms et cinq jeux. */
+.modal.ic-sheet {
+  max-width: 520px;
+}
+.ic-sheet-head h3 {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ic-sheet-head h3:focus {
+  outline: none;
+}
+.ic-sheet-back {
+  font-size: 1.5rem;
+}
+
+.ic-sheet-msg {
+  margin: 10px 0 0;
+}
+.ic-sheet-sum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 0 0 12px;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.ic-sheet-tabs {
+  margin-bottom: 10px;
+}
+
+/* Les rencontres de l'équipe : la ligne de la liste interclub, enfoncée dans la modale. */
+.ic-sheet .ic-row {
+  background: var(--sunken);
+}
+/* DANS LES FICHES, L'ISSUE PEINT AUSSI LE FOND (demande du club, 2026-10-18) : voile bleu
+   très pâle pour une victoire, rouge pour une défaite, en plus du filet. L'exception tient
+   parce qu'une fiche n'a pas d'état « en cours » à qui faire concurrence (DESIGN.md, Issue).
+   Le nul garde le fond neutre : l'ambre y serait lu comme « en cours ».
+   Mesuré : texte secondaire ≥ 4,75:1 sur les deux voiles, dans les trois thèmes — le même
+   niveau que sur `--sunken`. */
+.ic-sheet .ic-row.ic-issue-win,
+.ic-sheet-match.ic-issue-win {
+  background: var(--good-wash);
+}
+.ic-sheet .ic-row.ic-issue-loss,
+.ic-sheet-match.ic-issue-loss {
+  background: var(--bad-wash);
+}
+.ic-sheet-pair {
+  font-weight: 400;
+}
+/* L'équipe dont c'est la fiche, en gras : c'est d'elle qu'on lit le score. */
+.ic-sheet-pair .is-focus {
+  font-weight: 700;
+}
+/* Une rencontre à venir ne s'ouvre pas : elle ne doit pas réagir comme si elle s'ouvrait. */
+.ic-sheet-later,
+.ic-sheet-later:hover {
+  border-color: var(--pico-card-border-color);
+  cursor: default;
+}
+
+/* Les boutons de la fiche qui se lisent comme du texte : un nom de joueur, d'équipe. */
+.ic-sheet-link {
+  margin: 0;
+  padding: 0;
+  width: auto;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  color: var(--pico-contrast);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ic-sheet-link:hover {
+  background: none;
+  color: var(--pico-contrast);
+}
+.ic-sheet-link .ic-sheet-name,
+.ic-sheet-team.ic-sheet-link {
+  text-decoration: underline;
+  text-decoration-color: var(--grid-line);
+  text-underline-offset: 3px;
+}
+
+/* Le classement d'un soir (« 4D · 2128 ») : un sigle, au cran des sigles, titré au survol. */
+.ic-sheet-clt {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--pico-muted-color);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* --- Le détail d'une rencontre ------------------------------------------------ */
+
+.ic-sheet-score {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 6px;
+}
+.ic-sheet-team {
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.25;
+  /* « Liberty Country / Club 3 » plutôt qu'un « 3 » orphelin sous le nom. */
+  text-wrap: balance;
+}
+.ic-sheet-score > :first-child {
+  justify-self: end;
+  text-align: right;
+}
+/* La taille du total de la fiche rencontre (`.ic-total`) : le même rôle, la même valeur. */
+.ic-sheet-bigscore {
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ic-sheet-meta {
+  margin: 0 0 12px;
+  text-align: center;
+}
+
+.ic-sheet-lines,
+.ic-sheet-matches,
+.ic-sheet-roster {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ic-sheet-lines > li,
+.ic-sheet-matches > li,
+.ic-sheet-roster > li {
+  list-style: none;
+  margin: 0;
+}
+.ic-sheet-line {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px 10px;
+  background: var(--sunken);
+  border-radius: var(--radius-sm);
+}
+.ic-sheet-line-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.ic-sheet-line-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+}
+.ic-sheet-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  min-width: 0;
+  font-size: 0.95rem;
+}
+/* Le vainqueur du simple en gras, le perdant à l'encre normale : la ligne se lit sans chiffres. */
+.ic-sheet-who.is-winner .ic-sheet-name {
+  font-weight: 700;
+}
+.ic-sheet-games {
+  display: flex;
+  font-variant-numeric: tabular-nums;
+  color: var(--pico-muted-color);
+}
+.ic-sheet-games > span {
+  min-width: 1.9em;
+  text-align: right;
+}
+/* Le jeu gagné : encre pleine et gras. Le perdu reste en sourdine. */
+.ic-sheet-games > .is-won {
+  font-weight: 700;
+  color: var(--pico-contrast);
+}
+
+/* --- L'effectif ---------------------------------------------------------------- */
+
+.ic-sheet-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--sunken);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  color: var(--pico-contrast);
+  font-size: 0.95rem;
+  text-align: left;
+}
+button.ic-sheet-person {
+  cursor: pointer;
+}
+button.ic-sheet-person:hover {
+  background: var(--sunken);
+  border-color: var(--grid-line);
+  color: var(--pico-contrast);
+}
+/* Le chevron dit qu'on entre quelque part — le seul indice d'une ligne qui s'ouvre. */
+button.ic-sheet-person::after {
+  content: "›";
+  margin-left: 2px;
+  color: var(--pico-muted-color);
+  font-size: 1rem;
+  line-height: 1;
+}
+.ic-sheet-person .ic-sheet-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+.ic-sheet-badge {
+  flex: 0 0 auto;
+  min-width: 2.6em;
+  padding: 2px 8px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 999px;
+  background: var(--pico-card-background-color);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* --- Les matchs d'un joueur ---------------------------------------------------- */
+
+.ic-sheet-record {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+.ic-sheet-match {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 12px 10px;
+  background: var(--sunken);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid transparent;
+}
+.ic-sheet-match.ic-issue-win { border-left-color: var(--good-edge); }
+.ic-sheet-match.ic-issue-loss { border-left-color: var(--bad-edge); }
+.ic-sheet-match-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.ic-sheet-result {
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+/* « contre Aubertin Remi 4D Stade Français » : une ligne pour la question « contre qui ? ».
+   Le nom ne se coupe jamais entre prénom et nom ; s'il faut replier, c'est l'équipe qui passe
+   à la ligne. */
+.ic-sheet-opp {
+  min-width: 0;
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+.ic-sheet-opp strong {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ic-sheet-opp-team {
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+}
+/* Le score a sa ligne, aligné à gauche sous le nom : un cinq-jeux ne repousse plus rien. */
+.ic-sheet-match-score {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--pico-muted-color);
+}
+.ic-sheet-match-score > .is-won {
+  font-weight: 700;
+  color: var(--pico-contrast);
 }
