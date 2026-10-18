@@ -32,6 +32,7 @@ const h = vi.hoisted(() => ({
   moved: [] as Array<[unknown, string, unknown]>,
   standings: [] as Array<Record<string, unknown>>,
   standingsThrows: false,
+  sheetsThrows: false,
   teamUpdates: [] as Array<Record<string, unknown>>,
   /** La fonction interclub est-elle allumée ? (404 avant toute chose si elle ne l'est pas.) */
   interclub: true,
@@ -78,6 +79,13 @@ vi.mock("@/lib/squashnet/standings", () => ({
   }),
 }));
 
+vi.mock("@/lib/interclub-sheets", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/interclub-sheets")>()),
+  refreshTeamSheets: vi.fn(async () => {
+    if (h.sheetsThrows) throw new Error("base");
+    return { read: 3, stored: 3, empty: 0, unmatched: 0, failed: 0 };
+  }),
+}));
 vi.mock("@/lib/db", () => {
   const prisma: Record<string, unknown> = {
     interclubTeam: {
@@ -200,6 +208,7 @@ beforeEach(() => {
   h.moved = [];
   h.standings = [{ rank: 1, name: "Squash de l'Yvette", snTeamId: "161092", points: 9 }];
   h.standingsThrows = false;
+  h.sheetsThrows = false;
   h.teamUpdates = [];
   h.interclub = true;
   h.admin = { userId: "adm", email: "a@ex.com" };
@@ -552,6 +561,18 @@ describe("classement — la lecture à la demande", () => {
     const ecrit = h.teamUpdates.at(-1);
     expect(JSON.parse(ecrit?.snStandingsJson as string)).toEqual(h.standings);
     expect(ecrit?.snStandingsAt).toBeInstanceOf(Date);
+  });
+
+  it("relit AUSSI les feuilles de match, et le dit", async () => {
+    const res = await POST(req({ action: "standings", teamId: "t1" }));
+    expect((await res.json()).sheets).toMatch(/3 feuille\(s\) de match relue\(s\)/);
+  });
+
+  it("une feuille en échec ne transforme pas un classement lu en erreur", async () => {
+    h.sheetsThrows = true;
+    const res = await POST(req({ action: "standings", teamId: "t1" }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).sheets).toMatch(/non relues/);
   });
 
   it("REFUSE sans la division, plutôt que de rendre une autre poule", async () => {

@@ -25,6 +25,7 @@ import {
 } from "@/lib/interclub-db";
 import { notifyFixtureMoved } from "@/lib/interclub-notify";
 import { refreshTeamStandings } from "@/lib/interclub-standings";
+import { describeSheets, refreshTeamSheets } from "@/lib/interclub-sheets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -219,7 +220,16 @@ export async function POST(req: NextRequest) {
         { status: 404 },
       );
     }
-    return NextResponse.json({ ok: true, rows: r.rows, standingsAt: r.at.toISOString() });
+    // LES FEUILLES DE MATCH AVEC, comme dans les crons : le palmarès des joueurs en dépend, et
+    // c'est ce bouton qui rattrape la saison déjà jouée sans attendre le lundi. Best-effort : un
+    // classement lu ne se transforme pas en erreur parce qu'une feuille n'a pas répondu.
+    let sheets: string | null = null;
+    try {
+      sheets = describeSheets(await refreshTeamSheets(team.id));
+    } catch {
+      sheets = "feuilles de match non relues";
+    }
+    return NextResponse.json({ ok: true, rows: r.rows, standingsAt: r.at.toISOString(), sheets });
   }
 
   let published: OwnTie[];
