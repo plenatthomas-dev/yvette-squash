@@ -269,6 +269,12 @@ L'exception est le bloc de **disponibilités**, où le fond porte l'état : il n
 une rencontre à venir, donc aucun voile « en cours » ne peut y entrer en concurrence, et on y
 balaie une liste de noms à l'œil plutôt qu'on ne la lit ligne à ligne.
 
+Seconde exception, à la demande du club (2026-10-18) : les **fiches** — rencontres d'une équipe
+de la poule, matchs d'un joueur. Une victoire y prend le Voile Favorable, une défaite le Voile
+Défavorable, en plus du filet. Une fiche ne montre jamais de rencontre « en cours », donc rien
+n'y entre en concurrence ; le nul garde le fond neutre, où l'ambre se lirait « en cours ». Texte
+secondaire ≥ 4,75:1 sur les deux voiles, dans les trois thèmes.
+
 ### Couleurs volontairement hors thème
 
 Deux paires échappent au système, et c'est délibéré. Toutes deux fixent **fond ET texte

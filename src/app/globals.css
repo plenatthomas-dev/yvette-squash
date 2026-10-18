@@ -6578,6 +6578,20 @@ body[data-scoring] .install-banner {
 .ic-sheet .ic-row {
   background: var(--sunken);
 }
+/* DANS LES FICHES, L'ISSUE PEINT AUSSI LE FOND (demande du club, 2026-10-18) : voile bleu
+   très pâle pour une victoire, rouge pour une défaite, en plus du filet. L'exception tient
+   parce qu'une fiche n'a pas d'état « en cours » à qui faire concurrence (DESIGN.md, Issue).
+   Le nul garde le fond neutre : l'ambre y serait lu comme « en cours ».
+   Mesuré : texte secondaire ≥ 4,75:1 sur les deux voiles, dans les trois thèmes — le même
+   niveau que sur `--sunken`. */
+.ic-sheet .ic-row.ic-issue-win,
+.ic-sheet-match.ic-issue-win {
+  background: var(--good-wash);
+}
+.ic-sheet .ic-row.ic-issue-loss,
+.ic-sheet-match.ic-issue-loss {
+  background: var(--bad-wash);
+}
 .ic-sheet-pair {
   font-weight: 400;
 }
