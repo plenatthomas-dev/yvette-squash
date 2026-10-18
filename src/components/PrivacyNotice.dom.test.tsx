@@ -122,6 +122,27 @@ describe("note de confidentialité — la cohérence entre paragraphes", () => {
     );
   });
 
+  it("annonce que le nom SURVIT aussi dans un tableau de tournoi", () => {
+    // `TournamentPlayer.displayName` est figé et `userId` passe à NULL à la suppression du
+    // compte : le nom reste. L'interclub n'est donc plus la « seule exception » dès que les
+    // tournois tournent, et la note ne doit plus le prétendre.
+    const seul = texteDeLaNote({ tournament: true });
+    expect(seul).toMatch(/tableau d'un tournoi même si ton compte est supprimé/i);
+  });
+
+  it("ne parle plus de « seule exception » quand interclub ET tournois tournent", () => {
+    const t = texteDeLaNote({ interclub: true, tournament: true });
+    expect(t).not.toMatch(/la seule exception/i);
+    expect(t).toMatch(/Avec les tableaux de tournoi, ce sont les seules exceptions/i);
+  });
+
+  it("renvoie vers la page publique de suppression de compte", () => {
+    // Le chemin « dans l'appli » qu'exige Google Play, au même titre que les Paramètres.
+    texteDeLaNote();
+    const lien = document.querySelector('.privacy-body a[href="/suppression-compte"]');
+    expect(lien).not.toBeNull();
+  });
+
   it("la nuance vaut aussi pour les tournois, qui portent des prénoms d'invités", () => {
     // La phrase était déjà limite avant l'interclub : un tournoi enregistre des invités hors
     // asso. Ce test dit que la nuance couvre les deux, et non seulement la dernière arrivée.

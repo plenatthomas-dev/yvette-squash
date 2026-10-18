@@ -2,21 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { sendEmail, emailConfigured } from "@/lib/email";
+import {
+  OWNER_INBOX,
+  OWNER_MAX_PER_DAY,
+  ownerMessagesRecently,
+  recordOwnerMessage,
+} from "@/lib/owner-inbox";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Destinataire des commentaires (le proprio de l'appli). Surchargeable par variable d'env.
-const TO = process.env.FEEDBACK_TO_EMAIL ?? "plenat.thomas@gmail.com";
-
 // Longueur max d'un commentaire : large pour décrire un bug/une idée, mais bornée contre
 // l'abus. Doit rester synchronisée avec le maxLength de la zone de texte (page.tsx).
 const MAX_LEN = 1000;
-// Rate limiting : au-delà de MAX_PER_DAY envois en WINDOW_MS pour un même membre, on refuse
-// (protège la boîte mail du spam). Le compteur vit en base — les fonctions serverless n'ont
-// pas de mémoire partagée — sur le même modèle que le rate limiting du login.
-const WINDOW_MS = 24 * 60 * 60_000; // 24 h glissantes
-const MAX_PER_DAY = 10;
 
 // POST /api/feedback  { message }
 // Envoie le commentaire du membre connecté par e-mail au proprio (objet « APPLI SQUASH YVETTE »),
@@ -39,16 +37,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Rate limiting : nombre d'envois de ce membre sur les 24 h glissantes.
-  const since = new Date(Date.now() - WINDOW_MS);
-  // Purge opportuniste des lignes hors fenêtre (tous membres : garde la table minuscule).
-  await prisma.feedbackMessage.deleteMany({ where: { createdAt: { lt: since } } });
-  const sentRecently = await prisma.feedbackMessage.count({
-    where: { userId: session.userId, createdAt: { gte: since } },
-  });
-  if (sentRecently >= MAX_PER_DAY) {
+  // Rate limiting : nombre d'envois de ce membre sur les 24 h glissantes (cf. lib/owner-inbox).
+  if ((await ownerMessagesRecently(session.userId)) >= OWNER_MAX_PER_DAY) {
     return NextResponse.json(
-      { error: `Limite atteinte : ${MAX_PER_DAY} messages par 24 h. Réessaie plus tard.` },
+      { error: `Limite atteinte : ${OWNER_MAX_PER_DAY} messages par 24 h. Réessaie plus tard.` },
       { status: 429 },
     );
   }
@@ -70,7 +62,7 @@ export async function POST(req: NextRequest) {
 
   try {
     await sendEmail({
-      to: TO,
+      to: OWNER_INBOX,
       replyTo: userEmail || undefined,
       subject: "APPLI SQUASH YVETTE",
       text: `Commentaire de ${who}${userEmail ? ` (${userEmail})` : ""} :\n\n${text}`,
@@ -84,7 +76,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Envoi réussi : on journalise pour le compteur (les envois échoués ne comptent pas).
-  await prisma.feedbackMessage.create({ data: { userId: session.userId } }).catch(() => {});
+  await recordOwnerMessage(session.userId);
 
   return NextResponse.json({ ok: true });
 }
