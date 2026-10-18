@@ -479,15 +479,15 @@ function VueRencontre({
         </span>
         {equipe(tie.awayCode, tie.awayName)}
       </div>
+      {/* La journée et le jour sont au titre : la ligne ne garde que l'heure et les totaux. */}
       <p className="muted tiny ic-sheet-meta">
-        {tie.round} · {tie.dateConfirmed ? jour(tie.date) : "date à fixer"}
-        {tie.time && ` à ${tie.time}`}
-        {totaux && (
-          <>
-            {" "}
-            · jeux {totaux.jeux[0]}–{totaux.jeux[1]} · points {totaux.points[0]}–{totaux.points[1]}
-          </>
-        )}
+        {[
+          tie.dateConfirmed && tie.time ? tie.time : null,
+          totaux && `jeux ${totaux.jeux[0]}–${totaux.jeux[1]}`,
+          totaux && `points ${totaux.points[0]}–${totaux.points[1]}`,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
       </p>
       <ul className="ic-sheet-lines">
         {tie.lines.map((l) => {
@@ -554,7 +554,7 @@ function VueJoueur({
   return (
     <>
       <p className="ic-sheet-sum muted">
-        {[data.clt && `Classé ${data.clt}`, data.rangM && `rang mixte ${data.rangM}`, data.category]
+        {[data.clt && `Classé ${data.clt}`, data.rangM && `rang mixte ${data.rangM}`, data.category && `catégorie ${data.category}`]
           .filter(Boolean)
           .join(" · ")}
       </p>

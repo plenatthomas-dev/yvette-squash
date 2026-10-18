@@ -4040,6 +4040,12 @@ body[data-scoring] .install-banner {
   flex-direction: column;
   gap: 10px;
 }
+/* Pico pose `ul li { list-style: square }`, qui vise le LI (0,0,2) et bat l'héritage du
+   `none` posé sur le UL : une puce carrée sortait devant chaque rencontre (même piège que
+   `.forum-list`, Forum.css). */
+.ic-list > li, .ic-matches > li {
+  list-style: none;
+}
 
 /* Ligne de rencontre / de match : un bouton pleine largeur, pas un lien — la cible doit
    rester confortable au pouce, l'appli se tient debout entre deux portes.
@@ -6633,6 +6639,8 @@ body[data-scoring] .install-banner {
   font-size: 0.95rem;
   font-weight: 600;
   line-height: 1.25;
+  /* « Liberty Country / Club 3 » plutôt qu'un « 3 » orphelin sous le nom. */
+  text-wrap: balance;
 }
 .ic-sheet-score > :first-child {
   justify-self: end;

@@ -93,7 +93,7 @@ describe("InterclubTeamSheet", () => {
     // Le détail : les quatre simples, jeu par jeu, et les totaux de Squash App.
     fireEvent.click(j1);
     expect(await within(dialog).findByText("Homme 3")).toBeTruthy();
-    expect(dialog.textContent).toContain("jeux 6–11 · points 155–166");
+    expect(dialog.textContent).toContain("20:00 · jeux 6–11 · points 155–166");
     const kadiBtn = within(dialog).getByRole("button", { name: /Kadi Rafik/ });
     expect(kadiBtn.className).toContain("is-winner");
 

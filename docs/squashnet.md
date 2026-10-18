@@ -593,8 +593,17 @@ joueur ne demande que `regiid`, et publie l'identité (licence, catégorie, « N
 Rang : 4086 - RangM : 4976 ») puis **tous les matchs du joueur dans l'épreuve**, toutes équipes
 confondues, dans `<table id="table_results">` : rencontre, date (`data-order` complet), son
 classement ce soir-là, l'adversaire (avec son `regiid` et ses trois valeurs), le résultat et le
-score **de son point de vue**. `393474` rend les mêmes matchs (lien de la feuille de match),
-avec un tableau sans identifiant et deux valeurs de classement seulement : on lit `393477`.
+score. `393474` rend les mêmes matchs (lien de la feuille de match), avec un tableau sans
+identifiant et deux valeurs de classement seulement : on lit `393477`.
+
+⚠️ **Le score est écrit du côté du VAINQUEUR**, pas du joueur. Les deux matchs de Kadi, gagnés,
+ne pouvaient pas le montrer ; la fiche de Plenat Thomas (2025-26, relevée le même jour sur la
+préversion) si : ses six défaites portent toutes le score du gagnant (« 3-11 12-10 11-8 11-8 »,
+Perdu). `parsePlayer` le remet de son côté en comptant les jeux contre le résultat — juste aussi
+le jour où la ligue changerait de convention.
+
+Hors de nos poules, l'équipe adverse est nommée en coupant l'intitulé sur **l'équipe du joueur**,
+qu'on l'a vu défendre dans nos poules (`otherTeamInLabel`) ; l'autre nom est pris tel quel.
 
 ⚠️ **L'intitulé de la rencontre n'est pas ordonné** (« Verrieres 4-Squash in Issy » pour une
 rencontre jouée à Issy), et son tiret sans espaces peut appartenir à un nom d'équipe. Les

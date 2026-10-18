@@ -1,3 +1,4 @@
+import { inverserScore, jeuxDuScore } from "../interclub-score";
 import { postAjax } from "./client";
 import { TR, attr, cellule, cellules, dateIso, heure, rang, texte, txt, valeur } from "./html";
 import { normalize } from "./match";
@@ -10,7 +11,13 @@ import { joueur, type TiePlayer } from "./tie";
 //  classement de poule comme sur la fiche d'équipe. Elle publie l'identité du
 //  joueur, puis TOUS ses matchs de l'épreuve, toutes équipes confondues :
 //  rencontre, date, son classement ce soir-là, l'adversaire et le sien, le
-//  résultat et le score, écrit DE SON POINT DE VUE (il est en premier).
+//  résultat et le score.
+//
+//  ⚠️ LE SCORE EST ÉCRIT DU CÔTÉ DU VAINQUEUR, pas du joueur : mesuré le
+//  2026-10-18 sur les neuf matchs de PLENAT THOMAS (saison 2025-26), ses six défaites
+//  portent toutes le score du gagnant (« 3-11 12-10 11-8 11-8 », Perdu). La
+//  fixture de Kadi, qui n'a que des victoires, ne pouvait pas le montrer. On le
+//  remet de son côté (`deSonCote`).
 //
 //  Mesuré le 2026-10-18 sur KADI RAFIK (644801) : 5,6 Ko, deux matchs, les mêmes
 //  que Squash App. Le seul paramètre est `regiid` — l'identifiant d'une
@@ -53,7 +60,7 @@ export interface PlayerMatch {
   opponent: TiePlayer | null;
   /** Null sur un libellé inconnu : on ne range pas un « Abandon » dans la case voisine. */
   result: "won" | "lost" | null;
-  /** « 11-5 11-8 13-15 11-7 », SON score en premier. */
+  /** « 11-5 11-8 13-15 11-7 », SON score en premier (remis de son côté, cf. l'en-tête). */
   score: string | null;
 }
 
@@ -75,6 +82,23 @@ const RESULTATS: ReadonlyMap<string, "won" | "lost"> = new Map([
   ["gagne", "won"],
   ["perdu", "lost"],
 ]);
+
+/**
+ * Le score d'un match de la fiche, remis DE SON CÔTÉ.
+ *
+ * On ne retourne pas sur la seule foi du résultat : on compte les jeux, et on retourne quand ils
+ * le contredisent. Juste avec la convention mesurée (le vainqueur d'abord), et juste encore le
+ * jour où la ligue écrirait le score du côté du joueur. Un score illisible, ou un résultat
+ * inconnu, reste tel quel : un texte brut reste vrai.
+ */
+function deSonCote(score: string | null, result: "won" | "lost" | null): string | null {
+  const jeux = jeuxDuScore(score);
+  if (!score || !result || !jeux) return score;
+  const gagnes = jeux.filter(([a, b]) => a > b).length;
+  const perdus = jeux.filter(([a, b]) => b > a).length;
+  if (gagnes === perdus) return score;
+  return gagnes > perdus === (result === "won") ? score : inverserScore(score);
+}
 
 /** « 5B - 4086 - 4976 » → ses trois valeurs. */
 function troisValeurs(raw: string): { clt: string | null; rang: number | null; rangM: number | null } {
@@ -123,6 +147,7 @@ export function parsePlayer(html: string, regiid: string): PlayerHistory {
     const cellDate = cellule(c, "Date");
     // `data-order` porte « 2026-10-08 20:00:00 » : la date ET l'heure, que la case visible n'a pas.
     const ordre = cellDate ? attr(cellDate.attrs, "data-order") : null;
+    const result = RESULTATS.get(normalize(valeur(c, "Résultat"))) ?? null;
     matches.push({
       tie,
       date: /^\d{4}-\d{2}-\d{2}/.test(ordre ?? "")
@@ -131,8 +156,8 @@ export function parsePlayer(html: string, regiid: string): PlayerHistory {
       time: heure(ordre),
       ...troisValeurs(valeur(c, "Clt")),
       opponent: joueur(cellule(c, "Adversaire")),
-      result: RESULTATS.get(normalize(valeur(c, "Résultat"))) ?? null,
-      score: txt(valeur(c, "Score")),
+      result,
+      score: deSonCote(txt(valeur(c, "Score")), result),
     });
   }
 
@@ -163,6 +188,32 @@ export function splitTieLabel(label: string, knownNames: readonly string[]): [st
     if (reste === l.slice(pa.length)) continue; // pas de tiret juste après : « Verrieres 2 » ≠ « Verrieres 21 »
     const b = knownNames.find((n) => plie(n) === reste);
     if (b) return [a, b];
+  }
+  return null;
+}
+
+/**
+ * « Liberty Country Club 1-Squash de l'Yvette », vu de « Squash de l'Yvette » → « Liberty
+ * Country Club 1 ».
+ *
+ * L'autre équipe d'un intitulé dont on connaît UN côté : celui du joueur, qu'on l'a vu défendre
+ * dans nos poules. C'est ce qui nomme l'adversaire d'un match joué hors de nos poules, où
+ * `splitTieLabel` ne connaît pas l'autre nom. On ne coupe qu'au tiret collé au nom connu, et
+ * l'autre nom est pris tel quel : rien n'est deviné.
+ */
+export function otherTeamInLabel(label: string, team: string): string | null {
+  const l = texte(label);
+  const t = texte(team);
+  if (!t) return null;
+  const pl = l.toLowerCase();
+  const pt = t.toLowerCase();
+  if (pl.startsWith(pt)) {
+    const autre = /^\s*-\s*(.+)$/.exec(l.slice(t.length))?.[1];
+    if (autre) return autre.trim();
+  }
+  if (pl.endsWith(pt)) {
+    const autre = /^(.+?)\s*-\s*$/.exec(l.slice(0, l.length - t.length))?.[1];
+    if (autre) return autre.trim();
   }
   return null;
 }

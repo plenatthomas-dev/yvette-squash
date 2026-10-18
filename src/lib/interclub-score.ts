@@ -2,7 +2,8 @@
 //
 // La ligue écrit un simple en une chaîne, « 11-4 12-14 11-9 3-11 9-11 », du point de vue du
 // côté qu'elle place en premier : le receveur sur la feuille de poule, le côté A sur la feuille
-// de match, le joueur lui-même sur sa fiche. Ces fonctions ne décident jamais de ce sens : elles
+// de match, le vainqueur sur la fiche d'un joueur (remis de son côté à la lecture, `player.ts`).
+// Ces fonctions ne décident jamais de ce sens : elles
 // le retournent quand on le leur demande, et additionnent ce qu'elles savent lire.
 
 /** Les jeux d'un score, ou null si un seul jeu ne se lit pas (forfait, « WO »…). */

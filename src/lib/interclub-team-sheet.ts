@@ -11,7 +11,7 @@
 import { inverserScore } from "./interclub-score";
 import { nameKey, type RosterPlayer } from "./squashnet/roster";
 import type { PoolTie } from "./squashnet/pool";
-import { splitTieLabel, type PlayerHistory, type PlayerMatch } from "./squashnet/player";
+import { otherTeamInLabel, splitTieLabel, type PlayerHistory, type PlayerMatch } from "./squashnet/player";
 import type { StandingRow } from "./squashnet/standings";
 import type { TiePlayer } from "./squashnet/tie";
 
@@ -219,8 +219,9 @@ function matchsDepuisPoule(occ: readonly Occurrence[], noms: ReadonlyMap<string,
  * La fiche d'un joueur : sa fiche fédérale si on l'a, sinon ce que nos poules en disent.
  *
  * LES ÉQUIPES D'UN MATCH DE LA FICHE se retrouvent dans la poule par le COUPLE de `regiid` et la
- * date — c'est exact. À défaut (un match joué hors de nos poules), on coupe l'intitulé sur un nom
- * connu (`splitTieLabel`) et on reconnaît son équipe parmi celles où on l'a déjà vu jouer.
+ * date — c'est exact. À défaut (un match joué hors de nos poules), on coupe l'intitulé sur deux
+ * noms connus (`splitTieLabel`) et on reconnaît son équipe parmi celles où on l'a déjà vu jouer ;
+ * sinon sur cette seule équipe, l'autre nom pris tel quel (`otherTeamInLabel`).
  */
 export function ficheJoueur(input: {
   regiid: string;
@@ -273,6 +274,12 @@ export function ficheJoueur(input: {
       if (sesEquipes.has(a) && !sesEquipes.has(b)) return { ...m, ownTeam: a, opponentTeam: b };
       if (sesEquipes.has(b) && !sesEquipes.has(a)) return { ...m, ownTeam: b, opponentTeam: a };
     }
+    // Hors de nos poules, l'autre nom est inconnu : on coupe sur SON équipe, si une seule colle.
+    const parSonEquipe = [...sesEquipes].flatMap((e) => {
+      const autre = otherTeamInLabel(m.tie, e);
+      return autre ? [{ ownTeam: e, opponentTeam: autre }] : [];
+    });
+    if (parSonEquipe.length === 1) return { ...m, ...parSonEquipe[0] };
     return { ...m, ownTeam: null, opponentTeam: null };
   });
 

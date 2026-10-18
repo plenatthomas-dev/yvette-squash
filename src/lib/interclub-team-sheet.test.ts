@@ -106,6 +106,22 @@ describe("ficheJoueur — Rafik Kadi", () => {
     ]);
   });
 
+  it("un match hors de nos poules : l'adversaire nommé par SON équipe, l'autre nom tel quel", () => {
+    // Un troisième match, joué ailleurs : « Montigny 2 » n'est dans aucune de nos poules.
+    const ailleurs = {
+      ...kadi.matches[0],
+      tie: "Montigny 2-Squash in Issy",
+      date: "2026-10-01",
+      opponent: { name: "DUPONT JEAN", regiid: "1", clt: "5A", rang: 1, rangM: 1 },
+    };
+    const player = { ...kadi, matches: [...kadi.matches, ailleurs] };
+    const f = ficheJoueur({ ...input, cached: { player, fetchedAt: new Date("2026-10-18T19:00:00Z") } });
+    expect(f.matches.find((m) => m.date === "2026-10-01")).toMatchObject({
+      ownTeam: "Squash in Issy",
+      opponentTeam: "Montigny 2",
+    });
+  });
+
   it("une fiche de plus de six heures est à relire", () => {
     const f = ficheJoueur({ ...input, cached: { player: kadi, fetchedAt: new Date(now.getTime() - 7 * H) } });
     expect(f.stale).toBe(true);
