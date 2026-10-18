@@ -236,20 +236,51 @@ Android à jour instantanément**, sans passer par le Store. C'est l'argument pr
 - **25 $, une seule fois**, plus une vérification d'identité.
 - **Compte personnel** (à ton nom) : s'il a été créé après le 13/11/2023, il doit d'abord mener
   un **test fermé avec au moins 12 testeurs pendant 14 jours d'affilée** avant d'accéder à la
-  production publique. Les testeurs ne manquent pas dans un club.
-- **Compte organisation** (l'association) : exempté de cette règle, et la fiche affiche le nom
-  du club. Il faut un numéro **D-U-N-S** (gratuit, mais quelques jours à quelques semaines pour
-  l'obtenir) et des documents de l'association.
+  production publique. Les testeurs ne manquent pas dans un club. Le détail, vérifié sur l'aide
+  officielle le 14/10/2026, est dans l'encadré ci-dessous.
+- **Compte organisation** (l'association) : exempté de cette règle selon tous les guides tiers,
+  et la fiche affiche le nom du club. Il faut un numéro **D-U-N-S** (gratuit, mais quelques
+  jours à quelques semaines pour l'obtenir) et des documents de l'association.
+
+> **La règle des 12 testeurs, précisément** (aide Play Console, *App testing requirements for
+> new personal developer accounts*, lue le 14/10/2026) :
+>
+> - **Qui** : les comptes **personnels** créés **après le 13/11/2023**. La page ne parle pas des
+>   comptes organisation ; l'exemption n'est affirmée que par des sources tierces.
+> - **Quoi** : au moment de demander l'accès à la production, au moins **12 testeurs inscrits à
+>   un test fermé**, et inscrits **sans interruption pendant les 14 jours précédents**. Un
+>   testeur qui se désinscrit puis se réinscrit repart de zéro, et ne compte pas s'il est
+>   resté moins de 14 jours. La page ne compte que le test **fermé** : le test interne ne
+>   compte pas.
+> - **Ensuite** : un bouton « Demander l'accès à la production » dans le tableau de bord, puis
+>   un questionnaire en trois parties : le test (recrutement des testeurs, fonctions utilisées,
+>   retours recueillis), l'appli (public, intérêt, installations attendues la première année),
+>   et ce qui a changé grâce au test. Réponse en **7 jours ou moins** en général. Google peut
+>   demander de **prolonger le test** s'il juge l'engagement insuffisant : l'accès n'est pas
+>   automatique.
+> - **L'engagement** : la page ne fixe aucun seuil, mais les guides tiers sont unanimes. Être
+>   inscrit ne suffit pas : des testeurs qui n'ouvrent jamais l'appli sont la première cause de
+>   refus. Les émulateurs et les comptes de complaisance sont détectés.
+> - **Le chiffre** : c'était 20 testeurs au départ. La Play Console affiche 12 depuis le
+>   11/12/2024 environ, constaté par des développeurs, sans annonce officielle trouvée.
+>
+> **Ce que ça change pour nous : rien, tant qu'on reste sur une piste fermée.** La règle ne
+> conditionne que l'accès à la **production**. Le test fermé, lui, est ouvert dès le premier
+> jour : jusqu'à 2 000 personnes par liste d'e-mails, ou un Google Group. Chaque testeur doit
+> avoir un compte Google, accepter l'invitation par un lien, puis installer depuis le Play Store.
+> L'appli n'apparaît pas dans la recherche du Store : on partage son lien. Si un jour on vise la
+> production, les membres déjà sur la piste fermée **sont** les 12 testeurs, à condition qu'ils
+> s'en servent vraiment pendant ces 14 jours.
 
 ### Ce que Google exige de la fiche
 
 | Exigence | État aujourd'hui | À faire |
 |---|---|---|
 | Icône 512 px, bannière 1024×500, captures | icône et captures déjà dans `public/` | la bannière |
-| **Politique de confidentialité à une URL publique** | `PrivacyNotice` est une fenêtre **dans** l'appli | une page publique (`/confidentialite`) qui en reprend le texte |
-| Formulaire *Data safety* | | déclarer : e-mail, nom, identifiants ResaMania (chiffrés), réservations, abonnements push… |
+| **Politique de confidentialité à une URL publique** | ✅ **`/confidentialite`** : le même texte que la note de l'appli (`PrivacyContent`, partagé), avec un paragraphe sur l'appli Android | URL à saisir dans la Play Console |
+| Formulaire *Data safety* | | déclarer : e-mail, nom, identifiants ResaMania (chiffrés), réservations, abonnements push… ; la suppression de compte y renvoie à `/suppression-compte` |
 | Classification du contenu, public visé | | questionnaires en ligne |
-| **Suppression de compte** dans l'appli **et** par une URL web | on peut seulement « demander » (`src/components/PrivacyNotice.tsx:430`) | au minimum une page web de demande de suppression ; idéalement un bouton dans les Paramètres |
+| **Suppression de compte** dans l'appli **et** par une URL web | ✅ **`/suppression-compte`** : la demande (bouton si connecté, e-mail sinon), le délai, ce qui est supprimé et conservé. Les Paramètres y renvoient, ce que la règle de Google admet comme chemin « dans l'appli » | URL à saisir dans la Play Console |
 
 ### Le risque ResaMania
 
@@ -312,7 +343,8 @@ sujet : la TWA n'existe pas sur iPhone, il faudrait Capacitor ou rester en PWA, 
    passer quelques semaines.
 2. **Bouton retour** : utile dès aujourd'hui pour la PWA installée, indispensable pour l'appli.
 3. **Badge monochrome** : défaut actuel, une heure de travail.
-4. **Pages publiques** de confidentialité et de suppression de compte.
+4. ✅ **Pages publiques** de confidentialité (`/confidentialite`) et de suppression de compte
+   (`/suppression-compte`), faites le 14/10/2026.
 5. **Compte Play Console** : personnel ou association (décision à prendre avec le bureau).
 6. **TWA** : `bubblewrap init` → `assetlinks.json` → essai sur téléphone → piste **interne**
    avec 2 ou 3 testeurs.
@@ -326,8 +358,9 @@ sujet : la TWA n'existe pas sur iPhone, il faudrait Capacitor ou rester en PWA, 
 Les règles des stores bougent vite. Ce qui suit a été vérifié en octobre 2026, mais doit être
 confirmé à la source le jour venu :
 
-- **Règle des 12 testeurs / 14 jours** : relevée sur des sites tiers, **pas** sur l'aide
-  officielle de Google. Vérifier la page « exigences de test » dans Play Console.
+- ~~**Règle des 12 testeurs / 14 jours**~~ : **vérifiée sur l'aide officielle le 14/10/2026**
+  (encadré du §8). Reste à confirmer, dans la Play Console elle-même, l'exemption des comptes
+  organisation, que l'aide ne mentionne pas.
 - **Calendrier de vérification des développeurs pour la France** (annoncé pour 2027, sans date
   précise).
 - **La demande de permission des notifications** dans une TWA générée par Bubblewrap, sur un
@@ -339,6 +372,10 @@ confirmé à la source le jour venu :
 
 - [Exigence de niveau d'API cible — Android Developers](https://developer.android.com/google/play/requirements/target-sdk)
 - [Exigences de niveau d'API cible — aide Play Console](https://support.google.com/googleplay/android-developer/answer/11926878?hl=en-419)
+- [Exigences de test des nouveaux comptes personnels — aide Play Console](https://support.google.com/googleplay/android-developer/answer/14151465?hl=en)
+- [Tests internes, fermés et ouverts — aide Play Console](https://support.google.com/googleplay/android-developer/answer/9845334?hl=en)
+- [Suppression de compte — aide Play Console](https://support.google.com/googleplay/android-developer/answer/13327111?hl=en)
+- [Règle des 12 testeurs, ce qui compte — OnTest](https://ontest.app/blog/google-play-12-testers-14-days-requirement-explained)
 - [Règle des 12 testeurs — Testers Community](https://www.testerscommunity.com/guides/how-many-testers-do-you-need-google-play)
 - [Règle des 12 testeurs — Choicely](https://www.choicely.com/blog/google-play-12-tester-rule)
 - [Calendrier de la vérification des développeurs — Android Authority](https://www.androidauthority.com/android-sideloading-changes-timeline-3679204/)

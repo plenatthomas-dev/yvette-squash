@@ -5,6 +5,7 @@
 // ci-dessous ne servent qu'ici.
 
 import { useEffect, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { Dialog } from "@/components/Dialog";
 import { applyTheme, isTheme, type Theme } from "@/lib/theme";
 import { useFeatures } from "@/components/FeatureProvider";
@@ -1298,6 +1299,18 @@ export default function SettingsPanel({
               >
                 {sending ? "Envoi…" : "Envoyer"}
               </button>
+            </section>
+
+            {/* Le chemin « dans l'appli » qu'exige Google Play pour supprimer son compte. Un
+                lien vers la page publique, et non un bouton ici : la page dit ce qui part et ce
+                qui reste AVANT la demande, et c'est la même que le Store référence — un seul
+                texte, une seule procédure. Dernière section : c'est le geste le plus lourd. */}
+            <section className="setting">
+              <h4>Supprimer mon compte</h4>
+              <p className="muted tiny">
+                Ce qui disparaît, ce qui reste, et la demande elle-même :{" "}
+                <Link href="/suppression-compte">voir la marche à suivre</Link>.
+              </p>
             </section>
 
             <div className="modal-actions">
