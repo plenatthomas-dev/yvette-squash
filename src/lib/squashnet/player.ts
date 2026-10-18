@@ -10,8 +10,8 @@ import { joueur, type TiePlayer } from "./tie";
 //  C'est la page qu'ouvre un clic sur un nom, partout sur le site — dans le
 //  classement de poule comme sur la fiche d'équipe. Elle publie l'identité du
 //  joueur, puis TOUS ses matchs de l'épreuve, toutes équipes confondues :
-//  rencontre, date, son classement ce soir-là, l'adversaire et le sien, le
-//  résultat et le score.
+//  rencontre, date, son classement (l'ACTUEL, cf. `PlayerMatch.clt`),
+//  l'adversaire et le sien ce soir-là, le résultat et le score.
 //
 //  ⚠️ LE SCORE EST ÉCRIT DU CÔTÉ DU VAINQUEUR, pas du joueur : mesuré le
 //  2026-10-18 sur les neuf matchs de PLENAT THOMAS (saison 2025-26), ses six défaites
@@ -53,7 +53,11 @@ export interface PlayerMatch {
   /** « YYYY-MM-DD ». */
   date: string | null;
   time: string | null;
-  /** Son classement ce soir-là. */
+  /**
+   * ⚠️ Son classement ACTUEL, répété sur chaque ligne — pas celui du soir (mesuré le 2026-10-18 :
+   * 4D sur les neuf matchs de Plenat, classé 5A le 4 juin sur la feuille de poule). Celui de
+   * l'ADVERSAIRE, en revanche, est daté : il varie d'un match à l'autre pour un même joueur.
+   */
   clt: string | null;
   rang: number | null;
   rangM: number | null;

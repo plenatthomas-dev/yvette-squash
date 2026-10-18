@@ -140,7 +140,7 @@ describe("playerStats — la liste des matchs de chaque joueur", () => {
   it("date, équipe, adversaire et son équipe — du plus récent au plus ancien", () => {
     const [r] = playerStats(
       [
-        avec("A", "2026-10-08", simple({ b: { ...joueur("DETRY XAVIER"), clt: "5B" } })),
+        avec("A", "2026-10-08", simple({ a: { ...joueur("POPULU AXEL"), clt: "5A" }, b: { ...joueur("DETRY XAVIER"), clt: "5B" } })),
         avec("A", "2026-10-15", simple({ label: "Homme 2", winner: "B" })),
       ],
       parNom,
@@ -152,6 +152,8 @@ describe("playerStats — la liste des matchs de chaque joueur", () => {
       opponentTeam: "Verrieres 2",
       opponentName: "Detry Xavier",
       opponentClt: "5B",
+      // Notre joueur, ce soir-là, lu sur la même feuille.
+      clt: "5A",
       label: "Homme 1",
       won: true,
       score: "11-6 11-3 8-11 11-0",

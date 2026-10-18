@@ -49,7 +49,14 @@ export interface TeamSheet {
   stale: boolean;
 }
 
-/** Un match de la fiche d'un joueur, avec les équipes quand on sait les nommer. */
+/**
+ * Un match de la fiche d'un joueur, avec les équipes quand on sait les nommer.
+ *
+ * `clt`, `rang`, `rangM` : SON classement CE SOIR-LÀ, lu sur la rencontre de nos poules — null
+ * hors de nos poules. La fiche fédérale répète son classement ACTUEL sur chaque ligne (mesuré le
+ * 2026-10-18 : 4D partout pour Plenat, classé 5A le 4 juin sur la feuille de poule) ; l'afficher
+ * par match ferait croire à un classement figé. Celui de l'adversaire, lui, est bien daté.
+ */
 export interface PlayerSheetMatch extends PlayerMatch {
   /** L'équipe pour laquelle il jouait ce soir-là. */
   ownTeam: string | null;
@@ -65,6 +72,8 @@ export interface PlayerSheet {
   rang: number | null;
   rangM: number | null;
   category: string | null;
+  /** Les équipes pour lesquelles il a joué, la plus récente d'abord — presque toujours une seule. */
+  teams: string[];
   /** Du plus récent au plus ancien. */
   matches: PlayerSheetMatch[];
   /**
@@ -237,17 +246,25 @@ export function ficheJoueur(input: {
   const parDate = (a: { date: string | null }, b: { date: string | null }) =>
     (b.date ?? "").localeCompare(a.date ?? "");
 
+  const equipes = (ms: readonly PlayerSheetMatch[]) => [
+    ...new Set(ms.map((m) => m.ownTeam).filter((v): v is string => !!v)),
+  ];
+
   const p = input.cached?.player ?? null;
   if (!p) {
     const lui = occ[0] ? (occ[0].side === "home" ? occ[0].line.home : occ[0].line.away) : null;
+    const tries = depuisPoule.sort(parDate);
+    // Faute de fiche, l'en-tête prend son classement le plus récent qu'on ait lu.
+    const dernier = tries[0] ?? lui;
     return {
       regiid: input.regiid,
       name: lui?.name ?? null,
-      clt: lui?.clt ?? null,
-      rang: lui?.rang ?? null,
-      rangM: lui?.rangM ?? null,
+      clt: dernier?.clt ?? null,
+      rang: dernier?.rang ?? null,
+      rangM: dernier?.rangM ?? null,
       category: null,
-      matches: depuisPoule.sort(parDate),
+      teams: equipes(tries),
+      matches: tries,
       source: "poule",
       fetchedAt: null,
       stale: true,
@@ -266,22 +283,34 @@ export function ficheJoueur(input: {
     if (o) {
       const home = nomDe(o.tie.homeCode, o.tie.homeName, noms);
       const away = nomDe(o.tie.awayCode, o.tie.awayName, noms);
-      return { ...m, ownTeam: o.side === "home" ? home : away, opponentTeam: o.side === "home" ? away : home };
+      // Son classement de CE SOIR-LÀ, celui de la feuille de poule (cf. `PlayerSheetMatch`).
+      const lui = o.side === "home" ? o.line.home : o.line.away;
+      return {
+        ...m,
+        clt: lui?.clt ?? null,
+        rang: lui?.rang ?? null,
+        rangM: lui?.rangM ?? null,
+        ownTeam: o.side === "home" ? home : away,
+        opponentTeam: o.side === "home" ? away : home,
+      };
     }
+    // Hors de nos poules, son classement du soir est inconnu : la fiche ne porte que l'actuel.
+    const ailleurs = { ...m, clt: null, rang: null, rangM: null };
     const coupe = splitTieLabel(m.tie, tousLesNoms);
     if (coupe) {
       const [a, b] = coupe;
-      if (sesEquipes.has(a) && !sesEquipes.has(b)) return { ...m, ownTeam: a, opponentTeam: b };
-      if (sesEquipes.has(b) && !sesEquipes.has(a)) return { ...m, ownTeam: b, opponentTeam: a };
+      if (sesEquipes.has(a) && !sesEquipes.has(b)) return { ...ailleurs, ownTeam: a, opponentTeam: b };
+      if (sesEquipes.has(b) && !sesEquipes.has(a)) return { ...ailleurs, ownTeam: b, opponentTeam: a };
     }
-    // Hors de nos poules, l'autre nom est inconnu : on coupe sur SON équipe, si une seule colle.
+    // L'autre nom est inconnu : on coupe sur SON équipe, si une seule colle.
     const parSonEquipe = [...sesEquipes].flatMap((e) => {
       const autre = otherTeamInLabel(m.tie, e);
       return autre ? [{ ownTeam: e, opponentTeam: autre }] : [];
     });
-    if (parSonEquipe.length === 1) return { ...m, ...parSonEquipe[0] };
-    return { ...m, ownTeam: null, opponentTeam: null };
+    if (parSonEquipe.length === 1) return { ...ailleurs, ...parSonEquipe[0] };
+    return { ...ailleurs, ownTeam: null, opponentTeam: null };
   });
+  matches.sort(parDate);
 
   return {
     regiid: input.regiid,
@@ -290,7 +319,8 @@ export function ficheJoueur(input: {
     rang: p.rang,
     rangM: p.rangM,
     category: p.category,
-    matches: matches.sort(parDate),
+    teams: equipes(matches),
+    matches,
     source: "fiche",
     fetchedAt: input.cached!.fetchedAt.toISOString(),
     stale: input.now.getTime() - input.cached!.fetchedAt.getTime() > input.fraisMs,

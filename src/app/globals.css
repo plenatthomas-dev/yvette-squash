@@ -6801,8 +6801,7 @@ button.ic-sheet-person::after {
 }
 .ic-sheet-match.ic-issue-win { border-left-color: var(--good-edge); }
 .ic-sheet-match.ic-issue-loss { border-left-color: var(--bad-edge); }
-.ic-sheet-match-head,
-.ic-sheet-match-main {
+.ic-sheet-match-head {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
@@ -6813,40 +6812,32 @@ button.ic-sheet-person::after {
   font-weight: 700;
   white-space: nowrap;
 }
+/* « contre Aubertin Remi 4D Stade Français » : une ligne pour la question « contre qui ? ».
+   Le nom ne se coupe jamais entre prénom et nom ; s'il faut replier, c'est l'équipe qui passe
+   à la ligne. */
 .ic-sheet-opp {
   min-width: 0;
   font-size: 0.95rem;
+  line-height: 1.35;
 }
 .ic-sheet-opp strong {
   font-weight: 600;
+  white-space: nowrap;
 }
-/* L'équipe de l'adversaire, sous son nom : c'est la question « contre qui ? » complète. */
 .ic-sheet-opp-team {
-  display: block;
   font-size: 0.8rem;
   color: var(--pico-muted-color);
 }
+/* Le score a sa ligne, aligné à gauche sous le nom : un cinq-jeux ne repousse plus rien. */
 .ic-sheet-match-score {
   display: flex;
-  flex: 0 0 auto;
-  gap: 7px;
+  flex-wrap: wrap;
+  gap: 2px 8px;
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
   color: var(--pico-muted-color);
-  white-space: nowrap;
 }
 .ic-sheet-match-score > .is-won {
   font-weight: 700;
   color: var(--pico-contrast);
-}
-.ic-sheet-context {
-  font-size: 0.8rem;
-}
-
-/* Sur téléphone, le score d'un joueur passe sous son adversaire plutôt que de l'écraser. */
-@media (max-width: 420px) {
-  .ic-sheet-match-main {
-    flex-direction: column;
-    gap: 3px;
-  }
 }

@@ -103,6 +103,10 @@ describe("InterclubTeamSheet", () => {
     expect(dialog.textContent).toContain("Bougardier Franck");
     expect(dialog.textContent).toContain("Verrieres 4");
     expect(dialog.textContent).toContain("2 V – 0 D");
+    // Son club et son classement actuel en tête, une fois ; son classement du soir sur chaque match.
+    expect(dialog.textContent).toContain("RM #4976 · cat. +45 · Squash in Issy");
+    expect(dialog.querySelectorAll(".ic-sheet-opp-team")[0]?.textContent?.trim()).toBe("Verrieres 4");
+    expect(dialog.textContent).toContain("· classé 5B");
 
     // Deux retours : la rencontre, puis l'équipe — sans une requête de plus.
     const avant = appels.length;

@@ -602,6 +602,12 @@ préversion) si : ses six défaites portent toutes le score du gagnant (« 3-11 
 Perdu). `parsePlayer` le remet de son côté en comptant les jeux contre le résultat — juste aussi
 le jour où la ligue changerait de convention.
 
+⚠️ **Le classement du joueur, sur chaque ligne, est son classement ACTUEL** — 4D sur les neuf
+matchs de Plenat, classé 5A le 4 juin sur la feuille de poule. Celui de l'**adversaire** est bien
+daté (Khalfaoui : 2630 en janvier, 2469 en octobre ; Sibony : 4037 le 4 juin, comme la poule).
+L'écran met donc le classement actuel dans l'en-tête, et sur un match seulement celui que la
+feuille de poule a relevé ce soir-là (nos poules ; rien ailleurs).
+
 Hors de nos poules, l'équipe adverse est nommée en coupant l'intitulé sur **l'équipe du joueur**,
 qu'on l'a vu défendre dans nos poules (`otherTeamInLabel`) ; l'autre nom est pris tel quel.
 

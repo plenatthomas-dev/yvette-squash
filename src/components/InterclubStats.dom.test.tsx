@@ -201,6 +201,7 @@ describe("InterclubStats — les matchs d'un joueur", () => {
     opponentTeam: "Verrieres 5",
     opponentName: "Detry Xavier",
     opponentClt: "5B",
+    clt: "5A",
     label: "Homme 3",
     won: true,
     score: "11-5 11-8 13-15 11-7",

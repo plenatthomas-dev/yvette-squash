@@ -119,7 +119,22 @@ describe("ficheJoueur — Rafik Kadi", () => {
     expect(f.matches.find((m) => m.date === "2026-10-01")).toMatchObject({
       ownTeam: "Squash in Issy",
       opponentTeam: "Montigny 2",
+      // Hors de nos poules, son classement du soir est inconnu : la fiche ne porte que l'actuel.
+      clt: null,
+      rangM: null,
     });
+    expect(f.teams).toEqual(["Squash in Issy"]);
+  });
+
+  it("son classement de CHAQUE match vient de la poule, pas de la fiche qui répète l'actuel", () => {
+    // La fiche répète le classement actuel sur chaque ligne : on le fausse pour le voir écarté.
+    const player = { ...kadi, clt: "4D", matches: kadi.matches.map((m) => ({ ...m, clt: "4D", rangM: 1 })) };
+    const f = ficheJoueur({ ...input, cached: { player, fetchedAt: new Date("2026-10-18T19:00:00Z") } });
+    expect(f.clt).toBe("4D"); // l'en-tête : l'actuel
+    expect(f.matches.map((m) => [m.date, m.clt, m.rangM])).toEqual([
+      ["2026-10-15", "5B", 4976],
+      ["2026-10-08", "5B", 4976],
+    ]);
   });
 
   it("une fiche de plus de six heures est à relire", () => {

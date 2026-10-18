@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { Dialog } from "@/components/Dialog";
 import { readOk } from "@/lib/apiFetch";
 import { nomLisible } from "@/lib/nom-lisible";
@@ -155,15 +155,23 @@ export interface MatchItem {
   key: string;
   date: string | null;
   won: boolean | null;
+  /**
+   * Ce qui ne vaut que pour CE match, à côté de la date : son classement du soir, l'intitulé du
+   * simple. Ce qui vaut pour tous (son club, son classement actuel) est dans l'en-tête.
+   */
+  notes: string[];
   opponentName: string | null;
+  /** Le classement de l'adversaire CE SOIR-LÀ. */
   opponentClt: string | null;
   opponentTeam: string | null;
-  /** Ce qui situe le match chez le joueur : son équipe, l'intitulé du simple. */
-  context: string | null;
   /** De SON point de vue. */
   score: string | null;
 }
 
+/**
+ * Trois lignes, chacune à sa place : quand et l'issue ; contre qui ; le score. Le score a SA
+ * ligne : à côté de l'adversaire, un cinq-jeux repoussait le nom sur deux lignes.
+ */
 function MatchList({ items }: { items: MatchItem[] }) {
   if (items.length === 0) {
     return <p className="muted tiny ic-sheet-msg">Aucun match joué pour l&apos;instant.</p>;
@@ -178,31 +186,43 @@ function MatchList({ items }: { items: MatchItem[] }) {
             className={`ic-sheet-match${m.won === true ? " ic-issue-win" : m.won === false ? " ic-issue-loss" : ""}`}
           >
             <span className="ic-sheet-match-head">
-              <span className="ic-date">{jour(m.date)}</span>
+              <span className="ic-date">
+                <span>{jour(m.date)}</span>
+                {/* L'espace entre fragments ne compte pas dans la boîte flex (c'est l'écart qui
+                    sépare à l'œil), mais un lecteur d'écran le lit. */}
+                {m.notes.map((n) => (
+                  <Fragment key={n}>
+                    {" "}
+                    <span>· {n}</span>
+                  </Fragment>
+                ))}
+              </span>
               {m.won !== null && (
                 <span className="ic-sheet-result">{m.won ? "Gagné" : "Perdu"}</span>
               )}
             </span>
-            <span className="ic-sheet-match-main">
-              <span className="ic-sheet-opp">
-                <span className="ic-vs-word">contre </span>
-                <strong>{m.opponentName ?? "?"}</strong>
-                {m.opponentClt && <span className="ic-sheet-clt"> {m.opponentClt}</span>}
-                {m.opponentTeam && <span className="ic-sheet-opp-team">{m.opponentTeam}</span>}
-              </span>
-              {m.score && (
-                <span className="ic-sheet-match-score" aria-label={`Score : ${m.score}`}>
-                  {jeux
-                    ? jeux.map(([a, b], i) => (
-                        <span key={i} className={a > b ? "is-won" : undefined}>
-                          {a}-{b}
-                        </span>
-                      ))
-                    : m.score}
+            <span className="ic-sheet-opp">
+              <span className="ic-vs-word">contre </span>
+              <strong>{m.opponentName ?? "?"}</strong>
+              {m.opponentClt && (
+                <span className="ic-sheet-clt" title="Son classement ce soir-là">
+                  {" "}
+                  {m.opponentClt}
                 </span>
               )}
+              {m.opponentTeam && <span className="ic-sheet-opp-team"> {m.opponentTeam}</span>}
             </span>
-            {m.context && <span className="ic-sheet-context muted">{m.context}</span>}
+            {m.score && (
+              <span className="ic-sheet-match-score" aria-label={`Score : ${m.score}`}>
+                {jeux
+                  ? jeux.map(([a, b], i) => (
+                      <span key={i} className={a > b ? "is-won" : undefined}>
+                        {a}-{b}
+                      </span>
+                    ))
+                  : m.score}
+              </span>
+            )}
           </li>
         );
       })}
@@ -539,24 +559,34 @@ function VueJoueur({
 
   const won = data.matches.filter((m) => m.result === "won").length;
   const lost = data.matches.filter((m) => m.result === "lost").length;
+  // Son équipe va à l'en-tête ; elle ne redescend sur chaque match que s'il en a défendu plusieurs.
+  const teams = data.teams ?? [];
   const items: MatchItem[] = data.matches.map((m, i) => ({
     key: `${m.date}-${i}`,
     date: m.date,
     won: m.result === null ? null : m.result === "won",
+    notes: [m.clt && `classé ${m.clt}`, teams.length > 1 && m.ownTeam].filter((v): v is string => !!v),
     opponentName: m.opponent ? nomLisible(m.opponent.name) : null,
     opponentClt: m.opponent?.clt ?? null,
     // L'équipe adverse quand on sait la nommer ; sinon l'intitulé fédéral, tel quel.
     opponentTeam: m.opponentTeam ?? m.tie,
-    context: m.ownTeam && m.clt ? `${m.ownTeam} · classé ${m.clt}` : (m.ownTeam ?? null),
     score: m.score,
   }));
 
   return (
     <>
+      {/* « [4D] RM #2339 · cat. +45 · Squash de l'Yvette » : ce qui vaut pour tous ses matchs. */}
       <p className="ic-sheet-sum muted">
-        {[data.clt && `Classé ${data.clt}`, data.rangM && `rang mixte ${data.rangM}`, data.category && `catégorie ${data.category}`]
-          .filter(Boolean)
-          .join(" · ")}
+        {data.clt && (
+          <span className="ic-sheet-badge" title="Classement actuel">
+            {data.clt}
+          </span>
+        )}
+        <span>
+          {[data.rangM && `RM #${data.rangM}`, data.category && `cat. ${data.category}`, ...teams]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
       </p>
       <Bilan won={won} lost={lost} />
       <MatchList items={items} />
@@ -640,10 +670,11 @@ export function StatPlayerDialog({ row, onClose }: { row: PlayerStatRow; onClose
     key: `${m.date}-${m.label}-${i}`,
     date: m.date,
     won: m.won,
+    // Notre équipe peut changer d'un soir à l'autre (Équipe 1, Équipe 2) : elle reste par match.
+    notes: [m.teamName, m.label, m.clt && `classé ${m.clt}`].filter((v): v is string => !!v),
     opponentName: m.opponentName,
     opponentClt: m.opponentClt,
     opponentTeam: m.opponentTeam,
-    context: [m.teamName, m.label].filter(Boolean).join(" · ") || null,
     score: m.score,
   }));
   return (

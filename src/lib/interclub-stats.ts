@@ -84,6 +84,8 @@ export interface StatMatch {
   opponentName: string | null;
   /** Son classement ce soir-là, « 5B ». */
   opponentClt: string | null;
+  /** NOTRE joueur ce soir-là, lu sur la même feuille : « 5A ». */
+  clt: string | null;
   /** L'intitulé fédéral du simple, « Homme 2 ». */
   label: string;
   won: boolean;
@@ -336,6 +338,7 @@ export function playerStats(
         opponentTeam: meta?.opponent ?? null,
         opponentName: eux ? nomLisible(eux.name) : null,
         opponentClt: eux?.clt ?? null,
+        clt: nous.clt ?? null,
         label: l.label,
         won: l.winner === side,
         score: l.score && side === "B" ? inverserScore(l.score) : l.score,
