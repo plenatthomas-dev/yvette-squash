@@ -107,3 +107,120 @@ export async function readOk<T = unknown>(res: Response): Promise<T> {
   }
   return data;
 }
+
+// ─── APPEL COMPLET, MESSAGE TOUJOURS LISIBLE ─────────────────────────────────────────────
+//
+// `readJson` / `readOk` ne couvrent que la LECTURE du corps. Reste ce qui se passe AVANT : le
+// `fetch` lui-même peut lever, et ce qu'il lève est écrit pour un développeur — « Failed to
+// fetch » sous Chrome, « Load failed » sous Safari, « NetworkError when attempting to fetch
+// resource » sous Firefox. Les écrans de réservation affichaient ce texte tel quel derrière
+// « Réservation impossible : », exactement au moment où le membre, dans le parking du complexe,
+// a perdu le réseau. C'est la Règle 4 de PRODUCT.md (« une panne amont se présente en français
+// clair, jamais en message technique ») prise en défaut sur le chemin le plus fréquenté.
+//
+// D'où trois messages, et pas un de plus : chacun dit au membre QUOI FAIRE, ce qui est la seule
+// chose qui l'intéresse.
+
+/** Le `fetch` n'a pas abouti : la requête n'est jamais arrivée au serveur. */
+export const NETWORK_ERROR_MESSAGE = "Pas de réseau : vérifie ta connexion et réessaie.";
+/** Le serveur a répondu 5xx sans rien dire d'utile (corps vide, page HTML, JSON sans `error`). */
+export const SERVICE_DOWN_MESSAGE = "Le service ne répond pas, réessaie dans un instant.";
+
+/**
+ * Échec d'un appel d'API dont le `message` EST le texte à afficher.
+ *
+ * `status` est conservé pour que l'appelant puisse brancher AVANT d'afficher : 401 (session
+ * expirée → écran de connexion), 504 (résultat inconnu → recharger), etc. Il vaut `null` quand
+ * la requête n'a jamais atteint le serveur (réseau). `code` et `data` relaient le corps quand il
+ * existe — la réservation distingue ainsi le conflit « même créneau » (`code: "overlap"`).
+ */
+export class ApiError extends Error {
+  readonly status: number | null;
+  readonly code?: string;
+  readonly data?: unknown;
+  constructor(message: string, status: number | null, data?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.data = data;
+    const code = (data as { code?: unknown } | null | undefined)?.code;
+    if (typeof code === "string") this.code = code;
+  }
+}
+
+/** Interruption VOULUE (AbortController) : ce n'est pas une panne, on la laisse passer intacte. */
+function isAbort(e: unknown): boolean {
+  return (e as { name?: unknown } | null)?.name === "AbortError";
+}
+
+/**
+ * Lit une réponse déjà obtenue et rend son corps JSON si elle est `ok` ; sinon lève une
+ * `ApiError` au message affichable. Pour les appelants qui ont besoin du `Response` avant la
+ * lecture ; les autres passent par `callApi`, qui fait aussi le `fetch`.
+ *
+ * - corps illisible : `readJson` a déjà sondé la base (bannière + MaintenanceError si elle est à
+ *   terre — son message est gardé, il est écrit pour être lu). Sinon, un 5xx devient
+ *   SERVICE_DOWN_MESSAGE ; un autre statut garde le constat de `readJson`, déjà en français ;
+ * - statut d'erreur avec JSON : le `error` du serveur, qui sait pourquoi il refuse. À défaut, un
+ *   5xx retombe sur SERVICE_DOWN_MESSAGE.
+ */
+export async function readApi<T = unknown>(res: Response): Promise<T> {
+  let data: T;
+  try {
+    data = await readJson<T>(res);
+  } catch (e) {
+    if (e instanceof MaintenanceError) throw new ApiError(e.message, res.status);
+    throw new ApiError(
+      res.status >= 500 ? SERVICE_DOWN_MESSAGE : (e as Error).message,
+      res.status,
+    );
+  }
+  if (!res.ok) {
+    const err = (data as { error?: unknown } | null)?.error;
+    const message =
+      typeof err === "string" && err.trim()
+        ? err
+        : res.status >= 500
+          ? SERVICE_DOWN_MESSAGE
+          : `Demande refusée par le serveur (${res.status}).`;
+    throw new ApiError(message, res.status, data);
+  }
+  return data;
+}
+
+/**
+ * LE point d'entrée : `fetch` + lecture + traduction. Rend le corps JSON d'une réponse `ok`, lève
+ * une `ApiError` lisible dans tous les autres cas — réseau coupé compris. Une interruption
+ * volontaire (AbortError) est relancée telle quelle : ce n'est pas à l'utilisateur de la lire.
+ *
+ * Usage type :
+ *   try { const d = await callApi<X>("/api/…", init); … }
+ *   catch (e) { if (e instanceof ApiError && e.status === 401) …; toast("err", userMessage(e)); }
+ */
+export async function callApi<T = unknown>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(input, init);
+  } catch (e) {
+    if (isAbort(e)) throw e;
+    // TypeError dans tous les navigateurs, mais on ne trie pas plus finement : une exception
+    // levée par `fetch` lui-même veut toujours dire que la requête n'est pas partie ou n'est
+    // pas revenue — jamais que le serveur a dit non.
+    throw new ApiError(NETWORK_ERROR_MESSAGE, null);
+  }
+  return readApi<T>(res);
+}
+
+/**
+ * Le texte à montrer pour une exception attrapée, quelle qu'elle soit. Remplace
+ * `(e as Error).message`, qui laissait passer le jargon du navigateur et du parseur JSON.
+ *
+ * - ApiError / MaintenanceError : leur message est déjà écrit pour l'utilisateur ;
+ * - TypeError : un `fetch` fait à la main, hors `callApi`, a échoué → réseau ;
+ * - tout le reste (bogue, exception imprévue) : `fallback`, jamais le message brut.
+ */
+export function userMessage(e: unknown, fallback = SERVICE_DOWN_MESSAGE): string {
+  if (e instanceof ApiError || e instanceof MaintenanceError) return e.message;
+  if (e instanceof TypeError) return NETWORK_ERROR_MESSAGE;
+  return fallback;
+}

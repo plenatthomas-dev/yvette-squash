@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { PrivacyNotice } from "@/components/PrivacyNotice";
 import { useFeatures } from "@/components/FeatureProvider";
-import { readJson } from "@/lib/apiFetch";
+import { readApi, userMessage } from "@/lib/apiFetch";
 import {
   loginWithPasskey,
   passkeySupported,
@@ -161,6 +161,10 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     // a déjà retiré le paramètre d'URL.
   }, [emailLogin]);
 
+  // LES QUATRE ENVOIS CI-DESSOUS LISENT PAR `readApi` ET AFFICHENT PAR `userMessage`
+  // (cf. lib/apiFetch). Ils recopiaient `(e as Error).message` : hors réseau, l'écran de
+  // connexion — le premier que voit un nouveau membre — affichait « Failed to fetch » ou « Load
+  // failed ». Le message du serveur (« Identifiants incorrects »…) passe toujours tel quel.
   const submitResa = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -171,11 +175,10 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
-      const data = await readJson<{ error?: string }>(res);
-      if (!res.ok) throw new Error(data.error ?? "Connexion impossible");
+      await readApi(res);
       onLoggedIn();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(userMessage(e));
     } finally {
       setBusy(false);
     }
@@ -192,11 +195,10 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password: emailPassword }),
       });
-      const data = await readJson<{ error?: string }>(res);
-      if (!res.ok) throw new Error(data.error ?? "Connexion impossible");
+      await readApi(res);
       onLoggedIn();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(userMessage(e));
     } finally {
       setBusy(false);
     }
@@ -214,13 +216,12 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, name: name.trim() || undefined }),
       });
-      const data = await readJson<{ error?: string }>(res);
-      if (!res.ok) throw new Error(data.error ?? "Inscription impossible");
+      await readApi(res);
       setInfo(
         `Demande envoyée ✅ Un administrateur va la valider et te transmettre ton lien d'activation directement (WhatsApp, SMS…). Rien à surveiller dans tes mails.`,
       );
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(userMessage(e));
     } finally {
       setBusy(false);
     }
@@ -238,13 +239,12 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
-      const data = await readJson<{ error?: string }>(res);
-      if (!res.ok) throw new Error(data.error ?? "Envoi impossible");
+      await readApi(res);
       setInfo(
         `Si un compte existe pour ${email}, un administrateur validera ta demande et te transmettra un lien de réinitialisation directement.`,
       );
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(userMessage(e));
     } finally {
       setBusy(false);
     }
@@ -267,7 +267,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   return (
     <main className="login">
       <h1 className="sr-only">Squash de l'Yvette</h1>
-      <img src="/logo_squash.jpeg" alt="Squash de l'Yvette" className="logo-hero" />
+      <img src="/logo_squash-336.webp" alt="Squash de l'Yvette" className="logo-hero" width={168} height={168} />
 
       {/* Onglet « Par email » : actif si le flag est ON ; sinon affiché grisé (désactivé)
           avec un tooltip « en cours de développement ». Seule ResaMania reste utilisable. */}
@@ -317,11 +317,21 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
             <label className="field-label" htmlFor="resa-username">
               Identifiant ResaMania (email)
             </label>
+            {/* `type="text"` est conservé (un identifiant ResaMania historique peut ne pas être
+                une adresse) ; c'est le CLAVIER qui devient celui d'un e-mail. Sans ces quatre
+                attributs, iOS mettait une majuscule à la première lettre et le correcteur
+                « réparait » l'adresse — « Jean.dupont@gmail.com » devenait « Jean.dupont@gmail.cm » — un échec de
+                connexion inexplicable pour le membre. */}
             <input
               id="resa-username"
               type="text"
+              inputMode="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              aria-describedby={err ? "login-error" : undefined}
               // « webauthn » (quand la biométrie est active) branche l'autofill conditionnel :
               // le passkey apparaît dans la liste d'autocomplétion de ce champ.
               autoComplete={biometry ? "username webauthn" : "username"}
@@ -337,6 +347,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
+                aria-describedby={err ? "login-error" : undefined}
               />
               <button
                 type="button"
@@ -372,6 +383,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                aria-describedby={err ? "login-error" : undefined}
                 autoComplete="email"
               />
               <button type="submit" disabled={busy || !email.trim()}>
@@ -396,6 +408,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                aria-describedby={err ? "login-error" : undefined}
                 // « webauthn » : autofill conditionnel du passkey sur ce champ (cf. onglet ResaMania),
                 // seulement si la biométrie est active.
                 autoComplete={biometry ? "email webauthn" : "email"}
@@ -429,6 +442,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
                     value={emailPassword}
                     onChange={(e) => setEmailPassword(e.target.value)}
                     autoComplete="current-password"
+                    aria-describedby={err ? "login-error" : undefined}
                   />
                   <button
                     type="button"
@@ -506,8 +520,23 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
         </div>
       )}
 
-      {info && <div className="notice info">{info}</div>}
-      {err && <div className="notice error">⚠️ {err}</div>}
+      {/* ANNONCÉS, et chacun à son rythme. Ces deux encarts apparaissaient sous le formulaire
+          sans que rien ne le dise : au lecteur d'écran, « Se connecter » ne produisait rien, et
+          le membre recommençait. L'erreur est ASSERTIVE (`alert`) — elle interrompt, c'est elle
+          qui explique l'échec ; l'information reste POLIE (`status`). L'erreur est aussi reliée
+          aux champs (`aria-describedby`) : revenir sur un champ la relit. Pas d'`aria-invalid` :
+          l'erreur est souvent étrangère aux champs (réseau, compte suspendu…), et marquer un
+          champ invalide à tort enverrait le membre corriger ce qui était juste. */}
+      {info && (
+        <div className="notice info" role="status">
+          {info}
+        </div>
+      )}
+      {err && (
+        <div className="notice error" role="alert" id="login-error">
+          ⚠️ {err}
+        </div>
+      )}
       <PrivacyNotice />
     </main>
   );

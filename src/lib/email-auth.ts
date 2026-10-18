@@ -12,7 +12,7 @@
 
 import { randomBytes } from "node:crypto";
 import { prisma } from "./db";
-import { hashToken } from "./crypto";
+import { hashToken, tokenHashCandidates } from "./crypto";
 import { sendEmail } from "./email";
 import { logRequestDecision } from "./moderation";
 import { serializableTransaction } from "./http-tx";
@@ -126,7 +126,7 @@ export async function findEmailToken(token: string, purpose: TokenPurpose) {
   if (!token) return null;
   return prisma.emailToken.findFirst({
     where: {
-      tokenHash: hashToken(token),
+      tokenHash: { in: tokenHashCandidates(token) },
       purpose,
       expiresAt: { gt: new Date() },
       approvedAt: { not: null },
@@ -182,6 +182,23 @@ export async function approveRequest(
   return { token, purpose, email: row.email };
 }
 
+/** Usage d'une demande ENCORE en attente (`null` si elle n'existe plus ou a déjà été traitée). */
+export async function pendingRequestPurpose(id: string): Promise<TokenPurpose | null> {
+  const row = await prisma.emailToken.findFirst({
+    where: { id, approvedAt: null },
+    select: { purpose: true },
+  });
+  return (row?.purpose as TokenPurpose | undefined) ?? null;
+}
+
+/**
+ * Annule une approbation dont le lien n'a pas pu partir par e-mail : la demande revient dans la
+ * file, au lieu de rester « approuvée » avec un jeton que personne ne connaît.
+ */
+export async function revertApproval(id: string): Promise<void> {
+  await prisma.emailToken.updateMany({ where: { id }, data: { approvedAt: null } });
+}
+
 /**
  * Rejette (supprime) une demande en attente. Journalise d'abord la décision. Renvoie l'e-mail
  * de la demande (utile pour un « rejeter et bloquer »), ou `null` si elle n'existait plus.
@@ -214,7 +231,11 @@ export function authLinkFor(_origin: string, _purpose: TokenPurpose, token: stri
 export async function findApprovedToken(token: string) {
   if (!token) return null;
   return prisma.emailToken.findFirst({
-    where: { tokenHash: hashToken(token), expiresAt: { gt: new Date() }, approvedAt: { not: null } },
+    where: {
+      tokenHash: { in: tokenHashCandidates(token) },
+      expiresAt: { gt: new Date() },
+      approvedAt: { not: null },
+    },
     orderBy: { createdAt: "desc" },
   });
 }
@@ -310,6 +331,18 @@ export async function sendResetEmail(to: string, origin: string, token: string) 
     footer: "Tu n'as rien demandé ? Ignore ce message : ton mot de passe actuel reste valable.",
   });
   await sendEmail({ to, subject: "Ton nouveau mot de passe — Squash de l'Yvette", text });
+}
+
+/** Lien d'activation d'un compte approuvé par un admin (inscription sur invitation). */
+export async function sendSignupApprovedEmail(to: string, link: string) {
+  const { text } = renderEmail({
+    title: "Ton compte est prêt",
+    lead: "Un responsable du club a validé ta demande de compte au Squash de l'Yvette. Clique ci-dessous pour choisir ton mot de passe.",
+    cta: { label: "Choisir mon mot de passe", url: link },
+    expiry: "24 heures",
+    footer: "Tu n'as rien demandé ? Ignore ce message, rien ne sera activé.",
+  });
+  await sendEmail({ to, subject: "Ton compte au Squash de l'Yvette", text });
 }
 
 /** Envoyé quand une inscription vise un email qui a DÉJÀ un compte actif (anti-énumération). */

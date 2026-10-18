@@ -62,7 +62,7 @@ Ce qui manque **réellement** pour parler d'« application Android complète » 
 
 Capacitor brille quand on **embarque** le site dans l'APK. Ici, c'est impossible : l'appli n'est
 pas un site statique. Elle a 94 routes API, du rendu serveur, une CSP à nonce posée par le
-middleware (`src/middleware.ts:100`) et BotID. Il faudrait donc pointer la WebView sur l'URL en
+middleware (`src/proxy.ts`) et BotID. Il faudrait donc pointer la WebView sur l'URL en
 ligne. On perdrait alors l'intérêt de Capacitor et on cumulerait ses inconvénients :
 
 - **refaire les notifications** : projet Firebase, `firebase-admin` côté serveur, une table de
@@ -94,7 +94,7 @@ sont ceux du Chrome du téléphone. Un membre déjà connecté dans Chrome l'est
 
 | Changement | Pourquoi | Effort |
 |---|---|---|
-| `public/.well-known/assetlinks.json` | la moitié « site » des Digital Asset Links : nom du package et empreintes SHA-256 de la clé de signature Play **et** de la clé d'upload. Le middleware le laisse passer (il n'y ajoute qu'un en-tête CSP, sans effet sur du JSON ; cf. `src/middleware.ts:123`). | 1 h |
+| `public/.well-known/assetlinks.json` | la moitié « site » des Digital Asset Links : nom du package et empreintes SHA-256 de la clé de signature Play **et** de la clé d'upload. Le middleware le laisse passer (il n'y ajoute qu'un en-tête CSP, sans effet sur du JSON ; cf. `src/proxy.ts`). | 1 h |
 | **Bouton retour** | voir ci-dessous | **1 à 2 j** |
 | Masquer `InstallAppPrompt` dans l'appli | proposer d'« installer l'appli » à quelqu'un qui est déjà dedans. On reconnaît la TWA à son référent `android-app://<package>/` au lancement, à mémoriser pour la session. | 2 h |
 | Badge de notification monochrome | `public/sw.js:36` utilise `logo_squash.jpeg` : Android ne garde que la transparence d'un badge, donc un JPEG devient un **carré blanc** dans la barre d'état. Il faut un PNG silhouette sur fond transparent. Le défaut existe déjà aujourd'hui. | 1 h |

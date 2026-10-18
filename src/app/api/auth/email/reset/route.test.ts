@@ -3,10 +3,15 @@ import { NextRequest } from "next/server";
 const h = vi.hoisted(() => ({
   disabledAt: null as Date | null, tokenCount: 1,
   userUpdate: vi.fn(), sessionDelete: vi.fn(), sessionCreate: vi.fn(),
-  tokenDelete: vi.fn(), transaction: vi.fn(),
+  tokenDelete: vi.fn(), transaction: vi.fn(), passkeyDelete: vi.fn(),
 }));
 vi.mock("@/lib/features-server", () => ({ getFeatures: async () => ({ emailLogin: true }) }));
-vi.mock("@/lib/crypto", () => ({ hashPassword: async () => "new-hash", encrypt: (s: string) => s, decrypt: (s: string) => s }));
+vi.mock("@/lib/crypto", () => ({
+  hashPassword: async () => "new-hash",
+  encrypt: (s: string) => s,
+  decrypt: (s: string) => s,
+  hashSessionId: (s: string) => `h:${s}`,
+}));
 vi.mock("@/lib/resamania/client", () => ({ ensureFresh: vi.fn() }));
 vi.mock("@/lib/app-block", () => ({ appBlockForEmail: async () => null }));
 vi.mock("@/lib/email-auth", () => ({
@@ -27,6 +32,7 @@ beforeEach(() => {
     user: { findUnique: async () => ({ id: "u1", displayName: "Alice", disabledAt: h.disabledAt }), update: h.userUpdate },
     emailToken: { deleteMany: h.tokenDelete },
     session: { deleteMany: h.sessionDelete, create: h.sessionCreate },
+    passkey: { deleteMany: h.passkeyDelete },
   }));
 });
 it("refuse un compte désactivé sans consommer son lien ni changer son mot de passe", async () => {
@@ -41,6 +47,8 @@ it("révoque anciennes sessions et liens avant de créer l'unique nouvelle, dans
   expect(response.status).toBe(200);
   expect(response.cookies.get("sid")?.value).toBeTruthy();
   expect(h.sessionDelete).toHaveBeenCalledWith({ where: { userId: "u1" } });
+  // Les passkeys d'avant la réinitialisation n'ouvrent plus le compte.
+  expect(h.passkeyDelete).toHaveBeenCalledWith({ where: { userId: "u1" } });
   expect(h.tokenDelete).toHaveBeenCalledWith({ where: { email: "a@example.fr" } });
   expect(h.userUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ passwordHash: "new-hash" }) }));
   expect(h.sessionCreate).toHaveBeenCalledTimes(1);

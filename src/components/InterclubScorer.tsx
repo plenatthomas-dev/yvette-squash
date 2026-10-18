@@ -39,6 +39,20 @@ const ACK_PREFIX = "ic:ack:";
 // que `ACK_PREFIX` : un journal posé par une version antérieure reste lisible, et l'absence de
 // cette clé se lit « on prend celles du serveur ».
 const TIME_PREFIX = "ic:time:";
+// L'ÉTAT que le serveur connaît de ce journal : empreinte (cf. `empreinte`) du dernier état
+// dont il a CONFIRMÉ l'envoi — ou qu'on vient de lire chez lui à l'amorçage. Clé séparée, pour
+// la même raison que `ACK_PREFIX` ; son absence se lit « on ne sait pas », et l'on garde alors
+// le journal local comme avant.
+//
+// C'est elle qui permet de répondre, à la réouverture, à la seule question qui compte : « ce
+// journal porte-t-il quelque chose que le serveur n'a pas ? » Sinon, il n'a plus rien à
+// défendre, et le serveur — qui a pu avancer entre-temps sous les doigts d'un autre — fait foi.
+const SENT_PREFIX = "ic:sent:";
+// La RÉVISION du marquage confirmée par le serveur au dernier envoi réussi (cf. `PUT …/live`,
+// migration 63). Annoncée à chaque envoi : si la base en a une autre, un autre appareil — même
+// sur le même compte — a écrit entre-temps, et le serveur refuse en `stale-live` au lieu de
+// laisser écraser. Absente ou « ? » (envoi au sort inconnu) : on n'annonce rien.
+const REV_PREFIX = "ic:rev:";
 const NO_TIMES: MatchTimes<number> = { startedAt: null, finishedAt: null };
 
 type MatchInfo = {
@@ -65,6 +79,8 @@ type MatchInfo = {
    */
   startedAt?: string | null;
   finishedAt?: string | null;
+  /** Révision du marquage lue chez le serveur (cf. `REV_PREFIX`). */
+  liveRev?: number;
 };
 
 /** ISO → ms, `null` si absent ou illisible. */
@@ -119,8 +135,81 @@ export function clearLog(matchId: string) {
     localStorage.removeItem(LOG_PREFIX + matchId);
     localStorage.removeItem(ACK_PREFIX + matchId);
     localStorage.removeItem(TIME_PREFIX + matchId);
+    localStorage.removeItem(SENT_PREFIX + matchId);
+    localStorage.removeItem(REV_PREFIX + matchId);
   } catch {
     /* sans importance */
+  }
+}
+
+/** Révision confirmée, `"unsure"` si le dernier envoi est au sort inconnu, `null` si inconnue. */
+function loadRev(matchId: string): number | "unsure" | null {
+  try {
+    const raw = localStorage.getItem(REV_PREFIX + matchId);
+    if (raw === null) return null;
+    if (raw === "?") return "unsure";
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveRev(matchId: string, rev: number | "unsure" | null) {
+  try {
+    if (rev === null) localStorage.removeItem(REV_PREFIX + matchId);
+    else localStorage.setItem(REV_PREFIX + matchId, rev === "unsure" ? "?" : String(rev));
+  } catch {
+    /* même parti pris que `saveLog` */
+  }
+}
+
+type LiveState = { current: { home: number; away: number }; serving: Side | null; servingBox: Box | null };
+
+/**
+ * Empreinte d'un état de match, sous la forme exacte de ce que la synchro ENVOIE (jeux terminés
+ * + jeu en cours) — donc comparable à ce que le serveur rend.
+ *
+ * On compare des ÉTATS et non des nombres d'événements : annuler un point déjà envoyé puis en
+ * marquer un autre redonne la même longueur de journal avec un score différent, et un simple
+ * compteur aurait déclaré « rien de neuf » un point qui n'est jamais parti.
+ *
+ * Un jeu en cours à 0-0 sans serveur désigné ne dit rien : il s'écrit `null`, comme l'absence
+ * d'instantané côté serveur, pour que « rien » se compare égal à « rien ».
+ */
+function empreinte(games: readonly { home: number; away: number }[], live: LiveState | null): string {
+  const vide = !live || (live.serving === null && live.current.home === 0 && live.current.away === 0);
+  return JSON.stringify({
+    games: games.map((g) => [g.home, g.away]),
+    live: vide
+      ? null
+      : [live.current.home, live.current.away, live.serving ?? null, live.servingBox ?? null],
+  });
+}
+
+/** Empreinte de l'état que DÉRIVE un journal (cf. `empreinte`). */
+function empreinteJournal(events: readonly ScoreEvent[], bestOf: number): string {
+  const st = replay(events, bestOf);
+  return empreinte(
+    st.games,
+    st.status === "done" ? null : { current: st.current, serving: st.serving, servingBox: st.servingBox },
+  );
+}
+
+function loadSent(matchId: string): string | null {
+  try {
+    return localStorage.getItem(SENT_PREFIX + matchId);
+  } catch {
+    return null;
+  }
+}
+
+function saveSent(matchId: string, fp: string) {
+  try {
+    localStorage.setItem(SENT_PREFIX + matchId, fp);
+  } catch {
+    // Même parti pris que `saveLog`. Sans cette clé, la réouverture garde le journal local —
+    // le comportement d'avant, prudent pour les points non envoyés.
   }
 }
 
@@ -231,23 +320,50 @@ export default function InterclubScorer({
   // que `saveLog` promet précisément de « continuer en mémoire ».
   const seededFor = useRef<string | null>(null);
   const ackRef = useRef<Ack | null>(null);
+  const revRef = useRef<number | "unsure" | null>(null);
   useEffect(() => {
     if (seededFor.current === match.id) return;
     seededFor.current = match.id;
-    const local = loadLog(match.id);
-    // Pas de journal ici ? Le match a pu être entamé sur un autre téléphone, sur un autre
-    // compte, ou saisi à la main. On repart de ce que le serveur connaît : ses jeux terminés
-    // ET son jeu en cours (score fidèle, déroulé reconstitué, service rétabli tel quel).
+    const serverGames = match.games.map((g) => ({ home: g.home, away: g.away }));
+    // QUEL JOURNAL FAIT FOI : celui de ce téléphone, seulement s'il a quelque chose à défendre.
+    //
+    // Le journal local gagnait TOUJOURS, et c'était une perte de données. Il est enregistré dès
+    // l'amorçage — même vide — et n'est purgé que sur un match terminé confirmé. D'où ce
+    // scénario, sans malveillance ni concurrence : A ouvre « Marquer » puis « Retour » (journal
+    // `[]` conservé) ; B marque 6-4 au jeu 1 puis rend la main ; A rouvre → écran à 0-0, et son
+    // premier envoi `{ games: [], knownGameCount: 0, live: 0-0 }` passait la garde serveur
+    // (`staleGamesReason` ne compare que les jeux TERMINÉS) et remettait le simple à zéro.
+    //
+    // Deux règles, de la plus évidente à la plus fine :
+    //   1. un journal VIDE ne défend rien — il vaut absence ;
+    //   2. un journal dont l'état est exactement celui que le serveur a confirmé (`SENT_PREFIX`)
+    //      ne défend rien non plus : s'il diffère de l'état actuel du serveur, c'est que le
+    //      serveur a avancé sans lui, et le serveur fait foi. S'il est identique, on garde le
+    //      local — même score, mais le VRAI déroulé, que `seedEvents` ne sait que réinventer
+    //      (l'undo défait alors les points réellement joués).
+    // Un journal porteur de points non envoyés — ou dont on ignore le sort : clé absente,
+    // envoi au résultat inconnu — reste prioritaire, exactement comme avant : c'est lui qui
+    // détient les cinq dernières secondes de jeu.
+    //
+    // La règle 2 dépend de ce que CE téléphone a noté, et un journal porteur de points non
+    // envoyés l'emporte encore sur un serveur qui a avancé sans lui. C'est la RÉVISION
+    // (`REV_PREFIX`, migration 63) qui ferme ce cas : annoncée au premier envoi, elle fait
+    // refuser l'écrasement (`stale-live`) au lieu de le laisser passer.
+    let local = loadLog(match.id);
+    if (local && local.length === 0) local = null;
+    if (local) {
+      const envoye = loadSent(match.id);
+      const ici = empreinteJournal(local, bestOf);
+      if (envoye !== null && ici === envoye && ici !== empreinte(serverGames, match.live)) local = null;
+    }
+    // Pas de journal ici (ou plus rien à défendre) ? Le match a pu être entamé sur un autre
+    // téléphone, sur un autre compte, ou saisi à la main. On repart de ce que le serveur
+    // connaît : ses jeux terminés ET son jeu en cours (score fidèle, déroulé reconstitué,
+    // service rétabli tel quel).
     //
     // `match.live` est la moitié qui manquait. Sans elle, reprendre un match entamé ailleurs
     // effaçait silencieusement le jeu en cours — la fiche affichait 7-7, le marquage 0-0.
-    const seed =
-      local ??
-      seedEvents(
-        match.games.map((g) => ({ home: g.home, away: g.away })),
-        bestOf,
-        match.live,
-      );
+    const seed = local ?? seedEvents(serverGames, bestOf, match.live);
     eventsRef.current = seed;
     setEvents(seed);
     // Les heures suivent le journal : les nôtres s'il vient d'ici, celles du serveur sinon — un
@@ -258,17 +374,31 @@ export default function InterclubScorer({
     };
     timesRef.current = t;
     setTimes(t);
+    if (!local) {
+      // Repartis du serveur, on le NOTE aussitôt — état connu, base confirmée, heures. Sans
+      // cela, les clés d'un journal écarté survivaient : marquer un point puis fermer l'appli
+      // avant tout envoi, et la réouverture relisait l'ancien `ic:ack:` — un compte que la base
+      // a dépassé, donc un `stale-games` et la purge des points tout juste marqués.
+      saveSent(match.id, empreinteJournal(seed, bestOf));
+      saveAck(match.id, replay(seed, bestOf).games.length);
+      saveTimes(match.id, t);
+    }
     // Sur quel état du serveur ce journal est-il bâti ? Amorcé depuis le serveur, la réponse
     // est immédiate. Repris d'un journal local, elle a été notée au dernier envoi réussi ; à
     // défaut — journal d'avant cette clé, stockage vidé — on retient ce que le journal lui-même
     // a fait connaître, c'est-à-dire ses propres jeux terminés. Ce choix fait pencher le doute
     // du côté du SERVEUR, qui est la copie partagée.
     ackRef.current = (local ? loadAck(match.id) : null) ?? replay(seed, bestOf).games.length;
+    // La révision suit la même règle : repartis du serveur, c'est la sienne ; repris d'un
+    // journal local, c'est celle du dernier envoi réussi D'ICI — si un autre appareil a écrit
+    // depuis, le premier envoi sera refusé (`stale-live`) au lieu d'écraser son travail.
+    revRef.current = local ? loadRev(match.id) : (match.liveRev ?? null);
+    if (!local) saveRev(match.id, revRef.current);
     setReady(true);
     // `match.live` figure ici comme `match.games` : le verrou `seededFor` empêche de toute
     // façon un second amorçage, et les lister honnêtement vaut mieux qu'une exception de lint
     // qui masquerait le jour où le verrou disparaîtrait. Même chose pour les heures.
-  }, [match.id, match.games, match.live, match.startedAt, match.finishedAt, bestOf]);
+  }, [match.id, match.games, match.live, match.startedAt, match.finishedAt, match.liveRev, bestOf]);
 
   useEffect(() => {
     if (ready) saveLog(match.id, events);
@@ -329,6 +459,8 @@ export default function InterclubScorer({
             // s'est perdue — ne s'annonce pas, sous peine de se déclarer en conflit avec sa
             // propre écriture et d'y perdre le journal.
             knownGameCount: typeof ackRef.current === "number" ? ackRef.current : undefined,
+            // Même règle pour la révision : on n'annonce que ce que le serveur a confirmé.
+            rev: typeof revRef.current === "number" ? revRef.current : undefined,
             // `awaitingServeBox` n'est plus envoyé : le carré ne s'attend plus, il se propose
             // (cf. `interclub.ts`). Le serveur lit son absence comme `false`.
             live: st.status === "done" ? null : {
@@ -344,7 +476,7 @@ export default function InterclubScorer({
         }
         if (res.status === 409) {
           setOffline(false);
-          // Deux refus partagent ce statut, et ils demandent l'inverse l'un de l'autre : d'où
+          // Plusieurs refus partagent ce statut, et ils demandent des réactions opposées : d'où
           // le code renvoyé par le serveur, sur lequel on branche — jamais sur le message.
           const code = await res
             .json()
@@ -361,15 +493,30 @@ export default function InterclubScorer({
             toast("err", "Écriture simultanée — retape le point.");
             return "conflict";
           }
-          if (code === "stale-games") {
+          if (code === "stale-games" || code === "stale-live") {
             // Le serveur a dépassé ce journal : quelqu'un a saisi un jeu pendant qu'on avait le
             // dos tourné. Le journal ne décrit plus rien — on le jette, et on ferme pour que le
             // parent recharge la rencontre. Rouvrir « Reprendre le marquage » repartira du
             // score enregistré, seule version que tout le monde partage.
             clearLog(match.id);
             ackRef.current = null;
+            revRef.current = null;
             deadRef.current = true;
             toast("err", "Le score a changé ailleurs — rouvre le marquage pour repartir du score enregistré.");
+            onClose();
+            return "stale";
+          }
+          if (code === "match-done") {
+            // Le match est TERMINÉ côté serveur, et ce n'est pas nous qui l'avons clos : son score
+            // final est enregistré, et seule la correction a posteriori (`PATCH`) peut encore y
+            // toucher. Ce refus était lu comme « quelqu'un d'autre marque » : le journal restait
+            // alors À VIE, chaque réouverture renvoyait le même état et recevait le même refus.
+            // Il ne décrit plus rien qu'on puisse envoyer — on le jette et on ferme, comme pour
+            // `stale-games`.
+            clearLog(match.id);
+            ackRef.current = null;
+            deadRef.current = true;
+            toast("info", "Score déjà enregistré — ce match est terminé.");
             onClose();
             return "stale";
           }
@@ -384,11 +531,30 @@ export default function InterclubScorer({
           // commité ressemble exactement à cela. On ne sait pas, donc on ne l'affirmera pas.
           ackRef.current = "unsure";
           saveAck(match.id, "unsure");
+          revRef.current = "unsure";
+          saveRev(match.id, "unsure");
           return "offline";
         }
         // Le serveur a pris ce corps : c'est désormais l'état sur lequel le journal est bâti.
         ackRef.current = st.games.length;
         saveAck(match.id, st.games.length);
+        // La révision qu'il vient de poser. Un serveur qui ne la rend pas (déploiement
+        // antérieur) laisse la révision inconnue : on n'annoncera rien.
+        const rendu = await res
+          .json()
+          .then((d) => (d as { rev?: unknown } | null)?.rev)
+          .catch(() => undefined);
+        revRef.current = Number.isInteger(rendu) ? (rendu as number) : null;
+        saveRev(match.id, revRef.current);
+        // Et l'ÉTAT ainsi confirmé : c'est ce qui dira, à la réouverture, si le journal porte
+        // encore quelque chose que le serveur n'a pas (cf. `SENT_PREFIX` et l'amorçage).
+        saveSent(
+          match.id,
+          empreinte(
+            st.games,
+            st.status === "done" ? null : { current: st.current, serving: st.serving, servingBox: st.servingBox },
+          ),
+        );
         return "ok";
       } catch {
         // Hors-ligne : on garde la main, la prochaine tentative renverra l'état COMPLET.
@@ -399,6 +565,8 @@ export default function InterclubScorer({
         setOffline(true);
         ackRef.current = "unsure";
         saveAck(match.id, "unsure");
+        revRef.current = "unsure";
+        saveRev(match.id, "unsure");
         return "offline";
       }
     },

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { NextRequest } from "next/server";
 
 // Un invité hors asso n'a ni compte ni connexion : cette route le crée (ou le
@@ -9,9 +9,13 @@ import type { NextRequest } from "next/server";
 const h = vi.hoisted(() => ({
   /** Drapeau de fonction : le 404 « coupée » est le premier cas canonique. */
   tricountOn: true,
-  /** Combien d invités ont déjà été créés dans la fenêtre. */
-  guestCount: 0,
-  countWhere: null as null | Record<string, unknown>,
+  /**
+   * Le journal des gestes (`LoginAttempt`, cf. lib/geste-debit.ts), en mémoire. Il HONORE
+   * `ip`, `identifier` et les bornes de `createdAt` : la limite par membre s'y mesure.
+   */
+  journal: [] as { ip: string; identifier: string; createdAt: Date }[],
+  /** Le `where` de la purge des tricounts vides. */
+  purgeWhere: null as null | Record<string, unknown>,
   session: { userId: "u1", displayName: "Membre", resa: {} as unknown } as {
     userId: string;
     displayName: string;
@@ -38,14 +42,40 @@ vi.mock("@/lib/features-server", () => ({
     ranking: false,
   }),
 }));
+type WhereJournal = { ip?: string; identifier?: string; createdAt?: { gte?: Date; lt?: Date } };
+const dansJournal = (
+  l: { ip: string; identifier: string; createdAt: Date },
+  w: WhereJournal,
+) =>
+  (w.ip === undefined || l.ip === w.ip) &&
+  (w.identifier === undefined || l.identifier === w.identifier) &&
+  (!w.createdAt?.gte || l.createdAt >= w.createdAt.gte) &&
+  (!w.createdAt?.lt || l.createdAt < w.createdAt.lt);
+
 vi.mock("@/lib/db", () => ({
   prisma: {
-    tricount: { upsert: h.tricountUpsert },
-    tricountGuest: {
-      count: vi.fn(async (a: { where: Record<string, unknown> }) => {
-        h.countWhere = a.where;
-        return h.guestCount;
-      }), upsert: h.guestUpsert },
+    tricount: {
+      upsert: h.tricountUpsert,
+      deleteMany: vi.fn(async (a: { where: Record<string, unknown> }) => {
+        h.purgeWhere = a.where;
+        return { count: 0 };
+      }),
+    },
+    tricountGuest: { upsert: h.guestUpsert },
+    loginAttempt: {
+      create: vi.fn(async ({ data }: { data: { ip: string; identifier: string } }) => {
+        h.journal.push({ ...data, createdAt: new Date() });
+        return {};
+      }),
+      count: vi.fn(async ({ where }: { where: WhereJournal }) =>
+        h.journal.filter((l) => dansJournal(l, where)).length,
+      ),
+      deleteMany: vi.fn(async ({ where }: { where: WhereJournal }) => {
+        const avant = h.journal.length;
+        h.journal = h.journal.filter((l) => !dansJournal(l, where));
+        return { count: avant - h.journal.length };
+      }),
+    },
   },
 }));
 
@@ -60,11 +90,27 @@ const req = (body: unknown) =>
 const resaUser = { userId: "u1", displayName: "Membre", resa: { accessToken: "t" } };
 const emailOnly = { userId: "u1", displayName: "Membre", resa: null };
 
+/** Les dates des tests sont FIXES : sans horloge figée, la plage ±2 ans les refuserait un jour. */
+const MAINTENANT = new Date("2026-10-17T12:00:00Z");
+
+/** `n` invités déjà ajoutés par `userId`, il y a `ilYa` ms. */
+const prerempli = (n: number, userId = "u1", ilYa = 0) =>
+  Array.from({ length: n }, () => ({
+    ip: "geste",
+    identifier: `tricount-guest:${userId}`,
+    createdAt: new Date(MAINTENANT.getTime() - ilYa),
+  }));
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useFakeTimers({ toFake: ["Date"], now: MAINTENANT });
   h.tricountOn = true;
-  h.guestCount = 0;
-  h.countWhere = null;
+  h.journal = [];
+  h.purgeWhere = null;
   h.session = resaUser;
   h.tricountUpsert.mockResolvedValue({ id: "t1", date: "2026-07-10" });
   h.guestUpsert.mockResolvedValue({ id: "g1", name: "Marc" });
@@ -95,6 +141,16 @@ describe("POST /api/tricount/guests", () => {
     expect(res.status).toBe(400);
     expect(h.tricountUpsert).not.toHaveBeenCalled();
   });
+
+  it.each(["2026-02-30", "2026-13-01", "2062-07-10"])(
+    "rejette une date bien formée mais irréelle ou invraisemblable (%s)",
+    async (date) => {
+      const res = await POST(req({ date, name: "Marc" }));
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toEqual({ error: "Date invalide" });
+      expect(h.tricountUpsert).not.toHaveBeenCalled();
+    },
+  );
 
   it("refuse un compte email seul (même garde que l'ajout de dépense)", async () => {
     h.session = emailOnly;
@@ -133,30 +189,56 @@ describe("POST /api/tricount/guests — les cas canoniques et les bornes", () =>
     expect(res.status).toBe(200);
   });
 
-  it("REFUSE au-delà de 20 invités en 10 minutes sur la même date", async () => {
-    // Garde-fou anti-emballement, même motif que le fil de commentaires : le risque n'est pas
-    // l'inconnu malveillant (le club est sur invitation) mais le client qui boucle. Les invités
-    // n'étaient bornés que par l'unicité (tricountId, name) — donc pas bornés : il suffit de
-    // changer de prénom.
-    h.guestCount = 20;
+  it("REFUSE au-delà de 20 invités en 10 minutes pour un même membre", async () => {
+    // Garde-fou anti-emballement : le risque n'est pas l'inconnu malveillant (le club est sur
+    // invitation) mais le client qui boucle. Les invités n'étaient bornés que par l'unicité
+    // (tricountId, name) — donc pas bornés : il suffit de changer de prénom.
+    h.journal = prerempli(20);
     const res = await POST(req({ date: "2026-07-10", name: "Marc" }));
     expect(res.status).toBe(429);
     expect(h.guestUpsert).not.toHaveBeenCalled();
   });
 
   it("laisse passer juste en dessous de la borne", async () => {
-    h.guestCount = 19;
+    h.journal = prerempli(19);
     expect((await POST(req({ date: "2026-07-10", name: "Marc" }))).status).toBe(200);
   });
 
-  it("compte sur une FENÊTRE de 10 minutes, et sur la date visée", async () => {
-    // Une fenêtre qu'on n'inspecte pas peut valoir 10 ms ou 10 jours sans qu'aucun test bouge.
-    const avant = Date.now();
+  it("ne se contourne plus en CHANGEANT DE DATE (le compteur suivait la date visée)", async () => {
+    // Vingt invités, chacun sur une date différente : l'ancien compte, filtré par
+    // `tricount: { date }`, repartait de zéro à chaque date — et chaque date créait au passage
+    // un tricount vide.
+    for (let i = 1; i <= 20; i++) {
+      const date = `2026-07-${String(i).padStart(2, "0")}`;
+      expect((await POST(req({ date, name: `Invité ${i}` }))).status).toBe(200);
+    }
+    const res = await POST(req({ date: "2026-07-21", name: "Encore un" }));
+    expect(res.status).toBe(429);
+  });
+
+  it("compte PAR MEMBRE, sur une fenêtre de 10 minutes", async () => {
+    // Ceux d'un autre membre, ou plus vieux que la fenêtre, ne comptent pas.
+    h.journal = [...prerempli(20, "u2"), ...prerempli(20, "u1", 10 * 60_000 + 1000)];
+    expect((await POST(req({ date: "2026-07-10", name: "Marc" }))).status).toBe(200);
+  });
+});
+
+describe("POST /api/tricount/guests — purge des tricounts vides", () => {
+  it("efface au passage les tricounts SANS dépense de plus de 24 h, sauf celui de la date visée", async () => {
     await POST(req({ date: "2026-07-10", name: "Marc" }));
-    const where = h.countWhere as { createdAt: { gte: Date }; tricount: { date: string } };
-    expect(where.tricount).toEqual({ date: "2026-07-10" });
-    const fenetre = avant - where.createdAt.gte.getTime();
-    expect(fenetre).toBeGreaterThanOrEqual(10 * 60_000 - 50);
-    expect(fenetre).toBeLessThanOrEqual(10 * 60_000 + 50);
+    const where = h.purgeWhere as {
+      expenses: unknown;
+      createdAt: { lt: Date };
+      date: unknown;
+    };
+    expect(where.expenses).toEqual({ none: {} });
+    expect(where.date).toEqual({ not: "2026-07-10" });
+    expect(MAINTENANT.getTime() - where.createdAt.lt.getTime()).toBe(24 * 3600_000);
+  });
+
+  it("ne purge rien quand la requête est refusée", async () => {
+    h.journal = prerempli(20);
+    await POST(req({ date: "2026-07-10", name: "Marc" }));
+    expect(h.purgeWhere).toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminSession } from "@/lib/admin";
 import { prisma } from "@/lib/db";
 import {
   computeBalances,
@@ -28,12 +28,12 @@ export async function GET(req: NextRequest) {
   if (!features.tricount) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
   // L'admin a sur chaque ligne les droits de son auteur, comme les routes d'écriture.
-  const admin = isAdminEmail(session.email);
+  const admin = isAdminSession(session);
 
   // Pagination : on ne renvoie jamais TOUT l'historique d'un coup (il grossit sans fin).
   // ?limit borne le nombre de tricounts (les plus récents d'abord) ; le client demande
@@ -111,7 +111,9 @@ export async function GET(req: NextRequest) {
     // Compte « email seul » (sans ResaMania) : l'IHM masque alors la gestion des
     // dépenses (création/édition/suppression). Lecture, remboursements, messagerie
     // et validation restent possibles. Le serveur reste la source de vérité (403).
-    emailOnly: session.resa === null,
+    // Même définition que `isEmailOnly` (lib/tricount-guard) : un compte ResaMania dont le jeton
+    // est momentanément irrafraîchissable (`resaUnavailable`) n'est PAS « email seul ».
+    emailOnly: session.resa === null && !session.resaUnavailable,
     // Reste-t-il des tricounts plus anciens à charger ? (bouton « Charger plus »)
     hasMore,
     // Mon solde et mon nombre de dettes sur TOUT l'historique — indépendants de `limit`, donc
@@ -171,6 +173,14 @@ export async function GET(req: NextRequest) {
         })),
         expenses: t.expenses.map((e) => {
           const mine = e.creatorId === session.userId || e.payerId === session.userId || admin;
+          // Le BÉNÉFICIAIRE d'un remboursement (seul porteur de sa part) peut le retirer : un
+          // « j'ai remboursé » jamais suivi d'un virement effaçait sinon sa créance sans
+          // recours. Même règle que la route DELETE (api/tricount/expenses/[id]) — les deux
+          // doivent dire la même chose, sans quoi l'écran cacherait un geste permis, ou
+          // offrirait un bouton qui rend 404. Il ne gagne PAS l'édition (`canEdit`), qu'un
+          // remboursement n'offre à personne.
+          const beneficiaire =
+            e.isRefund && e.shares.length === 1 && e.shares[0].userId === session.userId;
           const payerKey = e.payerId ? userKey(e.payerId) : guestKey(e.payerGuestId as string);
           return {
             id: e.id,
@@ -186,7 +196,7 @@ export async function GET(req: NextRequest) {
               const p = parseKey(key);
               return { id: p.id, kind: p.kind, name: name(key), amountCents: s.amountCents };
             }),
-            canDelete: mine,
+            canDelete: mine || beneficiaire,
             // Édition réservée aux vraies dépenses (un remboursement se supprime/refait).
             canEdit: mine && !e.isRefund,
           };

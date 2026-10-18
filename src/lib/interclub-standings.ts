@@ -123,8 +123,12 @@ export interface StandingsAnchor {
 
 export type StandingsRefresh =
   | { ok: true; rows: number; at: Date }
-  /** `unreachable` : squashnet n'a pas répondu. `empty` : poule non publiée, ou ancrage faux. */
-  | { ok: false; reason: "unreachable" | "empty" };
+  /**
+   * `unreachable` : squashnet n'a pas répondu. `empty` : poule non publiée, ou ancrage faux.
+   * `vanished` : zéro ligne pour une poule DÉJÀ LUE — un classement publié ne disparaît pas,
+   * c'est donc le site (ou notre lecture) qui a changé : une panne, pas une attente.
+   */
+  | { ok: false; reason: "unreachable" | "empty" | "vanished" };
 
 /**
  * Relit le classement de la poule et l'enregistre.
@@ -144,7 +148,21 @@ export async function refreshTeamStandings(team: StandingsAnchor): Promise<Stand
   } catch {
     return { ok: false, reason: "unreachable" };
   }
-  if (rows.length === 0) return { ok: false, reason: "empty" };
+  if (rows.length === 0) {
+    // Une lecture de plus, seulement dans ce cas rare : la poule avait-elle déjà un classement ?
+    // « Pas encore publié » ne vaut qu'en début de saison ; après, c'est l'alarme qu'il faut
+    // (audit 2026-10, point 15).
+    let known: { snStandingsAt: Date | null } | null = null;
+    try {
+      known = await prisma.interclubTeam.findUnique({
+        where: { id: team.id },
+        select: { snStandingsAt: true },
+      });
+    } catch {
+      /* lecture impossible : on garde le verdict prudent, « pas publié » */
+    }
+    return { ok: false, reason: known?.snStandingsAt ? "vanished" : "empty" };
+  }
   const at = new Date();
   await prisma.interclubTeam.update({
     where: { id: team.id },

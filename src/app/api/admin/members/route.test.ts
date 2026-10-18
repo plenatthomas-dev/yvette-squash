@@ -34,11 +34,14 @@ const h = vi.hoisted(() => ({
   alertsChanged: vi.fn(),
   /** Les démissions de capitaine posées par `set_team`. */
   teamUpdateMany: vi.fn(async () => ({ count: 1 })),
+  probeDeleteMany: vi.fn(async () => ({ count: 0 })),
+  anonymize: vi.fn(async () => {}),
 }));
 
 vi.mock("@/lib/admin", () => ({
   requireAdmin: vi.fn(async () => h.admin),
-  isAdminEmail: (e: string | null | undefined) => (e ? h.adminEmails.has(e) : false),
+  isAdminUser: (u: { email?: string | null } | null | undefined) =>
+    u?.email ? h.adminEmails.has(u.email) : false,
 }));
 // Le flag est résolu à chaud côté serveur (env + override en base) : on mocke l'état effectif.
 vi.mock("@/lib/features-server", () => ({
@@ -52,9 +55,13 @@ vi.mock("@/lib/features-server", () => ({
     interclub: h.featureInterclub,
   }),
 }));
-vi.mock("@/lib/members", () => ({
+// `deleteBlockersMessage` reste le VRAI : c'est lui qui met en mots ce qui bloque, et le test
+// du 409 interclub ci-dessous vérifie précisément ce texte.
+vi.mock("@/lib/members", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/members")>()),
   listMembers: vi.fn(async () => h.members),
   deleteBlockersFor: vi.fn(async () => h.blockers),
+  anonymizeMember: h.anonymize,
 }));
 vi.mock("@/lib/email-auth", () => ({
   createEmailToken: h.createEmailToken,
@@ -81,6 +88,7 @@ vi.mock("@/lib/db", () => ({
     },
     interclubGuest: { findMany: vi.fn(async () => h.invites) },
     session: { deleteMany: h.sessionDeleteMany },
+    squashnetRankingProbe: { deleteMany: h.probeDeleteMany },
     // La désactivation est ATOMIQUE : poser `disabledAt`, révoquer les sessions et valider
     // d'office les tricounts dont le membre est payeur vont ensemble. Le mock exécute le
     // corps sur les mêmes doubles, pour que le test voie les trois écritures.
@@ -259,6 +267,18 @@ describe("POST /api/admin/members", () => {
     const res = await POST(postReq({ id: "u1", action: "delete" }));
     expect(res.status).toBe(409);
     expect((await res.json()).blockers.total).toBe(7);
+    expect(h.userDelete).not.toHaveBeenCalled();
+  });
+
+  it("delete : 409 explicite (et non 500) pour un membre qui a créé un tournoi", async () => {
+    h.blockers = { expenses: 0, shares: 0, tournaments: 1, total: 1 };
+    const res = await POST(postReq({ id: "u1", action: "delete" }));
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe(
+      "Suppression impossible : ce membre a un tournoi créé. Désactive-le plutôt.",
+    );
+    expect(body.blockers.tournaments).toBe(1);
     expect(h.userDelete).not.toHaveBeenCalled();
   });
 
@@ -471,6 +491,8 @@ describe("POST /api/admin/members — set_squashnet_name", () => {
     // savoir si le nom qu'il vient de taper était le bon.
     expect(h.refreshMember).toHaveBeenCalledWith("u1");
     expect(await res.json()).toMatchObject({ ok: true, status: "matched" });
+    // Les recherches vaines de l'historique portaient sur l'ancien nom : oubliées.
+    expect(h.probeDeleteMany).toHaveBeenCalledWith({ where: { userId: "u1" } });
   });
 
   it("relaie un rapprochement resté infructueux, sans annuler l'enregistrement", async () => {
@@ -619,5 +641,23 @@ describe("POST /api/admin/members — désactiver, sans laisser de tricount bloq
   it("n'écrit aucune validation quand le membre n'est payeur de rien", async () => {
     await POST(postReq({ id: "u1", action: "disable" }));
     expect(h.approvalsCreated).not.toHaveBeenCalled();
+  });
+});
+
+// Audit 2026-10, point 21 : effacement RGPD d'un membre que `delete` refuse.
+describe("POST /api/admin/members — anonymize", () => {
+  it("efface la personne dans une transaction", async () => {
+    h.anonymize.mockClear();
+    const res = await POST(postReq({ id: "u1", action: "anonymize" }));
+    expect(res.status).toBe(200);
+    expect(h.anonymize).toHaveBeenCalledWith("u1", expect.anything());
+  });
+
+  it("jamais sur soi-même", async () => {
+    h.anonymize.mockClear();
+    h.target = { ...h.target!, id: "adm" };
+    const res = await POST(postReq({ id: "adm", action: "anonymize" }));
+    expect(res.status).toBe(400);
+    expect(h.anonymize).not.toHaveBeenCalled();
   });
 });

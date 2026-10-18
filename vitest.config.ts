@@ -45,11 +45,9 @@ export default defineConfig({
           include: ["src/**/*.dom.test.{ts,tsx}"],
           setupFiles: ["./vitest.setup.dom.ts"],
         },
-        // `tsconfig.json` fixe `jsx: "preserve"` — le bon réglage pour la production, où c'est
-        // le compilateur de Next qui transforme le JSX. Vite suit ce réglage et laisse alors
-        // passer du JSX brut, que son analyse d'imports ne sait pas lire. Le plugin React fait
-        // la transformation, et il n'est chargé QUE pour ce projet : le projet « node » n'a pas
-        // une ligne de JSX à compiler.
+        // Le JSX est transformé par le plugin React, chargé QUE pour ce projet : le projet
+        // « node » n'a pas une ligne de JSX à compiler. (Next 16 impose `jsx: "react-jsx"` dans
+        // tsconfig.json ; sous Next 15 c'était `preserve`, que Vite laissait passer brut.)
         plugins: [react()],
       },
     ],

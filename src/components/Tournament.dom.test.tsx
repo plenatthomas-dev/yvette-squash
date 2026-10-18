@@ -56,6 +56,32 @@ describe("scorelines — les seuls scores qu'un joueur peut cliquer", () => {
   });
 });
 
+/**
+ * Exécute `fn` sous le fuseau `tz`, puis rend au processus EXACTEMENT le fuseau d'avant.
+ *
+ * Pourquoi pas simplement `process.env.TZ = fuseau` en sortie : quand TZ n'était pas posé,
+ * cela écrivait la CHAÎNE "undefined" (`process.env` convertit tout en texte). Node lit alors
+ * un fuseau inconnu et bascule en UTC — la suite du fichier tournait sous un fuseau que
+ * personne n'avait choisi.
+ *
+ * Pourquoi pas simplement `vi.unstubAllEnvs()` non plus : il SUPPRIME bien la variable quand
+ * elle n'existait pas, mais sous Windows (Node 24, mesuré) un `delete process.env.TZ` ne fait
+ * pas relire le fuseau du système — le processus resterait sur le dernier fuseau posé ici. On
+ * repose donc d'abord, en clair, le fuseau effectif d'avant (lu par `Intl`), ce qui recale le
+ * cache de dates partout ; `unstubAllEnvs` remet ensuite la variable dans son état d'origine,
+ * absente comprise.
+ */
+function sousFuseau<T>(tz: string, fn: () => T): T {
+  const fuseauAvant = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  vi.stubEnv("TZ", tz);
+  try {
+    return fn();
+  } finally {
+    vi.stubEnv("TZ", fuseauAvant);
+    vi.unstubAllEnvs();
+  }
+}
+
 describe("les dates, et le fuseau qui les décale d'un jour", () => {
   it("prettyDate affiche le jour demandé, y compris à l'ouest de Greenwich", () => {
     // `new Date("2026-11-14")` vaut minuit UTC : à Los Angeles c'est encore le 13 au soir, et
@@ -64,16 +90,12 @@ describe("les dates, et le fuseau qui les décale d'un jour", () => {
     //
     // On déplace donc réellement le fuseau du processus le temps du test — sans quoi cette
     // règle ne serait vérifiée que sous le fuseau de la machine qui lance les tests, c'est-à-
-    // dire nulle part de fiable.
-    const fuseau = process.env.TZ;
-    try {
-      for (const tz of ["America/Los_Angeles", "Pacific/Kiritimati"]) {
-        process.env.TZ = tz;
+    // dire nulle part de fiable. (Et rendu ensuite tel quel : cf. `sousFuseau`.)
+    for (const tz of ["America/Los_Angeles", "Pacific/Kiritimati"]) {
+      sousFuseau(tz, () => {
         expect(prettyDate("2026-11-14"), tz).toBe("sam. 14 nov.");
         expect(prettyDate("2026-01-01"), tz).toBe("jeu. 1 janv.");
-      }
-    } finally {
-      process.env.TZ = fuseau;
+      });
     }
   });
 
@@ -84,15 +106,14 @@ describe("les dates, et le fuseau qui les décale d'un jour", () => {
     //
     // Le fuseau du processus est fixé ici : comparer à `toLocaleDateString` serait recopier
     // l'implémentation, et le test passerait quelle que soit la formule employée.
-    const fuseau = process.env.TZ;
     vi.useFakeTimers();
     try {
-      process.env.TZ = "Europe/Paris";
-      vi.setSystemTime(new Date("2026-07-13T23:30:00Z"));
-      expect(todayISO()).toBe("2026-07-14");
+      sousFuseau("Europe/Paris", () => {
+        vi.setSystemTime(new Date("2026-07-13T23:30:00Z"));
+        expect(todayISO()).toBe("2026-07-14");
+      });
     } finally {
       vi.useRealTimers();
-      process.env.TZ = fuseau;
     }
   });
 });
@@ -414,8 +435,12 @@ describe("Assistant de création — le classement, du choix des joueurs aux tê
 
   async function ouvrirAssistant() {
     render(<Tournament {...props} />);
+    // `findByText` HORS de l'`act` : il attend déjà via `waitFor`, qui enveloppe chaque essai
+    // dans son propre `act`. L'imbriquer ici produisait deux `act` qui se chevauchent — d'où
+    // l'avertissement de React. Même forme que `ouvrir` plus haut.
+    const bouton = await screen.findByText("➕ Nouveau tournoi");
     await act(async () => {
-      fireEvent.click(await screen.findByText("➕ Nouveau tournoi"));
+      fireEvent.click(bouton);
     });
     await waitFor(() => expect(screen.getByText(/Choisis les joueurs/)).toBeTruthy());
   }

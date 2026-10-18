@@ -22,13 +22,28 @@ const h = vi.hoisted(() => ({
   /** La rencontre que l'équipe a DÉJÀ ce jour-là, telle que la garde de création la lit. */
   sameDay: null as null | Record<string, unknown>,
   sameDayWhere: null as null | Record<string, unknown>,
+  revalidateTag: vi.fn(),
+}));
+
+// `next/cache` BOUCHONNÉ. La création appelle `interclubChanged()`, donc `revalidateTag` — qui
+// exige le contexte de requête de Next, absent sous vitest. `interclubChanged` avale l'erreur
+// (une écriture de score ne doit jamais échouer pour un cache) mais la journalise : seize fois
+// « Invariant: static generation store missing in revalidateTag » dans la sortie, du bruit qui
+// finit par masquer un VRAI avertissement. Bouchonné, l'appel devient en plus VÉRIFIABLE : le
+// bandeau « En direct » ne voit une rencontre créée que si le tag est bien invalidé.
+//
+// `unstable_cache` rend la fonction telle quelle : `interclub-gate` l'appelle au chargement du
+// module, et ce fichier ne teste pas le cache.
+vi.mock("next/cache", () => ({
+  revalidateTag: (...a: unknown[]) => h.revalidateTag(...a),
+  unstable_cache: <T,>(fn: T) => fn,
 }));
 
 vi.mock("@/lib/features-server", () => ({
   getFeatures: async () => ({ interclub: h.interclub }),
 }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
-vi.mock("@/lib/admin", () => ({ isAdminEmail: vi.fn(() => h.admin) }));
+vi.mock("@/lib/admin", () => ({ isAdminSession: vi.fn(() => h.admin) }));
 vi.mock("@/lib/db", () => ({
   prisma: {
     interclubTeam: {
@@ -114,6 +129,7 @@ beforeEach(() => {
   h.created = null;
   h.sameDay = null;
   h.sameDayWhere = null;
+  h.revalidateTag.mockReset();
 });
 
 describe("GET /api/interclub", () => {
@@ -301,6 +317,8 @@ describe("POST /api/interclub", () => {
     });
     expect(h.sameDayWhere).toEqual({ teamId: "t1", date: "2026-09-03" });
     expect(h.created).toBeNull();
+    // Rien n'a changé : aucune raison de purger ce que voient les spectateurs.
+    expect(h.revalidateTag).not.toHaveBeenCalled();
   });
 
   it("crée quand même sur demande explicite (`force`) — une double journée existe", async () => {
@@ -324,6 +342,9 @@ describe("POST /api/interclub", () => {
     const res = await POST(post(validBody));
     expect(res.status).toBe(201);
     expect(h.created?.createdById).toBe("u1");
+    // Une rencontre du jour de plus change le bandeau « En direct » : sans cette invalidation,
+    // les spectateurs ne la verraient qu'à l'expiration du cache.
+    expect(h.revalidateTag).toHaveBeenCalledExactlyOnceWith("interclub-live", { expire: 0 });
   });
 
   it("403 pour un membre non admin : les rencontres viennent du calendrier de la ligue", async () => {
@@ -331,6 +352,7 @@ describe("POST /api/interclub", () => {
     const res = await POST(post(validBody));
     expect(res.status).toBe(403);
     expect(h.created).toBeNull();
+    expect(h.revalidateTag).not.toHaveBeenCalled();
   });
 
   it("crée autant de simples que demandé, numérotés dans l'ordre", async () => {

@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 // Sans `endpoint`, on retire TOUS les appareils du membre : c'est le geste « je ne veux plus
 // rien recevoir », qui ne doit pas dépendre de l'appareil depuis lequel on le fait.
 export async function POST(req: NextRequest) {
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }

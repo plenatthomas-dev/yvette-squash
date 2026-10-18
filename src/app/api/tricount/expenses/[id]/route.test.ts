@@ -14,6 +14,10 @@ const h = vi.hoisted(() => ({
   resteVraies: 1,
   resteRemboursements: 0,
   countWhere: null as null | Record<string, unknown>,
+  /** TOUTES les clauses de compte, dans l'ordre : la route en pose deux depuis le refus 409. */
+  countWheres: [] as Record<string, unknown>[],
+  /** Les options passées à `$transaction` (niveau d'isolation). */
+  txOptions: [] as unknown[],
   count: vi.fn(),
   tricountDelete: vi.fn(),
   // Pour PATCH : membres et invités connus, autres dépenses du tricount, et ce qui est écrit.
@@ -82,8 +86,8 @@ vi.mock("@/lib/db", () => ({
     // Les deux routes passent désormais un CALLBACK (PATCH est devenu sérialisable comme
     // DELETE) ; le mock accepte encore la forme tableau, au cas où. Le client de transaction
     // porte tout ce que les deux corps touchent.
-    $transaction: async (arg: unknown) =>
-      Array.isArray(arg)
+    $transaction: async (arg: unknown, opts?: unknown) =>
+      (h.txOptions.push(opts), Array.isArray(arg))
         ? Promise.all(arg)
         : (arg as (tx: unknown) => Promise<unknown>)({
             expense: {
@@ -147,6 +151,8 @@ beforeEach(() => {
   // qui rendrait le même chiffre avec ou sans `isRefund: false` répondrait à la place de la
   // route, et le retrait du filtre ne se verrait pas.
   h.count.mockImplementation(async (a: { where: Record<string, unknown> }) => {
+    h.countWheres.push(a.where);
+    if (a.where.isRefund === true) return h.resteRemboursements;
     h.countWhere = a.where;
     return a.where.isRefund === false
       ? h.resteVraies
@@ -155,6 +161,8 @@ beforeEach(() => {
   h.resteVraies = 1;
   h.resteRemboursements = 0;
   h.countWhere = null;
+  h.countWheres = [];
+  h.txOptions = [];
   h.tricountEtat = EN_COURS;
   h.session = emailOnly;
   process.env.ADMIN_EMAILS = "chef@example.com";
@@ -186,7 +194,10 @@ describe("DELETE /api/tricount/expenses/[id] — compte « email seul »", () =>
   });
 
   it("ne peut pas supprimer le remboursement d'un AUTRE (404, pas 403)", async () => {
-    h.expense = { tricountId: "t1", isRefund: true, creatorId: "u2", payerId: "u2" };
+    // u2 a remboursé u3 : u1 n'en est ni l'auteur, ni le payeur, ni le bénéficiaire.
+    h.expense = {
+      tricountId: "t1", isRefund: true, creatorId: "u2", payerId: "u2", shares: [{ userId: "u3" }],
+    };
     const res = await DELETE(req(), ctx);
     expect(res.status).toBe(404);
     expect(h.del).not.toHaveBeenCalled();
@@ -224,21 +235,26 @@ describe("DELETE — la coquille vide, et la dette inversée qu'elle produisait"
     h.expense = { tricountId: "t1", isRefund: false, creatorId: "u1", payerId: "u1" };
   });
 
-  it("EMPORTE le tricount quand il ne reste plus que des remboursements", async () => {
-    // Le défaut : le compte portait sur TOUTES les lignes, remboursements inclus. Supprimer
-    // la dernière vraie dépense laissait donc vivre un tricount qui n'en portait plus que des
-    // remboursements — et un tel tricount est un piège sans issue. Plus aucun payeur, donc
-    // `ready` faux à jamais : `approve` répond 403 et `refunds` 409. Pire, les soldes
-    // S'INVERSENT (le seul mouvement restant est un remboursement) : celui qui avait été
-    // remboursé voyait « tu dois 15,00 € » pour de l'argent qu'il avait déjà reçu.
+  it("REFUSE (409) de supprimer la dernière vraie dépense d'un tricount qui porte des remboursements", async () => {
+    // Le compte des vraies dépenses reste le bon — un tricount sans vraie dépense est un piège
+    // sans issue (plus de payeur, `ready` faux à jamais, soldes INVERSÉS). Mais l'emporter
+    // effaçait en cascade ses remboursements, c'est-à-dire la trace de virements RÉELLEMENT
+    // faits, sans un mot. On refuse donc, et la suppression est annulée avec la transaction.
     h.resteVraies = 0;
     h.resteRemboursements = 1;
 
     const res = await DELETE(req(), ctx);
 
-    expect(res.status).toBe(200);
-    expect(h.countWhere).toEqual({ tricountId: "t1", isRefund: false });
-    expect(h.tricountDelete).toHaveBeenCalledWith({ where: { id: "t1" } });
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({
+      error:
+        "Ce tricount porte des remboursements : modifie la dépense plutôt que de la supprimer, ou retire d'abord les remboursements.",
+    });
+    expect(h.countWheres).toEqual([
+      { tricountId: "t1", isRefund: false },
+      { tricountId: "t1", isRefund: true },
+    ]);
+    expect(h.tricountDelete).not.toHaveBeenCalled();
   });
 
   it("garde le tricount tant qu'il reste une VRAIE dépense", async () => {
@@ -506,5 +522,67 @@ describe("preserving a saved expense split", () => {
   it("conserve à la suppression la validation des payeurs désactivés", async () => {
     expect((await DELETE(req(), ctx)).status).toBe(200);
     expect(h.approvalsDeleteMany).toHaveBeenCalledWith({ where: { tricountId: "t1", user: { disabledAt: null } } });
+  });
+});
+
+describe("DELETE — isolation", () => {
+  it("passe par une transaction SERIALIZABLE, comme la création et l'édition", async () => {
+    // En Read Committed, une validation concurrente (`approve`, sérialisable) pouvait survivre
+    // à la remise à zéro des validations : SSI ne protège qu'entre transactions sérialisables.
+    h.session = resaUser;
+    h.expense = { tricountId: "t1", isRefund: false, creatorId: "u1", payerId: "u1" };
+    expect((await DELETE(req(), ctx)).status).toBe(200);
+    expect(h.txOptions).toEqual([expect.objectContaining({ isolationLevel: "Serializable" })]);
+  });
+
+  it("relaie un refus levé DANS la transaction en 409, et non en 500", async () => {
+    // Le refus métier (HttpError) levé DANS la transaction ressort par `httpErrorResponse`,
+    // et non en 500 : c'est le même relais que POST/PATCH.
+    h.session = resaUser;
+    h.expense = { tricountId: "t1", isRefund: false, creatorId: "u1", payerId: "u1" };
+    h.resteVraies = 0;
+    h.resteRemboursements = 2;
+    const res = await DELETE(req(), ctx);
+    expect(res.status).toBe(409);
+  });
+});
+
+describe("DELETE — le bénéficiaire d'un remboursement", () => {
+  // u2 déclare avoir remboursé u1 : créateur = payeur = u2, l'UNIQUE part est à u1. Si le
+  // virement n'est jamais arrivé, u1 doit pouvoir retirer ce faux « j'ai remboursé » — sans
+  // quoi sa créance disparaît sans recours qu'un admin.
+  const fauxRemboursement = {
+    tricountId: "t1", isRefund: true, creatorId: "u2", payerId: "u2", shares: [{ userId: "u1" }],
+  };
+
+  it("peut supprimer un remboursement qui lui est destiné", async () => {
+    h.session = resaUser;
+    h.expense = fauxRemboursement;
+    const res = await DELETE(req(), ctx);
+    expect(res.status).toBe(200);
+    expect(h.del).toHaveBeenCalledWith({ where: { id: "e1" } });
+  });
+
+  it("y compris depuis un compte « email seul » (ce n'est pas une vraie dépense)", async () => {
+    h.session = emailOnly;
+    h.expense = fauxRemboursement;
+    expect((await DELETE(req(), ctx)).status).toBe(200);
+  });
+
+  it("le remboursement d'un invité payeur se retire aussi par son bénéficiaire", async () => {
+    // Remboursement déclaré par u2 pour le compte d'un invité : `payerId` est nul.
+    h.session = resaUser;
+    h.expense = { ...fauxRemboursement, payerId: null };
+    expect((await DELETE(req(), ctx)).status).toBe(200);
+  });
+
+  it("porter une part d'une VRAIE dépense ne donne pas le droit de la supprimer", async () => {
+    h.session = resaUser;
+    h.expense = {
+      tricountId: "t1", isRefund: false, creatorId: "u2", payerId: "u2",
+      shares: [{ userId: "u1" }],
+    };
+    expect((await DELETE(req(), ctx)).status).toBe(404);
+    expect(h.del).not.toHaveBeenCalled();
   });
 });

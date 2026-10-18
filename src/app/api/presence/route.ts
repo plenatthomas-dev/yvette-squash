@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 const RETENTION_DAYS = 30;
 
 export async function POST(req: NextRequest) {
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }

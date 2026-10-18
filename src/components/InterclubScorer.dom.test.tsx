@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, act, fireEvent } from "@testing-library/react";
+import { render, act, fireEvent, screen } from "@testing-library/react";
 import InterclubScorer from "@/components/InterclubScorer";
 
 // LA CONCURRENCE OPTIMISTE DU MARQUEUR, ET LES DEUX FAÇONS DONT ELLE SE RETOURNAIT CONTRE LUI.
@@ -636,5 +636,241 @@ describe("InterclubScorer — le chrono", () => {
     fireEvent.click(container.querySelectorAll(".ics-side")[0]);
     await souffle();
     expect(chrono()).toBeNull();
+  });
+});
+
+// LE JOURNAL LOCAL NE GAGNE PLUS QUAND IL N'A RIEN À DÉFENDRE.
+//
+// Il gagnait toujours à l'amorçage — même vide, même entièrement envoyé. Le scénario de perte :
+// A ouvre « Marquer » puis « Retour » (journal `[]` conservé) ; B marque 6-4 au jeu 1 et rend la
+// main ; A rouvre sur 0-0, et son premier envoi `{ games: [], knownGameCount: 0, live: 0-0 }`
+// passe la garde serveur (qui ne compare que les jeux TERMINÉS) et remet le simple à zéro.
+describe("InterclubScorer — à la réouverture, le serveur fait foi si le journal n'a rien à défendre", () => {
+  const ID = "m-reouv";
+  /** Le serveur a avancé pendant qu'on avait le dos tourné : 6-4 au jeu 1, Gérard au service. */
+  const SERVEUR_AVANCE = {
+    ...MATCH,
+    id: ID,
+    games: [] as { number: number; home: number; away: number }[],
+    live: {
+      current: { home: 6, away: 4 },
+      serving: "away" as "home" | "away",
+      servingBox: "right" as "left" | "right",
+    },
+  };
+
+  function rendre(match: typeof SERVEUR_AVANCE | typeof MATCH_VIERGE) {
+    return render(
+      <InterclubScorer
+        fixtureId="f1"
+        match={match}
+        bestOf={5}
+        onClose={vi.fn()}
+        onExpired={(status) => status === 401}
+        toast={vi.fn()}
+      />,
+    );
+  }
+  const points = (c: HTMLElement) => [...c.querySelectorAll(".ics-points")].map((e) => e.textContent);
+
+  /** Désigne le serveur, marque deux points pour Thomas, puis « Retour » (envoi confirmé). */
+  async function marqueDeuxPointsEtRevient() {
+    const ecran = rendre({ ...MATCH_VIERGE, id: ID });
+    await souffle();
+    fireEvent.click(ecran.getByText("Thomas sert"));
+    await souffle();
+    fireEvent.click(ecran.getByLabelText("Point pour Thomas"));
+    await souffle();
+    fireEvent.click(ecran.getByLabelText("Point pour Thomas"));
+    await souffle();
+    fireEvent.click(ecran.getByText("← Retour"));
+    await souffle();
+    return ecran;
+  }
+
+  it("journal local VIDE + serveur en cours → on repart du serveur", async () => {
+    localStorage.setItem(`ic:log:${ID}`, "[]");
+    localStorage.setItem(`ic:ack:${ID}`, "0");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+        envois.push({ url: String(url), corps: JSON.parse(String(init?.body)) });
+        return reponse(true);
+      }),
+    );
+    const { container, getByText } = rendre(SERVEUR_AVANCE);
+    await souffle();
+    expect(points(container)).toEqual(["6", "4"]);
+
+    // Et ce qui repart n'efface rien : le 6-4 du serveur, pas un 0-0.
+    fireEvent.click(getByText("← Retour"));
+    await souffle();
+    expect(envois[0].corps.live).toMatchObject({ current: { home: 6, away: 4 } });
+  });
+
+  it("journal local ENTIÈREMENT ENVOYÉ + serveur plus avancé → on repart du serveur", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
+    const premier = await marqueDeuxPointsEtRevient();
+    expect(points(premier.container)).toEqual(["2", "0"]);
+    premier.unmount();
+
+    // Rien de non envoyé sur ce téléphone ; le serveur, lui, est à 6-4 : il fait foi.
+    const { container } = rendre(SERVEUR_AVANCE);
+    await souffle();
+    expect(points(container)).toEqual(["6", "4"]);
+    // Les clés suivent : la base confirmée est celle du serveur, plus celle du journal écarté.
+    expect(localStorage.getItem(`ic:ack:${ID}`)).toBe("0");
+  });
+
+  it("journal local entièrement envoyé, serveur IDENTIQUE → on garde le local (vrai déroulé)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => reponse(true)));
+    const premier = await marqueDeuxPointsEtRevient();
+    premier.unmount();
+
+    const { container, getByText } = rendre({
+      ...SERVEUR_AVANCE,
+      live: { current: { home: 2, away: 0 }, serving: "home", servingBox: "right" },
+    });
+    await souffle();
+    expect(points(container)).toEqual(["2", "0"]);
+    // Le vrai déroulé est là : deux annulations ramènent à 0-0 avec Thomas au service — un
+    // déroulé reconstitué par `seedEvents` n'aurait plus rien eu à défaire après le 0-0.
+    fireEvent.click(getByText("↶ Annuler"));
+    fireEvent.click(getByText("↶ Annuler"));
+    await souffle();
+    expect(points(container)).toEqual(["0", "0"]);
+  });
+
+  it("journal local avec des événements NON ENVOYÉS → on garde le local", async () => {
+    let enLigne = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        if (!enLigne) throw new Error("réseau coupé");
+        return reponse(true);
+      }),
+    );
+    const premier = await marqueDeuxPointsEtRevient();
+    // Un troisième point, qui ne part pas : le sous-sol du club.
+    enLigne = false;
+    fireEvent.click(premier.getByLabelText("Point pour Thomas"));
+    await souffle();
+    expect(points(premier.container)).toEqual(["3", "0"]);
+    premier.unmount();
+
+    // Le serveur a pourtant « avancé » : le journal porte un point qu'il n'a pas, il l'emporte.
+    const { container } = rendre(SERVEUR_AVANCE);
+    await souffle();
+    expect(points(container)).toEqual(["3", "0"]);
+  });
+});
+
+describe("InterclubScorer — un match déjà terminé ailleurs", () => {
+  it("⚠️ `match-done` purge le journal, ferme, et dit « Score déjà enregistré »", async () => {
+    // Ce 409 était lu comme « quelqu'un d'autre marque » : le journal restait à vie, et chaque
+    // réouverture renvoyait le même état pour recevoir le même refus.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: "Ce match est terminé", code: "match-done" }),
+      }) as unknown as Response),
+    );
+    const toast = vi.fn();
+    const onClose = vi.fn();
+    const { getByText } = render(
+      <InterclubScorer
+        fixtureId="f1"
+        match={MATCH}
+        bestOf={5}
+        onClose={onClose}
+        onExpired={(status) => status === 401}
+        toast={toast}
+      />,
+    );
+    await souffle();
+    expect(localStorage.getItem(LOG_KEY)).not.toBeNull();
+
+    fireEvent.click(getByText("← Retour"));
+    await souffle();
+
+    expect(localStorage.getItem(LOG_KEY)).toBeNull();
+    expect(localStorage.getItem(ACK_KEY)).toBeNull();
+    expect(localStorage.getItem(`ic:sent:${MATCH_ID}`)).toBeNull();
+    // Fermé UNE fois : `finish` ne referme pas derrière `push`.
+    expect(onClose).toHaveBeenCalledTimes(1);
+    const dits = toast.mock.calls.map((c) => String(c[1])).join(" | ");
+    expect(dits).toMatch(/Score déjà enregistré/);
+    expect(dits).not.toContain("Quelqu'un d'autre marque");
+  });
+});
+
+// Audit 2026-10, point 17 : la révision du marquage, annoncée à chaque envoi.
+describe("InterclubScorer — révision du marquage", () => {
+  function monteRev(liveRev: number, onClose = vi.fn()) {
+    render(
+      <InterclubScorer
+        fixtureId="f1"
+        match={{ ...MATCH, liveRev }}
+        bestOf={5}
+        onClose={onClose}
+        onExpired={(status) => status === 401}
+        toast={vi.fn()}
+      />,
+    );
+    return onClose;
+  }
+
+  it("annonce la révision lue chez le serveur, puis celle que le serveur rend", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_u: RequestInfo | URL, init?: RequestInit) => {
+        envois.push({ url: "", corps: JSON.parse(String(init?.body)) });
+        return reponse(true, { ok: true, rev: 8 });
+      }),
+    );
+    monteRev(7);
+    await souffle();
+    fireEvent.click(screen.getByText("← Retour"));
+    await souffle();
+    expect(envois[0]?.corps.rev).toBe(7);
+    expect(localStorage.getItem(`ic:rev:${MATCH_ID}`)).toBe("8");
+  });
+
+  it("refus `stale-live` : un autre appareil a écrit — journal jeté, écran fermé", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: "autre appareil", code: "stale-live" }),
+      })),
+    );
+    const onClose = monteRev(3);
+    await souffle();
+    fireEvent.click(screen.getByText("← Retour"));
+    await souffle();
+    expect(localStorage.getItem(LOG_KEY)).toBeNull();
+    expect(localStorage.getItem(`ic:rev:${MATCH_ID}`)).toBeNull();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("réponse perdue → plus aucune révision annoncée (le doute ne s'affirme pas)", async () => {
+    let n = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_u: RequestInfo | URL, init?: RequestInit) => {
+        envois.push({ url: "", corps: JSON.parse(String(init?.body)) });
+        n += 1;
+        if (n === 1) throw new Error("réseau coupé");
+        return reponse(true, { ok: true, rev: 5 });
+      }),
+    );
+    monteRev(3);
+    await souffle();
+    fireEvent.click(screen.getByText("← Retour"));
+    await souffle();
+    expect(localStorage.getItem(`ic:rev:${MATCH_ID}`)).toBe("?");
   });
 });

@@ -1,5 +1,7 @@
 "use client";
 
+import "./Captain.css";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readOk } from "@/lib/apiFetch";
 import { countProblems, type CheckReport, type PlayerCheck } from "@/lib/captain-check";

@@ -9,7 +9,8 @@ vi.mock("@/components/PasskeyEnrollPrompt", () => ({ PasskeyEnrollPrompt: () => 
 vi.mock("@/components/PrivacyNotice", () => ({ PrivacyNotice: () => null, InfoIcon: () => null }));
 vi.mock("@/components/HeaderMenu", () => ({ HeaderMenu: () => null }));
 vi.mock("@/components/AnnouncementBanner", () => ({ recheckBanner: vi.fn() }));
-vi.mock("@/lib/apiFetch", () => ({ reportMaintenance: vi.fn() }));
+// Le vrai module (callApi, userMessage…), sauf la bannière de maintenance, neutralisée.
+vi.mock("@/lib/apiFetch", async (orig) => ({ ...(await orig<typeof import("@/lib/apiFetch")>()), reportMaintenance: vi.fn() }));
 vi.mock("@/lib/sound", () => ({ unlockAudio: vi.fn(), playSuccessJingle: vi.fn(), playError: vi.fn(), playAlert: vi.fn() }));
 vi.mock("@/lib/notif-report", () => ({ reportNotifState: vi.fn(async () => {}) }));
 vi.mock("@/lib/pushClient", () => ({
@@ -21,7 +22,7 @@ vi.mock("@/components/PlanningGrid", () => ({ PlanningGrid: ({ planning, onBook,
   {planning.slots.map((slot) => <button key={slot.id} onClick={() => slot.mine ? onCancelMine(slot) : onBook(slot)}>{slot.mine ? "Annuler la mienne" : "Réserver le libre"}</button>)}
 </div> }));
 vi.mock("@/components/WeekGrid", () => ({ WeekGrid: ({ days }: { days: { date: string }[] }) => <div data-testid="week">{days.map((d) => d.date).join(",")}</div> }));
-import Home from "./page";
+import Home from "./HomeApp";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -37,11 +38,14 @@ let planningReplies: Map<string, Promise<Response>>;
 let weekReplies: Map<string, Promise<Response>>;
 let journalReplies: Map<string, Promise<Response>>;
 let calls: { url: string; body?: Record<string, unknown> }[];
+/** Réponse de /api/book (et /api/cancel-slot) imposée par un test ; `undefined` = succès. */
+let bookReply: (() => Promise<Response>) | undefined;
 
 beforeEach(() => {
   localStorage.clear();
   window.history.replaceState(null, "", "/?date=2026-09-10&view=day");
   planningReplies = new Map(); weekReplies = new Map(); journalReplies = new Map(); calls = [];
+  bookReply = undefined;
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input); calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     const date = new URL(url, "http://localhost").searchParams.get("date")!;
@@ -53,6 +57,7 @@ beforeEach(() => {
     if (url.startsWith("/api/alerts/counts")) return response({});
     if (url.startsWith("/api/notifications")) return response({ notifications: [], unread: 0 });
     if (url === "/api/alerts") return response([]);
+    if ((url === "/api/book" || url === "/api/cancel-slot") && bookReply) return bookReply();
     return response({ ok: true });
   }));
 });
@@ -121,4 +126,87 @@ it("annule la résa d'Alice depuis la grille, même quand le sélecteur affiche 
   fireEvent.click(screen.getByText("Annuler la mienne"));
   fireEvent.click(await screen.findByRole("button", { name: "Annuler la r\u00e9sa" }));
   await waitFor(() => expect(calls.find((c) => c.url === "/api/cancel-slot")?.body).toEqual({ classEventId: "mine" }));
+});
+
+// ─── Messages d'erreur : jamais le jargon du navigateur ni du parseur JSON ─────────────
+//
+// « Réservation impossible : Failed to fetch », « … : Load failed », « Erreur : Unexpected end
+// of JSON input » : trois textes vus à l'écran, écrits pour un développeur. Cf. lib/apiFetch.
+
+/** Réserve le créneau libre jusqu'à la confirmation incluse. */
+async function reserverLeLibre() {
+  render(<Home />);
+  await waitFor(() => expect(screen.getByTestId("planning")).toBeTruthy());
+  // Pour Bob : Alice joue déjà à cet horaire, le garde « un seul terrain » l'arrêterait avant
+  // tout appel réseau.
+  fireEvent.change(screen.getByLabelText("Réserver pour"), { target: { value: "bob" } });
+  fireEvent.click(screen.getByText("Réserver le libre"));
+  fireEvent.click(await screen.findByRole("button", { name: "R\u00e9server" }));
+}
+
+it("réservation hors réseau : message en français, pas « Failed to fetch »", async () => {
+  bookReply = () => Promise.reject(new TypeError("Failed to fetch"));
+  await reserverLeLibre();
+  expect(
+    await screen.findByText(/Réservation impossible : Pas de réseau : vérifie ta connexion et réessaie\./),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Failed to fetch/)).toBeNull();
+});
+
+it("réservation sur un 500 au corps vide : « le service ne répond pas », pas une erreur JSON", async () => {
+  bookReply = async () =>
+    ({ ok: false, status: 500, json: async () => { throw new SyntaxError("Unexpected end of JSON input"); } }) as unknown as Response;
+  await reserverLeLibre();
+  expect(await screen.findByText(/Le service ne répond pas, réessaie dans un instant\./)).toBeTruthy();
+  expect(screen.queryByText(/JSON/)).toBeNull();
+});
+
+it("réservation en 504 : issue inconnue → renvoi au planning, rechargé en frais", async () => {
+  // Pas « Réservation impossible » : la résa a pu passer chez ResaMania. Retaper pousserait
+  // à réserver deux fois.
+  bookReply = async () => response({ error: "ResaMania n'a pas répondu à temps." }, 504);
+  await reserverLeLibre();
+  expect(
+    await screen.findByText(/La réservation n'a pas pu être confirmée : vérifie le planning\./),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Réservation impossible/)).toBeNull();
+  await waitFor(() =>
+    expect(calls.some((c) => c.url === "/api/planning?date=2026-09-10&fresh=1")).toBe(true),
+  );
+});
+
+it("un succès `journalSynced: false` reste une réservation confirmée", async () => {
+  bookReply = async () => response({ ok: true, journalSynced: false });
+  await reserverLeLibre();
+  expect(await screen.findByText(/Réservation confirmée/)).toBeTruthy();
+});
+
+it("annulation hors réseau (Safari) : message en français, pas « Load failed »", async () => {
+  bookReply = () => Promise.reject(new TypeError("Load failed"));
+  render(<Home />);
+  await waitFor(() => expect(screen.getByTestId("planning")).toBeTruthy());
+  fireEvent.click(screen.getByText("Annuler la mienne"));
+  fireEvent.click(await screen.findByRole("button", { name: "Annuler la r\u00e9sa" }));
+  expect(await screen.findByText(/Annulation impossible : Pas de réseau/)).toBeTruthy();
+  expect(screen.queryByText(/Load failed/)).toBeNull();
+});
+
+it("planning du jour sur un 500 illisible : erreur lisible à la place de la grille", async () => {
+  planningReplies.set(
+    "2026-09-10",
+    Promise.resolve({ ok: false, status: 500, json: async () => { throw new SyntaxError("Unexpected end of JSON input"); } } as unknown as Response),
+  );
+  render(<Home />);
+  expect((await screen.findAllByText(/Le service ne répond pas/)).length).toBeGreaterThan(0);
+  expect(screen.queryByText(/JSON/)).toBeNull();
+});
+
+// Audit 2026-10, point 26 : la session lue au rendu serveur évite l'aller-retour /api/auth/me.
+it("amorcé par le serveur : affiche l'appli SANS interroger /api/auth/me", async () => {
+  const initialMe = { id: "me", displayName: "Alice", canBook: true } as unknown as Parameters<typeof Home>[0] extends infer P
+    ? P extends { initialMe?: infer M } ? M : never
+    : never;
+  render(<Home initialMe={initialMe} />);
+  await waitFor(() => expect(screen.getByTestId("planning")).toBeTruthy());
+  expect(calls.some((c) => c.url === "/api/auth/me")).toBe(false);
 });

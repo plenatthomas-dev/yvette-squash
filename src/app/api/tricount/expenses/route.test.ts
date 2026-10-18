@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { NextRequest } from "next/server";
 
 // LA ROUTE QUI ÉCRIT L'ARGENT — et qui n'avait aucun test.
@@ -131,7 +131,14 @@ function partsEcrites(): [string, number][] {
   ]);
 }
 
+// Les dates des tests sont FIXES : sans horloge figée, la plage de ±2 ans autour
+// d'aujourd'hui (lib/date-saisie.ts) finirait par les refuser.
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-17T12:00:00Z") });
   h.interclubOn = true;
   h.lier.mockReset().mockImplementation(async (_t: string, ids: string[]) =>
     new Map(ids.map((id) => [id, `tg-${id}`])),
@@ -274,6 +281,16 @@ describe("POST /api/tricount/expenses — la validation du corps", () => {
   it("refuse une date qui n'est pas au format YYYY-MM-DD", async () => {
     await refus({ ...base, date: "03/09/2026" }, "Date invalide");
     await refus({ ...base, date: 20260903 }, "Date invalide");
+  });
+
+  it("refuse une date bien formée mais IRRÉELLE ou invraisemblable", async () => {
+    // « 2026-13-01 » passait la regex, puis `new Date("2026-13-01T12:00:00")` rendait une date
+    // invalide que Prisma refusait : un 500 nu. « 2026-02-30 » créait un tricount fantôme.
+    await refus({ ...base, date: "2026-13-01" }, "Date invalide");
+    await refus({ ...base, date: "2026-02-30" }, "Date invalide");
+    // Plus de deux ans d'écart avec aujourd'hui : une faute de frappe, pas une soirée.
+    await refus({ ...base, date: "2062-09-03" }, "Date invalide");
+    await refus({ ...base, date: "2024-09-03" }, "Date invalide");
   });
 
   it("refuse un libellé vide ou de plus de 80 caractères", async () => {

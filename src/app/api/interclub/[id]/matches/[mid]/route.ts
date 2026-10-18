@@ -2,17 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
 import { HttpError, httpErrorResponse, readJsonBody, serializableTransaction } from "@/lib/http-tx";
 import { Prisma } from "@prisma/client";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminSession } from "@/lib/admin";
 import {
   isColorValue,
   lineupComplete,
   normalizeColor,
   sequenceWinner,
   validGameSequence,
+  winGamesFor,
   type GameScore,
 } from "@/lib/interclub";
 import {
   derivedStatus,
+  doneTransition,
   staleGamesReason,
   fixtureScore,
   scorerIsStale,
@@ -39,7 +41,14 @@ export const dynamic = "force-dynamic";
 
 // PATCH /api/interclub/{id}/matches/{mid} : composition et/ou score d'un simple.
 //   { homeUserId?, homeGuestId?, awayName?, homeColor?, awayColor?,
-//     games?: [{ home, away }], knownGameCount? }
+//     games?: [{ home, away }], knownGameCount?,
+//     outcome?: "forfait" | "abandon" | null, outcomeWinner?: "home" | "away" }
+//
+// FORFAIT ET ABANDON (audit 2026-10, point 18) : sans eux, une rencontre où un joueur manque
+// ne pouvait jamais se clore — un simple ne passait « terminé » qu'avec une suite de jeux
+// complète. Un forfait se clôt sans jeu, au score de jeux attribué (3-0 en cinq jeux) ; un
+// abandon garde les jeux réellement terminés (`games`, facultatif) et attribue la victoire.
+// `outcome: null` revient à un match joué.
 //
 // `games` remplace INTÉGRALEMENT la liste des jeux : c'est une correction de saisie, pas un
 // ajout incrémental — on évite ainsi qu'une double soumission crée deux fois le même jeu.
@@ -76,6 +85,22 @@ export async function PATCH(
       knownGameCount?: unknown;
       knownGames?: GameScore[];
     };
+
+  // L'issue particulière n'est TOUCHÉE que si la clé est présente (`null` compris).
+  const touchesOutcome = "outcome" in body;
+  const outcome = body.outcome as unknown;
+  const outcomeWinner = body.outcomeWinner as unknown;
+  if (touchesOutcome) {
+    if (outcome !== null && outcome !== "forfait" && outcome !== "abandon") {
+      return NextResponse.json({ error: "Issue inconnue" }, { status: 400 });
+    }
+    if (outcome !== null && outcomeWinner !== "home" && outcomeWinner !== "away") {
+      return NextResponse.json({ error: "Dis qui l'emporte" }, { status: 400 });
+    }
+    if (outcome === "forfait" && games !== undefined && Array.isArray(games) && games.length > 0) {
+      return NextResponse.json({ error: "Un forfait se déclare sans jeu" }, { status: 400 });
+    }
+  }
 
   if (knownGames !== undefined && (!Array.isArray(knownGames) || knownGames.length !== knownGameCount ||
     knownGames.some((g) => !g || !Number.isInteger(g.home) || !Number.isInteger(g.away) || g.home < 0 || g.away < 0))) {
@@ -114,7 +139,7 @@ export async function PATCH(
   // version en émettait un depuis l'INTÉRIEUR de la transaction, et sur le client global —
   // donc une seconde connexion mobilisée pendant qu'une transaction Serializable en détenait
   // déjà une, motif classique d'interblocage sur un pool serverless étroit.
-  const admin = isAdminEmail(session.email);
+  const admin = isAdminSession(session);
 
   // Ce qu'il y aura à ANNONCER, calculé dans la transaction et consommé après elle : notifier
   // depuis l'intérieur enverrait la notification même si la transaction était finalement
@@ -131,6 +156,7 @@ export async function PATCH(
     matchDone: { home: number; away: number } | null;
     fixtureStarted: boolean;
     fixtureDone: boolean;
+    fixtureCorrected: boolean;
     score: { home: number; away: number };
     lines: MatchLine[];
   }
@@ -166,6 +192,7 @@ export async function PATCH(
               status: true,
               startNotifiedAt: true,
               doneNotifiedAt: true,
+              doneNotifiedScore: true,
               opponent: true,
               team: { select: { name: true } },
             },
@@ -207,7 +234,7 @@ export async function PATCH(
         m.scorerId !== null &&
         m.scorerId !== session.userId &&
         !scorerIsStale(m.scorerClaimedAt);
-      if (parsedGames && heldByOther) {
+      if ((parsedGames || touchesOutcome) && heldByOther) {
         throw new HttpError(409, "Quelqu'un marque ce match en direct — attends qu'il ait fini");
       }
 
@@ -230,6 +257,15 @@ export async function PATCH(
 
       if (parsedGames && !validGameSequence(parsedGames, m.interclub.bestOf)) {
         throw new HttpError(400, "Score impossible pour ce format");
+      }
+      // Un abandon se déclare AVANT la fin : les jeux terminés ne doivent pas déjà désigner un
+      // vainqueur (ce serait un match gagné, pas abandonné).
+      const issue = touchesOutcome && outcome !== null ? (outcome as "forfait" | "abandon") : null;
+      if (issue === "abandon") {
+        const joues = parsedGames ?? m.games.map((g) => ({ home: g.pointsHome, away: g.pointsAway }));
+        if (sequenceWinner(joues, m.interclub.bestOf)) {
+          throw new HttpError(400, "Ce match a déjà un vainqueur : ce n'est pas un abandon");
+        }
       }
 
       // Forme NON VÉRIFIÉE (clés étrangères en colonnes) et non `connect`/`disconnect` : Prisma
@@ -342,7 +378,54 @@ export async function PATCH(
         throw new HttpError(400, "Désigne les deux joueurs avant de saisir un score");
       }
 
-      if (parsedGames) {
+      if (issue) {
+        // FORFAIT / ABANDON : le simple se clôt au score de jeux ATTRIBUÉ. Un forfait n'a aucun
+        // jeu ; un abandon garde ceux qui ont réellement été terminés.
+        const joues =
+          issue === "forfait"
+            ? []
+            : (parsedGames ?? m.games.map((g) => ({ home: g.pointsHome, away: g.pointsAway })));
+        const gagnes = (side: "home" | "away") =>
+          joues.filter((g) => (side === "home" ? g.home > g.away : g.away > g.home)).length;
+        const need = winGamesFor(m.interclub.bestOf);
+        const times = correctedGameTimes(m.games, joues);
+        await tx.interclubGame.deleteMany({ where: { matchId: mid } });
+        if (joues.length) {
+          await tx.interclubGame.createMany({
+            data: joues.map((g, i) => ({
+              matchId: mid,
+              number: i + 1,
+              pointsHome: g.home,
+              pointsAway: g.away,
+              finishedAt: times[i],
+            })),
+          });
+        }
+        data.outcome = issue;
+        data.outcomeWinner = outcomeWinner as "home" | "away";
+        data.gamesHome = outcomeWinner === "home" ? need : gagnes("home");
+        data.gamesAway = outcomeWinner === "away" ? need : gagnes("away");
+        data.status = "done";
+        data.scorerId = null;
+        data.scorerClaimedAt = null;
+        data.liveJson = null;
+      } else if (touchesOutcome && m.outcome != null && !parsedGames) {
+        // Retour à un match joué sans nouveaux jeux : le statut se relit sur les jeux gardés.
+        const joues = m.games.map((g) => ({ home: g.pointsHome, away: g.pointsAway }));
+        const w = sequenceWinner(joues, m.interclub.bestOf);
+        data.outcome = null;
+        data.outcomeWinner = null;
+        data.gamesHome = joues.length ? joues.filter((g) => g.home > g.away).length : null;
+        data.gamesAway = joues.length ? joues.filter((g) => g.away > g.home).length : null;
+        data.status = w ? "done" : joues.length ? "live" : "pending";
+      }
+
+      if (parsedGames && !issue) {
+        // Des jeux saisis normalement effacent une issue particulière posée avant.
+        if (m.outcome != null) {
+          data.outcome = null;
+          data.outcomeWinner = null;
+        }
         const winner = sequenceWinner(parsedGames, m.interclub.bestOf);
         let home = 0;
         let away = 0;
@@ -377,6 +460,23 @@ export async function PATCH(
           data.scorerClaimedAt = null;
           data.liveJson = null;
         }
+        // LE JEU EN COURS NE SURVIT PAS À UNE CORRECTION DES JEUX TERMINÉS.
+        //
+        // `liveJson` décrit le jeu qui SUIT les jeux enregistrés : il n'a de sens que posé sur
+        // ces jeux-là. On ne le vidait pourtant que sur un match GAGNÉ, si bien qu'une saisie
+        // partielle — un capitaine qui entre le jeu 1 à la main, ou qui vide la liste pour
+        // ressaisir — laissait derrière elle l'ancien « 6-4 en cours » : la fiche l'affichait à
+        // la suite des nouveaux jeux, l'average (`runningTally`) le comptait, et le marqueur
+        // suivant le reprenait à l'amorçage (`seedEvents`) comme s'il était toujours joué.
+        //
+        // Dès que les jeux SAISIS diffèrent de ceux de la base, l'instantané part donc. Une
+        // écriture qui renvoie exactement les mêmes jeux (composition et score enregistrés d'un
+        // même geste, double soumission) n'y touche pas : le jeu en cours y reste vrai.
+        const saisis = parsedGames;
+        const memesJeux =
+          m.games.length === saisis.length &&
+          m.games.every((g, i) => g.pointsHome === saisis[i].home && g.pointsAway === saisis[i].away);
+        if (!memesJeux) data.liveJson = null;
       }
 
       // RIEN À ÉCRIRE ⇒ ON N'ÉCRIT PAS.
@@ -390,6 +490,13 @@ export async function PATCH(
       // On sort avant d'avoir rien changé. La transaction n'a rien écrit : il n'y a donc ni
       // statut à recaler, ni notification à envoyer, ni cache à invalider.
       if (Object.keys(data).length === 0) return RIEN_ECRIT;
+
+      // Toute écriture des jeux ou du jeu en cours fait avancer la révision du marquage : un
+      // marqueur resté ouvert sur l'ancien état sera refusé (`stale-live`) au lieu d'écraser
+      // la correction (cf. `PUT …/live`).
+      if ("gamesHome" in data || "liveJson" in data || "status" in data) {
+        data.liveRev = { increment: 1 };
+      }
 
       await tx.interclubMatch.update({ where: { id: mid }, data });
 
@@ -419,9 +526,11 @@ export async function PATCH(
       // « la rencontre commence » sur une rencontre finie depuis deux heures, puis renvoyait le
       // résultat final à tous les abonnés. Un marqueur ne se réarme pas.
       const fixtureStarted = eff === "live" && m.interclub.startNotifiedAt === null;
-      const fixtureNewlyDone = eff === "done" && m.interclub.doneNotifiedAt === null;
 
       const now = new Date();
+      // Fin à annoncer, ou résultat déjà annoncé à RECTIFIER (cf. `doneTransition`).
+      const fin = doneTransition(eff, m.interclub, fixtureScore(siblings), now);
+      const fixtureNewlyDone = fin.newlyDone;
       await tx.interclub.update({
         where: { id },
         data: {
@@ -429,7 +538,7 @@ export async function PATCH(
           // Posés DANS la transaction : un rejeu après conflit de sérialisation relit la ligne
           // et retrouve donc la garde fermée si une autre écriture a déjà annoncé.
           ...(fixtureStarted ? { startNotifiedAt: now } : {}),
-          ...(fixtureNewlyDone ? { doneNotifiedAt: now } : {}),
+          ...fin.data,
         },
       });
 
@@ -452,7 +561,9 @@ export async function PATCH(
       const winner = parsedGames ? sequenceWinner(parsedGames, m.interclub.bestOf) : null;
       const matchNewlyDone = !!winner && m.status !== "done";
 
-      if (!gamesGrew && !matchNewlyDone && !fixtureStarted && !fixtureNewlyDone) return null;
+      if (!gamesGrew && !matchNewlyDone && !fixtureStarted && !fixtureNewlyDone && !fin.corrected) {
+        return null;
+      }
 
       return {
       ctx: {
@@ -472,6 +583,7 @@ export async function PATCH(
           : null,
       fixtureStarted,
       fixtureDone: fixtureNewlyDone,
+      fixtureCorrected: fin.corrected,
       score: fixtureScore(siblings),
       lines: siblings.map((s) => ({
         player: s.homeDisplayName,
@@ -513,6 +625,9 @@ export async function PATCH(
       await notifyGameDone(ev.ctx, ev.players.player, ev.players.opponent, ev.gameDone);
     }
     if (ev.fixtureDone) await notifyFixtureDone(ev.ctx, ev.score, ev.lines);
+    else if (ev.fixtureCorrected) {
+      await notifyFixtureDone(ev.ctx, ev.score, ev.lines, { corrected: true });
+    }
   }
 
   return NextResponse.json({ ok: true });

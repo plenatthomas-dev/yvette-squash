@@ -1,0 +1,469 @@
+/* Styles de Tricount.tsx — sortis de globals.css (audit 2026-10, point 27) : ils ne servaient
+   qu'à un module chargé à la demande, et pesaient sur la feuille du premier chargement.
+   Chargés avec le module (next/dynamic emporte la CSS importée par le composant). */
+
+/* --- Vue « Frais » (partage de dépenses type Tricount) ------------------- */
+.tricount {
+  margin-top: 4px;
+}
+
+.tri-summary {
+  text-align: center;
+  margin-bottom: 14px;
+}
+
+.tri-me {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 0 0 2px;
+}
+.tri-me.pos { color: var(--primary-fg); }
+.tri-me.neg { color: var(--danger-fg); }
+
+.tri-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.tri-actions button {
+  flex: 1;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.tri-block { margin-top: 22px; }
+
+/* Bouton « charger l'historique plus ancien » (pagination). */
+.tri-loadmore {
+  display: flex;
+  justify-content: center;
+  margin: 14px 0 4px;
+}
+.tri-loadmore button {
+  width: auto;
+  margin: 0;
+  font-size: 0.85rem;
+}
+.tri-block h2 {
+  font-size: 1.05rem;
+  margin-bottom: 10px;
+}
+
+/* Listes (soldes, virements, dépenses) : mêmes cartes que le journal */
+.tri-block ul {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0;
+}
+.tri-block li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: var(--pico-border-radius);
+  margin-bottom: 8px;
+  font-size: 0.88rem;
+  background: var(--pico-card-background-color);
+}
+.tri-block li.mine { border-left: 3px solid var(--pico-primary); }
+.tri-block li.refund { opacity: 0.85; }
+
+.tri-balances strong.pos { color: var(--primary-fg); }
+.tri-balances strong.neg { color: var(--danger-fg); }
+
+/* Ligne de dépense : libellé + méta à gauche, montant + suppr à droite */
+.tri-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+.tri-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.tri-label small {
+  color: var(--pico-color);
+  opacity: 0.78;
+  font-size: 0.78rem;
+}
+.tri-amount {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.tri-amount button.cancel {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  width: auto;
+  background: transparent;
+  color: var(--danger-fg);
+  border: 1px solid var(--danger-border);
+}
+/* Bouton « Modifier » d'une dépense : même gabarit compact que « Suppr. »,
+   couleur neutre (action non destructive). */
+.tri-amount button.tri-edit {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  width: auto;
+}
+
+/* Formulaire d'ajout (dans la modale) */
+.tri-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tri-form input[type="text"] { margin: 0; }
+.tri-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+.tri-field select { margin: 0; }
+
+.tri-participants {
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: var(--pico-border-radius);
+  padding: 10px 12px;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.tri-participants legend {
+  font-size: 0.85rem;
+  padding: 0 4px;
+}
+.tri-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  padding: 4px 0;
+}
+.tri-check input { margin: 0; }
+/* Nom du participant : tronqué (…) plutôt que de passer à la ligne, sinon les lignes de
+   la liste « Pour qui ? » se déforment quand le mode « par parts » occupe la droite. */
+.tri-check-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Choix du mode de répartition (équitable / par parts) — segmenté compact. */
+.tri-splitmode {
+  display: flex;
+  gap: 6px;
+  margin: 2px 0 8px;
+}
+.tri-splitmode button {
+  flex: 1;
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 0.78rem;
+  background: var(--pico-background-color);
+  color: var(--pico-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.tri-splitmode button.on {
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+/* Ligne participant : case à cocher (flexible) + parts éventuelles + montant en direct. */
+.tri-check-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tri-check-row .tri-check {
+  flex: 1;
+  min-width: 0;
+}
+/* Ligne « + Invité » : un champ texte libre au lieu d'une case à cocher. */
+.tri-add-guest {
+  margin-top: 4px;
+}
+.tri-add-guest input {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.tri-add-guest button {
+  flex: none;
+  margin: 0;
+}
+/* Les joueurs du club SANS COMPTE : un intertitre dans « Pour qui ? », et la phrase qui dit ce
+   qu'ils ne pourront pas faire — au moment où l'on décide de les compter, pas après. */
+.tri-sans-compte {
+  margin: 8px 0 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--pico-muted-border-color);
+}
+.tri-sans-compte-titre {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.tri-sans-compte-aide {
+  margin: 2px 0 0;
+  font-size: 0.75rem;
+}
+.tri-parts {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.75rem;
+  color: var(--pico-muted-color);
+  flex: 0 0 auto;
+}
+/* Sélecteur de parts : boutons − / + compacts encadrant la valeur (en lecture seule). */
+.tri-parts-btn {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  line-height: 1;
+  border-radius: 7px;
+}
+.tri-parts-btn:disabled {
+  opacity: 0.4;
+}
+.tri-parts-value {
+  /* Largeur FIXE : sinon 1→2 chiffres décale les boutons + / − (et toute la ligne). */
+  width: 1.4em;
+  min-width: 1.4em;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--pico-color);
+}
+.tri-parts-unit {
+  /* Réserve la place de « parts » pour que « part »/« parts » ne décale rien. */
+  display: inline-block;
+  min-width: 2.3em;
+  white-space: nowrap;
+}
+.tri-share {
+  flex: 0 0 auto;
+  min-width: 54px;
+  text-align: right;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--pico-color);
+  white-space: nowrap;
+}
+
+/* --- Tricounts par jour (cartes d'historique) ---------------------------- */
+.money-btn.active {
+  border-color: var(--pico-primary);
+  color: var(--primary-fg);
+}
+
+.tri-card {
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: var(--radius);
+  background: var(--pico-card-background-color);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+/* Tricount soldé : TOUTE la carte change de couleur, bien plus repérable que la seule
+   pastille. GRIS, et non plus vert.
+
+   DESIGN.md, Règle du Vert Actionnable : « le vert ne se pose que sur ce qu'on peut toucher…
+   un élément vert non actionnable est une faute ». Un tricount soldé est précisément l'état
+   qui n'appelle plus AUCUNE action — la carte le dit elle-même (« Tout le monde est
+   remboursé »), et l'écran y masque désormais Modifier et Suppr. Il portait pourtant l'aplat
+   le plus large de toute la page, en teinte de marque : le vert y disait « viens » là où le
+   texte disait « c'est fini ».
+
+   La paire `past`/`past-fg` est celle du créneau écoulé, et c'est la même idée — DESIGN.md
+   la prescrit déjà pour la rencontre interclub terminée : « gris plein ». Le repère visuel
+   reste entier, il change seulement de sens. */
+.tri-card.settled {
+  background: color-mix(in srgb, var(--past) 55%, var(--pico-card-background-color));
+  border-color: color-mix(in srgb, var(--past-fg) 30%, var(--pico-card-border-color));
+}
+.tri-card.settled .tri-card-head:hover {
+  background: color-mix(in srgb, var(--past-fg) 12%, transparent);
+}
+
+.tri-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  /* Pico traite tout [role="button"] comme un bouton : il REDÉFINIT la variable
+     --pico-color (→ blanc/inverse) et applique un fond primaire sur l'élément,
+     ce qui rendait le titre illisible (blanc sur blanc). On rétablit l'héritage :
+     --pico-color reprend la valeur normale de la carte, et le fond reste neutre. */
+  --pico-color: inherit;
+  --pico-background-color: transparent;
+  background: transparent;
+  color: var(--pico-color);
+}
+/* Pico réapplique --pico-color = blanc + fond primaire sur :hover/:focus/:active
+   des [role="button"] : on rétablit l'héritage dans TOUS ces états, sinon le titre
+   repasse en blanc au survol / à la sélection. Fond neutre, sans box-shadow Pico. */
+.tri-card-head:hover,
+.tri-card-head:focus,
+.tri-card-head:active {
+  --pico-color: inherit;
+  --pico-background-color: transparent;
+  color: var(--pico-color);
+  background: color-mix(in srgb, var(--pico-primary) 6%, transparent);
+  box-shadow: none;
+}
+.tri-card-head:focus-visible {
+  outline: 2px solid var(--pico-primary);
+  outline-offset: -2px;
+}
+
+.tri-card-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.tri-card-title small {
+  /* Contraste : la couleur du texte courant légèrement atténuée, plutôt que le
+     gris « muted » illisible sur les fonds teintés (cartes soldées, hover…). */
+  color: var(--pico-color);
+  opacity: 0.78;
+  font-size: 0.78rem;
+}
+
+.tri-chip {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  border: 1px solid var(--pico-card-border-color);
+}
+/* « En cours » : pastille ambre pleine → nettement visible sur TOUS les thèmes
+   (clair / sombre / rose), contrairement à l'ancien gris muet peu lisible. */
+.tri-chip.pending {
+  color: #78350f;
+  background: #fcd34d;
+  border-color: #f59e0b;
+}
+.tri-chip.ready {
+  color: var(--primary-fg);
+  border-color: var(--pico-primary);
+}
+/* « Équilibré ✅ » : même raison que la carte soldée — c'est un état, pas une action. Gris
+   plein plutôt que teinte de marque (DESIGN.md, Règle du Vert Actionnable). La coche porte
+   déjà le sens ; la couleur n'a pas à promettre un geste qui n'existe plus. */
+.tri-chip.ok {
+  color: var(--past-fg);
+  background: color-mix(in srgb, var(--past) 60%, transparent);
+  border-color: transparent;
+}
+
+.tri-card-body {
+  padding: 0 14px 14px;
+  border-top: 1px solid var(--pico-card-border-color);
+}
+.tri-card-body h3 {
+  font-size: 0.92rem;
+  margin: 14px 0 6px;
+}
+.tri-card-body ul { margin: 6px 0; }
+.tri-card-body li {
+  border: none;
+  border-bottom: 1px solid var(--pico-card-border-color);
+  border-radius: 0;
+  margin-bottom: 0;
+  padding: 8px 0;
+  background: transparent;
+}
+.tri-card-body li:last-child { border-bottom: none; }
+.tri-card-body li.mine { border-left: none; }
+.tri-card-body li.mine span:first-child { font-weight: 600; }
+
+.tri-approvals button,
+.tri-settle button {
+  width: auto;
+  margin: 8px 0 0;
+  font-size: 0.88rem;
+}
+.tri-payers {
+  list-style: none;
+  padding: 0;
+}
+.tri-payers li {
+  display: block;
+  font-size: 0.88rem;
+}
+
+/* Fil de commentaires (idée 5a) */
+.tri-comment-list {
+  list-style: none;
+  padding: 0;
+}
+.tri-card-body .tri-comment-list li {
+  position: relative;
+  padding: 8px 0;
+}
+.tri-comment-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.tri-comment-head strong {
+  font-size: 0.86rem;
+}
+.tri-comment-head small {
+  color: var(--pico-muted-color);
+  font-size: 0.72rem;
+}
+.tri-comment-body {
+  margin: 2px 0 0;
+  font-size: 0.9rem;
+  white-space: pre-wrap; /* respecte les retours à la ligne éventuels */
+  overflow-wrap: anywhere; /* pas de débordement sur un mot très long / URL */
+}
+.tri-comment-del {
+  position: absolute;
+  top: 6px;
+  right: 0;
+}
+.tri-comment-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: stretch;
+}
+.tri-comment-form input {
+  flex: 1;
+  margin: 0;
+}
+.tri-comment-form button {
+  width: auto;
+  margin: 0;
+  flex-shrink: 0;
+  font-size: 0.88rem;
+}

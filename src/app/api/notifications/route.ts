@@ -29,7 +29,7 @@ export const dynamic = "force-dynamic";
 const RAW_WINDOW = 120;
 
 export async function GET(req: NextRequest) {
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
@@ -91,7 +91,7 @@ export async function GET(req: NextRequest) {
 // Tout, et pas ligne par ligne : la cloche se consulte d'un coup d'œil, et demander à
 // l'utilisateur d'acquitter chaque ligne serait une corvée pour une information déjà lue.
 export async function POST(req: NextRequest) {
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
@@ -108,7 +108,7 @@ export async function POST(req: NextRequest) {
 // ce qu'on a déjà vu — l'usage courant, sans risque de perdre quelque chose —, tandis que la
 // portée par défaut efface tout, y compris le non lu, pour repartir de zéro.
 export async function DELETE(req: NextRequest) {
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }

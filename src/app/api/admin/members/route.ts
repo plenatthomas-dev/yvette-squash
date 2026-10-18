@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireAdmin, isAdminEmail } from "@/lib/admin";
-import { listMembers, deleteBlockersFor } from "@/lib/members";
+import { requireAdmin, isAdminUser } from "@/lib/admin";
+import { forgetProbes } from "@/lib/squashnet/history";
+import { listMembers, deleteBlockersFor, deleteBlockersMessage, anonymizeMember } from "@/lib/members";
 import { getFeatures } from "@/lib/features-server";
 import { interclubDisabledResponse } from "@/lib/interclub-access";
 import { doublonsAppli } from "@/lib/interclub-federal";
@@ -92,12 +93,12 @@ export async function POST(req: NextRequest) {
 
   // Garde-fous communs aux actions sensibles : ne jamais agir sur soi-même (anti-auto-blocage)
   // ni sur un autre administrateur (l'équipe d'admin se protège mutuellement).
-  const isSensitive = action === "disable" || action === "delete";
+  const isSensitive = action === "disable" || action === "delete" || action === "anonymize";
   if (isSensitive) {
     if (target.id === admin.userId) {
       return NextResponse.json({ error: "Tu ne peux pas agir sur ton propre compte." }, { status: 400 });
     }
-    if (isAdminEmail(target.email)) {
+    if (isAdminUser(target)) {
       return NextResponse.json({ error: "Ce compte est administrateur." }, { status: 400 });
     }
   }
@@ -135,6 +136,19 @@ export async function POST(req: NextRequest) {
       await tx.session.deleteMany({ where: { userId: target.id } });
       await approveAsDisabledPayer(target.id, tx as unknown as typeof prisma);
     });
+    return NextResponse.json({ ok: true });
+  }
+
+  //   anonymize → effacement RGPD (cf. `anonymizeMember`) : l'identité et les données
+  //               personnelles partent, l'historique d'argent reste au nom « Membre supprimé ».
+  //               Pour un membre que `delete` refuse (parts de tricount). Irréversible.
+  if (action === "anonymize") {
+    await prisma.$transaction(async (tx) => {
+      await anonymizeMember(target.id, tx);
+      // Même raison que `disable` : ses tricounts de payeur ne doivent pas rester bloqués.
+      await approveAsDisabledPayer(target.id, tx as unknown as typeof prisma);
+    });
+    alertsChanged();
     return NextResponse.json({ ok: true });
   }
 
@@ -271,6 +285,9 @@ export async function POST(req: NextRequest) {
       where: { id: target.id },
       data: { squashnetGivenName: given || null, squashnetFamilyName: family || null },
     });
+    // Les recherches vaines de l'historique portaient sur l'ANCIEN nom : on les oublie, pour
+    // que le prochain « Compléter l'historique » reprenne ce membre sous le nouveau.
+    await forgetProbes(target.id);
     // Rapprochement IMMÉDIAT : sans lui, l'admin saisirait un nom sans savoir s'il est le bon
     // et devrait attendre le passage mensuel du cron pour l'apprendre. Best-effort — l'échec
     // réseau ne remet pas en cause l'enregistrement du nom, qui est ce qu'on veut garder, et
@@ -298,11 +315,7 @@ export async function POST(req: NextRequest) {
     const blockers = await deleteBlockersFor(target.id);
     if (blockers.total > 0) {
       return NextResponse.json(
-        {
-          error:
-            "Suppression impossible : ce membre a un historique (dépenses/tournois). Désactive-le plutôt.",
-          blockers,
-        },
+        { error: deleteBlockersMessage(blockers), blockers },
         { status: 409 },
       );
     }

@@ -1,5 +1,10 @@
 import { createRequire } from "node:module";
 import { withBotId } from "botid/next/config";
+import { assertProductionEnv } from "./src/lib/env-check.mjs";
+
+// Une production mal configurée (CREDENTIALS_SECRET absente…) ne se déploie pas : cf.
+// env-check.mjs. Sans effet hors `VERCEL_ENV=production`.
+assertProductionEnv();
 
 // Identifiant de build, figé UNE FOIS à la compilation (jamais recalculé au runtime) et
 // inliné aussi bien côté client que côté serveur via `env` ci-dessous. Sert à détecter un
@@ -15,7 +20,7 @@ const { version } = createRequire(import.meta.url)("./package.json");
 const APP_VERSION = version.split(".").slice(0, 2).join(".");
 
 // Headers de sécurité appliqués à toutes les réponses (pages + API).
-// NB : la Content-Security-Policy N'EST PLUS ICI — elle est posée par src/middleware.ts
+// NB : la Content-Security-Policy N'EST PLUS ICI — elle est posée par src/proxy.ts
 // (CSP stricte à nonce + strict-dynamic). La mettre aussi ici créerait un DEUXIÈME en-tête
 // CSP, et le navigateur appliquerait l'intersection des deux → casse. Une seule source.
 const securityHeaders = [

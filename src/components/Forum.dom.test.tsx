@@ -193,7 +193,7 @@ describe("la touche Entrée", () => {
   const taper = async () => {
     rendre();
     await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
-    const zone = screen.getByLabelText("Votre message") as HTMLTextAreaElement;
+    const zone = screen.getByLabelText("Ton message") as HTMLTextAreaElement;
     fireEvent.change(zone, { target: { value: "Première ligne" } });
     return zone;
   };
@@ -235,7 +235,7 @@ describe("envoi", () => {
   it("envoie le message et le montre tout de suite", async () => {
     rendre();
     await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
-    fireEvent.change(screen.getByLabelText("Votre message"), { target: { value: "Coucou 👍" } });
+    fireEvent.change(screen.getByLabelText("Ton message"), { target: { value: "Coucou 👍" } });
     fireEvent.click(screen.getByRole("button", { name: "Envoyer" }));
     await waitFor(() => expect(appels.some((a) => a.startsWith("POST"))).toBe(true));
     // Ce qui est ENVOYÉ, et pas seulement le fait qu'une requête soit partie.
@@ -246,7 +246,7 @@ describe("envoi", () => {
 
   it("vide le champ après un envoi réussi, et le garde après un refus", async () => {
     rendre();
-    const zone = screen.getByLabelText("Votre message") as HTMLTextAreaElement;
+    const zone = screen.getByLabelText("Ton message") as HTMLTextAreaElement;
     await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
 
     fireEvent.change(zone, { target: { value: "ok" } });
@@ -264,7 +264,7 @@ describe("envoi", () => {
   it("n'envoie rien sur un message vide ou fait d'espaces", async () => {
     rendre();
     await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
-    fireEvent.change(screen.getByLabelText("Votre message"), { target: { value: "   " } });
+    fireEvent.change(screen.getByLabelText("Ton message"), { target: { value: "   " } });
     expect((screen.getByRole("button", { name: "Envoyer" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
@@ -286,7 +286,7 @@ describe("le courtier", () => {
   it("NE SE VOIT PAS PARLER DOUBLE quand son message revient par le courtier", async () => {
     rendre();
     await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
-    fireEvent.change(screen.getByLabelText("Votre message"), { target: { value: "Coucou" } });
+    fireEvent.change(screen.getByLabelText("Ton message"), { target: { value: "Coucou" } });
     fireEvent.click(screen.getByRole("button", { name: "Envoyer" }));
     await waitFor(() => expect(screen.getAllByText("Coucou")).toHaveLength(1));
     // Le courtier renvoie EXACTEMENT le même message, avec le même id : c'est ce qui arrive
@@ -324,7 +324,7 @@ describe("le courtier", () => {
     await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
     act(() => canal.handlers.get("pusher:subscription_succeeded")?.(null));
 
-    const zone = screen.getByLabelText("Votre message");
+    const zone = screen.getByLabelText("Ton message");
     fireEvent.change(zone, { target: { value: "a" } });
     fireEvent.change(zone, { target: { value: "ab" } });
     fireEvent.change(zone, { target: { value: "abc" } });
@@ -370,7 +370,7 @@ describe("sans le courtier", () => {
     expect(screen.queryByText(/écrit…/)).toBeNull();
     expect(screen.queryByText(/en ligne/)).toBeNull();
 
-    fireEvent.change(screen.getByLabelText("Votre message"), { target: { value: "Coucou" } });
+    fireEvent.change(screen.getByLabelText("Ton message"), { target: { value: "Coucou" } });
     fireEvent.click(screen.getByRole("button", { name: "Envoyer" }));
     await waitFor(() => expect(appels.some((a) => a.startsWith("POST"))).toBe(true));
   });
@@ -591,7 +591,7 @@ describe("la palette d'emoji", () => {
   it("insère À LA POSITION DU CURSEUR, pas en fin de champ", async () => {
     rendre();
     await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
-    const champ = screen.getByLabelText("Votre message") as HTMLTextAreaElement;
+    const champ = screen.getByLabelText("Ton message") as HTMLTextAreaElement;
     fireEvent.change(champ, { target: { value: "Bien joue" } });
     champ.setSelectionRange(4, 4); // juste après « Bien »
     fireEvent.click(screen.getByRole("button", { name: "Emoji" }));
@@ -1070,7 +1070,7 @@ describe("la citation", () => {
     await waitFor(() => expect(screen.getByText("Salut")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: /Répondre à Gégé/ }));
     await waitFor(() => expect(screen.getByText(/Réponse à/)).toBeTruthy());
-    const champ = screen.getByLabelText("Votre message");
+    const champ = screen.getByLabelText("Ton message");
     fireEvent.change(champ, { target: { value: "Je viens" } });
     fireEvent.submit(champ.closest("form") as HTMLFormElement);
     await waitFor(() => expect(screen.getByText("Coucou")).toBeTruthy());

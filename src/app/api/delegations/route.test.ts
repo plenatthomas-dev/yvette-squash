@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 
 const h = vi.hoisted(() => ({
   featureOn: true,
-  session: null as null | { userId: string; resa?: unknown },
+  session: null as null | { userId: string; resa?: unknown; resaUnavailable?: true },
   outgoing: [] as Array<Record<string, unknown>>,
   incoming: [] as Array<Record<string, unknown>>,
   // POST : utilisateurs « trouvés » par prisma.user.findMany + espions de la transaction.
@@ -168,6 +168,13 @@ describe("POST /api/delegations", () => {
   it("403 sans session ResaMania (compte email-seul)", async () => {
     h.session = { userId: "u1" }; // pas de resa
     expect((await POST(postReq({ delegateIds: ["a"], hours: 3 }))).status).toBe(403);
+  });
+
+  it("panne ResaMania passagère (`resaUnavailable`) : franchit le contrôle « connexion ResaMania »", async () => {
+    // La session ResaMania existe, seul son rafraîchissement attend. Corps invalide exprès :
+    // le 400 prouve qu'on est passé APRÈS le contrôle de rôle (qui aurait répondu 403).
+    h.session = { userId: "u1", resa: null, resaUnavailable: true };
+    expect((await POST(postReq({ delegateIds: [], hours: 3 }))).status).toBe(400);
   });
 
   it("400 si aucun membre / entrée non-string", async () => {

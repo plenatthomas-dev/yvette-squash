@@ -1,6 +1,7 @@
 // Briques de la « gestion des membres » (espace admin, étape 1). Les routes /api/admin/members
 // restent minces en s'appuyant sur ces helpers, eux-mêmes testables sans HTTP.
 
+import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { memberClt, memberRangM } from "./interclub-roster";
 
@@ -179,7 +180,14 @@ export async function listMembers(): Promise<MemberRow[]> {
 // Relations `Restrict` qui BLOQUENT la suppression d'un membre : supprimer ne doit jamais
 // effacer en douce un historique d'argent (dépenses/parts Tricount) ni un tournoi créé. Les
 // autres relations sont en Cascade (sessions, résas, présences, alertes…) ou SetNull
-// (participations à un tournoi d'un autre) et se règlent toutes seules.
+// (participations à un tournoi d'un autre, simples joués, rencontres interclub saisies…) et se
+// règlent toutes seules.
+//
+// CETTE LISTE DOIT SUIVRE LE SCHÉMA, et elle l'a déjà raté : `Interclub.createdBy` était en
+// RESTRICT depuis la migration 34 sans être compté ici — supprimer un membre qui avait saisi une
+// seule rencontre rendait un 500 nu (P2003). La migration 62 l'a passé en SetNull. Le test
+// `members.test.ts` relit `prisma/schema.prisma` et échoue si une relation bloquante vers `User`
+// n'est pas comptée ci-dessous.
 export type DeleteBlockers = {
   expenses: number; // dépenses payées OU saisies par le membre
   shares: number; // parts de dépense portées par le membre
@@ -194,4 +202,101 @@ export async function deleteBlockersFor(userId: string): Promise<DeleteBlockers 
     prisma.tournament.count({ where: { createdById: userId } }),
   ]);
   return { expenses, shares, tournaments, total: expenses + shares + tournaments };
+}
+
+/**
+ * Message du 409 de suppression : dit CE QUI bloque, et non un « historique » vague. L'admin
+ * qui lit « dépenses/tournois » devant un membre qui n'a jamais rien dépensé croirait à un bug.
+ */
+export function deleteBlockersMessage(b: DeleteBlockers): string {
+  const parts: string[] = [];
+  if (b.expenses + b.shares > 0) parts.push("des dépenses Tricount");
+  if (b.tournaments > 0) parts.push(b.tournaments > 1 ? "des tournois créés" : "un tournoi créé");
+  const quoi =
+    parts.length === 0
+      ? "un historique"
+      : parts.length === 1
+        ? parts[0]
+        : `${parts.slice(0, -1).join(", ")} et ${parts[parts.length - 1]}`;
+  return `Suppression impossible : ce membre a ${quoi}. Désactive-le plutôt.`;
+}
+
+/** Nom affiché à la place d'un membre effacé (RGPD). */
+export const ANONYMIZED_NAME = "Membre supprimé";
+
+/**
+ * EFFACEMENT RGPD SANS PERTE D'ARGENT (audit 2026-10, point 21).
+ *
+ * Un membre qui porte une seule part de tricount ne peut pas être supprimé (cf.
+ * `deleteBlockersFor`) : sa ligne `User` tient l'historique d'argent des autres. Jusqu'ici il ne
+ * pouvait qu'être DÉSACTIVÉ, et toutes ses données restaient. Ici on garde la ligne — donc les
+ * dépenses, parts, remboursements et tournois qui s'y rattachent, sommes intactes — mais on la
+ * vide de tout ce qui identifie la personne, et on supprime ce qui n'a de sens que pour elle.
+ *
+ * Effacé : identité (nom, pseudo, e-mail, contactId ResaMania, licence), mot de passe,
+ * sessions, passkeys, abonnements push, alertes, cloche, présences, réservations, messages,
+ * réactions et votes du fil, délégations, classements, abonnements interclub, disponibilités.
+ * Gardé, au nom « Membre supprimé » : l'argent, les tournois créés, les simples joués.
+ *
+ * Irréversible, et la ligne reste désactivée : elle ne se reconnecte plus jamais (plus
+ * d'e-mail ni de contactId pour la retrouver).
+ */
+export async function anonymizeMember(userId: string, tx: Prisma.TransactionClient): Promise<void> {
+  const u = await tx.user.findUnique({ where: { id: userId }, select: { email: true } });
+  if (!u) return;
+  const where = { userId };
+  await tx.session.deleteMany({ where });
+  await tx.passkey.deleteMany({ where });
+  await tx.pushSubscription.deleteMany({ where });
+  await tx.slotAlert.deleteMany({ where });
+  await tx.appNotification.deleteMany({ where });
+  await tx.notifDeviceState.deleteMany({ where });
+  await tx.attendance.deleteMany({ where });
+  await tx.booking.deleteMany({ where });
+  await tx.forumReaction.deleteMany({ where });
+  await tx.forumPollVote.deleteMany({ where });
+  await tx.forumMessage.deleteMany({ where: { authorId: userId } });
+  await tx.delegation.deleteMany({ where: { OR: [{ delegatorId: userId }, { delegateId: userId }] } });
+  await tx.squashnetRanking.deleteMany({ where });
+  await tx.squashnetRankingPoint.deleteMany({ where });
+  await tx.squashnetRankingProbe.deleteMany({ where });
+  await tx.interclubFollow.deleteMany({ where });
+  await tx.interclubAvailability.deleteMany({ where });
+  await tx.interclubTeam.updateMany({ where: { captainId: userId }, data: { captainId: null } });
+  // Les noms FIGÉS ailleurs (feuille de match, tableau de tournoi) portaient son nom en clair.
+  await tx.interclubMatch.updateMany({
+    where: { homeUserId: userId },
+    data: { homeDisplayName: ANONYMIZED_NAME },
+  });
+  await tx.tournamentPlayer.updateMany({ where, data: { displayName: ANONYMIZED_NAME } });
+  if (u.email) {
+    await tx.emailToken.deleteMany({ where: { email: u.email } });
+    await tx.loginAttempt.deleteMany({ where: { identifier: u.email } });
+  }
+  await tx.user.update({
+    where: { id: userId },
+    data: {
+      displayName: ANONYMIZED_NAME,
+      nickname: null,
+      email: null,
+      emailVerifiedAt: null,
+      passwordHash: null,
+      contactId: null,
+      listed: false,
+      disabledAt: new Date(),
+      lastLoginAt: null,
+      lastSeenAt: null,
+      teamId: null,
+      interclubCltOverride: null,
+      interclubRangMOverride: null,
+      squashnetGivenName: null,
+      squashnetFamilyName: null,
+      snLicence: null,
+      snRosterClt: null,
+      snRosterRangM: null,
+      snRosterAt: null,
+      bannerDismissedVersion: null,
+      bannerModalSeenVersion: null,
+    },
+  });
 }

@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
   if (!(await getFeatures()).delegation) {
     return NextResponse.json({ error: "Délégation désactivée" }, { status: 404 });
   }
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
@@ -74,11 +74,15 @@ export async function POST(req: NextRequest) {
   if (!(await getFeatures()).delegation) {
     return NextResponse.json({ error: "Délégation désactivée" }, { status: 404 });
   }
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
-  if (!session.resa) {
+  // Contrôle de RÔLE : le délégant doit avoir une session ResaMania, dont le délégué empruntera
+  // le jeton. Pendant une panne passagère (`resaUnavailable`), cette session existe bel et
+  // bien — seul son rafraîchissement attend — : on laisse créer la délégation, elle servira
+  // dès que ResaMania répondra (le délégué recevra d'ici là un 503 « réessaie »).
+  if (!session.resa && !session.resaUnavailable) {
     return NextResponse.json(
       { error: "La délégation nécessite une connexion ResaMania." },
       { status: 403 },
@@ -164,35 +168,48 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const delegations = await prisma.$transaction(async (tx) => {
-    // Renouvellement : révoque toute délégation active vers CES délégués (au plus une par
-    // couple), sans toucher celles données à d'autres membres. endNotifiedAt posé pour que
-    // le cron d'expiration ne pousse pas un « délégation terminée » trompeur alors qu'une
-    // nouvelle la remplace.
-    await tx.delegation.updateMany({
-      where: {
-        delegatorId: session.userId,
-        delegateId: { in: delegateIds },
-        revokedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      data: { revokedAt: new Date(), endNotifiedAt: new Date() },
+  let delegations;
+  try {
+    delegations = await prisma.$transaction(async (tx) => {
+      // Renouvellement : révoque toute délégation NON RÉVOQUÉE vers CES délégués — y compris
+      // une échue : l'index unique partiel de la migration 67 n'admet qu'une ligne non révoquée
+      // par couple, et l'échéance ne peut pas y figurer. Sans toucher celles données à d'autres
+      // membres. endNotifiedAt posé pour que le cron d'expiration ne pousse pas un « délégation
+      // terminée » trompeur alors qu'une nouvelle la remplace.
+      await tx.delegation.updateMany({
+        where: {
+          delegatorId: session.userId,
+          delegateId: { in: delegateIds },
+          revokedAt: null,
+        },
+        data: { revokedAt: new Date(), endNotifiedAt: new Date() },
+      });
+      const created = [];
+      for (const delegateId of delegateIds) {
+        created.push(
+          await tx.delegation.create({
+            data: {
+              delegatorId: session.userId,
+              delegateId,
+              scope: DELEGATION_SCOPE,
+              expiresAt: targetExpiries.get(delegateId) ?? new Date(now + hours * 3_600_000),
+            },
+          }),
+        );
+      }
+      return created;
     });
-    const created = [];
-    for (const delegateId of delegateIds) {
-      created.push(
-        await tx.delegation.create({
-          data: {
-            delegatorId: session.userId,
-            delegateId,
-            scope: DELEGATION_SCOPE,
-            expiresAt: targetExpiries.get(delegateId) ?? new Date(now + hours * 3_600_000),
-          },
-        }),
+  } catch (e) {
+    // Deux envois simultanés (double appui, deux onglets) : l'index unique partiel refuse la
+    // seconde délégation vivante du même couple (audit 2026-10, point 22).
+    if ((e as { code?: string })?.code === "P2002") {
+      return NextResponse.json(
+        { error: "Délégation déjà en cours d'enregistrement — recharge pour la voir." },
+        { status: 409 },
       );
     }
-    return created;
-  });
+    throw e;
+  }
 
   // Notifie chaque délégataire (push web) qu'il vient de recevoir des droits. Best-effort :
   // un échec d'envoi ne doit jamais faire échouer la délégation elle-même.

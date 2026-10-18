@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import { MIN_PLAYERS, MAX_PLAYERS } from "@/lib/tournament";
 
@@ -11,7 +11,7 @@ import { MIN_PLAYERS, MAX_PLAYERS } from "@/lib/tournament";
 
 const h = vi.hoisted(() => ({
   featureOn: true,
-  session: null as null | { userId: string; resa?: unknown },
+  session: null as null | { userId: string; resa?: unknown; resaUnavailable?: true },
   users: [] as { id: string; displayName: string; nickname: string | null }[],
   findMany: vi.fn(async (_args: Record<string, unknown>) => [] as unknown[]),
   create: vi.fn(async (_args: { data: Record<string, unknown> }) => ({ id: "t-neuf" })),
@@ -68,7 +68,14 @@ const cree = () => h.create.mock.calls[0][0].data;
 const joueursCrees = () =>
   (cree().players as { create: Record<string, unknown>[] }).create;
 
+// Les dates des tests sont FIXES : sans horloge figée, la plage de ±2 ans autour
+// d'aujourd'hui (lib/date-saisie.ts) finirait par les refuser.
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-17T12:00:00Z") });
   h.featureOn = true;
   h.session = { userId: "u1", resa: { id: 42 } };
   h.users = [];
@@ -178,12 +185,25 @@ describe("POST /api/tournaments — les neuf refus", () => {
     expect(h.create).not.toHaveBeenCalled();
   });
 
+  it("compte ResaMania pendant une panne passagère (`resaUnavailable`) : PAS traité en email seul", async () => {
+    // Contrôle de rôle, pas d'usage du jeton : la panne de ResaMania n'a pas à bloquer la
+    // création d'un tournoi, ni à afficher « Compte email seul » à un membre ResaMania.
+    h.session = { userId: "u1", resa: null, resaUnavailable: true };
+    const res = await POST(post(corps()));
+    expect(res.status).not.toBe(403);
+    expect(h.create).toHaveBeenCalled();
+  });
+
   it.each([
     ["absente", undefined],
     ["numérique", 20261114],
     ["au format français", "14/11/2026"],
     ["tronquée", "2026-11"],
     ["avec une heure", "2026-11-14T20:00"],
+    // Bien formées, mais irréelles ou invraisemblables (±2 ans, cf. lib/date-saisie.ts).
+    ["inexistante (30 février)", "2026-02-30"],
+    ["au mois 13", "2026-13-01"],
+    ["à plus de deux ans", "2062-11-14"],
   ])("400 sur une date %s", async (_cas, date) => {
     // `date` est une CHAÎNE en base, et les listes se trient dessus : un format libre casse
     // l'ordre chronologique sans jamais lever d'erreur.

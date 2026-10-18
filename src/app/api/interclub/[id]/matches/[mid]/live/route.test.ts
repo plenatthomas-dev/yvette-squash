@@ -228,6 +228,25 @@ describe("PUT .../live — gardes", () => {
     expect((await PUT(put({ games: [{ home: 0, away: 11 }] }), ctx)).status).toBe(409);
   });
 
+  it("dit POURQUOI par un code : `match-done`, distinct de « quelqu'un d'autre marque »", async () => {
+    // Trois 409 sur cette route, trois réactions côté marqueur : renoncer (prise tenue),
+    // repartir du serveur (`stale-games`), jeter le journal (`match-done`). Sans code, l'écran
+    // confondait le dernier avec le premier et gardait son journal à vie.
+    h.match = freshMatch({ status: "done", scorerId: "u2", scorerClaimedAt: OLD, updatedAt: OLD });
+    h.session = { userId: "intrus" };
+    const res = await PUT(put({ games: [{ home: 0, away: 11 }] }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("match-done");
+    expect(h.updated).toBeNull();
+  });
+
+  it("la prise tenue par un autre reste un 409 SANS code `match-done`", async () => {
+    h.match = freshMatch({ scorerId: "u2", scorerClaimedAt: RECENT, updatedAt: RECENT });
+    const res = await PUT(put({ games: [] }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBeUndefined();
+  });
+
   it("mais celui qui marquait peut revenir sur sa saisie", async () => {
     // Le marqueur annule le point décisif : la liste RÉTRÉCIT, ce qui exige d'annoncer la base
     // (cf. « fraîcheur du journal » plus bas) — l'écran de marquage le fait à chaque envoi.
@@ -535,5 +554,86 @@ describe("PUT .../live — durée du match", () => {
     expect(h.createdGames?.[0].finishedAt).toBe(FIN_JEU_1);
     expect(h.createdGames?.[1].finishedAt).toBeInstanceOf(Date);
     expect(h.createdGames?.[1].finishedAt).not.toBe(FIN_JEU_1);
+  });
+});
+
+// Audit 2026-10, point 17 : deux appareils — y compris du MÊME compte, que l'exclusion mutuelle
+// laisse passer — ne s'écrasent plus le jeu en cours.
+describe("PUT .../live — révision du marquage", () => {
+  beforeEach(() => {
+    h.session = { userId: "u1" };
+    h.siblings = [];
+  });
+
+  it("révision annoncée = celle de la base → écrit, l'incrémente, et la rend", async () => {
+    h.match = freshMatch({ liveRev: 4 });
+    const res = await PUT(put({ games: [], live: liveSnap, rev: 4 }), ctx);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ rev: 5 });
+    expect(h.updated?.liveRev).toEqual({ increment: 1 });
+  });
+
+  it("révision PÉRIMÉE (un autre appareil a écrit) → 409 `stale-live`, rien d'écrit", async () => {
+    h.match = freshMatch({ liveRev: 6 });
+    h.updated = null;
+    const res = await PUT(put({ games: [], live: liveSnap, rev: 4 }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("stale-live");
+    expect(h.updated).toBeNull();
+  });
+
+  it("sans révision annoncée (réponse perdue, ancien client) → gardes habituelles seulement", async () => {
+    h.match = freshMatch({ liveRev: 6 });
+    expect((await PUT(put({ games: [], live: liveSnap }), ctx)).status).toBe(200);
+  });
+
+  it("révision invalide → 400", async () => {
+    h.match = freshMatch();
+    expect((await PUT(put({ games: [], live: liveSnap, rev: -1 }), ctx)).status).toBe(400);
+  });
+});
+
+// Audit 2026-10, point 19 : un faux « 3-1 » annoncé n'était jamais rectifié.
+describe("PUT .../live — résultat final corrigé", () => {
+  const fini = (home: number) =>
+    Array.from({ length: 4 }, (_, i) => ({
+      gamesHome: i < home ? 3 : 0,
+      gamesAway: i < home ? 0 : 3,
+      status: "done",
+      homeDisplayName: "Tom",
+    }));
+
+  beforeEach(() => {
+    h.session = { userId: "u1" };
+    h.notified = [];
+  });
+
+  it("score ANNONCÉ différent du nouveau → notification rectificative, score remplacé", async () => {
+    h.siblings = fini(2);
+    h.match = freshMatch({
+      status: "live",
+      interclub: { ...baseFixture, doneNotifiedAt: NOTIFIED, doneNotifiedScore: "3-1" },
+    });
+    await PUT(put({ games: WIN }), ctx);
+    expect(h.notified).toContain("fixtureDone");
+    expect(h.fixtureUpdate?.doneNotifiedScore).toBe("2-2");
+  });
+
+  it("même score que l'annonce → silence", async () => {
+    h.siblings = fini(3);
+    h.match = freshMatch({
+      status: "live",
+      interclub: { ...baseFixture, doneNotifiedAt: NOTIFIED, doneNotifiedScore: "3-1" },
+    });
+    await PUT(put({ games: WIN }), ctx);
+    expect(h.notified).not.toContain("fixtureDone");
+  });
+
+  it("première fin → annoncée, et le score annoncé est gardé", async () => {
+    h.siblings = fini(3);
+    h.match = freshMatch({ status: "live" });
+    await PUT(put({ games: WIN }), ctx);
+    expect(h.notified).toContain("fixtureDone");
+    expect(h.fixtureUpdate?.doneNotifiedScore).toBe("3-1");
   });
 });

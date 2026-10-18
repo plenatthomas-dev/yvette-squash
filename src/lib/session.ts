@@ -1,11 +1,44 @@
 import { randomBytes } from "node:crypto";
 import { prisma } from "./db";
-import { encrypt, decrypt } from "./crypto";
-import { ensureFresh } from "./resamania/client";
+import { encrypt, decrypt, hashSessionId } from "./crypto";
+import { ensureFresh, isResaAuthRejected, isOwnClub } from "./resamania/client";
+import { ResaRefreshTransientError, isResaRefreshTransient } from "./resamania/errors";
 import type { ResaIdentity, ResaSession } from "./resamania/types";
 import type { User, Prisma } from "@prisma/client";
 
 const SESSION_DAYS = 30;
+
+/**
+ * L'identifiant de cookie et la clé de la ligne `Session` ne sont plus la même chose : seule
+ * l'empreinte HMAC du cookie est stockée (cf. `crypto.hashSessionId`). Les sessions ouvertes
+ * avant ce changement portent encore l'identifiant en clair : elles sont retrouvées sous lui,
+ * puis RENOMMÉES sous leur empreinte au passage (migration paresseuse, sans déconnecter
+ * personne). Après 30 jours, plus aucune n'existe et la seconde lecture ne trouve jamais rien.
+ */
+function sessionKeys(sid: string): string[] {
+  return [hashSessionId(sid), sid];
+}
+
+/** Ouvre une session neuve : rend l'identifiant de COOKIE, stocke son empreinte. */
+function newSessionIds(): { sid: string; key: string } {
+  const sid = randomBytes(24).toString("base64url");
+  return { sid, key: hashSessionId(sid) };
+}
+
+async function findSessionWithUser(sid: string) {
+  const [key, legacy] = sessionKeys(sid);
+  const row = await prisma.session.findUnique({ where: { id: key }, include: { user: true } });
+  if (row) return row;
+  const old = await prisma.session.findUnique({ where: { id: legacy }, include: { user: true } });
+  if (!old) return null;
+  // Best-effort : un échec laisse la ligne lisible sous l'ancien nom, rien ne casse — et l'on
+  // rend alors l'identifiant RÉEL, celui sur lequel les écritures qui suivent doivent porter.
+  const renamed = await prisma.session
+    .update({ where: { id: legacy }, data: { id: key } })
+    .then(() => true)
+    .catch(() => false);
+  return renamed ? { ...old, id: key } : old;
+}
 
 function nameOf(id: ResaIdentity): string {
   return `${id.givenName} ${id.familyName}`.trim() || id.email || "Joueur";
@@ -40,11 +73,38 @@ export async function resolveUser(input: {
   if (contactId) {
     const byContact = await prisma.user.findUnique({ where: { contactId } });
     if (byContact) {
+      // ResaMania fait autorité sur l'email… sauf s'il appartient déjà à une AUTRE ligne User
+      // (un compte « email seul » ouvert avec l'adresse que le membre vient d'adopter côté
+      // ResaMania). L'écraser violerait `User.email @unique` (P2002) : createSession lèverait,
+      // et la connexion — pourtant réussie chez ResaMania — échouerait à CHAQUE tentative tant
+      // que les deux lignes coexistent. On garde l'ancienne adresse et on le signale : fusionner
+      // deux comptes est une décision d'admin, pas un effet de bord de la connexion.
+      // Lecture supplémentaire seulement quand l'email CHANGE (rare) : le chemin courant n'en
+      // paie aucune.
+      let nextEmail = byContact.email;
+      if (email && email !== byContact.email) {
+        const owner = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+        if (owner && owner.id !== byContact.id) {
+          console.warn(
+            `[session] email ResaMania déjà porté par un autre compte (user ${owner.id}) : ` +
+              `user ${byContact.id} garde son adresse actuelle`,
+          );
+        } else if (isAllowlistedAdminEmail(email)) {
+          // Une adresse de l'allowlist admin ne s'ADOPTE pas par simple changement chez
+          // ResaMania : rien ne garantit qu'ils l'aient vérifiée, et l'adopter donnerait les
+          // droits d'admin (audit 2026-10, point 1). Un admin rattache la ligne à la main.
+          console.warn(
+            `[session] user ${byContact.id} : nouvelle adresse ResaMania dans ADMIN_EMAILS, non adoptée`,
+          );
+        } else {
+          nextEmail = email;
+        }
+      }
       return prisma.user.update({
         where: { id: byContact.id },
         data: {
           displayName: input.displayName,
-          email: email ?? byContact.email,
+          email: nextEmail,
           ...(byContact.emailVerifiedAt ? {} : { emailVerifiedAt: now }),
         },
       });
@@ -64,6 +124,23 @@ export async function resolveUser(input: {
       // "cancelled" (cf. api/planning : bookerContactId ≠ user.contactId).
       // Sûr vis-à-vis de l'unicité de `contactId` : si une AUTRE ligne le portait déjà,
       // l'étape 1 (jointure par contactId) l'aurait trouvée et on ne serait pas ici.
+      //
+      // ⚠️ Mais JAMAIS EN SILENCE quand la ligne en portait déjà un autre (audit 2026-10,
+      // point 1) : l'e-mail que renvoie ResaMania fait foi pour l'identité, et un compte
+      // ResaMania tout neuf créé avec l'adresse d'un autre membre — admin compris — se serait
+      // greffé sur sa ligne. Le rattachement d'un contactId EXISTANT se fait donc seulement
+      // pendant une migration de club annoncée (`RESA_CONTACT_RELINK=1`, à retirer ensuite) ;
+      // hors de cette fenêtre, la connexion est refusée et journalisée.
+      if (contactId && byEmail.contactId && byEmail.contactId !== contactId) {
+        if (process.env.RESA_CONTACT_RELINK !== "1") {
+          console.warn(
+            `[session] user ${byEmail.id} : contactId ResaMania différent de celui enregistré, ` +
+              "connexion refusée (RESA_CONTACT_RELINK=1 pour une migration de club)",
+          );
+          throw new LoginRefusedError("identity_conflict");
+        }
+        console.warn(`[session] user ${byEmail.id} : contactId ResaMania RÉÉCRIT (RESA_CONTACT_RELINK=1)`);
+      }
       const attach = contactId && byEmail.contactId !== contactId ? { contactId } : {};
       // Connexion ResaMania retombant sur une ligne « email seul » → email désormais prouvé.
       const verify = contactId && !byEmail.emailVerifiedAt ? { emailVerifiedAt: now } : {};
@@ -97,8 +174,39 @@ export class AccountDisabledError extends Error {
   }
 }
 
+/**
+ * Levée par `createSession` / `resolveUser` quand ResaMania a bien authentifié la personne mais
+ * que l'appli refuse de lui ouvrir une session (audit 2026-10, points 1 et 2) :
+ *  - `foreign_club`       : compte d'un AUTRE club du même tenant ResaMania ;
+ *  - `blocked`            : adresse dans la blocklist de modération ;
+ *  - `identity_conflict`  : l'adresse est déjà liée à un autre compte ResaMania.
+ * La route de login la traduit en 403 — jamais comptée comme mauvais mot de passe.
+ */
+export class LoginRefusedError extends Error {
+  constructor(readonly reason: "foreign_club" | "blocked" | "identity_conflict") {
+    super(`LOGIN_REFUSED:${reason}`);
+    this.name = "LoginRefusedError";
+  }
+}
+
+/** Adresse de l'allowlist `ADMIN_EMAILS` (lecture locale : `admin.ts` importe ce module). */
+function isAllowlistedAdminEmail(email: string): boolean {
+  return (process.env.ADMIN_EMAILS ?? "")
+    .split(/[\s,;]+/)
+    .some((e) => e && normalizeEmail(e) === email);
+}
+
 /** Crée un User (via réconciliation email) + une session ResaMania. Renvoie l'id de cookie. */
 export async function createSession(resa: ResaSession): Promise<string> {
+  // N'importe quel compte du TENANT ResaMania s'authentifie chez eux, y compris ceux des autres
+  // clubs : on n'ouvre l'appli qu'aux comptes du nôtre (le chemin e-mail, lui, est sur
+  // invitation). Et la blocklist de modération vaut pour les deux chemins.
+  if (!isOwnClub(resa.identity.clubId)) throw new LoginRefusedError("foreign_club");
+  const resaEmail = resa.identity.email ? normalizeEmail(resa.identity.email) : "";
+  if (resaEmail && (await prisma.emailBlock.findUnique({ where: { email: resaEmail } }))) {
+    throw new LoginRefusedError("blocked");
+  }
+
   // Purge opportuniste : les sessions expirées ne sont sinon supprimées que si leur
   // propre cookie revient un jour — elles s'accumuleraient avec leurs refresh tokens.
   await prisma.session.deleteMany({ where: { expiresAt: { lt: new Date() } } });
@@ -114,10 +222,10 @@ export async function createSession(resa: ResaSession): Promise<string> {
   // Trace la dernière connexion (repère les comptes inactifs côté admin).
   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
-  const id = randomBytes(24).toString("base64url");
+  const { sid: id, key } = newSessionIds();
   await prisma.session.create({
     data: {
-      id,
+      id: key,
       userId: user.id,
       accessToken: encrypt(resa.accessToken),
       refreshTokenEnc: encrypt(resa.refreshToken),
@@ -135,10 +243,10 @@ export async function createEmailSession(userId: string, tx: Prisma.TransactionC
   // Trace la dernière connexion (le refus des comptes désactivés est fait en amont, dans la
   // route de login email qui a déjà chargé le User).
   await tx.user.update({ where: { id: userId }, data: { lastLoginAt: new Date() } });
-  const id = randomBytes(24).toString("base64url");
+  const { sid: id, key } = newSessionIds();
   await tx.session.create({
     data: {
-      id,
+      id: key,
       userId,
       expiresAt: new Date(Date.now() + SESSION_DAYS * 864e5),
       // accessToken / refreshTokenEnc / tokenExpiresAt / identityJson restent NULL
@@ -157,6 +265,11 @@ export async function createEmailSession(userId: string, tx: Prisma.TransactionC
  * Renvoie l'id de cookie de la nouvelle session, ou `null` si aucune session ResaMania n'est
  * exploitable (jamais connecté à ResaMania, session > 30 j, ou refresh token révoqué/expiré) —
  * l'appelant doit alors retomber sur un autre mode (session email, ou mot de passe ResaMania).
+ *
+ * LÈVE `ResaRefreshTransientError` si le rafraîchissement échoue de façon passagère : la
+ * session source est alors intacte (rien n'est transféré ni supprimé) et une nouvelle tentative
+ * dans quelques secondes réussira. Surtout pas `null`, qui ferait dire « ta connexion ResaMania
+ * a expiré » à un membre dont le lien est parfaitement valide.
  */
 export async function createResaSessionFromUser(userId: string): Promise<string | null> {
   const src = await prisma.session.findFirst({
@@ -167,11 +280,11 @@ export async function createResaSessionFromUser(userId: string): Promise<string 
   const resa = await resolveResaToken(src); // rafraîchit + persiste sur src si besoin
   if (!resa) return null; // jeton irrécupérable → repli à l'appelant
 
-  const id = randomBytes(24).toString("base64url");
+  const { sid: id, key } = newSessionIds();
   // Crée D'ABORD la nouvelle ligne (on ne perd jamais les jetons), puis retire la source.
   await prisma.session.create({
     data: {
-      id,
+      id: key,
       userId,
       accessToken: encrypt(resa.accessToken),
       refreshTokenEnc: encrypt(resa.refreshToken),
@@ -184,6 +297,21 @@ export async function createResaSessionFromUser(userId: string): Promise<string 
   await prisma.user.update({ where: { id: userId }, data: { lastLoginAt: new Date() } });
   return id;
 }
+
+/**
+ * Échec PASSAGER de la résolution du jeton ResaMania : un autre processus rafraîchit encore
+ * (attente épuisée), ou ResaMania est indisponible au moment du rafraîchissement (5xx, 429,
+ * réseau, délai). Dans les deux cas la session est CONSERVÉE — la requête suivante réessaiera.
+ *
+ * Définie dans `resamania/errors` (avec un `code` stable, reconnu par `isResaRefreshTransient`
+ * même quand un test remplace ce module-ci par une fabrique) et ré-exportée ici pour les
+ * appelants historiques.
+ *
+ * Qui la voit encore : `getResaTokenForUser` (crons, délégation) et `createResaSessionFromUser`
+ * (biométrie) la LAISSENT remonter — leurs appelants savent quoi faire d'un « réessaie plus
+ * tard ». `getSession`, lui, ne la lève plus : il la traduit en `resaUnavailable` (voir là).
+ */
+export { ResaRefreshTransientError };
 
 export interface AppSession {
   userId: string;
@@ -198,7 +326,37 @@ export interface AppSession {
    * le défaut reste fail-safe.
    */
   email: string | null;
-  resa: ResaSession | null; // null = session « email seul » (sans ResaMania)
+  /**
+   * Jeton ResaMania exploitable, ou `null`. ⚠️ `null` a DEUX sens, que `resaUnavailable`
+   * départage :
+   *  - `resaUnavailable` absent → session « email seul » (jamais eu de ResaMania) ;
+   *  - `resaUnavailable: true`  → compte ResaMania dont le jeton n'a pas pu être rafraîchi à
+   *    l'instant (panne passagère) : PAS un compte email seul.
+   */
+  resa: ResaSession | null;
+  /**
+   * `true` quand la session porte des jetons ResaMania mais que leur rafraîchissement vient
+   * d'échouer de façon PASSAGÈRE (ResaMania en panne, ou rafraîchissement concurrent qui
+   * s'éternise) — `resa` vaut alors `null`. Absent dans tous les autres cas.
+   *
+   * POURQUOI UN INDICATEUR PLUTÔT QU'UNE EXCEPTION. `getSession` est appelée par une
+   * cinquantaine de routes ; l'immense majorité (forum, tricount, interclub, présences…) n'a
+   * que faire du jeton ResaMania. Lever ici transformait une panne de ResaMania en 500 sur
+   * TOUTE l'appli — forum compris — pour tout membre dont le jeton expirait pendant la panne.
+   * Avec l'indicateur, ces routes fonctionnent normalement, et seules celles qui ont besoin du
+   * jeton s'en soucient : réservation et annulation répondent 503 « réessaie »
+   * (resolveActingContext), le planning se replie sur son snapshot.
+   *
+   * POURQUOI PAS SIMPLEMENT `resa: null`. Plusieurs écrans et routes lisent `resa === null`
+   * comme « compte email seul » (/api/auth/me → `mode`/`canBook`, tricount, tournois,
+   * délégations). Sans indicateur distinct, une panne de trente secondes faisait basculer
+   * l'interface en lecture seule et afficher « Compte email seul » à un membre ResaMania. Tout
+   * test de `resa` à des fins de RÔLE doit donc aussi regarder ce champ.
+   *
+   * Optionnel (et non `boolean` obligatoire) pour ne pas obliger chaque fabrique de session des
+   * tests à le mentionner : l'absence vaut « non ».
+   */
+  resaUnavailable?: true;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -243,9 +401,12 @@ type SessionTokenFields = {
  * plutôt que par cookie — cf. docs/delegation-droits.md).
  *
  * - `undefined` : session « email seul » par nature (jamais eu de jeton) — état normal.
- * - `null`      : jeton attendu mais irrécupérable (déchiffrement/refresh en échec) — la
- *                 session elle-même doit être considérée invalide (déjà supprimée ici).
+ * - `null`      : jeton attendu mais irrécupérable (déchiffrement en échec, ou refresh
+ *                 REFUSÉ par ResaMania) — la session elle-même doit être considérée invalide
+ *                 (déjà supprimée ici).
  * - `ResaSession` : jeton valide (frais, ou tout juste rafraîchi).
+ * - lève `ResaRefreshTransientError` : échec passager (rafraîchissement concurrent qui
+ *   s'éternise, ou ResaMania indisponible) — la session est conservée, verrou relâché.
  */
 async function resolveResaToken(s: SessionTokenFields): Promise<ResaSession | null | undefined> {
   // Session « email seul » : aucun jeton ResaMania à déchiffrer/rafraîchir.
@@ -286,26 +447,44 @@ async function resolveResaToken(s: SessionTokenFields): Promise<ResaSession | nu
       data: { refreshClaimedAt: claimedAt },
     });
     if (claimed.count === 1) {
+      let fresh: ResaSession;
       try {
-        const fresh = await ensureFresh(resa);
-        resa = { ...fresh, identity: resa.identity };
-        const saved = await prisma.session.updateMany({
-          where: { id: s.id, refreshClaimedAt: claimedAt },
-          data: {
-            accessToken: encrypt(resa.accessToken),
-            refreshTokenEnc: encrypt(resa.refreshToken),
-            tokenExpiresAt: new Date(resa.expiresAt),
-            refreshClaimedAt: null,
-          },
-        });
-        return saved.count === 1 ? resa : null;
-      } catch {
-        await prisma.session.deleteMany({ where: { id: s.id, refreshClaimedAt: claimedAt } });
-        return null;
+        fresh = await ensureFresh(resa);
+      } catch (e) {
+        // Refus d'authentification (refresh token révoqué / expiré, `invalid_grant`) : le jeton
+        // est mort pour de bon, la session aussi → suppression, reconnexion requise.
+        if (isResaAuthRejected(e)) {
+          await prisma.session.deleteMany({ where: { id: s.id, refreshClaimedAt: claimedAt } });
+          return null;
+        }
+        // Tout le reste est traité comme PASSAGER (ResaMania en 5xx/429, réseau, délai…). Avant,
+        // n'importe quelle erreur supprimait la session : une panne de quelques secondes chez
+        // eux déconnectait tous les membres dont le jeton expirait pendant ce temps. Une
+        // suppression étant irréversible, seul un refus explicite la justifie.
+        // On RELÂCHE le verrou (même filtre : on ne libère que le nôtre) pour que la prochaine
+        // requête retente aussitôt, au lieu d'attendre la reprise d'un verrou abandonné (60 s).
+        await prisma.session
+          .updateMany({ where: { id: s.id, refreshClaimedAt: claimedAt }, data: { refreshClaimedAt: null } })
+          .catch(() => {});
+        console.warn("[session] rafraîchissement ResaMania en échec passager:", e);
+        throw new ResaRefreshTransientError("ResaMania momentanément indisponible — réessaie.", { cause: e });
       }
+      // Hors du try, à dessein : une erreur de la BASE ici n'est pas un échec ResaMania et doit
+      // remonter telle quelle (isDbUnavailable → 503 chez les appelants qui le gèrent).
+      resa = { ...fresh, identity: resa.identity };
+      const saved = await prisma.session.updateMany({
+        where: { id: s.id, refreshClaimedAt: claimedAt },
+        data: {
+          accessToken: encrypt(resa.accessToken),
+          refreshTokenEnc: encrypt(resa.refreshToken),
+          tokenExpiresAt: new Date(resa.expiresAt),
+          refreshClaimedAt: null,
+        },
+      });
+      return saved.count === 1 ? resa : null;
     }
     // Une attente épuisée est transitoire : on garde la session et son verrou.
-    if (Date.now() >= deadline) throw new Error("Rafraîchissement ResaMania en cours — réessaie.");
+    if (Date.now() >= deadline) throw new ResaRefreshTransientError("Rafraîchissement ResaMania en cours — réessaie.");
     await sleep(refreshBackoffMs(essais++));
     // `select` explicite : on ne relit QUE de quoi savoir si le jeton est devenu frais. Sans
     // lui, chaque tour de boucle rapatriait la ligne entière — identité sérialisée comprise —
@@ -348,8 +527,8 @@ export async function getLiveSessionUserId(sid: string | undefined): Promise<str
   // dépendance série → un seul aller-retour de latence. L'échec de l'écriture est avalé : marquer
   // l'activité ne doit jamais faire échouer l'affichage (bannière publique).
   const [s] = await Promise.all([
-    prisma.session.findUnique({
-      where: { id: sid },
+    prisma.session.findFirst({
+      where: { id: { in: sessionKeys(sid) } },
       select: { userId: true, expiresAt: true, user: { select: { disabledAt: true } } },
     }),
     touchLastSeen(sid, now).catch(() => {}),
@@ -374,31 +553,56 @@ function touchLastSeen(sid: string, now: Date): Promise<unknown> {
   const cutoff = new Date(now.getTime() - LAST_SEEN_THROTTLE_MS);
   return prisma.user.updateMany({
     where: {
-      sessions: { some: { id: sid, expiresAt: { gt: now } } },
+      sessions: { some: { id: { in: sessionKeys(sid) }, expiresAt: { gt: now } } },
       OR: [{ lastSeenAt: null }, { lastSeenAt: { lt: cutoff } }],
     },
     data: { lastSeenAt: now },
   });
 }
 
-/** Récupère la session depuis l'id de cookie, en rafraîchissant le token ResaMania si besoin. */
-export async function getSession(sid: string | undefined): Promise<AppSession | null> {
+/**
+ * Récupère la session depuis l'id de cookie, en rafraîchissant le token ResaMania si besoin
+ * (sauf `{ resa: false }` : voir plus bas).
+ *
+ * Ne lève PAS sur une panne passagère de ResaMania au rafraîchissement : la session est rendue
+ * sans jeton, avec `resaUnavailable: true` (cf. `AppSession.resaUnavailable` pour le pourquoi).
+ * Une erreur de la BASE, elle, remonte telle quelle (isDbUnavailable → 503 « maintenance »
+ * chez les appelants qui le gèrent) : ce n'est pas le même incident.
+ */
+export async function getSession(
+  sid: string | undefined,
+  opts: { resa?: boolean } = {},
+): Promise<AppSession | null> {
   if (!sid) return null;
-  const s = await prisma.session.findUnique({ where: { id: sid }, include: { user: true } });
+  const s = await findSessionWithUser(sid);
   if (!s) return null;
   if (s.expiresAt <= new Date() || s.user.disabledAt) {
-    await prisma.session.delete({ where: { id: sid } }).catch(() => {});
+    await prisma.session.delete({ where: { id: s.id } }).catch(() => {});
     return null;
   }
 
-  const resa = await resolveResaToken(s);
+  const base = { userId: s.userId, displayName: s.user.displayName, email: s.user.email };
+  // `{ resa: false }` : la route n'a pas besoin du jeton ResaMania (forum, tricount, interclub…).
+  // On ne tente donc PAS de le rafraîchir — pendant une panne de ResaMania, chaque requête y
+  // perdait jusqu'à ~8 s de délais de garde pour rien (audit 2026-10, point 11). Un compte
+  // ResaMania est rendu comme pendant une panne (`resaUnavailable: true`), ce qui garde le sens
+  // « ce n'est PAS un compte email seul » aux appelants qui le testent.
+  if (opts.resa === false) {
+    return s.refreshTokenEnc ? { ...base, resa: null, resaUnavailable: true } : { ...base, resa: null };
+  }
+  let resa: ResaSession | null | undefined;
+  try {
+    resa = await resolveResaToken(s);
+  } catch (e) {
+    // Seule l'erreur PASSAGÈRE typée est absorbée ; tout le reste (base…) remonte.
+    if (!isResaRefreshTransient(e)) throw e;
+    // La session reste VALIDE (rien n'a été supprimé, le verrou est relâché) : le membre est
+    // bien authentifié, seul le jeton ResaMania manque pour l'instant. La prochaine requête
+    // retentera le rafraîchissement.
+    return { ...base, resa: null, resaUnavailable: true };
+  }
   if (resa === null) return null; // jeton irrécupérable → session invalidée (déjà supprimée)
-  return {
-    userId: s.userId,
-    displayName: s.user.displayName,
-    email: s.user.email,
-    resa: resa ?? null,
-  };
+  return { ...base, resa: resa ?? null };
 }
 
 /**
@@ -408,6 +612,12 @@ export async function getSession(sid: string | undefined): Promise<AppSession | 
  * la requête du DÉLÉGUÉ qui déclenche ce refresh, pas une action du délégant.
  * `null` si aucune session ResaMania utilisable n'existe (jamais connecté via ResaMania,
  * session expirée, ou jeton irrécupérable).
+ *
+ * LÈVE `ResaRefreshTransientError` sur une panne passagère — volontairement, contrairement à
+ * `getSession` : `null` déclenche chez les appelants des actes définitifs (le cron keep-alive
+ * prévient le délégant que sa délégation « ne fonctionne plus », resolveActingContext répond
+ * « session du délégant plus valide »). Une panne de ResaMania ne doit produire ni l'un ni
+ * l'autre ; chaque appelant traite donc l'exception (report au passage suivant, ou 503).
  */
 export async function getResaTokenForUser(userId: string): Promise<ResaSession | null> {
   const s = await prisma.session.findFirst({
@@ -454,7 +664,10 @@ export async function getResaSessionExpiry(userId: string): Promise<Date | null>
  */
 export async function destroySession(sid: string | undefined): Promise<void> {
   if (!sid) return;
-  const s = await prisma.session.findUnique({ where: { id: sid } }).catch(() => null);
+  const [key, legacy] = sessionKeys(sid);
+  const s =
+    (await prisma.session.findUnique({ where: { id: key } }).catch(() => null)) ??
+    (await prisma.session.findUnique({ where: { id: legacy } }).catch(() => null));
   if (!s) return;
 
   // Ordre volontaire : on crée la réserve AVANT de supprimer, pour ne jamais perdre les
@@ -464,7 +677,7 @@ export async function destroySession(sid: string | undefined): Promise<void> {
     await prisma.session
       .create({
         data: {
-          id: randomBytes(24).toString("base64url"),
+          id: newSessionIds().key,
           userId: s.userId,
           accessToken: s.accessToken,
           refreshTokenEnc: s.refreshTokenEnc,
@@ -476,5 +689,5 @@ export async function destroySession(sid: string | undefined): Promise<void> {
       .catch(() => {});
   }
 
-  await prisma.session.delete({ where: { id: sid } }).catch(() => {});
+  await prisma.session.delete({ where: { id: s.id } }).catch(() => {});
 }

@@ -4,14 +4,18 @@ import { getResaTokenForUser } from "@/lib/session";
 import { getPlanning } from "@/lib/resamania/client";
 import { pushToUser, pushConfigured } from "@/lib/push";
 import { cronAuthorized } from "@/lib/cron-auth";
-import { recordCronRun } from "@/lib/cron-run";
+import { recordCronRun, runCron } from "@/lib/cron-run";
 import { alertsPending, alertsChanged, alertHorizonISO, noteCronAlive } from "@/lib/alerts-gate";
 import { fmtTime, toInstant } from "@/lib/time";
 import { BOOK_ACTION } from "@/lib/notification-actions";
+import { isResaRefreshTransient } from "@/lib/resamania/errors";
+import { serviceAccessToken } from "@/lib/resamania/service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// 300 s : la limite des fonctions Vercel (Fluid compute, plan Hobby compris). 60 s coupait les
+// passes longues en plein milieu — toujours les mêmes membres, ceux de fin de liste.
+export const maxDuration = 300;
 
 function prettyDate(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString("fr-FR", {
@@ -19,6 +23,56 @@ function prettyDate(date: string): string {
     day: "numeric",
     month: "long",
   });
+}
+
+/**
+ * Instant (ms) du début du créneau `date` + `hm`, lus en heure du club — ou `null` si la paire
+ * ne désigne pas un instant réel. Ne lève JAMAIS : voir l'usage dans le classement de `GET`.
+ */
+function debutCreneauMs(date: string, hm: string): number | null {
+  try {
+    const t = new Date(toInstant(`${date}T${hm}:00`)).getTime();
+    return Number.isFinite(t) ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+// Durée de vie de la notification « terrain libéré » chez le service push. Au-delà du début du
+// créneau elle n'a plus d'objet (et le défaut de web-push est de QUATRE SEMAINES : un téléphone
+// éteint la recevrait à son réveil, pour un créneau passé depuis longtemps). Plafond d'une heure :
+// un terrain libre se reprend vite, une alerte vieille d'une heure est probablement fausse.
+// Plancher d'une minute : un TTL de 0 se traduit par « livrer tout de suite ou jeter », ce qui
+// perd la notification au moindre téléphone en veille profonde.
+const ALERTE_TTL_MIN_S = 60;
+const ALERTE_TTL_MAX_S = 3600;
+
+function ttlAlerteS(debutMs: number, now: number): number {
+  const s = Math.floor((debutMs - now) / 1000);
+  return Math.min(ALERTE_TTL_MAX_S, Math.max(ALERTE_TTL_MIN_S, s));
+}
+
+type FreeByHm = Map<string, { id: string; courtName: string; startsAt: string }[]>;
+
+/**
+ * Les terrains libres, par horaire : TOUS, et pas seulement le fait qu'il y en ait un. Le
+ * bouton « Réserver » de la notification les essaie dans l'ordre — entre l'envoi et le geste,
+ * le premier a pu être pris par quelqu'un d'autre.
+ */
+function freeSlotsByHm(planning: { slots: { id: string; courtName: string; startsAt: string; bookable: boolean }[] }): FreeByHm {
+  const out: FreeByHm = new Map();
+  for (const slot of planning.slots) {
+    if (!slot.bookable) continue;
+    // Heure du club (Europe/Paris), comme la clé `hm` stockée à la création de l'alerte
+    // (cf. page.tsx onWatch / WeekGrid). Un slice UTC brut décalerait de +2 h l'été et
+    // ne matcherait jamais les alertes créées depuis la vue Semaine.
+    const hm = fmtTime(slot.startsAt);
+    const libre = { id: slot.id, courtName: slot.courtName, startsAt: slot.startsAt };
+    const deja = out.get(hm);
+    if (deja) deja.push(libre);
+    else out.set(hm, [libre]);
+  }
+  return out;
 }
 
 // NB : la récupération du jeton ResaMania d'un joueur passe par `getResaTokenForUser`
@@ -30,7 +84,7 @@ function prettyDate(date: string): string {
 // GET /api/cron/check-alerts
 // Pour chaque alerte active : interroge le planning du jour visé et, si un terrain est
 // redevenu réservable à l'horaire demandé, pousse une notif et désactive l'alerte.
-export async function GET(req: NextRequest) {
+async function handle(req: NextRequest) {
   if (!cronAuthorized(req)) {
     return NextResponse.json({ error: "Interdit" }, { status: 401 });
   }
@@ -72,10 +126,21 @@ export async function GET(req: NextRequest) {
   const now = Date.now();
   const expired: typeof allAlerts = [];
   const alerts: typeof allAlerts = [];
+  // Début de chaque créneau surveillé, en instant absolu : sert au classement ci-dessous ET au
+  // TTL de la notification (inutile de la livrer une fois le créneau commencé).
+  const debutMs = new Map<string, number>();
   for (const a of allAlerts) {
-    const passee = new Date(toInstant(`${a.date}T${a.hm}:00`)).getTime() <= now;
-    if (passee || a.date > horizon) expired.push(a);
-    else alerts.push(a);
+    const debut = debutCreneauMs(a.date, a.hm);
+    // Une alerte ILLISIBLE (date ou horaire impossible, écrit avant que POST /api/alerts ne
+    // valide autre chose que la forme) part en expiration silencieuse. `toInstant` lève sur une
+    // telle valeur, et cette boucle est hors de tout `try` : une seule ligne fautive faisait
+    // tomber le cron à chaque passage, pour tout le club, sans jamais être désactivée.
+    if (debut === null || debut <= now || a.date > horizon) {
+      expired.push(a);
+    } else {
+      debutMs.set(a.id, debut);
+      alerts.push(a);
+    }
   }
   if (expired.length > 0) {
     await prisma.slotAlert.updateMany({
@@ -103,35 +168,64 @@ export async function GET(req: NextRequest) {
   let checked = 0;
   let notified = 0;
   let deactivated = 0;
+  // Alertes dont le membre n'a pas pu être traité À CE PASSAGE faute de jeton ResaMania
+  // (rafraîchissement en panne passagère) : elles restent actives et seront revues au passage
+  // suivant (~4 min). Compté à part pour que le heartbeat dise « ResaMania toussait » au lieu
+  // de laisser croire à une passe complète.
+  let reportes = 0;
+
+  // Le planning d'un jour est le même pour tout le club : on le lit avec le compte de service,
+  // UNE fois par jour surveillé (et non une fois par membre). Surtout, c'est ce qui sert les
+  // comptes « email seul » : sans jeton ResaMania à eux, leur liste d'attente ne se déclenchait
+  // jamais (audit 2026-10, point 8). Sans compte de service (non configuré, ou ResaMania en
+  // panne au login), on retombe sur le jeton du membre, comme avant.
+  const service = await serviceAccessToken();
+  const servicePlanning = new Map<string, Promise<FreeByHm | null>>();
+  const viaService = (date: string) => {
+    if (!service) return Promise.resolve(null);
+    let p = servicePlanning.get(date);
+    if (!p) {
+      p = getPlanning(date, service).then(freeSlotsByHm, () => null);
+      servicePlanning.set(date, p);
+    }
+    return p;
+  };
 
   for (const [key, group] of groups) {
     const [userId, date] = key.split("|");
     checked += group.length;
 
-    // Jeton déchiffré et rafraîchi si besoin (et rechiffré en base) par session.ts.
-    const resa = await getResaTokenForUser(userId);
-    if (!resa) continue;
-
-    // Les terrains libres, par horaire : TOUS, et pas seulement le fait qu'il y en ait un. Le
-    // bouton « Réserver » de la notification les essaie dans l'ordre — entre l'envoi et le
-    // geste, le premier a pu être pris par quelqu'un d'autre.
-    let freeByHm: Map<string, { id: string; courtName: string; startsAt: string }[]>;
-    try {
-      const planning = await getPlanning(date, resa.accessToken);
-      freeByHm = new Map();
-      for (const slot of planning.slots) {
-        if (!slot.bookable) continue;
-        // Heure du club (Europe/Paris), comme la clé `hm` stockée à la création de l'alerte
-        // (cf. page.tsx onWatch / WeekGrid). Un slice UTC brut décalerait de +2 h l'été et
-        // ne matcherait jamais les alertes créées depuis la vue Semaine.
-        const hm = fmtTime(slot.startsAt);
-        const libre = { id: slot.id, courtName: slot.courtName, startsAt: slot.startsAt };
-        const deja = freeByHm.get(hm);
-        if (deja) deja.push(libre);
-        else freeByHm.set(hm, [libre]);
+    let freeByHm = await viaService(date);
+    if (!freeByHm) {
+      // Jeton déchiffré et rafraîchi si besoin (et rechiffré en base) par session.ts.
+      //
+      // try/catch PAR MEMBRE : `getResaTokenForUser` LÈVE désormais sur une panne passagère
+      // (au lieu de supprimer la session et rendre null). Sans ce filet, la première alerte d'un
+      // membre au jeton expiré pendant une panne interrompait TOUTE la passe — les alertes des
+      // membres suivants, dont le jeton était peut-être frais, n'étaient plus vérifiées du tout.
+      // On saute ce membre pour ce passage, SANS désactiver son alerte : le terrain peut encore
+      // se libérer, et le jeton se rafraîchira au prochain tour.
+      let resa;
+      try {
+        resa = await getResaTokenForUser(userId);
+      } catch (e) {
+        reportes += group.length;
+        // Une erreur NON passagère (base…) est rare et mérite d'être vue ; elle ne doit pas
+        // pour autant priver les autres membres de leur vérification.
+        if (isResaRefreshTransient(e)) {
+          console.warn(`[check-alerts] jeton de ${userId} reporté (ResaMania indisponible)`);
+        } else {
+          console.error(`[check-alerts] jeton de ${userId} illisible, membre sauté:`, e);
+        }
+        continue;
       }
-    } catch {
-      continue;
+      if (!resa) continue;
+
+      try {
+        freeByHm = freeSlotsByHm(await getPlanning(date, resa.accessToken));
+      } catch {
+        continue;
+      }
     }
 
     for (const a of group) {
@@ -143,6 +237,12 @@ export async function GET(req: NextRequest) {
         body: `${quand} — tu étais en liste d'attente, file réserver !`,
         url: `/?date=${a.date}&view=day`,
         tag: `alert-${a.id}`,
+        // Urgence HAUTE : chaque seconde compte face aux autres membres, et une urgence normale
+        // laisse Android différer la livraison d'un téléphone en veille (Doze). TTL calé sur le
+        // début du créneau, cf. ttlAlerteS.
+        // `Date.now()` et non `now` : la passe peut durer (un appel planning par membre et par jour).
+        ttl: ttlAlerteS(debutMs.get(a.id) ?? Date.now(), Date.now()),
+        urgency: "high",
         // « Réserver » réserve SANS ouvrir l'appli ni redemander confirmation : c'est le geste
         // que la notification réclame, et chaque seconde compte face aux autres membres. Le
         // service worker (public/sw.js) poste à /api/book, qui relit le planning comme pour
@@ -171,6 +271,15 @@ export async function GET(req: NextRequest) {
   // état. Un seul appel en fin de passe plutôt qu'un par alerte — l'invalidation est globale.
   if (expired.length > 0 || deactivated > 0) alertsChanged();
 
-  await recordCronRun("check-alerts", true, `${notified} notif(s), ${checked} vérifiée(s)`);
-  return NextResponse.json({ checked, notified, expired: expired.length });
+  // Rouge quand AUCUNE alerte n'a pu être vérifiée (ResaMania en panne pour tout le monde).
+  await recordCronRun(
+    "check-alerts",
+    !(checked > 0 && reportes === checked),
+    `${notified} notif(s), ${checked} vérifiée(s)${reportes ? `, ${reportes} reportée(s)` : ""}`,
+  );
+  return NextResponse.json({ checked, notified, expired: expired.length, reportes });
 }
+
+// Filet commun (cf. lib/cron-run) : une exception laisse une trace `ok: false` au lieu du
+// « ok » de la veille.
+export const GET = (req: NextRequest) => runCron("check-alerts", () => handle(req));

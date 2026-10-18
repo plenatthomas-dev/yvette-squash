@@ -6,6 +6,8 @@ import { isClassEventId } from "@/lib/validation";
 import { resolveActingContext } from "@/lib/delegation";
 import { refreshSnapshotFromResa } from "@/lib/planning-snapshot";
 import { appBlockForUserId, appBlockedResponse } from "@/lib/app-block";
+import { isResaOutcomeUnknown, isResaUnavailable } from "@/lib/resamania/errors";
+import { outcomeUnknownResponse, resaUnavailableResponse } from "@/lib/resamania/responses";
 
 export const runtime = "nodejs";
 
@@ -33,7 +35,11 @@ export async function POST(req: NextRequest) {
     "L'annulation d'une réservation nécessite une connexion ResaMania.",
   );
   if (!acting.ok) {
-    return NextResponse.json({ error: acting.error }, { status: acting.status });
+    // `code` relayé quand il existe (« resa-unavailable » : 503 de panne ResaMania).
+    return NextResponse.json(
+      { error: acting.error, ...(acting.code ? { code: acting.code } : {}) },
+      { status: acting.status },
+    );
   }
   const { resa, bookingOwnerId, actingUserId } = acting.ctx;
 
@@ -41,7 +47,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "classEventId invalide" }, { status: 400 });
   }
 
-  const attendeeId = await findAttendeeId(resa, classEventId);
+  let attendeeId: string | null;
+  try {
+    attendeeId = await findAttendeeId(resa, classEventId);
+  } catch (e) {
+    // ResaMania injoignable ≠ « réservation introuvable » : ce 404 faisait croire au membre que
+    // sa résa avait disparu. Lecture seule, rien n'a bougé : réessayer est sans danger.
+    if (isResaUnavailable(e)) return resaUnavailableResponse();
+    throw e;
+  }
   if (!attendeeId) {
     return NextResponse.json(
       { error: "Réservation introuvable côté ResaMania." },
@@ -49,7 +63,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const r = await cancel(resa, attendeeId);
+  let r;
+  try {
+    r = await cancel(resa, attendeeId);
+  } catch (e) {
+    // Annulation partie sans réponse : résultat INCONNU (cf. /api/bookings/[id], même règle).
+    // Journal laissé tel quel — la réconciliation du planning tranchera —, cache vidé pour
+    // que le membre voie l'état réel en rechargeant.
+    if (isResaOutcomeUnknown(e)) {
+      console.warn("[cancel-slot] annulation partie sans réponse, résultat inconnu:", e);
+      invalidatePlanningCache();
+      return outcomeUnknownResponse("L'annulation");
+    }
+    throw e;
+  }
   if (!r.ok) {
     return NextResponse.json({ error: r.error }, { status: 409 });
   }

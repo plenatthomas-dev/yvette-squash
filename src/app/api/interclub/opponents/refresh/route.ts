@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
+import { isAdminSession } from "@/lib/admin";
 import { prisma } from "@/lib/db";
 import { MAX_RENCONTRES } from "@/lib/interclub-opponents-db";
 import { fraicheurPour, refreshRosters } from "@/lib/interclub-roster-db";
@@ -35,16 +36,32 @@ export const maxDuration = 60;
 // c'est `requireInterclubMember` et non le contrôle capitaine. Composer une rencontre reste
 // ouvert à tous (cf. docs/interclub.md), et cette route ne fait qu'aller lire une page publique.
 //
+// ⚠️ …MAIS SEULEMENT DANS LA FORME QUE L'ÉCRAN EMPLOIE : `?fixtureId=…`, sans `force`. C'est la
+// seule que `Interclub.tsx` appelle (à l'ouverture d'une rencontre), et elle coûte au plus UNE
+// requête fédérale, bornée par la fraîcheur et par le repos après échec (`refreshRosters`).
+// Les deux autres leviers étaient ouverts à tout membre, sans limite, alors qu'aucun écran ne
+// s'en sert :
+//   * `force=1` contourne la fraîcheur ET le repos après échec — une boucle de rechargement
+//     suffisait à marteler la fiche d'une équipe chez un site associatif qui ne nous doit rien ;
+//   * le chemin SANS `fixtureId` relit les adversaires des `MAX_RENCONTRES` dernières rencontres,
+//     soit jusqu'à quarante requêtes espacées par appel.
+// Ce sont des gestes d'ADMIN (dépannage, rattrapage après ré-import du calendrier). Pour un
+// membre, `force` est donc ignoré — l'appel reste utile, il ne fait que respecter la
+// fraîcheur — et le chemin global refusé en 403 : le taire renverrait un succès vide qui
+// laisserait chercher une panne ailleurs.
+//
 // ⚠️ N'ÉCRIT RIEN SUR NOS RENCONTRES. Elle remplit un cache d'équipes fédérales, rien d'autre :
 // aucune composition, aucun score, aucun nom d'adversaire déjà saisi n'est touché.
 
 export async function POST(req: NextRequest) {
   const access = await requireInterclubMember(req);
   if (!access.ok) return access.response;
+  const admin = isAdminSession(access.session);
 
   const teamId = req.nextUrl.searchParams.get("teamId") || undefined;
   const fixtureId = req.nextUrl.searchParams.get("fixtureId") || undefined;
-  const force = req.nextUrl.searchParams.get("force") === "1";
+  // Réservé aux admins (cf. l'en-tête) : pour un membre, la demande est ignorée, pas refusée.
+  const force = admin && req.nextUrl.searchParams.get("force") === "1";
 
   // UNE SEULE RENCONTRE, DONC UNE SEULE ÉQUIPE. L'identifiant fédéral est relu EN BASE et
   // jamais reçu du client : une rencontre inconnue rend une liste vide plutôt qu'une erreur —
@@ -71,6 +88,12 @@ export async function POST(req: NextRequest) {
       unreadable: outcomes.filter((o) => o.status === "unreadable").map((o) => o.snTeamId),
       failed: outcomes.filter((o) => o.status === "failed").map((o) => o.snTeamId),
     });
+  }
+
+  // LE CHEMIN GLOBAL EST UN GESTE D'ADMIN (cf. l'en-tête) : jusqu'à quarante sorties chez la
+  // ligue par appel, qu'aucun écran de membre ne déclenche.
+  if (!admin) {
+    return NextResponse.json({ error: "Rafraîchissement global réservé aux admins" }, { status: 403 });
   }
 
   // MÊME PROFONDEUR QUE LE MENU (`MAX_RENCONTRES`), importée et non recopiée : on rafraîchit

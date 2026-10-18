@@ -5,6 +5,7 @@ import type { NextRequest } from "next/server";
 // USAGE UNIQUE (cookie toujours effacé), credential inconnu/désactivé, échec de vérification, et
 // l'échelle de session (ResaMania → email → mur 409). Toutes les frontières sont mockées.
 const h = vi.hoisted(() => ({
+  challengeFresh: true,
   biometry: true,
   rateLimited: false,
   challenge: { challenge: "chal", type: "auth" } as null | { challenge: string; type: string },
@@ -12,6 +13,8 @@ const h = vi.hoisted(() => ({
   verifyResult: { verified: true, authenticationInfo: { newCounter: 5 } } as unknown,
   verifyThrows: false,
   resaSid: "resa-sid" as string | null,
+  // Erreur levée par createResaSessionFromUser à la place d'un sid (panne ResaMania…).
+  resaThrows: null as null | Error,
   emailSid: null as string | null,
   passkeyUpdate: vi.fn(),
   recordAttempt: vi.fn(),
@@ -32,7 +35,9 @@ vi.mock("@/lib/client-ip", () => ({ clientIp: () => "1.2.3.4" }));
 // export et casserait la route pour une raison sans rapport avec ce qu'on teste ici.
 vi.mock("@/lib/session", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/session")>()),
-  createResaSessionFromUser: vi.fn(async () => h.resaSid),
+  createResaSessionFromUser: vi.fn(() =>
+    h.resaThrows ? Promise.reject(h.resaThrows) : Promise.resolve(h.resaSid),
+  ),
   createEmailSession: vi.fn(async () => h.emailSid),
 }));
 vi.mock("@/lib/webauthn", () => ({
@@ -42,6 +47,7 @@ vi.mock("@/lib/webauthn", () => ({
   recordPasskeyAttempt: h.recordAttempt,
   CHALLENGE_COOKIE: "wa_chal",
   challengeCookieOptions: () => ({ path: "/" }),
+  consumeChallenge: async () => h.challengeFresh,
 }));
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -91,6 +97,7 @@ beforeEach(() => {
   h.verifyResult = { verified: true, authenticationInfo: { newCounter: 5 } };
   h.verifyThrows = false;
   h.resaSid = "resa-sid";
+  h.resaThrows = null;
   h.emailSid = null;
   h.passkeyUpdate.mockReset().mockResolvedValue({});
   h.recordAttempt.mockReset().mockResolvedValue(undefined);
@@ -175,5 +182,60 @@ describe("POST /api/auth/webauthn/auth/verify", () => {
     const body = (await res.json()) as { code?: string; username?: string };
     expect(body.code).toBe("resa_expired");
     expect(body.username).toBe("jean@club.fr");
+  });
+});
+
+// PANNE RESAMANIA PASSAGÈRE pendant la restauration : la biométrie a réussi, le lien ResaMania
+// est valide, seul ResaMania est injoignable. Ni 409 « connexion expirée » (faux, et il pousse à
+// retaper un mot de passe pour rien), ni 500.
+describe("POST /api/auth/webauthn/auth/verify — ResaMania injoignable", () => {
+  // Décision produit : si ResaMania ne marche pas, l'appli ne marche pas — pas de cookie
+  // « email seul » de 30 jours posé faute de mieux.
+  it("AUCUN repli sur la session e-mail, même quand le compte en a une : 503", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { ResaRefreshTransientError } = await import("@/lib/resamania/errors");
+    h.resaThrows = new ResaRefreshTransientError("ResaMania momentanément indisponible");
+    h.emailSid = "email-sid";
+
+    const res = await POST(postReq(goodBody));
+
+    expect(res.status).toBe(503);
+    expect(res.cookies.get("sid")).toBeUndefined();
+    expect(h.recordAttempt).not.toHaveBeenCalled();
+  });
+
+  it("503 « réessaie » sans compte e-mail — ni 409 « expirée », ni tentative comptée", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { ResaRefreshTransientError } = await import("@/lib/resamania/errors");
+    h.resaThrows = new ResaRefreshTransientError("ResaMania momentanément indisponible");
+    (h.passkey!.user as Record<string, unknown>).passwordHash = null;
+
+    const res = await POST(postReq(goodBody));
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      error: "ResaMania ne répond pas, réessaie dans un instant.",
+      code: "resa-unavailable",
+    });
+    expect(clears(res)).toBe(true);
+    expect(res.cookies.get("sid")).toBeUndefined();
+    expect(h.recordAttempt).not.toHaveBeenCalled();
+  });
+
+  it("une erreur NON passagère (base…) n'est pas maquillée en panne ResaMania", async () => {
+    h.resaThrows = new Error("Can't reach database server");
+    await expect(POST(postReq(goodBody))).rejects.toThrow("database");
+  });
+});
+
+// Audit 2026-10, point 24 : un cookie de défi + une réponse capturés ne se rejouent pas.
+describe("POST /api/auth/webauthn/auth/verify — défi à usage unique", () => {
+  it("défi déjà consommé → 401, aucune session ouverte", async () => {
+    h.challengeFresh = false;
+    const res = await POST(postReq(goodBody));
+    h.challengeFresh = true;
+    expect(res.status).toBe(401);
+    expect(res.cookies.get("sid")).toBeUndefined();
+    expect(h.recordAttempt).toHaveBeenCalled();
   });
 });

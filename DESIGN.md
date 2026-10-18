@@ -23,7 +23,7 @@ colors:
   carte-sombre: "#191e26"
   rose-short: "#e6007e"
   bandeau-info: "#2563eb"
-  bandeau-avertissement: "#ea580c"
+  bandeau-avertissement: "#c2410c"
   bandeau-incident: "#dc2626"
   sunken-clair: "#f4f6f9"
   sunken-sombre: "#12161d"
@@ -293,8 +293,10 @@ s'adressent à quelqu'un qui ne les a pas demandés et qui doit les comprendre *
 en entier** — d'où un vocabulaire de couleurs pleines, texte blanc, appliqué de façon stricte :
 
 - **`bandeau-info`** (`#2563eb`) : une information, rien n'est cassé. Annonce du bureau.
-- **`bandeau-avertissement`** (`#ea580c`) : une annonce que le bureau a marquée comme
-  importante (`level: "warn"`).
+- **`bandeau-avertissement`** (`#c2410c`) : une annonce que le bureau a marquée comme
+  importante (`level: "warn"`). 5,18:1 sous le texte blanc. Elle était à `#ea580c` (3,56:1) :
+  le texte du bandeau (0,95rem demi-gras) n'est pas du « grand texte », le seuil est 4,5:1 —
+  et c'était l'annonce marquée importante qui se lisait le moins bien.
 - **`bandeau-incident`** (`#dc2626`) : l'appli est dégradée maintenant — base injoignable.
 
 Ils suivent la **Règle de la Paire Complète** : fond plein + texte blanc figés ensemble, donc

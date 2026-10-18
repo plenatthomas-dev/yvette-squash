@@ -7,13 +7,21 @@ import type { RankingRow } from "./client";
 const h = vi.hoisted(() => ({
   getMonths: vi.fn(),
   searchRanking: vi.fn(),
+  truncated: false,
   subjectsToRefresh: vi.fn(),
   knownCouples: vi.fn(),
   writePoint: vi.fn(),
   writeProbe: vi.fn(),
 }));
 
-vi.mock("./client", () => ({ getMonths: h.getMonths, searchRanking: h.searchRanking }));
+vi.mock("./client", () => ({
+  getMonths: h.getMonths,
+  searchRanking: h.searchRanking,
+  searchRankingPage: async (q: string, o: unknown) => ({
+    rows: await h.searchRanking(q, o),
+    truncated: h.truncated,
+  }),
+}));
 vi.mock("./refresh", () => ({ subjectsToRefresh: h.subjectsToRefresh }));
 vi.mock("./history", async (orig) => ({
   // `pointKey` reste le VRAI : c'est la clé partagée entre ce qu'on lit et ce qu'on saute, et
@@ -58,6 +66,7 @@ function sujet(id: string, nom: string, licence?: string) {
 beforeEach(() => {
   h.getMonths.mockReset().mockResolvedValue(["2026-03-02", "2026-02-02", "2026-01-05"]);
   h.searchRanking.mockReset().mockResolvedValue([]);
+  h.truncated = false;
   h.subjectsToRefresh.mockReset().mockResolvedValue([sujet("u1", "Jean Dupont")]);
   h.knownCouples.mockReset().mockResolvedValue(new Set<string>());
   h.writeProbe.mockReset().mockResolvedValue(undefined);
@@ -261,6 +270,15 @@ describe("backfillHistory — la mémoire des trous", () => {
       "2026-03-02",
       "unknown",
     );
+  });
+
+  // Audit 2026-10, point 14 : une page 1 tronquée (nom courant) ne prouve pas l'absence.
+  it("ne marque RIEN sur une page TRONQUÉE : le joueur peut être en page 2", async () => {
+    h.searchRanking.mockResolvedValue([row("MARTIN PIERRE")]);
+    h.truncated = true;
+    const res = await run();
+    expect(res).toMatchObject({ written: 0, unresolved: 3 });
+    expect(h.writeProbe).not.toHaveBeenCalled();
   });
 
   it("ne marque RIEN quand squashnet n'a pas répondu : c'est un incident, pas un verdict", async () => {

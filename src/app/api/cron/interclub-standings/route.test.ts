@@ -26,6 +26,7 @@ vi.mock("@/lib/cron-run", () => ({
   recordCronRun: vi.fn(async (...a: unknown[]) => {
     h.runs.push(a);
   }),
+  runCron: (_n: string, fn: () => Promise<unknown>) => fn(),
 }));
 vi.mock("@/lib/features-server", () => ({
   getFeatures: async () => {

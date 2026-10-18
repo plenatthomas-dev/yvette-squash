@@ -1,11 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
+  ApiError,
   MAINTENANCE_EVENT,
   MaintenanceError,
+  NETWORK_ERROR_MESSAGE,
+  SERVICE_DOWN_MESSAGE,
+  callApi,
   isDbDown,
+  readApi,
   readJson,
   readOk,
   reportMaintenance,
+  userMessage,
 } from "./apiFetch";
 
 // « MAINTENANCE » NE DOIT PAS ÊTRE LE NOM DE TOUTES LES PANNES.
@@ -170,5 +176,102 @@ describe("reportMaintenance", () => {
   it("annonce une panne CONFIRMÉE quand l'appelant a déjà sondé health", () => {
     reportMaintenance(true);
     expect(bannieres).toEqual([{ confirmed: true }]);
+  });
+});
+
+// ─── callApi / readApi / userMessage ─────────────────────────────────────────────────────
+//
+// Ce que ces tests figent, c'est qu'AUCUN texte écrit pour un développeur n'atteint l'écran :
+// ni « Failed to fetch » (Chrome), ni « Load failed » (Safari), ni « Unexpected end of JSON
+// input » (le parseur). Chacun de ces trois textes a été vu derrière « Réservation impossible : ».
+
+describe("callApi", () => {
+  it("rend le corps d'une réponse ok", async () => {
+    fetchMock.mockResolvedValue(reponse(200, { ok: true, journalSynced: false }));
+    await expect(callApi("/api/book", { method: "POST" })).resolves.toEqual({
+      ok: true,
+      journalSynced: false,
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/book", { method: "POST" });
+  });
+
+  it.each(["Failed to fetch", "Load failed"])(
+    "traduit l'échec du fetch (%s) en message réseau, statut null",
+    async (brut) => {
+      fetchMock.mockRejectedValue(new TypeError(brut));
+      const p = callApi("/api/book");
+      await expect(p).rejects.toBeInstanceOf(ApiError);
+      await expect(p).rejects.toMatchObject({ message: NETWORK_ERROR_MESSAGE, status: null });
+    },
+  );
+
+  it("laisse passer une interruption VOULUE telle quelle : ce n'est pas une panne", async () => {
+    const abort = new DOMException("The user aborted a request.", "AbortError");
+    fetchMock.mockRejectedValue(abort);
+    await expect(callApi("/api/planning")).rejects.toBe(abort);
+  });
+
+  it("rend le `error` du serveur sur un refus, avec son statut et son code", async () => {
+    fetchMock.mockResolvedValue(
+      reponse(409, { error: "Un seul terrain par horaire.", code: "overlap" }),
+    );
+    await expect(callApi("/api/book")).rejects.toMatchObject({
+      message: "Un seul terrain par horaire.",
+      status: 409,
+      code: "overlap",
+    });
+  });
+
+  it("garde le statut 504 pour que l'appelant puisse dire « résultat inconnu »", async () => {
+    fetchMock.mockResolvedValue(reponse(504, { error: "ResaMania n'a pas répondu à temps." }));
+    await expect(callApi("/api/book")).rejects.toMatchObject({ status: 504 });
+  });
+});
+
+describe("readApi", () => {
+  it("un 5xx au corps ILLISIBLE, base debout → « le service ne répond pas », sans jargon", async () => {
+    // /api/health répond que la base va bien : c'est donc un incident applicatif.
+    fetchMock.mockResolvedValue(reponse(200, { ok: true }));
+    const p = readApi(reponse(500, null, { illisible: true }));
+    await expect(p).rejects.toMatchObject({ message: SERVICE_DOWN_MESSAGE, status: 500 });
+    await expect(p).rejects.not.toThrow(/JSON/);
+  });
+
+  it("un 5xx au JSON muet (sans `error`) → « le service ne répond pas »", async () => {
+    await expect(readApi(reponse(502, {}))).rejects.toThrow(SERVICE_DOWN_MESSAGE);
+  });
+
+  it("un 5xx qui EXPLIQUE garde son explication : le serveur sait mieux", async () => {
+    await expect(
+      readApi(reponse(502, { error: "Planning momentanément indisponible — réessaie dans un instant." })),
+    ).rejects.toThrow("Planning momentanément indisponible");
+  });
+
+  it("base à terre : garde le message de maintenance, déjà écrit pour être lu", async () => {
+    fetchMock.mockResolvedValue(reponse(503, { ok: false }));
+    await expect(readApi(reponse(500, null, { illisible: true }))).rejects.toThrow(
+      new MaintenanceError().message,
+    );
+    expect(bannieres).toEqual([{ confirmed: true }]);
+  });
+
+  it("un 4xx sans `error` ne laisse pas l'écran vide", async () => {
+    await expect(readApi(reponse(400, {}))).rejects.toThrow("Demande refusée par le serveur (400).");
+  });
+});
+
+describe("userMessage", () => {
+  it("rend le message d'une ApiError ou d'une MaintenanceError", () => {
+    expect(userMessage(new ApiError("Créneau pris.", 409))).toBe("Créneau pris.");
+    expect(userMessage(new MaintenanceError("Base en veille"))).toBe("Base en veille");
+  });
+
+  it("traduit un TypeError de fetch fait à la main en message réseau", () => {
+    expect(userMessage(new TypeError("Failed to fetch"))).toBe(NETWORK_ERROR_MESSAGE);
+  });
+
+  it("n'affiche JAMAIS le message brut d'une exception quelconque", () => {
+    expect(userMessage(new SyntaxError("Unexpected end of JSON input"))).toBe(SERVICE_DOWN_MESSAGE);
+    expect(userMessage(new Error("boom"), "Annulation impossible.")).toBe("Annulation impossible.");
   });
 });

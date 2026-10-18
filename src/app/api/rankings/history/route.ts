@@ -82,7 +82,7 @@ export async function GET(req: NextRequest) {
   if (!ranking || !rankingHistory) {
     return NextResponse.json({ error: "Classement désactivé" }, { status: 404 });
   }
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }

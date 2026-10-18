@@ -1,5 +1,7 @@
 "use client";
 
+import "./Forum.css";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readOk } from "@/lib/apiFetch";
 import { onForeground } from "@/lib/onForeground";
@@ -592,7 +594,6 @@ export default function Forum({
     };
     // `limit` n'est volontairement PAS une dépendance : changer de page ne doit pas
     // reconstruire la connexion. Le rattrapage relit de toute façon depuis l'ancre.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [charge, retirer, appliquerReaction, inserer]);
 
   // Oubli des « en train d'écrire » : sans ce balayage, quelqu'un qui ferme son onglet en
@@ -1633,7 +1634,7 @@ export default function Forum({
               onChange={(e) => onDraft(e.target.value)}
               placeholder="Écrire au club…"
               rows={1}
-              aria-label="Votre message"
+              aria-label="Ton message"
               /* Le clavier tactile affiche un RETOUR À LA LIGNE et non un « Envoyer » : sans
                  cela, sa touche promettrait un envoi que `onKeyDown` ne fait plus. */
               enterKeyHint="enter"

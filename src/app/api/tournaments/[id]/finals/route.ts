@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { getSession } from "@/lib/session";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminSession } from "@/lib/admin";
 import { prisma } from "@/lib/db";
 import { getFeatures } from "@/lib/features-server";
 import { httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!(await getFeatures()).tournament) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!t) {
     return NextResponse.json({ error: "Tournoi introuvable" }, { status: 404 });
   }
-  if (t.createdById !== session.userId && !isAdminEmail(session.email)) {
+  if (t.createdById !== session.userId && !isAdminSession(session)) {
     return NextResponse.json(
       { error: "Seul le créateur peut générer la phase finale" },
       { status: 403 },

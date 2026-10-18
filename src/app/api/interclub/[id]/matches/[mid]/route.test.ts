@@ -53,7 +53,7 @@ vi.mock("@/lib/interclub-notify", () => ({
   }),
 }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
-vi.mock("@/lib/admin", () => ({ isAdminEmail: vi.fn(() => h.admin) }));
+vi.mock("@/lib/admin", () => ({ isAdminSession: vi.fn(() => h.admin) }));
 vi.mock("@/lib/db", () => {
   const tx = {
     interclubMatch: {
@@ -232,6 +232,44 @@ describe("PATCH /api/interclub/{id}/matches/{mid}", () => {
     await PATCH(patch({ games: [] }), ctx);
     expect(h.updated).toMatchObject({ gamesHome: null, gamesAway: null, status: "pending" });
     expect(h.createdGames).toBeNull();
+  });
+
+  // Le jeu en cours (`liveJson`) décrit la suite des jeux ENREGISTRÉS. Une saisie partielle qui
+  // les change le laissait en place : la fiche affichait l'ancien 6-4 derrière les jeux
+  // ressaisis, l'average le comptait, et le marqueur suivant le reprenait.
+  it("une saisie partielle qui change les jeux efface le jeu en cours", async () => {
+    h.match = { ...freshMatch(), status: "live", liveJson: '{"current":{"home":6,"away":4}}' };
+    const res = await PATCH(patch({ games: [{ home: 11, away: 5 }] }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.updated).toMatchObject({ status: "live", liveJson: null });
+  });
+
+  it("vider les jeux efface aussi le jeu en cours", async () => {
+    h.match = {
+      ...freshMatch(),
+      status: "live",
+      games: [{ number: 1, pointsHome: 11, pointsAway: 5 }],
+      gamesHome: 1,
+      gamesAway: 0,
+      liveJson: '{"current":{"home":6,"away":4}}',
+    };
+    const res = await PATCH(patch({ games: [], knownGameCount: 1 }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.updated).toMatchObject({ status: "pending", liveJson: null });
+  });
+
+  it("renvoyer les MÊMES jeux laisse le jeu en cours en place", async () => {
+    h.match = {
+      ...freshMatch(),
+      status: "live",
+      games: [{ number: 1, pointsHome: 11, pointsAway: 5 }],
+      gamesHome: 1,
+      gamesAway: 0,
+      liveJson: '{"current":{"home":6,"away":4}}',
+    };
+    const res = await PATCH(patch({ games: [{ home: 11, away: 5 }], knownGameCount: 1 }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.updated).not.toHaveProperty("liveJson");
   });
 
   it("refuse un score impossible pour le format (4e jeu après un 3-0)", async () => {
@@ -909,5 +947,91 @@ describe("PATCH .../matches/{mid} — heures", () => {
     expect(h.updated).toMatchObject({ status: "done" });
     expect(h.updated).not.toHaveProperty("startedAt");
     expect(h.updated).not.toHaveProperty("finishedAt");
+  });
+});
+
+// Audit 2026-10, point 18 : une rencontre avec un forfait ne pouvait pas se clore.
+describe("PATCH — forfait et abandon", () => {
+  it("forfait : simple TERMINÉ sans jeu, au score attribué (3-0 en cinq jeux)", async () => {
+    const res = await PATCH(patch({ outcome: "forfait", outcomeWinner: "home" }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.updated).toMatchObject({
+      outcome: "forfait",
+      outcomeWinner: "home",
+      gamesHome: 3,
+      gamesAway: 0,
+      status: "done",
+      scorerId: null,
+      liveRev: { increment: 1 },
+    });
+    expect(h.createdGames).toBeNull();
+  });
+
+  it("abandon : garde les jeux terminés et attribue la victoire", async () => {
+    const res = await PATCH(
+      patch({
+        outcome: "abandon",
+        outcomeWinner: "away",
+        games: [
+          { home: 11, away: 5 },
+          { home: 4, away: 11 },
+        ],
+      }),
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    expect(h.updated).toMatchObject({ outcome: "abandon", gamesHome: 1, gamesAway: 3, status: "done" });
+    expect(h.createdGames).toHaveLength(2);
+  });
+
+  it("abandon refusé si les jeux désignent déjà un vainqueur", async () => {
+    const res = await PATCH(
+      patch({
+        outcome: "abandon",
+        outcomeWinner: "away",
+        games: [
+          { home: 11, away: 5 },
+          { home: 11, away: 5 },
+          { home: 11, away: 5 },
+        ],
+      }),
+      ctx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("issue inconnue, vainqueur absent, forfait avec jeux → 400", async () => {
+    expect((await PATCH(patch({ outcome: "nul", outcomeWinner: "home" }), ctx)).status).toBe(400);
+    expect((await PATCH(patch({ outcome: "forfait" }), ctx)).status).toBe(400);
+    expect(
+      (await PATCH(patch({ outcome: "forfait", outcomeWinner: "home", games: [{ home: 11, away: 0 }] }), ctx))
+        .status,
+    ).toBe(400);
+  });
+
+  it("revenir à un match joué : l'issue s'efface, le statut se relit sur les jeux", async () => {
+    h.match = { ...freshMatch(), outcome: "forfait", outcomeWinner: "home", status: "done", gamesHome: 3, gamesAway: 0 };
+    const res = await PATCH(patch({ outcome: null }), ctx);
+    expect(res.status).toBe(200);
+    expect(h.updated).toMatchObject({ outcome: null, outcomeWinner: null, status: "pending", gamesHome: null });
+  });
+});
+
+// Audit 2026-10, point 19.
+describe("PATCH — résultat final corrigé", () => {
+  it("une correction qui change le score annoncé renvoie une notification rectificative", async () => {
+    h.match = {
+      ...freshMatch(),
+      interclub: { ...freshMatch().interclub, status: "done", doneNotifiedAt: NOTIFIED, doneNotifiedScore: "3-1" },
+    };
+    h.siblings = Array.from({ length: 4 }, (_, i) => ({
+      gamesHome: i < 2 ? 3 : 0,
+      gamesAway: i < 2 ? 0 : 3,
+      status: "done",
+      homeDisplayName: "Tom",
+    }));
+    await PATCH(patch({ games: [{ home: 11, away: 5 }, { home: 11, away: 5 }, { home: 11, away: 5 }] }), ctx);
+    expect(h.notified).toContain("fixtureDone");
+    expect(h.fixtureUpdate?.doneNotifiedScore).toBe("2-2");
   });
 });

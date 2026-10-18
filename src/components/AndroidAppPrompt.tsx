@@ -82,7 +82,7 @@ export default function AndroidAppPrompt() {
 
   return (
     <div className="install-banner" role="status">
-      <img src="/logo_squash.jpeg" alt="" aria-hidden="true" className="install-banner-icon" />
+      <img src="/logo_squash-96.webp" alt="" aria-hidden="true" className="install-banner-icon" />
       <span className="install-banner-text">
         {mode === "offer" && (
           <>

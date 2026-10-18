@@ -1,0 +1,22 @@
+# Mises à jour des dépendances (audit 2026-10, point 31). Une PR par semaine et par
+# écosystème, regroupée pour ne pas noyer la file : les correctifs de sécurité, eux, arrivent
+# dès qu'ils sont publiés (Dependabot les ouvre hors calendrier). Chaque PR passe la CI.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Paris
+    open-pull-requests-limit: 5
+    groups:
+      # Les montées de version mineures et correctives d'un coup ; les majeures à part,
+      # une par une — c'est là que les ruptures se cachent (cf. le passage à Next 16).
+      mineures:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

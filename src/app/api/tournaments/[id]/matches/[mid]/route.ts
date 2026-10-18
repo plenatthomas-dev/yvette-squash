@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminSession } from "@/lib/admin";
 import { HttpError, httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
 import { getFeatures } from "@/lib/features-server";
 import { serializeTournament, tournamentInclude, validScore } from "@/lib/tournament-db";
@@ -23,7 +23,7 @@ export async function PATCH(
   if (!(await getFeatures()).tournament) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
@@ -40,7 +40,7 @@ export async function PATCH(
       const t = await tx.tournament.findUnique({ where: { id }, include: tournamentInclude });
       if (!t) throw new HttpError(404, "Tournoi introuvable");
 
-      const view = serializeTournament(t, session.userId, isAdminEmail(session.email));
+      const view = serializeTournament(t, session.userId, isAdminSession(session));
       if (!view.isParticipant && !view.canManage) {
         throw new HttpError(403, "Réservé aux participants du tournoi");
       }

@@ -220,6 +220,41 @@ export function fixtureScore(
 }
 
 /**
+ * Fin de rencontre à annoncer, ou à RECTIFIER (audit 2026-10, point 19).
+ *
+ * `doneNotifiedAt` ne se réarme jamais — c'est voulu, le statut redescend légitimement pendant
+ * une correction. Mais un faux « 3-1 » annoncé sur une erreur de marquage restait alors faux
+ * chez tous les abonnés. On garde le score annoncé (`doneNotifiedScore`) : quand la rencontre
+ * redevient terminée avec un AUTRE score, on annonce la correction et on le remplace.
+ *
+ * Rend les champs à écrire sur `Interclub` (vides s'il n'y a rien à poser) et ce qu'il faut
+ * annoncer. Une ligne d'avant la migration (annoncée sans score gardé) reçoit le score
+ * courant en silence : on ne sait pas ce qui avait été annoncé.
+ */
+export function doneTransition(
+  nextStatus: string,
+  fixture: { doneNotifiedAt: Date | null; doneNotifiedScore?: string | null },
+  score: { home: number; away: number },
+  now: Date,
+): {
+  data: { doneNotifiedAt?: Date; doneNotifiedScore?: string };
+  newlyDone: boolean;
+  corrected: boolean;
+} {
+  if (nextStatus !== "done") return { data: {}, newlyDone: false, corrected: false };
+  const key = `${score.home}-${score.away}`;
+  if (!fixture.doneNotifiedAt) {
+    return { data: { doneNotifiedAt: now, doneNotifiedScore: key }, newlyDone: true, corrected: false };
+  }
+  if (fixture.doneNotifiedScore === key) return { data: {}, newlyDone: false, corrected: false };
+  return {
+    data: { doneNotifiedScore: key },
+    newlyDone: false,
+    corrected: fixture.doneNotifiedScore != null,
+  };
+}
+
+/**
  * Statut DÉDUIT de la rencontre, indépendamment de la colonne `status` : tous les matchs sont
  * terminés ⇒ terminée ; au moins un match entamé ⇒ en cours. La colonne reste la valeur
  * stockée, mais l'API la recale (auto-cicatrisation, comme le tournoi).
@@ -373,6 +408,11 @@ export function serializeInterclub(f: FullInterclub, userId: string | null, isAd
       // Heures du marquage en direct (cf. `interclub-duree.ts`) : NULL quand on ne sait pas.
       startedAt: m.startedAt?.toISOString() ?? null,
       finishedAt: m.finishedAt?.toISOString() ?? null,
+      // Révision du marquage (cf. `PUT …/live`) : le marqueur part de celle-ci.
+      liveRev: m.liveRev ?? 0,
+      // Forfait / abandon : l'issue particulière et le côté qui l'emporte, ou null.
+      outcome: m.outcome ?? null,
+      outcomeWinner: m.outcomeWinner ?? null,
       updatedAt: m.updatedAt.toISOString(),
     };
   });

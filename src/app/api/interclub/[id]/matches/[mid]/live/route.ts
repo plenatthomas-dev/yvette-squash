@@ -4,6 +4,7 @@ import { HttpError, httpErrorResponse, readJsonBody, serializableTransaction } f
 import { lineupComplete, sequenceWinner, validGameSequence, type GameScore } from "@/lib/interclub";
 import {
   derivedStatus,
+  doneTransition,
   staleGamesReason,
   fixtureScore,
   parseLive,
@@ -76,13 +77,20 @@ export async function PUT(
   const { id, mid } = await params;
 
   const body = await readJsonBody(req);
-  const { live, games, knownGameCount } = body as {
+  const { live, games, knownGameCount, rev } = body as {
     live?: unknown;
     games?: unknown;
     knownGameCount?: unknown;
+    rev?: unknown;
   };
   if (knownGameCount !== undefined && (!Number.isInteger(knownGameCount) || (knownGameCount as number) < 0)) {
     return NextResponse.json({ error: "knownGameCount invalide" }, { status: 400 });
+  }
+  // RÉVISION ANNONCÉE (migration 63) : celle que le serveur a confirmée au marqueur à son
+  // dernier envoi réussi. Facultative — un marqueur qui ne sait pas (réponse perdue, journal
+  // d'avant la migration) ne l'envoie pas, et seules les gardes plus anciennes s'appliquent.
+  if (rev !== undefined && (!Number.isInteger(rev) || (rev as number) < 0)) {
+    return NextResponse.json({ error: "rev invalide" }, { status: 400 });
   }
 
   if (!Array.isArray(games)) {
@@ -143,6 +151,8 @@ export async function PUT(
     fixtureDone: boolean;
     score: { home: number; away: number };
     lines: MatchLine[];
+    fixtureCorrected: boolean;
+    rev: number;
   }
 
   let ev: Outcome;
@@ -160,6 +170,7 @@ export async function PUT(
               status: true,
               startNotifiedAt: true,
               doneNotifiedAt: true,
+              doneNotifiedScore: true,
               opponent: true,
               teamId: true,
               team: { select: { name: true } },
@@ -194,7 +205,12 @@ export async function PUT(
       // pouvoir continuer sur un autre téléphone sans passer par un écran d'erreur.
       if (m.scorerId !== session.userId) {
         if (m.status === "done") {
-          throw new HttpError(409, "Ce match est terminé — passe par la correction du score");
+          // Code `match-done` : ce 409 est le TROISIÈME de cette route, et il demande au marqueur
+          // une troisième réaction. Sans code, l'écran le lisait comme « quelqu'un d'autre
+          // marque » — il gardait alors son journal À VIE et renvoyait le même refus à chaque
+          // réouverture. Ici le score final est enregistré : le journal ne sert plus à rien, on
+          // le jette et on ferme (cf. `InterclubScorer`).
+          throw new HttpError(409, "Ce match est terminé — passe par la correction du score", "match-done");
         }
         if (m.scorerId !== null && !scorerIsStale(m.scorerClaimedAt)) {
           throw new HttpError(409, "Quelqu'un d'autre marque ce match");
@@ -209,6 +225,16 @@ export async function PUT(
       // deux copies avaient divergé (cf. `staleGamesReason`).
       const perime = staleGamesReason(knownGameCount as number | undefined, m.games, parsed);
       if (perime) throw new HttpError(409, perime, "stale-games");
+
+      // GARDE DE RÉVISION — le vrai correctif de la concurrence (audit 2026-10, point 17). La
+      // garde ci-dessus ne voit que les jeux TERMINÉS : deux appareils qui comptent le même jeu
+      // — deux marqueurs, ou un même compte sur deux téléphones, que l'exclusion mutuelle
+      // laisse passer puisque `scorerId` est le même — s'écrasaient le jeu en cours. Toute
+      // écriture incrémente `liveRev` ; un journal bâti sur une autre révision ne décrit plus
+      // l'état de la base.
+      if (rev !== undefined && rev !== m.liveRev) {
+        throw new HttpError(409, "Le score a été modifié sur un autre appareil", "stale-live");
+      }
 
       if (!validGameSequence(parsed, m.interclub.bestOf)) {
         throw new HttpError(400, "Score impossible pour ce format");
@@ -260,6 +286,7 @@ export async function PUT(
           gamesAway: parsed.length ? away : null,
           status,
           ...liveMatchTimes(m, { status, games: parsed.length }, now),
+          liveRev: { increment: 1 },
         },
       });
 
@@ -276,14 +303,15 @@ export async function PUT(
       // transitions. Un marqueur ne se réarme pas — quoi qu'il arrive à la colonne `status`, y
       // compris le recalage que le `GET` du détail lui applique.
       const fixtureStarted = nextStatus === "live" && m.interclub.startNotifiedAt === null;
-      const fixtureNewlyDone = nextStatus === "done" && m.interclub.doneNotifiedAt === null;
       const notifiedAt = new Date();
+      const fin = doneTransition(nextStatus, m.interclub, fixtureScore(siblings), notifiedAt);
+      const fixtureNewlyDone = fin.newlyDone;
       await tx.interclub.update({
         where: { id },
         data: {
           status: nextStatus,
           ...(fixtureStarted ? { startNotifiedAt: notifiedAt } : {}),
-          ...(fixtureNewlyDone ? { doneNotifiedAt: notifiedAt } : {}),
+          ...fin.data,
         },
       });
 
@@ -302,6 +330,8 @@ export async function PUT(
       gameDone: !winner && gamesGrew ? parsed : null,
       matchDone: winner && !wasDone ? { home, away } : null,
       fixtureDone: fixtureNewlyDone,
+      fixtureCorrected: fin.corrected,
+      rev: m.liveRev + 1,
       score: fixtureScore(siblings),
       lines: siblings.map((s) => ({
         player: s.homeDisplayName,
@@ -334,6 +364,10 @@ export async function PUT(
     await notifyGameDone(ev.ctx, ev.players.player, ev.players.opponent, ev.gameDone);
   }
   if (ev.fixtureDone) await notifyFixtureDone(ev.ctx, ev.score, ev.lines);
+  else if (ev.fixtureCorrected) {
+    await notifyFixtureDone(ev.ctx, ev.score, ev.lines, { corrected: true });
+  }
 
-  return NextResponse.json({ ok: true, done: ev.done });
+  // `rev` : la révision que CET envoi vient de poser — la base du prochain.
+  return NextResponse.json({ ok: true, done: ev.done, rev: ev.rev });
 }

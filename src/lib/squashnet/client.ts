@@ -57,8 +57,25 @@ function stripTags(s: string): string {
  * matche donc pas « rangM ».
  */
 function fieldText(rowHtml: string, cls: string): string {
-  const m = rowHtml.match(new RegExp(`div-rank-${cls}['"]>([\\s\\S]*?)</div>`));
-  return m ? stripTags(m[1]) : "";
+  // Classe lue AU JETON PRÈS (cf. calendar.ts, « une seule politique, tolérante ») : une classe
+  // utilitaire ajoutée — `class='div-rank-name text-start'` — ne doit pas vider le champ.
+  const re = /<div\b([^>]*)>([\s\S]*?)<\/div>/g;
+  for (const m of rowHtml.matchAll(re)) {
+    if (hasClass(m[1], `div-rank-${cls}`)) return stripTags(m[2]);
+  }
+  return "";
+}
+
+const classAttr = (attrs: string) => /\bclass=['"]([^'"]*)['"]/.exec(attrs)?.[1] ?? "";
+/** « Cette balise porte-t-elle cette classe ? », au jeton près. */
+const hasClass = (attrs: string, cls: string) => classAttr(attrs).split(/\s+/).includes(cls);
+/** Positions des `<div>` qui portent TOUTES ces classes (au jeton près, parmi d'autres). */
+function divsWith(html: string, ...cls: string[]): { start: number; end: number }[] {
+  const out: { start: number; end: number }[] = [];
+  for (const m of html.matchAll(/<div\b([^>]*)>/g)) {
+    if (cls.every((c) => hasClass(m[1], c))) out.push({ start: m.index!, end: m.index! + m[0].length });
+  }
+  return out;
 }
 
 /**
@@ -70,11 +87,14 @@ export function parseRankingFragment(html: string): RankingRow[] {
   const resultsAt = html.search(/id=['"]results['"]/);
   const scope = resultsAt >= 0 ? html.slice(resultsAt) : html;
   // Découpe aux ouvertures de lignes de données ; le 1er segment (avant la 1re ligne) est ignoré.
-  const segments = scope.split(/<div class=['"]row ranking['"]>/).slice(1);
+  // Lignes de données : `row` ET `ranking` (l'en-tête, `ranking ranking-head`, n'a pas `row`).
+  // Classes lues au jeton près : `class='row ranking mt-1'` reste une ligne.
+  const debuts = divsWith(scope, "row", "ranking");
+  const segments = debuts.map((d, i) => scope.slice(d.end, debuts[i + 1]?.start ?? scope.length));
   const rows: RankingRow[] = [];
   for (const seg of segments) {
     // Coupe le segment à la pagination (queue de la dernière ligne) le cas échéant.
-    const cut = seg.search(/<div class=['"]div-pages['"]>/);
+    const cut = divsWith(seg, "div-pages")[0]?.start ?? -1;
     const rowHtml = cut >= 0 ? seg.slice(0, cut) : seg;
     const name = fieldText(rowHtml, "name");
     if (!name) continue;
@@ -225,6 +245,30 @@ export async function searchRanking(
   name: string,
   opts: { month?: string } = {},
 ): Promise<RankingRow[]> {
+  return (await searchRankingPage(name, opts)).rows;
+}
+
+/**
+ * Comme `searchRanking`, mais dit aussi si la réponse est TRONQUÉE : squashnet ne rend que la
+ * première page, et un joueur absent de la page 1 d'un nom courant peut très bien être en
+ * page 2. Une absence sur une page tronquée n'est donc PAS un verdict (cf. backfill).
+ */
+export async function searchRankingPage(
+  name: string,
+  opts: { month?: string } = {},
+): Promise<{ rows: RankingRow[]; truncated: boolean }> {
   const month = opts.month ?? (await getLatestMonth());
-  return parseRankingFragment(await post(name, month));
+  const html = await post(name, month);
+  return { rows: parseRankingFragment(html), truncated: isRankingTruncated(html) };
+}
+
+/**
+ * Vrai si la pagination du classement propose PLUS D'UNE page. squashnet pose toujours le bloc
+ * `div-pages`, même pour un seul résultat (« 1 ») : c'est le nombre de pages qui compte.
+ */
+export function isRankingTruncated(html: string): boolean {
+  const at = divsWith(html, "div-pages")[0]?.start ?? -1;
+  if (at < 0) return false;
+  const bloc = html.slice(at, html.indexOf("</div>", at) + 6);
+  return (bloc.match(/<a\b/g) ?? []).length > 1;
 }

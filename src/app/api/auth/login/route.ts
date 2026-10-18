@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { login } from "@/lib/resamania/client";
-import { createSession, AccountDisabledError, normalizeEmail } from "@/lib/session";
+import { login, isResaAuthRejected } from "@/lib/resamania/client";
+import { createSession, AccountDisabledError, LoginRefusedError, normalizeEmail } from "@/lib/session";
 import { clientIp } from "@/lib/client-ip";
 import { prisma } from "@/lib/db";
 import { isDbUnavailable, dbUnavailableResponse } from "@/lib/db-error";
 import { appBlockForEmail, appBlockedResponse } from "@/lib/app-block";
+import { MAX_PASSWORD_LEN } from "@/lib/email-auth";
+import { crossSiteRefusal } from "@/lib/same-origin";
+import { checkBotId } from "botid/server";
 
 export const runtime = "nodejs";
 
@@ -23,14 +26,32 @@ const WINDOW_MS = 15 * 60_000; // 15 minutes
 const MAX_FAILURES = 5; // par IP
 const MAX_FAILURES_ACCOUNT = 10; // par identifiant visé
 
+// Bornes d'entrée : 254 = longueur maximale d'une adresse (RFC 5321) ; le mot de passe reprend
+// la borne de la connexion email (cf. lib/email-auth). Au-delà, c'est une requête fabriquée :
+// on la refuse AVANT toute lecture en base ou appel à ResaMania, plutôt que de lui faire
+// transporter (et compter, et stocker dans LoginAttempt.identifier) des mégaoctets.
+const MAX_USERNAME_LEN = 254;
+
 // POST /api/auth/login { username, password }
 export async function POST(req: NextRequest) {
+  // Connexion forcée depuis un autre site (login CSRF) : refusée d'emblée (cf. lib/same-origin).
+  const ailleurs = crossSiteRefusal(req);
+  if (ailleurs) return ailleurs;
+  // Anti-bot invisible (Vercel BotID), avant tout appel à ResaMania : un robot qui essaie des
+  // mots de passe en masse ferait aussi blocklister nos IP par ResaMania. Même garde que
+  // auth/email/register ; la route est déclarée dans src/instrumentation-client.ts.
+  if ((await checkBotId()).isBot) {
+    return NextResponse.json({ error: "Requête refusée." }, { status: 403 });
+  }
   const { username, password } = await req.json().catch(() => ({}));
   if (typeof username !== "string" || typeof password !== "string" || !username || !password) {
     return NextResponse.json(
       { error: "Identifiant et mot de passe requis" },
       { status: 400 },
     );
+  }
+  if (username.length > MAX_USERNAME_LEN || password.length > MAX_PASSWORD_LEN) {
+    return NextResponse.json({ error: "Identifiant ou mot de passe trop long" }, { status: 400 });
   }
 
   const ip = clientIp(req);
@@ -62,23 +83,44 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Deux étapes, deux try DISTINCTS. Quand `login()` et `createSession()` partageaient le
+    // même, toute erreur de createSession (email déjà pris par un autre compte → P2002,
+    // CREDENTIALS_SECRET mal configuré…) devenait « Identifiants invalides » ET une tentative
+    // échouée : un membre au bon mot de passe finissait bloqué par l'anti-brute-force, sans
+    // qu'aucun message ne pointe la vraie cause. Seul un REFUS de ResaMania est compté.
+    let resa;
     try {
-      const resa = await login({ username, password });
-      // Connexion réussie : on efface l'ardoise de cette IP ET de ce compte (les fautes de frappe
-      // précédentes ne doivent pénaliser ni les prochains logins du foyer/club, ni le membre).
-      await prisma.loginAttempt.deleteMany({ where: { OR: [{ ip }, { identifier: account }] } });
-      const sid = await createSession(resa);
-      const res = NextResponse.json({
-        displayName: `${resa.identity.givenName} ${resa.identity.familyName}`.trim(),
-      });
-      res.cookies.set("sid", sid, {
-        httpOnly: true,
-        sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
-        path: "/",
-        maxAge: 60 * 60 * 24 * 30,
-      });
-      return res;
+      resa = await login({ username, password });
+    } catch (e) {
+      // Détail journalisé côté serveur ; message générique pour ne rien divulguer de l'amont.
+      console.error("[login] échec ResaMania:", e);
+      if (isResaAuthRejected(e)) {
+        // Identifiants refusés par ResaMania : on incrémente les deux compteurs.
+        await prisma.loginAttempt.create({ data: { ip, identifier: account } }).catch(() => {});
+        return NextResponse.json({ error: "Identifiants invalides" }, { status: 401 });
+      }
+      // ResaMania indisponible (5xx, 429, réseau, délai) ou réponse inattendue : le membre n'y
+      // est pour rien → 503, SANS compter de tentative (sinon une panne amont de quelques
+      // minutes verrouillerait tout un club derrière une IP partagée). Pas de drapeau
+      // `maintenance` : il annoncerait une panne de NOTRE base (cf. lib/apiFetch).
+      return NextResponse.json(
+        { error: "ResaMania ne répond pas pour le moment — réessaie dans quelques minutes." },
+        { status: 503 },
+      );
+    }
+
+    // Connexion réussie : on efface les échecs de CE COUPLE (IP, compte) — les fautes de frappe
+    // du membre ne doivent pas le pénaliser à sa prochaine connexion.
+    // Surtout PAS `OR: [{ ip }, { identifier }]`, l'ancienne forme : elle effaçait les échecs de
+    // l'IP sur TOUS les comptes. Un attaquant muni d'UN compte valide pouvait alterner quatre
+    // essais sur les comptes visés et une connexion réussie avec le sien, et remettre ainsi la
+    // limite par IP à zéro indéfiniment. Prix à payer, assumé : les échecs d'un AUTRE membre
+    // du même foyer/club restent comptés jusqu'au bout de leur fenêtre de 15 min.
+    await prisma.loginAttempt.deleteMany({ where: { ip, identifier: account } });
+
+    let sid: string;
+    try {
+      sid = await createSession(resa);
     } catch (e) {
       // Compte désactivé par un admin : l'authentification ResaMania a réussi, ce n'est PAS un
       // échec d'identifiants → 403 explicite, sans incrémenter le compteur anti-brute-force.
@@ -88,18 +130,41 @@ export async function POST(req: NextRequest) {
           { status: 403 },
         );
       }
-      // Base injoignable (ex. createSession qui écrit la session) : ce N'EST PAS un mauvais mot de
-      // passe → on la laisse remonter à la garde externe (→ 503) plutôt que de la maquiller en 401.
+      if (e instanceof LoginRefusedError) {
+        console.warn("[login] connexion refusée:", e.reason);
+        const error =
+          e.reason === "foreign_club"
+            ? "Ce compte ResaMania n'est pas rattaché au club. L'appli est réservée à ses membres."
+            : e.reason === "identity_conflict"
+              ? "Cette adresse est déjà liée à un autre compte ResaMania. Contacte un responsable du club."
+              : "Connexion refusée. Contacte un responsable du club.";
+        return NextResponse.json({ error }, { status: 403 });
+      }
+      // Base injoignable : on la laisse remonter à la garde externe (→ 503 « maintenance »).
       if (isDbUnavailable(e)) throw e;
-      // Échec (identifiants invalides ou flux interrompu) : on incrémente les deux compteurs.
-      await prisma.loginAttempt.create({ data: { ip, identifier: account } }).catch(() => {});
-      // Détail journalisé côté serveur ; message générique pour ne rien divulguer de l'amont.
-      console.error("[login] échec:", e);
+      // Toute autre erreur est NOTRE problème (contrainte d'unicité, chiffrement mal configuré…),
+      // pas celui du membre : 500 lisible, journalisé, jamais compté comme tentative.
+      console.error("[login] ouverture de session impossible:", e);
       return NextResponse.json(
-        { error: "Identifiants invalides ou service momentanément indisponible" },
-        { status: 401 },
+        {
+          error:
+            "Connexion impossible pour le moment (erreur de l'appli). Préviens un responsable du club.",
+        },
+        { status: 500 },
       );
     }
+
+    const res = NextResponse.json({
+      displayName: `${resa.identity.givenName} ${resa.identity.familyName}`.trim(),
+    });
+    res.cookies.set("sid", sid, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 30,
+    });
+    return res;
   } catch (e) {
     if (isDbUnavailable(e)) return dbUnavailableResponse();
     throw e; // vraie erreur inattendue → laisse Next répondre 500

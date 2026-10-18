@@ -24,31 +24,51 @@ function getKey(): Buffer {
   return key;
 }
 
-/** Chiffre une chaîne. Format de sortie : base64(iv).base64(tag).base64(ciphertext) */
+/**
+ * UNE CLÉ PAR USAGE (audit 2026-10, point 24). `CREDENTIALS_SECRET` servait telle quelle au
+ * chiffrement ET aux HMAC : une faiblesse — ou une fuite — d'un usage engageait l'autre. On
+ * en DÉRIVE désormais une sous-clé par usage (HKDF-SHA256, étiquette distincte) ; le secret
+ * lui-même ne change pas, aucune variable d'environnement à ajouter.
+ */
+function subKey(label: "enc" | "token" | "session"): Buffer {
+  return Buffer.from(crypto.hkdfSync("sha256", getKey(), Buffer.alloc(0), `yvette-squash:${label}`, 32));
+}
+
+/** Préfixe des chiffrés produits avec la sous-clé (les anciens n'en ont pas). */
+const V2 = "v2";
+
+/**
+ * Chiffre une chaîne. Format de sortie : `v2.base64(iv).base64(tag).base64(ciphertext)`.
+ * Les chiffrés d'avant la dérivation (sans `v2.`, clé brute) restent lisibles par `decrypt` ;
+ * ils sont réécrits au format courant à leur prochaine écriture (rafraîchissement du jeton).
+ */
 export function encrypt(plaintext: string): string {
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv(ALGO, getKey(), iv);
+  const cipher = crypto.createCipheriv(ALGO, subKey("enc"), iv);
   const ciphertext = Buffer.concat([
     cipher.update(plaintext, "utf8"),
     cipher.final(),
   ]);
   const tag = cipher.getAuthTag();
   return [
+    V2,
     iv.toString("base64"),
     tag.toString("base64"),
     ciphertext.toString("base64"),
   ].join(".");
 }
 
-/** Déchiffre une chaîne produite par encrypt(). */
+/** Déchiffre une chaîne produite par encrypt() — format courant ou d'avant la dérivation. */
 export function decrypt(payload: string): string {
-  const [ivB64, tagB64, dataB64] = payload.split(".");
+  const parts = payload.split(".");
+  const courant = parts[0] === V2;
+  const [ivB64, tagB64, dataB64] = courant ? parts.slice(1) : parts;
   if (!ivB64 || !tagB64 || !dataB64) {
     throw new Error("Format chiffré invalide.");
   }
   const decipher = crypto.createDecipheriv(
     ALGO,
-    getKey(),
+    courant ? subKey("enc") : getKey(),
     Buffer.from(ivB64, "base64"),
   );
   decipher.setAuthTag(Buffer.from(tagB64, "base64"));
@@ -68,7 +88,27 @@ export function decrypt(payload: string): string {
  * de passe humain, qui exige un hash lent — cf. hashPassword).
  */
 export function hashToken(token: string): string {
-  return crypto.createHmac("sha256", getKey()).update(token).digest("hex");
+  return crypto.createHmac("sha256", subKey("token")).update(token).digest("hex");
+}
+
+/**
+ * Les empreintes sous lesquelles un jeton a PU être enregistré : la courante, et celle d'avant
+ * la dérivation des clés (clé brute). Les liens envoyés juste avant le déploiement (24 h au
+ * plus) restent ainsi valables. La seconde pourra être retirée passé ce délai.
+ */
+export function tokenHashCandidates(token: string): string[] {
+  return [hashToken(token), crypto.createHmac("sha256", getKey()).update(token).digest("hex")];
+}
+
+/**
+ * Identifiant de session STOCKÉ, dérivé de celui du cookie (audit 2026-10, point 24). La table
+ * `Session` gardait l'identifiant du cookie en clair : une lecture de la base (sauvegarde,
+ * accès de diagnostic) suffisait à se faire passer pour chaque membre connecté. Seule
+ * l'empreinte HMAC y vit désormais ; le cookie garde la valeur brute. Préfixée pour se
+ * distinguer des anciens identifiants (cf. `session.ts`, migration paresseuse).
+ */
+export function hashSessionId(sid: string): string {
+  return `h:${crypto.createHmac("sha256", subKey("session")).update(sid).digest("base64url")}`;
 }
 
 /**

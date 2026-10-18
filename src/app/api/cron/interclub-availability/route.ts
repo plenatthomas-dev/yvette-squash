@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { cronAuthorized } from "@/lib/cron-auth";
-import { recordCronRun } from "@/lib/cron-run";
+import { recordCronRun, runCron } from "@/lib/cron-run";
 import { getFeatures } from "@/lib/features-server";
 import { prisma } from "@/lib/db";
 import { todayISO } from "@/lib/interclub-gate";
@@ -22,7 +23,9 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// 300 s : la limite des fonctions Vercel (Fluid compute, plan Hobby compris). 60 s coupait les
+// passes longues en plein milieu — toujours les mêmes membres, ceux de fin de liste.
+export const maxDuration = 300;
 
 // ============================================================================
 //  GET /api/cron/interclub-availability — l'appel de disponibilité, et sa relance.
@@ -41,10 +44,62 @@ export const maxDuration = 60;
 //  journées non planifiées avec une date bouchon commune ; convoquer l'équipe
 //  là-dessus lui apprendrait à ignorer ces notifications.
 //
-//  L'idempotence tient aux deux marqueurs portés par la rencontre, écrits
-//  APRÈS l'envoi : un cron quotidien redemanderait sinon chaque matin à la
-//  même équipe si elle est disponible.
+//  L'idempotence tient aux trois marqueurs portés par la rencontre
+//  (`availabilityOpenedAt`, `availabilityRemindedAt`, `eveRemindedAt`) : un cron
+//  quotidien redemanderait sinon chaque matin à la même équipe si elle est
+//  disponible. Ils sont PRIS AVANT l'envoi, cf. `prendre`.
 // ============================================================================
+
+/** Les trois marqueurs d'envoi d'une rencontre — un par étape de `dueAction`. */
+type Marqueur = "availabilityOpenedAt" | "availabilityRemindedAt" | "eveRemindedAt";
+
+const MARQUEUR: Record<"call" | "remind" | "eve", Marqueur> = {
+  call: "availabilityOpenedAt",
+  remind: "availabilityRemindedAt",
+  eve: "eveRemindedAt",
+};
+
+/**
+ * PREND l'envoi `marqueur` de la rencontre `id` : vrai si et seulement si CE passage l'a obtenu.
+ *
+ * Le marqueur était posé APRÈS l'envoi, par un `update` inconditionnel. Deux exécutions
+ * concurrentes — un réessai de la plateforme, un déclenchement manuel pendant le passage
+ * planifié — lisaient donc toutes deux `null`, envoyaient toutes deux, puis marquaient toutes
+ * deux : l'équipe recevait l'appel en double, le capitaine deux récapitulatifs.
+ *
+ * Un `updateMany` conditionné sur `marqueur: null` est atomique en base : des deux passages, un
+ * seul compte `1`, l'autre `0` et se tait. Aucune transaction, aucun verrou tenu pendant l'envoi.
+ *
+ * L'ancien ordre se justifiait ainsi : « marqué après l'envoi, sinon on perd l'appel si l'envoi
+ * échoue ». L'argument ne tient plus pour la PUSH elle-même : `sendTo` (`interclub-notify.ts`)
+ * avale déjà toute erreur d'envoi — un envoi raté ne jetait jamais, et le marqueur se posait de
+ * toute façon derrière. Ce qui peut encore jeter, ce sont les LECTURES en base qui précèdent
+ * l'envoi (destinataires, réponses) : pour elles, `relacher` rend le marqueur et le passage du
+ * lendemain retente — la garantie d'origine, sans la double notification.
+ */
+async function prendre(id: string, marqueur: Marqueur, at: Date): Promise<boolean> {
+  const { count } = await prisma.interclub.updateMany({
+    where: { id, [marqueur]: null } as Prisma.InterclubWhereInput,
+    data: { [marqueur]: at } as Prisma.InterclubUpdateManyMutationInput,
+  });
+  return count === 1;
+}
+
+/**
+ * Rend un marqueur pris par CE passage — conditionné sur l'heure qu'il y a posée : on ne défait
+ * jamais celui d'un autre. Best-effort : si la base refuse encore, l'envoi est perdu pour cette
+ * rencontre, exactement ce qu'aurait donné l'ancien ordre sur la même panne.
+ */
+async function relacher(id: string, marqueur: Marqueur, at: Date): Promise<void> {
+  try {
+    await prisma.interclub.updateMany({
+      where: { id, [marqueur]: at } as Prisma.InterclubWhereInput,
+      data: { [marqueur]: null } as Prisma.InterclubUpdateManyMutationInput,
+    });
+  } catch {
+    /* cf. ci-dessus */
+  }
+}
 
 /** Les mêmes entrées que l'écran, réduites à ce dont les décisions ont besoin. */
 async function entriesFor(teamId: string, fixtureId: string): Promise<AvailabilityEntry[]> {
@@ -95,7 +150,7 @@ async function entriesFor(teamId: string, fixtureId: string): Promise<Availabili
   return entries;
 }
 
-export async function GET(req: NextRequest) {
+async function handle(req: NextRequest) {
   if (!(await getFeatures()).interclub) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
@@ -158,20 +213,18 @@ export async function GET(req: NextRequest) {
   // capitaine — « il manque du monde » — était écrit puis effacé dans la même requête.
   const sousEffectif: string[] = [];
 
-  for (const f of fixtures) {
-    const action = dueAction(f, today);
-    if (!action) continue;
+  // Rencontres sur lesquelles le passage a échoué. Comptées et non levées : UNE rencontre dont
+  // la lecture casse ne doit pas priver de leur appel toutes celles qui la suivent.
+  const echecs: string[] = [];
+
+  /** Les envois d'UNE rencontre, son marqueur déjà pris (cf. `prendre` et la boucle plus bas). */
+  async function envoyer(f: (typeof fixtures)[number], action: "call" | "remind" | "eve") {
     const ctx = { fixtureId: f.id, teamId: f.teamId, teamName: f.team.name, opponent: f.opponent };
 
     if (action === "call") {
       await notifyAvailabilityCall(ctx, { date: f.date, time: f.time, home: f.home });
-      // Marqué APRÈS l'envoi : l'inverse ferait perdre l'appel en silence si l'envoi échoue.
-      await prisma.interclub.update({
-        where: { id: f.id },
-        data: { availabilityOpenedAt: new Date() },
-      });
       called++;
-      continue;
+      return;
     }
 
     // --- RAPPEL DE LA VEILLE ---------------------------------------------------------
@@ -196,11 +249,11 @@ export async function GET(req: NextRequest) {
         );
         eves += alignes.length;
       }
-      // Le marqueur est posé MÊME SANS DESTINATAIRE : une composition vide la veille ne sera
-      // pas remplie à temps par ce cron, et repasser demain sur la même rencontre ne
-      // trouverait rien de plus. Sans lui, elle serait réexaminée à chaque passage.
-      await prisma.interclub.update({ where: { id: f.id }, data: { eveRemindedAt: new Date() } });
-      continue;
+      // Le marqueur (pris avant d'arriver ici) reste posé MÊME SANS DESTINATAIRE : une
+      // composition vide la veille ne sera pas remplie à temps par ce cron, et repasser demain
+      // sur la même rencontre ne trouverait rien de plus. Sans lui, elle serait réexaminée à
+      // chaque passage.
+      return;
     }
 
     // --- RELANCE + RÉCAPITULATIF AU CAPITAINE -------------------------------------------
@@ -242,13 +295,33 @@ export async function GET(req: NextRequest) {
       digests++;
     }
 
-    await prisma.interclub.update({
-      where: { id: f.id },
-      data: { availabilityRemindedAt: new Date() },
-    });
+    // Le marqueur de relance, pris avant d'arriver ici, reste posé MÊME si personne n'était à
+    // relancer : sinon le récap du capitaine repartirait chaque matin jusqu'à la rencontre.
 
     if (isShortHanded(counts, f.matchCount)) {
       sousEffectif.push(`${f.team.name} c. ${f.opponent} ${counts.yes}/${f.matchCount}`);
+    }
+  }
+
+  for (const f of fixtures) {
+    const action = dueAction(f, today);
+    if (!action) continue;
+    const marqueur = MARQUEUR[action];
+    const at = new Date();
+    let pris = false;
+    try {
+      // L'ENVOI SE PREND AVANT DE PARTIR (cf. `prendre`) : si un passage concurrent l'a déjà
+      // pris, c'est lui qui envoie, et celui-ci passe à la rencontre suivante.
+      pris = await prendre(f.id, marqueur, at);
+      if (!pris) continue;
+      await envoyer(f, action);
+    } catch (e) {
+      // Une erreur BASE sur cette rencontre (prise du marqueur, lecture des destinataires ou
+      // des réponses) : on rend le marqueur s'il a été pris, pour que le passage du lendemain
+      // retente, et l'on continue avec les autres rencontres.
+      if (pris) await relacher(f.id, marqueur, at);
+      echecs.push(f.id);
+      console.error(`[cron interclub-availability] rencontre ${f.id} (${action}) :`, e);
     }
   }
 
@@ -257,10 +330,22 @@ export async function GET(req: NextRequest) {
   const alerte = sousEffectif.length
     ? ` — sous-effectif à J-${REMIND_DAYS_BEFORE} : ${sousEffectif.join(", ")}`
     : "";
+  const panne = echecs.length ? ` — ÉCHEC sur ${echecs.length} rencontre(s) : ${echecs.join(", ")}` : "";
   await recordCronRun(
     "interclub-availability",
-    true,
-    `${called} appel(s), ${reminded} relance(s), ${digests} récap(s), ${eves} rappel(s) de veille${alerte}`,
+    echecs.length === 0,
+    `${called} appel(s), ${reminded} relance(s), ${digests} récap(s), ${eves} rappel(s) de veille${alerte}${panne}`,
   );
-  return NextResponse.json({ examined: fixtures.length, called, reminded, digests, eves });
+  return NextResponse.json({
+    examined: fixtures.length,
+    called,
+    reminded,
+    digests,
+    eves,
+    failed: echecs.length,
+  });
 }
+
+// Filet commun (cf. lib/cron-run) : une exception laisse une trace `ok: false` au lieu du
+// « ok » de la veille.
+export const GET = (req: NextRequest) => runCron("interclub-availability", () => handle(req));
