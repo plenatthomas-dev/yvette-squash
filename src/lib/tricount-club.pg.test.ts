@@ -33,15 +33,17 @@ let PATCH: typeof import("@/app/api/tricount/expenses/[id]/route").PATCH;
 let transfererAuMembre: typeof import("./tricount-club").transfererAuMembre;
 
 const MARQUEUR = "PG-TEST-tricount-club";
-// Des dates qu'aucun autre fichier n'emploie : `Tricount.date` est unique. Elles restent dans la
-// plage que la route accepte (`dateSaisieRecevable` : deux ans autour d'aujourd'hui) — une date
-// fixe en 2099 se faisait refuser « Date invalide » avant d'avoir rien mesuré.
-const jour = (n: number) => new Date(Date.now() + (600 + n) * 864e5).toISOString().slice(0, 10);
-const J1 = jour(1);
-const J2 = jour(2);
-const J3 = jour(3);
-const J4 = jour(4);
-const J5 = jour(5);
+// Des dates qu'aucun autre fichier n'emploie : `Tricount.date` est unique.
+// Plus en 2099 : la route refuse désormais une date à plus de deux ans d'aujourd'hui
+// (lib/date-saisie.ts). On prend donc des jours à ~700 jours d'ici, recalculés à chaque passage
+// pour rester dans la plage quelle que soit la date du jour — et assez loin pour ne croiser
+// aucune date fixe des autres fichiers pg.
+const dansNJours = (n: number) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+const J1 = dansNJours(700);
+const J2 = dansNJours(701);
+const J3 = dansNJours(702);
+const J4 = dansNJours(703);
+const J5 = dansNJours(704);
 const DATES = [J1, J2, J3, J4, J5];
 let alice = "";
 let membre = "";
