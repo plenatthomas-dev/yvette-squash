@@ -13,7 +13,13 @@ import { prisma } from "./db";
 import { loadPlayer, loadPool, storePlayer } from "./interclub-pool-db";
 import { DELAI_MS, ECHEC_REPOS_MS, ROSTER_FRAIS_JOURS, loadRosters, refreshRosters } from "./interclub-roster-db";
 import { refreshTeamStandings, type StandingsAnchor } from "./interclub-standings";
-import { ficheEquipe, ficheJoueur, type PlayerSheet, type TeamSheet } from "./interclub-team-sheet";
+import {
+  ficheEquipe,
+  ficheJoueur,
+  type ClassementMensuel,
+  type PlayerSheet,
+  type TeamSheet,
+} from "./interclub-team-sheet";
 import { fetchPlayer } from "./squashnet/player";
 import type { PoolTie } from "./squashnet/pool";
 import { estLigneClassement, type StandingRow } from "./squashnet/standings";
@@ -173,11 +179,38 @@ async function toutesLesPoules(): Promise<{ ties: PoolTie[]; standings: Standing
   };
 }
 
+/**
+ * L'historique mensuel du classement d'un joueur DU CLUB — membre ou joueur sans compte —,
+ * retrouvé par sa LICENCE. Null s'il n'est pas des nôtres.
+ *
+ * Par la licence et non par le nom : la fiche fédérale la publie, et le rapprochement mensuel
+ * l'a gardée (`SquashnetRanking.licence`, `InterclubGuest.snLicence`). Un égal exact, sans
+ * deviner — un homonyme d'un autre club ne prendra jamais l'historique d'un des nôtres.
+ */
+async function historiqueDuClub(licence: string | null): Promise<ClassementMensuel[] | null> {
+  const l = (licence ?? "").trim();
+  if (!/^\d{4,12}$/.test(l)) return null;
+  // La même licence, avec ou sans ses zéros de tête : selon la page, la ligue les garde ou non.
+  const variantes = [...new Set([l, l.replace(/^0+/, "")])];
+  const [membre, invite] = await Promise.all([
+    prisma.squashnetRanking.findFirst({ where: { licence: { in: variantes } }, select: { userId: true } }),
+    prisma.interclubGuest.findFirst({ where: { snLicence: { in: variantes } }, select: { id: true } }),
+  ]);
+  const sujet = membre ? { userId: membre.userId } : invite ? { guestId: invite.id } : null;
+  if (!sujet) return null;
+  return prisma.squashnetRankingPoint.findMany({
+    where: sujet,
+    select: { month: true, clt: true, rang: true, rangM: true },
+    orderBy: { month: "asc" },
+  });
+}
+
 /** La fiche d'un joueur, depuis la base seule. Null : joueur absent de nos données. */
 export async function ficheJoueurEnBase(regiid: string, now: Date = new Date()): Promise<PlayerSheet | null> {
   if (!(await joueurConnu(regiid))) return null;
   const [cached, poules] = await Promise.all([loadPlayer(regiid), toutesLesPoules()]);
-  return ficheJoueur({ regiid, cached, ...poules, now, fraisMs: JOUEUR_FRAIS_MS });
+  const history = await historiqueDuClub(cached?.player.licence ?? null);
+  return ficheJoueur({ regiid, cached, ...poules, history, now, fraisMs: JOUEUR_FRAIS_MS });
 }
 
 /** Relit la fiche fédérale du joueur si elle est trop ancienne (UNE requête), puis la rend. */

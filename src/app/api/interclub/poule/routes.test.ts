@@ -22,6 +22,9 @@ const h = vi.hoisted(() => ({
   pools: new Map<string, { snRoundId: string; tiesJson: string; fetchedAt: Date }>(),
   rosters: new Map<string, { snTeamId: string; rosterJson: string; fetchedAt: Date }>(),
   players: new Map<string, { regiid: string; json: string; fetchedAt: Date }>(),
+  /** Les membres classés du club, par licence, et leur historique mensuel. */
+  membres: [] as Array<{ userId: string; licence: string }>,
+  points: [] as Array<{ userId: string; month: string; clt: string; rang: number | null; rangM: number | null }>,
   fetchPool: vi.fn(),
   fetchRoster: vi.fn(),
   fetchPlayer: vi.fn(),
@@ -76,6 +79,21 @@ vi.mock("@/lib/db", () => ({
         h.players.set(a.where.regiid, { regiid: a.where.regiid, ...a.create });
       }),
     },
+    squashnetRanking: {
+      findFirst: vi.fn(
+        async (a: { where: { licence: { in: string[] } } }) =>
+          h.membres.find((m) => a.where.licence.in.includes(m.licence)) ?? null,
+      ),
+    },
+    interclubGuest: { findFirst: vi.fn(async () => null) },
+    squashnetRankingPoint: {
+      findMany: vi.fn(async (a: { where: { userId?: string } }) =>
+        h.points
+          .filter((p) => p.userId === a.where.userId)
+          .map(({ userId: _u, ...p }) => p)
+          .sort((x, y) => x.month.localeCompare(y.month)),
+      ),
+    },
   },
 }));
 
@@ -126,6 +144,8 @@ beforeEach(() => {
   h.pools.clear();
   h.rosters.clear();
   h.players.clear();
+  h.membres = [];
+  h.points = [];
   h.fetchPool.mockReset().mockResolvedValue(pool);
   h.fetchRoster.mockReset().mockResolvedValue(issy);
   h.fetchPlayer.mockReset().mockResolvedValue(kadi);
@@ -209,6 +229,25 @@ describe("/api/interclub/poule/joueur", () => {
     expect(body.matches[0]).toMatchObject({ opponentTeam: "Verrieres 4", result: "won" });
     await joueur.POST(req("joueur?regiid=644801"));
     expect(h.fetchPlayer).toHaveBeenCalledTimes(1);
+  });
+
+  it("un joueur du club, reconnu à sa licence : hors poule, son classement du soir vient de son historique", async () => {
+    await equipe.POST(req("equipe?snTeamId=176169"));
+    // Un match joué hors de nos poules, que seule sa fiche fédérale connaît.
+    const ailleurs = { ...kadi.matches[0], tie: "Montigny 2-Squash in Issy", date: "2026-09-24", opponent: null };
+    h.fetchPlayer.mockResolvedValue({ ...kadi, matches: [...kadi.matches, ailleurs] });
+    h.membres = [{ userId: "u-kadi", licence: "0140024" }];
+    h.points = [
+      { userId: "u-kadi", month: "2026-09-07", clt: "5C", rang: 5000, rangM: 6000 },
+      { userId: "u-kadi", month: "2026-10-06", clt: "5B", rang: 4086, rangM: 4976 },
+    ];
+    const body = await (await joueur.POST(req("joueur?regiid=644801"))).json();
+    expect(body.matches.find((m: { date: string }) => m.date === "2026-09-24")).toMatchObject({ clt: "5C", rangM: 6000 });
+
+    // Licence inconnue du club : pas d'historique, et rien d'inventé.
+    h.membres = [];
+    const autre = await (await joueur.GET(req("joueur?regiid=644801"))).json();
+    expect(autre.matches.find((m: { date: string }) => m.date === "2026-09-24")).toMatchObject({ clt: null });
   });
 
   it("une fiche qui ne répond pas : on sert la poule, sans redemander aussitôt", async () => {

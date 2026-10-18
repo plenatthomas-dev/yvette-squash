@@ -818,7 +818,11 @@ de vues : la flèche remonte d'un cran, la croix referme tout (`InterclubTeamShe
 - **L'effectif** est la fiche d'équipe déjà en cache pour les adversaires (`SquashnetTeamRoster`,
   7 jours), qui garde désormais le `regiid` de chaque inscrit.
 - **La fiche joueur** (`squashnet/player.ts`, cache `SquashnetPlayer`, 6 h). Faute de fiche, ses
-  matchs dans nos poules, tirés des rencontres (`source: "poule"`, dit à l'écran).
+  matchs dans nos poules, tirés des rencontres (`source: "poule"`, dit à l'écran). En tête, ce
+  qui vaut pour tous ses matchs : classement actuel, rang mixte, catégorie, équipe. Sur chaque
+  match, son **classement du soir** — la fiche fédérale ne porte que l'actuel : on le lit sur la
+  feuille de poule, ou, pour un joueur du club reconnu à sa **licence**, dans son historique
+  mensuel (`classementAu`, le dernier relevé publié au plus tard ce jour-là).
 - **Afficher d'abord, relire ensuite** : `GET /api/interclub/poule/{equipe,joueur}` rend la base
   tout de suite ; s'il répond `stale`, l'écran appelle `POST`, qui relit au plus la poule (si
   elle a plus de 6 h) et l'effectif, ou la fiche joueur — avec le repos de 15 min après échec.

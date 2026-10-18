@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ficheEquipe, ficheJoueur } from "./interclub-team-sheet";
+import { classementAu, ficheEquipe, ficheJoueur } from "./interclub-team-sheet";
 import { parsePool } from "./squashnet/pool";
 import { parseTeamRoster } from "./squashnet/roster";
 import { parsePlayer } from "./squashnet/player";
@@ -135,6 +135,40 @@ describe("ficheJoueur — Rafik Kadi", () => {
       ["2026-10-15", "5B", 4976],
       ["2026-10-08", "5B", 4976],
     ]);
+  });
+
+  it("un joueur du club : hors de nos poules, son classement du soir vient de son historique mensuel", () => {
+    const ailleurs = (date: string) => ({
+      ...kadi.matches[0],
+      tie: "Montigny 2-Squash in Issy",
+      date,
+      opponent: { name: "DUPONT JEAN", regiid: "1", clt: "5A", rang: 1, rangM: 1 },
+    });
+    const player = { ...kadi, matches: [...kadi.matches, ailleurs("2026-09-24"), ailleurs("2025-06-12")] };
+    const history = [
+      { month: "2025-09-08", clt: "5C", rang: 5000, rangM: 6000 },
+      { month: "2026-09-07", clt: "5B", rang: 4100, rangM: 4990 },
+      { month: "2026-10-06", clt: "5A", rang: 3000, rangM: 3500 },
+    ];
+    const f = ficheJoueur({ ...input, history, cached: { player, fetchedAt: new Date("2026-10-18T19:00:00Z") } });
+    const cltDu = (d: string) => f.matches.find((m) => m.date === d)?.clt;
+    // Le relevé EN VIGUEUR ce jour-là — celui de septembre, pas celui d'octobre publié après.
+    expect(f.matches.find((m) => m.date === "2026-09-24")).toMatchObject({ clt: "5B", rangM: 4990 });
+    // Avant le premier relevé : on ne sait pas.
+    expect(cltDu("2025-06-12")).toBeNull();
+    // Dans nos poules, la feuille de la rencontre prime sur l'historique (5B relevé ce soir-là).
+    expect(cltDu("2026-10-08")).toBe("5B");
+  });
+
+  it("classementAu : le dernier relevé publié le jour même ou avant", () => {
+    const h = [
+      { month: "2026-10-06", clt: "5A", rang: null, rangM: null },
+      { month: "2026-09-07", clt: "5B", rang: null, rangM: null },
+    ];
+    expect(classementAu(h, "2026-10-06")?.clt).toBe("5A");
+    expect(classementAu(h, "2026-10-05")?.clt).toBe("5B");
+    expect(classementAu(h, "2026-09-01")).toBeNull();
+    expect(classementAu(h, null)).toBeNull();
   });
 
   it("une fiche de plus de six heures est à relire", () => {

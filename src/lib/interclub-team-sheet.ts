@@ -52,8 +52,9 @@ export interface TeamSheet {
 /**
  * Un match de la fiche d'un joueur, avec les équipes quand on sait les nommer.
  *
- * `clt`, `rang`, `rangM` : SON classement CE SOIR-LÀ, lu sur la rencontre de nos poules — null
- * hors de nos poules. La fiche fédérale répète son classement ACTUEL sur chaque ligne (mesuré le
+ * `clt`, `rang`, `rangM` : SON classement CE SOIR-LÀ, lu sur la rencontre de nos poules ou, pour
+ * un joueur du club, dans son historique mensuel — null sinon (cf. `ficheJoueur`). La fiche
+ * fédérale répète son classement ACTUEL sur chaque ligne (mesuré le
  * 2026-10-18 : 4D partout pour Plenat, classé 5A le 4 juin sur la feuille de poule) ; l'afficher
  * par match ferait croire à un classement figé. Celui de l'adversaire, lui, est bien daté.
  */
@@ -224,6 +225,33 @@ function matchsDepuisPoule(occ: readonly Occurrence[], noms: ReadonlyMap<string,
     });
 }
 
+/** Un relevé mensuel du classement d'un joueur du club (`SquashnetRankingPoint`). */
+export interface ClassementMensuel {
+  /** La période fédérale, « YYYY-MM-DD » : le jour de publication. */
+  month: string;
+  clt: string;
+  rang: number | null;
+  rangM: number | null;
+}
+
+/**
+ * Le classement EN VIGUEUR un jour donné : le dernier publié ce jour-là ou avant.
+ *
+ * Jamais un relevé postérieur : un match de septembre ne se lit pas au classement d'octobre. Et
+ * rien si l'historique commence après le match — un trou dit « on ne sait pas ».
+ */
+export function classementAu(
+  historique: readonly ClassementMensuel[],
+  date: string | null,
+): ClassementMensuel | null {
+  if (!date) return null;
+  let vu: ClassementMensuel | null = null;
+  for (const p of historique) {
+    if (p.month <= date && (!vu || p.month > vu.month)) vu = p;
+  }
+  return vu;
+}
+
 /**
  * La fiche d'un joueur : sa fiche fédérale si on l'a, sinon ce que nos poules en disent.
  *
@@ -231,12 +259,18 @@ function matchsDepuisPoule(occ: readonly Occurrence[], noms: ReadonlyMap<string,
  * date — c'est exact. À défaut (un match joué hors de nos poules), on coupe l'intitulé sur deux
  * noms connus (`splitTieLabel`) et on reconnaît son équipe parmi celles où on l'a déjà vu jouer ;
  * sinon sur cette seule équipe, l'autre nom pris tel quel (`otherTeamInLabel`).
+ *
+ * SON CLASSEMENT DU SOIR : celui de la feuille de poule quand le match y est (ce que la ligue a
+ * noté ce soir-là) ; sinon, pour un joueur du CLUB, celui de son historique mensuel en vigueur à
+ * la date du match (`history`, rapproché par la licence) ; sinon rien.
  */
 export function ficheJoueur(input: {
   regiid: string;
   cached: { player: PlayerHistory; fetchedAt: Date } | null;
   ties: readonly PoolTie[];
   standings: readonly StandingRow[];
+  /** Son historique mensuel s'il est du club ; null sinon. */
+  history?: readonly ClassementMensuel[] | null;
   now: Date;
   fraisMs: number;
 }): PlayerSheet {
@@ -280,35 +314,29 @@ export function ficheJoueur(input: {
         x.tie.date === m.date &&
         (x.side === "home" ? x.line.away : x.line.home)?.regiid === m.opponent?.regiid,
     );
+    // Son classement de CE SOIR-LÀ (cf. `PlayerSheetMatch`) : la feuille de poule d'abord, son
+    // historique mensuel ensuite — jamais celui que la fiche répète.
+    const lui = o ? (o.side === "home" ? o.line.home : o.line.away) : null;
+    const soir = lui?.clt ? lui : classementAu(input.history ?? [], m.date);
+    const duSoir = { ...m, clt: soir?.clt ?? null, rang: soir?.rang ?? null, rangM: soir?.rangM ?? null };
     if (o) {
       const home = nomDe(o.tie.homeCode, o.tie.homeName, noms);
       const away = nomDe(o.tie.awayCode, o.tie.awayName, noms);
-      // Son classement de CE SOIR-LÀ, celui de la feuille de poule (cf. `PlayerSheetMatch`).
-      const lui = o.side === "home" ? o.line.home : o.line.away;
-      return {
-        ...m,
-        clt: lui?.clt ?? null,
-        rang: lui?.rang ?? null,
-        rangM: lui?.rangM ?? null,
-        ownTeam: o.side === "home" ? home : away,
-        opponentTeam: o.side === "home" ? away : home,
-      };
+      return { ...duSoir, ownTeam: o.side === "home" ? home : away, opponentTeam: o.side === "home" ? away : home };
     }
-    // Hors de nos poules, son classement du soir est inconnu : la fiche ne porte que l'actuel.
-    const ailleurs = { ...m, clt: null, rang: null, rangM: null };
     const coupe = splitTieLabel(m.tie, tousLesNoms);
     if (coupe) {
       const [a, b] = coupe;
-      if (sesEquipes.has(a) && !sesEquipes.has(b)) return { ...ailleurs, ownTeam: a, opponentTeam: b };
-      if (sesEquipes.has(b) && !sesEquipes.has(a)) return { ...ailleurs, ownTeam: b, opponentTeam: a };
+      if (sesEquipes.has(a) && !sesEquipes.has(b)) return { ...duSoir, ownTeam: a, opponentTeam: b };
+      if (sesEquipes.has(b) && !sesEquipes.has(a)) return { ...duSoir, ownTeam: b, opponentTeam: a };
     }
     // L'autre nom est inconnu : on coupe sur SON équipe, si une seule colle.
     const parSonEquipe = [...sesEquipes].flatMap((e) => {
       const autre = otherTeamInLabel(m.tie, e);
       return autre ? [{ ownTeam: e, opponentTeam: autre }] : [];
     });
-    if (parSonEquipe.length === 1) return { ...ailleurs, ...parSonEquipe[0] };
-    return { ...ailleurs, ownTeam: null, opponentTeam: null };
+    if (parSonEquipe.length === 1) return { ...duSoir, ...parSonEquipe[0] };
+    return { ...duSoir, ownTeam: null, opponentTeam: null };
   });
   matches.sort(parDate);
 
