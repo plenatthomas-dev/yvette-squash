@@ -2874,6 +2874,59 @@ td.cell.past {
   color: var(--pico-color);
 }
 
+/* --- Pages publiques : /confidentialite, /suppression-compte -------------- */
+/* Celles que référence la fiche Google Play. Du texte à lire d'un bout à l'autre, pas un écran
+   d'appli : colonne étroite (~70 caractères), corps à taille normale — la modale, elle, tasse le
+   même texte en petit parce qu'on la parcourt. */
+.legal-page {
+  max-width: 42rem;
+}
+
+.legal-page h1 {
+  margin: 12px 0 10px;
+  font-size: 1.6rem;
+}
+
+.legal-page h2 {
+  margin: 28px 0 10px;
+  font-size: 1.1rem;
+}
+
+.legal-page p,
+.legal-page li {
+  line-height: 1.6;
+}
+
+.legal-lede {
+  color: var(--pico-muted-color);
+}
+
+.legal-body {
+  margin-top: 20px;
+}
+
+.legal-back {
+  font-size: 0.92rem;
+}
+
+.legal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.legal-actions button {
+  width: auto;
+  margin: 0;
+}
+
+.legal-actions button.danger {
+  background: var(--error-accent);
+  border-color: var(--error-accent);
+  color: #fff;
+}
+
 /* --- Partage : QR code ------------------------------------------------- */
 .qr-wrap {
   display: flex;
