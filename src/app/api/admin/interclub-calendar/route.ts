@@ -229,7 +229,14 @@ export async function POST(req: NextRequest) {
     } catch {
       sheets = "feuilles de match non relues";
     }
-    return NextResponse.json({ ok: true, rows: r.rows, standingsAt: r.at.toISOString(), sheets });
+    return NextResponse.json({
+      ok: true,
+      rows: r.rows,
+      standingsAt: r.at.toISOString(),
+      sheets,
+      // Les rencontres de la poule, lues dans le même fragment (fiche d'équipe du classement).
+      ties: r.ties,
+    });
   }
 
   let published: OwnTie[];

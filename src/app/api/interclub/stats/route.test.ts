@@ -70,6 +70,9 @@ const rencontre = (simples: Array<[string, boolean]>, side: string | null = "A")
   }),
   snSheetSide: side,
   snSheetAt: new Date("2026-10-15T20:00:00Z"),
+  date: "2026-10-15",
+  opponent: "Verrieres 2",
+  team: { name: "Équipe 1" },
 });
 
 beforeEach(() => {
@@ -107,12 +110,20 @@ describe("GET /api/interclub/stats", () => {
     expect(body.rows[0]).toMatchObject({ name: "Martin Lea", played: 1, won: 1, isMember: false });
     expect(body.rows[1]).toMatchObject({ key: "u:u1", name: "Tom", played: 2, won: 1, isMember: true });
     expect(body.sheetsAt).toBe("2026-10-15T20:00:00.000Z");
+    // Chaque ligne porte SES matchs, situés : la fenêtre du joueur s'ouvre sans autre requête.
+    expect(body.rows[1].matches).toHaveLength(2);
+    expect(body.rows[1].matches[0]).toMatchObject({
+      date: "2026-10-15",
+      teamName: "Équipe 1",
+      opponentTeam: "Verrieres 2",
+      opponentName: "Adversaire X",
+    });
   });
 
   it("compte À PART les rencontres jouées sans feuille, ou sans notre côté reconnu", async () => {
     h.fixtures = [
       rencontre([["PLENAT THOMAS", true]]),
-      { snSheetJson: null, snSheetSide: null, snSheetAt: null },
+      { snSheetJson: null, snSheetSide: null, snSheetAt: null, date: "2026-10-08", opponent: "X", team: { name: "Équipe 1" } },
       rencontre([["PLENAT THOMAS", true]], null),
     ];
     const body = await (await GET(req())).json();

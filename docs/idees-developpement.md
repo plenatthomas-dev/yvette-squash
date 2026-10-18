@@ -362,9 +362,13 @@ réservé** via un code couleur (asso vs autre asso) — **comme en vue jour**.
   remède. Rapport mis en cache (`InterclubOfficial`) — vérifier coûte huit recherches fédérales.
   **Lots 2 et 3 en attente d'observation** : lire l'état fédéral d'une rencontre (« l'adversaire
   a saisi, à toi de valider ») et poser les deux gestes. Cf. [docs/squashnet.md](squashnet.md).
-- **S5. Historique des matchs d'un joueur** · ❓ endpoint inconnu · ⭐⭐ · **?**
-  Les lignes du classement ne sont pas cliquables : aucune fiche joueur observée à ce jour.
-  Contournement borné mais sûr : reconstituer depuis S4. Cf. [docs/squashnet.md](squashnet.md).
+- **S5. Historique des matchs d'un joueur** · ✅ fait · ⭐⭐ · **M**
+  La fiche joueur fédérale (`ic_a=393477&regiid=…`) publie tous ses matchs de l'épreuve. On y
+  arrive par la **fiche d'une équipe de la poule** : toucher une équipe du classement → ses
+  rencontres (lues dans le fragment du classement, sans requête de plus) → le détail d'une
+  rencontre → un joueur. Et depuis le tableau des statistiques, un joueur du club ouvre ses
+  matchs (calculés sur nos feuilles officielles). Cf. [docs/squashnet.md](squashnet.md) et
+  [docs/interclub.md](interclub.md).
 
 ---
 

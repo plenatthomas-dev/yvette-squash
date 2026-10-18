@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readOk } from "@/lib/apiFetch";
 import { TrendIcon } from "@/components/icons";
+import { StatPlayerDialog } from "@/components/InterclubTeamSheet";
 import type { PlayerStatRow } from "@/lib/interclub-stats";
 
 // ============================================================================
@@ -59,6 +60,8 @@ export function InterclubStats({
   const [saison, setSaison] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
+  /** Le joueur dont on regarde les matchs. */
+  const [ouvert, setOuvert] = useState<PlayerStatRow | null>(null);
 
   const charge = useCallback(
     async (saisonVoulue: string) => {
@@ -179,7 +182,11 @@ export function InterclubStats({
               {data.rows.map((r) => (
                 <tr key={r.key}>
                   <th scope="row" className="ic-stats-name" title={r.name}>
-                    {r.name}
+                    {/* Ses matchs, dans une fenêtre : contre qui, de quelle équipe, quand, et le
+                        score. La liste voyage déjà avec le palmarès — aucune requête de plus. */}
+                    <button type="button" className="ic-st-link" onClick={() => setOuvert(r)}>
+                      {r.name}
+                    </button>
                     {/* Un joueur sans compte joue les mêmes matchs et compte pareil ; la
                         mention évite seulement qu'on le cherche dans l'annuaire. */}
                     {!r.isMember && <span className="ic-stats-tag">hors appli</span>}
@@ -223,9 +230,11 @@ export function InterclubStats({
         </p>
       )}
 
+      {ouvert && <StatPlayerDialog row={ouvert} onClose={() => setOuvert(null)} />}
+
       {data && data.rows.length > 0 && (
         <p className="ic-stats-note muted tiny">
-          Classé par victoires. Le pourcentage s&apos;affiche mais ne classe pas : un joueur qui
+          Touche un joueur pour voir ses matchs. Classé par victoires. Le pourcentage s&apos;affiche mais ne classe pas : un joueur qui
           a gagné son unique match passerait devant celui qui en a gagné neuf sur douze.
         </p>
       )}

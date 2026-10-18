@@ -84,6 +84,14 @@ export interface RosterPlayer {
   rangM: number | null;
   /** Date d'inscription dans l'équipe, « YYYY-MM-DD ». */
   registeredAt: string | null;
+  /**
+   * Identifiant d'INSCRIPTION dans l'épreuve (`data-regiid`), la clé de sa fiche joueur
+   * (`ic_a=393477`) — cf. `TiePlayer.regiid`, et sa mise en garde : ce n'est pas une licence.
+   *
+   * FACULTATIF, comme `ties` dans `estRoster` : les rosters rangés avant ce champ n'en ont pas,
+   * et la fiche joueur les retrouve alors par le nom dans les rencontres de poule.
+   */
+  regiid?: string | null;
 }
 
 /** L'issue d'une rencontre, telle que la fédération la qualifie POUR L'ÉQUIPE DEMANDÉE. */
@@ -374,6 +382,7 @@ export function parseTeamRoster(html: string, snTeamId: string): TeamRoster {
       rang: rang(valeur(c, "Rang")),
       rangM: rang(valeur(c, "RangM")),
       registeredAt: dateIso(valeur(c, "Date")),
+      regiid: attr(cellule(c, "Nom Prénom")?.html ?? "", "data-regiid"),
     });
   }
 

@@ -38,12 +38,13 @@ clair (`<a id="players" data-ic_a="393475" …>`).
 |----------|-----------------------------|-----------------------------------|-----------------------------|
 | `131079` | Classement des joueurs      | `name`, `month`, `gender`, `ligue`… | ✅ lu (`client.ts`)         |
 | `393986` | Calendrier d'une épreuve    | `eventid`, `roundid`              | ✅ lu (`calendar.ts`) — dates prises sur `393480` |
-| `394242` | Classement d'une poule      | `eventid`, `drawid`, `roundid`    | ✅ lu (`standings.ts`)      |
+| `394242` | Classement d'une poule **et ses rencontres** | `eventid`, `drawid`, `roundid` | ✅ lu (`standings.ts` + `pool.ts`) |
 | `393480` | Fiche d'une équipe          | `teamid` **seul**                 | ✅ lu (`roster.ts`)         |
 | `393475` | Joueurs d'une épreuve       | `eventid`                         | ⬜ coquille vide — voir ci-dessous |
 | `394243` | **Résultats d'une épreuve** | `eventid` (+ `drawid`/`roundid` ?) | ⬜ non lu — voir « résultats » |
 | `393479` | Équipes d'une épreuve       | `eventid` (+ `teamid`)            | ⬜ non lu — porte le même roster |
-| `393477` | **Fiche d'un JOUEUR**       | `regiid`                          | ⬜ non lu — voir point 4     |
+| `393477` | **Fiche d'un JOUEUR**       | `regiid` **seul**                 | ✅ lu (`player.ts`) — point 4 |
+| `393474` | Fiche d'un joueur (variante) | `regiid` **seul**                | — mêmes matchs, non lu       |
 | `394248` | **Feuille de match**        | `tieid` **seul**                  | ✅ lu (`tie.ts`)            |
 | `393217` | Informations d'une épreuve  | `eventid`                         | ⬜ non lu                   |
 | `393729` | Impression (PDF)            | `eventid`, `drawid`               | — sans intérêt ici          |
@@ -557,7 +558,53 @@ débusque la panne silencieuse que le schéma documente déjà : quand ResaMania
 verdict est « introuvable » tous les mois sans que rien ne le signale. Remède :
 `squashnetGivenName` / `squashnetFamilyName` sur le membre.
 
-### 4. Historique des matchs d'un joueur — **piste ouverte : `ic_a=393477`**
+### 3 bis. Les rencontres d'une poule — dans le fragment du classement ✅ fait
+
+Voir `src/lib/squashnet/pool.ts` (parsing), `src/lib/interclub-pool-db.ts` (cache
+`SquashnetPool`, migration `70_squashnet_poule_joueur`), `src/lib/interclub-team-sheet*.ts`
+(la fiche d'équipe) et `docs/interclub.md` (« La fiche d'une équipe de la poule »).
+
+**`ic_a=394242` ne s'arrête pas au tableau.** Mesuré le 2026-10-18 sur la poule B des Hommes 4 :
+247 Ko, le classement puis **les 110 rencontres de la poule**, chacune avec ses simples, ses
+joueurs (`data-regiid`, « NOM PRÉNOM (clt - rang - rangM) ») et le score jeu par jeu. On les
+jetait : elles donnent, **sans une requête de plus**, les résultats de n'importe quelle équipe de
+la poule. Fixture : `poule-2027-h4-poule-b.html`.
+
+- **Un bloc par rencontre** : `<table id="table_tie_N">`, puis `<div class="tie-score">` (noms
+  complets et total) — absent tant que la rencontre n'est pas jouée.
+- **Les intitulés de l'en-tête sont des données** : `J1 · 08-10-2026 20:00 · VERR5 · AQISSY ·
+  Score · …`. Les cellules portent les mêmes intitulés en `data-label` ; « Score » en cinquième
+  position est le témoin que les quatre premières sont bien journée, date et sigles.
+- **Le receveur est à gauche**, dans l'en-tête comme dans le total, quel que soit le vainqueur
+  (vérifié sur VERR5–AQISSY, joué à Verrières, et AQISSY–VERR4, joué à Issy). Le score d'un
+  simple est donc écrit du point de vue du receveur.
+- ⚠️ **Une rencontre non jouée porte la classe `winner` des DEUX côtés**, sur des cases vides.
+  Le vainqueur d'un simple n'est retenu que si un seul côté la porte et qu'un joueur est saisi.
+- Les rencontres contre **EXEMPT** sont écartées ; ce sont elles qui portent la date bouchon
+  (08/06/2027). Même signature de bouchon que le calendrier, sauf qu'une date où un simple a été
+  joué n'en est jamais un.
+- Un rendu des rencontres qu'on ne sait plus lire (`PoolUnreadableError`) **n'emporte pas le
+  classement**, lu dans le même fragment.
+
+### 4. Historique des matchs d'un joueur — `ic_a=393477` ✅ fait
+
+**Observé le 2026-10-18** (fixture `joueur-2027-644801-fiche.html`, KADI RAFIK) : la fiche
+joueur ne demande que `regiid`, et publie l'identité (licence, catégorie, « Niveau : 5B -
+Rang : 4086 - RangM : 4976 ») puis **tous les matchs du joueur dans l'épreuve**, toutes équipes
+confondues, dans `<table id="table_results">` : rencontre, date (`data-order` complet), son
+classement ce soir-là, l'adversaire (avec son `regiid` et ses trois valeurs), le résultat et le
+score **de son point de vue**. `393474` rend les mêmes matchs (lien de la feuille de match),
+avec un tableau sans identifiant et deux valeurs de classement seulement : on lit `393477`.
+
+⚠️ **L'intitulé de la rencontre n'est pas ordonné** (« Verrieres 4-Squash in Issy » pour une
+rencontre jouée à Issy), et son tiret sans espaces peut appartenir à un nom d'équipe. Les
+équipes d'un match se retrouvent donc dans les rencontres de la poule, par le couple de `regiid`
+et la date ; à défaut, on ne coupe l'intitulé que sur un nom connu (`splitTieLabel`).
+
+Cache `SquashnetPlayer`, relu à la demande (6 h). Faute de fiche (pas encore lue, ou la ligue
+ne répond pas), l'écran sert les matchs du joueur **dans nos poules**, tirés des rencontres.
+
+**Historique de la piste**, conservé pour mémoire :
 
 La demande n'avait aucun chemin identifié tant qu'on ne regardait que le classement, dont les
 lignes ne sont pas cliquables. La fiche d'équipe en a ouvert un : **chaque nom de joueur y est
