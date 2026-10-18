@@ -16,6 +16,7 @@ const h = vi.hoisted(() => {
   return {
     FauxPrismaError,
     conflitsRestants: 0,
+    conflitsAuCommit: 0,
     appels: 0,
     jette: null as null | Error,
     dernieresOptions: undefined as undefined | Record<string, unknown>,
@@ -40,6 +41,14 @@ vi.mock("./db", () => ({
         h.conflitsRestants -= 1;
         throw new h.FauxPrismaError("P2034");
       }
+      if (h.conflitsAuCommit > 0) {
+        h.conflitsAuCommit -= 1;
+        // Ce que Prisma 7 (adaptateur `pg`) laisse passer quand le conflit tombe au COMMIT.
+        const e = new Error("TransactionWriteConflict");
+        e.name = "DriverAdapterError";
+        Object.assign(e, { cause: { kind: "TransactionWriteConflict", originalCode: "40001" } });
+        throw e;
+      }
       if (h.jette) throw h.jette;
       return run({});
     }),
@@ -56,6 +65,7 @@ import {
 
 beforeEach(() => {
   h.conflitsRestants = 0;
+  h.conflitsAuCommit = 0;
   h.appels = 0;
   h.jette = null;
 });
@@ -72,6 +82,12 @@ describe("serializableTransaction", () => {
     const v = await serializableTransaction(async () => "ok");
     expect(v).toBe("ok");
     expect(h.appels).toBe(3); // 2 conflits + la bonne
+  });
+
+  it("rejoue aussi le conflit détecté au COMMIT (erreur brute de l'adaptateur, Prisma 7)", async () => {
+    h.conflitsAuCommit = 2;
+    await expect(serializableTransaction(async () => "ok")).resolves.toBe("ok");
+    expect(h.appels).toBe(3);
   });
 
   it("abandonne en 409 après six tentatives, avec le message fourni", async () => {

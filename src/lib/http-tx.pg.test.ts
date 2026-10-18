@@ -334,11 +334,8 @@ describe.skipIf(SANS_BASE)("SUR VRAIE BASE — deux transactions concurrentes", 
     // Le cas Neon : la première écriture d'une soirée attend l'ouverture d'une connexion. Le
     // défaut `maxWait` (2 s annoncées) court AVANT le premier ordre SQL — un plafond qu'aucune
     // requête rapide ne compense. On le reproduit en saturant le pool à une connexion.
-    const { PrismaClient } = await import("@prisma/client");
-    const sep = URL_TEST.includes("?") ? "&" : "?";
-    const etroit = new PrismaClient({
-      datasources: { db: { url: `${URL_TEST}${sep}connection_limit=1` } },
-    });
+    const { creeClient } = await import("./db");
+    const etroit = creeClient(URL_TEST, 1);
     try {
       const occupee = jalon();
       const relacher = jalon();
@@ -377,11 +374,8 @@ describe.skipIf(SANS_BASE)("SUR VRAIE BASE — deux transactions concurrentes", 
     // pool saturé, même attente, mais on tient la connexion 3 s — au-delà des 2 s du défaut. Si
     // les dix secondes servent à quelque chose, la seconde transaction ne meurt plus, elle
     // attend son tour. C'est exactement ce qu'on achète pour la première écriture d'une soirée.
-    const { PrismaClient } = await import("@prisma/client");
-    const sep = URL_TEST.includes("?") ? "&" : "?";
-    const etroit = new PrismaClient({
-      datasources: { db: { url: `${URL_TEST}${sep}connection_limit=1` } },
-    });
+    const { creeClient } = await import("./db");
+    const etroit = creeClient(URL_TEST, 1);
     try {
       const occupee = jalon();
       const relacher = jalon();

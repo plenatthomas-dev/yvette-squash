@@ -3,9 +3,9 @@
 // Chloé + Bruno + Thomas. Les centimes d'arrondi sont COMPENSÉS entre les deux
 // dépenses (comme le fait maintenant l'API) : chacun doit 100 € pile.
 // Validations de Chloé et Bruno créées → remboursements ouverts.
-import { PrismaClient } from "@prisma/client";
+import { creeClient } from "../src/lib/db";
 
-const prisma = new PrismaClient();
+const prisma = creeClient();
 
 async function main() {
   const host = process.env.DATABASE_URL?.match(/@([^/]+)\//)?.[1] ?? "?";

@@ -168,7 +168,7 @@ jobs:
       # `db push` et non `migrate deploy` : ces tests veulent le SCHÉMA COURANT, pas l'histoire
       # des migrations. (L'histoire, elle, se vérifie à part — cf. prisma/migrations/README.md.)
       - name: Pose le schéma sur la base jetable
-        run: npx prisma db push --skip-generate
+        run: npx prisma db push
 
       # ⚠️ `ALLOW_REMOTE_TEST_DB` n'est PAS posé, et ne doit jamais l'être ici. Le garde-fou
       # `estJetable` de `pg-harness.ts` n'accepte sans lui que `localhost` — c'est ce qui

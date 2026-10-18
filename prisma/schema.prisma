@@ -1,15 +1,14 @@
 // Schéma de la base. Prod + dev = PostgreSQL (Neon).
-// DATABASE_URL = connexion « pooled » (runtime serverless) ; DIRECT_URL = connexion directe
-// (utilisée par prisma db push / migrations). Les deux sont fournies par le dashboard Neon.
+// Depuis Prisma 7, les URL ne vivent plus ici :
+//  * DIRECT_URL (connexion directe) → prisma.config.ts, pour migrate / db push / db execute ;
+//  * DATABASE_URL (connexion « pooled ») → src/lib/db.ts, via l'adaptateur `pg`.
+// Plus de moteur binaire non plus (ni `binaryTargets`) : le client est en TypeScript.
 generator client {
-  provider      = "prisma-client-js"
-  binaryTargets = ["native", "rhel-openssl-3.0.x"] // rhel = runtime des fonctions Vercel
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
 }
 
 // Un joueur de l'appli, identifié par son compte ResaMania (contactId).
