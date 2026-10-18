@@ -37,7 +37,7 @@ jobs:
     # ce temps avant d'échouer. Dix minutes laissent une large marge au travail normal.
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # La version de Node suit le `nodeVersion` du projet Vercel (24.x) : vérifier sur une
       # version que la production n'utilise pas ne prouverait pas grand-chose. Elle est lue dans
@@ -117,7 +117,7 @@ jobs:
       DIRECT_URL: postgresql://postgres:test@localhost:55432/postgres
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # L'HISTOIRE DES MIGRATIONS, CONTRÔLÉE AVANT TOUT LE RESTE — elle ne demande ni Node ni
       # base, et `db push` plus bas ne la regarde pas (il pose le schéma courant, pas l'histoire).
