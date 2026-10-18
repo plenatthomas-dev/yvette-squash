@@ -43,7 +43,7 @@ jobs:
       # version que la production n'utilise pas ne prouverait pas grand-chose. Elle est lue dans
       # `.nvmrc` plutôt qu'écrite ici, pour qu'il n'y ait qu'UN endroit à changer — le même que
       # lisent `nvm use` sur un poste et le champ `engines` de package.json.
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -159,7 +159,7 @@ jobs:
           fi
           echo "$(ls -d [0-9][0-9]_*/ | wc -l | tr -d ' ') migrations, format et numérotation conformes."
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
