@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAuthenticationResponse } from "@simplewebauthn/server";
-import type {
-  AuthenticationResponseJSON,
-  AuthenticatorTransportFuture,
-} from "@simplewebauthn/server";
+import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { prisma } from "@/lib/db";
 import { createEmailSession, createResaSessionFromUser } from "@/lib/session";
 import { getFeatures } from "@/lib/features-server";
@@ -101,9 +98,7 @@ export async function POST(req: NextRequest) {
         id: passkey.credentialId,
         publicKey: new Uint8Array(passkey.publicKey),
         counter: passkey.counter,
-        transports: passkey.transports
-          ? (passkey.transports.split(",") as AuthenticatorTransportFuture[])
-          : undefined,
+        transports: passkey.transports ? passkey.transports.split(",") : undefined,
       },
     });
   } catch (e) {
