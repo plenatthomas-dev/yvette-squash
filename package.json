@@ -28,7 +28,7 @@
   },
   "dependencies": {
     "@picocss/pico": "^2.1.1",
-    "@prisma/client": "^6.2.0",
+    "@prisma/client": "^7.10.0",
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.3.2",
     "@vercel/analytics": "^2.0.1",
