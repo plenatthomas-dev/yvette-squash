@@ -6782,6 +6782,16 @@ button.ic-sheet-person::after {
   font-weight: 700;
   text-align: center;
 }
+/* La même pastille dans une ligne de texte (« 15/10/26 · Équipe 2 · H3 · [NC] ») : assez
+   basse pour ne pas épaissir la ligne, à l'encre pleine dans une ligne en sourdine. */
+.ic-sheet-badge.is-small {
+  display: inline-block;
+  min-width: 0;
+  padding: 0 6px;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--pico-contrast);
+}
 
 /* --- Les matchs d'un joueur ---------------------------------------------------- */
 
@@ -6806,6 +6816,11 @@ button.ic-sheet-person::after {
   justify-content: space-between;
   align-items: baseline;
   gap: 10px;
+}
+/* Les morceaux s'y séparent déjà d'un « · » : un écart plus serré que la liste des rencontres
+   fait tenir « 15/10/26 · Équipe 2 · H3 · [NC] » sur une ligne jusqu'à 320 px (mesuré). */
+.ic-sheet-match .ic-date {
+  column-gap: 5px;
 }
 .ic-sheet-result {
   font-size: 0.75rem;

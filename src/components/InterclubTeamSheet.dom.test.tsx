@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import InterclubTeamSheet from "@/components/InterclubTeamSheet";
+import InterclubTeamSheet, { posteCourt } from "@/components/InterclubTeamSheet";
 import { ficheEquipe, ficheJoueur } from "@/lib/interclub-team-sheet";
 import { parsePool } from "@/lib/squashnet/pool";
 import { parseTeamRoster } from "@/lib/squashnet/roster";
@@ -149,5 +149,13 @@ describe("InterclubTeamSheet", () => {
     await waitFor(() =>
       expect(appels.some((a) => a.url.includes("snTeamId=176174"))).toBe(true),
     );
+  });
+});
+
+describe("posteCourt — la position dans l'ordre des simples", () => {
+  it("« Homme 3 » → « H3 », « Dame 1 » → « D1 » ; l'inconnu reste tel quel", () => {
+    expect(posteCourt("Homme 3")).toBe("H3");
+    expect(posteCourt("Dame 1")).toBe("D1");
+    expect(posteCourt("Simple mixte")).toBe("Simple mixte");
   });
 });
