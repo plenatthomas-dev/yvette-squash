@@ -6,9 +6,9 @@
 //     300 € par Bruno pour Bruno+Thomas), payeurs factices déjà validés →
 //     remboursements OUVERTS, testables depuis le compte réel.
 // Relançable : il repart de zéro (tricounts de démo supprimés puis recréés).
-import { PrismaClient } from "@prisma/client";
+import { creeClient } from "../src/lib/db";
 
-const prisma = new PrismaClient();
+const prisma = creeClient();
 
 const day = (offset: number) => {
   const d = new Date();

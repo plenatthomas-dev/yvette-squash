@@ -79,9 +79,18 @@ const MAX_ATTEMPTS = 6;
  */
 export const WRITE_CONFLICT = "write_conflict";
 
-/** P2034 = conflit d'écriture / échec de sérialisation, le cas qu'on rejoue. */
+/**
+ * P2034 = conflit d'écriture / échec de sérialisation, le cas qu'on rejoue.
+ *
+ * ⚠️ Depuis Prisma 7 (adaptateur `pg`), le conflit détecté AU COMMIT — le cas le plus courant
+ * en Serializable — ne remonte PAS en P2034 : c'est l'erreur brute de l'adaptateur
+ * (`DriverAdapterError`, `cause.kind` = `TransactionWriteConflict`). Sans ce second cas, deux
+ * payeurs qui valident ensemble ne sont plus rejoués, et l'un des deux prend un 500.
+ */
 function isSerializationConflict(e: unknown): boolean {
-  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2034";
+  if (e instanceof Prisma.PrismaClientKnownRequestError) return e.code === "P2034";
+  const cause = (e as { name?: unknown; cause?: { kind?: unknown } } | null)?.cause;
+  return (e as { name?: unknown } | null)?.name === "DriverAdapterError" && cause?.kind === "TransactionWriteConflict";
 }
 
 /**

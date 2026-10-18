@@ -18,7 +18,7 @@
 //   docker run --rm -d --name pg-test -e POSTGRES_PASSWORD=test -p 55432:5432 postgres:16
 //   export TEST_DATABASE_URL="postgresql://postgres:test@localhost:55432/postgres"
 //   DATABASE_URL="$TEST_DATABASE_URL" DIRECT_URL="$TEST_DATABASE_URL" \
-//     npx prisma db push --skip-generate
+//     npx prisma db push
 //   npm run test:pg
 //   docker rm -f pg-test
 
