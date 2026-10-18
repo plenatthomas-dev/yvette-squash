@@ -69,10 +69,10 @@ vi.mock("@/lib/interclub-notify", () => ({
     h.unreadable.push(a);
   }),
 }));
-vi.mock("@/lib/squashnet/standings", () => ({
-  fetchStandings: vi.fn(async () => {
+vi.mock("@/lib/squashnet/pool", () => ({
+  fetchPool: vi.fn(async () => {
     if (h.standingsThrows) throw new Error("502");
-    return h.standings;
+    return { standings: h.standings, ties: [], tiesError: null };
   }),
 }));
 // Les feuilles de match ont leurs propres tests (lib/interclub-sheets.test.ts) : ici, seulement

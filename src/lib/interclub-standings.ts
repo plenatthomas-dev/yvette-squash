@@ -17,7 +17,8 @@
 
 import { unstable_cache } from "next/cache";
 import { prisma } from "./db";
-import { fetchStandings } from "./squashnet/standings";
+import { fetchPool } from "./squashnet/pool";
+import { storePoolTies } from "./interclub-pool-db";
 import { INTERCLUB_TAG, todayISO } from "./interclub-gate";
 import { shiftISO } from "./interclub";
 import { slotMinutes } from "./time";
@@ -122,7 +123,17 @@ export interface StandingsAnchor {
 }
 
 export type StandingsRefresh =
-  | { ok: true; rows: number; at: Date }
+  | {
+      ok: true;
+      rows: number;
+      at: Date;
+      /**
+       * Les rencontres de la poule, lues dans le MÊME fragment (cf. `squashnet/pool.ts`) :
+       * `stored` rangées, `empty` aucune publiée (rien d'écrit), `unreadable` rendu qu'on ne sait
+       * plus lire, `failed` écriture impossible. Aucun de ces échecs ne touche au classement.
+       */
+      ties: "stored" | "empty" | "unreadable" | "failed";
+    }
   /**
    * `unreachable` : squashnet n'a pas répondu. `empty` : poule non publiée, ou ancrage faux.
    * `vanished` : zéro ligne pour une poule DÉJÀ LUE — un classement publié ne disparaît pas,
@@ -142,12 +153,13 @@ export type StandingsRefresh =
  * chaque appelant décide de ce qu'elle lui coûte.
  */
 export async function refreshTeamStandings(team: StandingsAnchor): Promise<StandingsRefresh> {
-  let rows;
+  let pool;
   try {
-    rows = await fetchStandings(team.snEventId, team.snDrawId, team.snRoundId);
+    pool = await fetchPool(team.snEventId, team.snDrawId, team.snRoundId);
   } catch {
     return { ok: false, reason: "unreachable" };
   }
+  const rows = pool.standings;
   if (rows.length === 0) {
     // Une lecture de plus, seulement dans ce cas rare : la poule avait-elle déjà un classement ?
     // « Pas encore publié » ne vaut qu'en début de saison ; après, c'est l'alarme qu'il faut
@@ -168,5 +180,21 @@ export async function refreshTeamStandings(team: StandingsAnchor): Promise<Stand
     where: { id: team.id },
     data: { snStandingsJson: JSON.stringify(rows), snStandingsAt: at },
   });
-  return { ok: true, rows: rows.length, at };
+
+  // LES RENCONTRES, APRÈS LE CLASSEMENT ET SANS LUI NUIRE. Elles viennent du même fragment, mais
+  // un rendu qui change ou une écriture qui échoue ici ne doit pas faire perdre un classement
+  // déjà rangé — c'est lui qui s'affiche depuis le début de la saison.
+  let ties: "stored" | "empty" | "unreadable" | "failed";
+  if (pool.ties === null) {
+    console.warn("[interclub-standings]", pool.tiesError);
+    ties = "unreadable";
+  } else {
+    try {
+      ties = await storePoolTies(team, pool.ties, at);
+    } catch (e) {
+      console.warn("[interclub-standings] rencontres de poule non rangées", e);
+      ties = "failed";
+    }
+  }
+  return { ok: true, rows: rows.length, at, ties };
 }

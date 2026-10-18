@@ -1495,3 +1495,37 @@ model SquashnetTeamRoster {
   fetchedAt  DateTime
   updatedAt  DateTime @updatedAt
 }
+
+/// LES RENCONTRES D'UNE POULE FÉDÉRALE, TELLES QUE LE FRAGMENT DU CLASSEMENT LES PUBLIE.
+///
+/// Le classement (`ic_a=394242`) publie, sous son tableau, TOUTES les rencontres de la poule avec
+/// leurs simples et leurs scores jeu par jeu (cf. `squashnet/pool.ts`). On les garde ici, relues
+/// avec le classement et par les mêmes déclencheurs : zéro requête de plus pour afficher les
+/// résultats de n'importe quelle équipe de la poule.
+///
+/// UNE LIGNE PAR POULE, PAS PAR ÉQUIPE : nos deux équipes partagent la poule B, et le JSON pèse une
+/// centaine de Ko — trop pour voyager avec `InterclubTeam` dans chaque `GET /api/interclub`.
+model SquashnetPool {
+  /// `roundid` fédéral — la POULE.
+  snRoundId String   @id
+  snEventId String
+  snDrawId  String
+  /// `PoolTie[]` sérialisé, relu à travers une garde de forme (`lirePoolTies`).
+  tiesJson  String
+  /// Dernière lecture RÉUSSIE des rencontres. Jamais posée par une lecture vide ou illisible.
+  fetchedAt DateTime
+  updatedAt DateTime @updatedAt
+}
+
+/// LA FICHE D'UN JOUEUR FÉDÉRAL (`ic_a=393477`, `regiid`) : ses matchs de l'épreuve.
+///
+/// `regiid` identifie une INSCRIPTION dans une épreuve, pas une personne (cf. `TiePlayer.regiid`) :
+/// la fiche couvre donc tous les matchs de ce joueur dans cette épreuve, toutes équipes confondues.
+model SquashnetPlayer {
+  regiid    String   @id
+  name      String?
+  /// `PlayerHistory` sérialisé, relu à travers une garde de forme (`lireFicheJoueur`).
+  json      String
+  fetchedAt DateTime
+  updatedAt DateTime @updatedAt
+}

@@ -53,7 +53,15 @@ export async function GET(req: NextRequest) {
         date: { lt: todayISO() },
         OR: [{ dateConfirmed: true }, { status: { not: "scheduled" } }],
       },
-      select: { snSheetJson: true, snSheetSide: true, snSheetAt: true },
+      select: {
+        snSheetJson: true,
+        snSheetSide: true,
+        snSheetAt: true,
+        // De quoi situer chaque match dans la fenêtre d'un joueur (cf. `StatMatch`).
+        date: true,
+        opponent: true,
+        team: { select: { name: true } },
+      },
     }),
     // Les saisons ouvertes au filtre, prises sur les rencontres elles-mêmes plutôt que déduites
     // d'un calendrier : c'est ce qui a été saisi qui fait foi.
@@ -107,7 +115,11 @@ export async function GET(req: NextRequest) {
       pending += 1;
       continue;
     }
-    officielles.push({ sheet, side });
+    officielles.push({
+      sheet,
+      side,
+      meta: { date: r.date, teamName: r.team.name, opponent: r.opponent },
+    });
     if (r.snSheetAt && (!sheetsAt || r.snSheetAt > sheetsAt)) sheetsAt = r.snSheetAt;
   }
 

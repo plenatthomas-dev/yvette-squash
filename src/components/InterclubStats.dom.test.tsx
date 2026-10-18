@@ -193,3 +193,61 @@ describe("InterclubStats", () => {
     await waitFor(() => expect(screen.getByText(/indisponibles/)).toBeTruthy());
   });
 });
+
+describe("InterclubStats — les matchs d'un joueur", () => {
+  const match = (over: Record<string, unknown> = {}) => ({
+    date: "2026-10-08",
+    teamName: "Équipe 1",
+    opponentTeam: "Verrieres 5",
+    opponentName: "Detry Xavier",
+    opponentClt: "5B",
+    clt: "5A",
+    label: "Homme 3",
+    won: true,
+    score: "11-5 11-8 13-15 11-7",
+    ...over,
+  });
+
+  it("toucher un joueur ouvre ses matchs : adversaire, son équipe, date, issue, score", async () => {
+    charge = {
+      rows: [
+        ligne({
+          played: 2,
+          won: 1,
+          lost: 1,
+          matches: [
+            match({ date: "2026-10-15", opponentName: "Bougardier Franck", opponentTeam: "Verrieres 4", won: false, score: "8-11 6-11 5-11" }),
+            match(),
+          ],
+        }),
+      ],
+      seasons: [],
+    };
+    rendre();
+    await ouvrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Thomas" }));
+
+    const fenetre = await screen.findByRole("dialog", { name: "Matchs de Thomas" });
+    expect(fenetre.textContent).toContain("2 matchs");
+    expect(fenetre.textContent).toContain("1 V – 1 D");
+    expect(fenetre.textContent).toContain("Detry Xavier");
+    expect(fenetre.textContent).toContain("Verrieres 5");
+    expect(fenetre.textContent).toContain("Équipe 1 · Homme 3");
+    expect(fenetre.textContent).toMatch(/jeu\. 8 oct\./);
+    // Le plus récent d'abord, tel que le serveur l'envoie.
+    const issues = [...fenetre.querySelectorAll(".ic-sheet-result")].map((e) => e.textContent);
+    expect(issues).toEqual(["Perdu", "Gagné"]);
+    // Aucune requête de plus : la liste voyage avec le palmarès.
+    expect(appels).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Fermer la fiche" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("un palmarès sans liste de matchs (serveur plus ancien) ouvre une fenêtre vide, sans lever", async () => {
+    rendre();
+    await ouvrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Thomas" }));
+    expect((await screen.findByRole("dialog")).textContent).toContain("Aucun match joué");
+  });
+});

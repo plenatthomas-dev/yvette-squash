@@ -14,6 +14,9 @@ const h = vi.hoisted(() => ({
   rows: [] as unknown[],
   updates: [] as Array<{ where: unknown; data: Record<string, unknown> }>,
   knownAt: null as Date | null,
+  ties: [] as unknown[] | null,
+  stored: [] as Array<{ pool: unknown; ties: unknown[] }>,
+  storeThrows: false,
 }));
 
 vi.mock("next/cache", () => ({
@@ -40,10 +43,17 @@ vi.mock("./db", () => ({
     },
   },
 }));
-vi.mock("./squashnet/standings", () => ({
-  fetchStandings: vi.fn(async () => {
+vi.mock("./squashnet/pool", () => ({
+  fetchPool: vi.fn(async () => {
     if (h.fetchThrows) throw new Error("502");
-    return h.rows;
+    return { standings: h.rows, ties: h.ties, tiesError: h.ties ? null : "illisibles" };
+  }),
+}));
+vi.mock("./interclub-pool-db", () => ({
+  storePoolTies: vi.fn(async (pool: unknown, ties: unknown[]) => {
+    if (h.storeThrows) throw new Error("base");
+    h.stored.push({ pool, ties });
+    return ties.length ? "stored" : "empty";
   }),
 }));
 
@@ -56,6 +66,9 @@ beforeEach(() => {
   h.fetchThrows = false;
   h.rows = [];
   h.updates = [];
+  h.ties = [];
+  h.stored = [];
+  h.storeThrows = false;
 });
 
 describe("standingsWindowOpen — de 22 h le soir du match à la fin du 5e jour", () => {
@@ -153,5 +166,40 @@ describe("refreshTeamStandings", () => {
     h.fetchThrows = true;
     expect(await refreshTeamStandings(team)).toEqual({ ok: false, reason: "unreachable" });
     expect(h.updates).toHaveLength(0);
+  });
+
+  describe("les rencontres de la poule, lues dans le même fragment", () => {
+    const rencontre = { round: "J1", homeCode: "A", awayCode: "B", lines: [] };
+
+    it("les range avec l'ancrage de la poule", async () => {
+      h.rows = [{ rank: 1 }];
+      h.ties = [rencontre];
+      expect(await refreshTeamStandings(team)).toMatchObject({ ok: true, ties: "stored" });
+      expect(h.stored).toEqual([{ pool: team, ties: [rencontre] }]);
+    });
+
+    it("des rencontres ILLISIBLES n'empêchent pas le classement", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      h.rows = [{ rank: 1 }];
+      h.ties = null;
+      expect(await refreshTeamStandings(team)).toMatchObject({ ok: true, rows: 1, ties: "unreadable" });
+      expect(h.updates).toHaveLength(1);
+      expect(h.stored).toHaveLength(0);
+    });
+
+    it("une écriture des rencontres qui échoue n'emporte pas le classement", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      h.rows = [{ rank: 1 }];
+      h.ties = [rencontre];
+      h.storeThrows = true;
+      expect(await refreshTeamStandings(team)).toMatchObject({ ok: true, ties: "failed" });
+      expect(h.updates).toHaveLength(1);
+    });
+
+    it("zéro ligne de classement : rien n'est écrit, rencontres comprises", async () => {
+      h.ties = [rencontre];
+      expect(await refreshTeamStandings(team)).toMatchObject({ ok: false });
+      expect(h.stored).toHaveLength(0);
+    });
   });
 });

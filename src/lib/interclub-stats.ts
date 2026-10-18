@@ -1,3 +1,5 @@
+import { inverserScore } from "./interclub-score";
+import { nomLisible } from "./nom-lisible";
 import { normalize } from "./squashnet/match";
 import { nameKey } from "./squashnet/roster";
 import type { TieLine, TieSheet } from "./squashnet/tie";
@@ -61,6 +63,37 @@ export interface PlayerStatRow {
   games: StatTally | null;
   /** Points de jeu. NULL dans le même cas. */
   rallies: StatTally | null;
+  /**
+   * SES MATCHS, un par simple compté — du plus récent au plus ancien. Calculés dans la MÊME
+   * boucle que les chiffres, sous les mêmes règles : la liste compte toujours `played` lignes,
+   * dont `won` gagnées. Une fenêtre qui annoncerait « 7 matchs » sous une ligne « MJ 6 » ferait
+   * douter des deux.
+   */
+  matches: StatMatch[];
+}
+
+/** Un match d'un de nos joueurs, tel que la fenêtre du palmarès le raconte. */
+export interface StatMatch {
+  /** « YYYY-MM-DD » — celle de NOTRE rencontre, à défaut celle de la feuille. */
+  date: string | null;
+  /** Notre équipe ce soir-là, « Équipe 2 ». */
+  teamName: string | null;
+  /** L'équipe adverse, telle que la rencontre la nomme chez nous. */
+  opponentTeam: string | null;
+  /** L'adversaire, « Detry Xavier » — nom fédéral remis en casse lisible. */
+  opponentName: string | null;
+  /** Son classement ce soir-là, « 5B ». */
+  opponentClt: string | null;
+  /** NOTRE joueur ce soir-là, lu sur la même feuille : « 5A ». */
+  clt: string | null;
+  /** L'intitulé fédéral du simple, « Homme 2 ». */
+  label: string;
+  won: boolean;
+  /**
+   * Le score DE NOTRE POINT DE VUE : la feuille l'écrit côté A (vérifié sur la fixture de
+   * référence, « 9-11 4-11 11-9 7-11 » pour Jeux A 1 – B 3), on le retourne quand nous sommes B.
+   */
+  score: string | null;
 }
 
 /** Sous quelle identité un joueur de la feuille est compté. */
@@ -74,6 +107,8 @@ export interface StatIdentity {
 export interface OfficialFixture {
   sheet: TieSheet;
   side: "A" | "B" | null;
+  /** La rencontre chez nous : de quoi dater et situer chaque match dans la fenêtre du palmarès. */
+  meta?: { date: string | null; teamName: string | null; opponent: string | null };
 }
 
 // ---------------------------------------------------------------------------
@@ -168,13 +203,7 @@ export interface FederalEntry {
 
 const cleLicence = (v: string | null | undefined) => (v ?? "").trim().toUpperCase();
 
-/** « POPULU AXEL » → « Populu Axel ». Le nom fédéral est en capitales ; on ne crie pas. */
-export function nomLisible(fedName: string): string {
-  return fedName
-    .trim()
-    .toLowerCase()
-    .replace(/(^|[\s'-])(\p{L})/gu, (_, sep: string, c: string) => sep + c.toUpperCase());
-}
+export { nomLisible };
 
 /**
  * Le résolveur d'identité : nom fédéral → joueur de l'appli.
@@ -265,10 +294,11 @@ export function playerStats(
       lost: number;
       jeux: StatTally | null;
       points: StatTally | null;
+      matchs: StatMatch[];
     }
   >();
 
-  for (const { sheet, side } of fixtures) {
+  for (const { sheet, side, meta } of fixtures) {
     // Règle 1.
     if (side === null) continue;
     for (const l of sheet.lines) {
@@ -286,6 +316,7 @@ export function playerStats(
           lost: 0,
           jeux: { won: 0, lost: 0, diff: 0 },
           points: { won: 0, lost: 0, diff: 0 },
+          matchs: [],
         };
         par.set(id.key, ligne);
       }
@@ -299,6 +330,19 @@ export function playerStats(
       const [pn, pe] = side === "A" ? [l.pointsA, l.pointsB] : [l.pointsB, l.pointsA];
       ligne.jeux = cumule(ligne.jeux, jn, je);
       ligne.points = cumule(ligne.points, pn, pe);
+
+      const eux = side === "A" ? l.b : l.a;
+      ligne.matchs.push({
+        date: meta?.date ?? sheet.date,
+        teamName: meta?.teamName ?? null,
+        opponentTeam: meta?.opponent ?? null,
+        opponentName: eux ? nomLisible(eux.name) : null,
+        opponentClt: eux?.clt ?? null,
+        clt: nous.clt ?? null,
+        label: l.label,
+        won: l.winner === side,
+        score: l.score && side === "B" ? inverserScore(l.score) : l.score,
+      });
     }
   }
 
@@ -312,6 +356,11 @@ export function playerStats(
     winRate: l.played > 0 ? l.won / l.played : null,
     games: l.jeux,
     rallies: l.points,
+    // Du plus récent au plus ancien ; dans une même soirée, dans l'ordre des simples.
+    matches: l.matchs
+      .map((m, i) => ({ m, i }))
+      .sort((a, b) => (b.m.date ?? "").localeCompare(a.m.date ?? "") || a.i - b.i)
+      .map(({ m }) => m),
   }));
 
   lignes.sort(

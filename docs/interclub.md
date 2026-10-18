@@ -805,6 +805,35 @@ avant.
 téléphone. Les averages qui départagent — matchs, jeux, points — sont donnés **en toutes
 lettres sous le tableau, pour notre équipe seulement**, là où ils se lisent.
 
+### La fiche d'une équipe de la poule
+
+**Toucher une équipe du classement** — n'importe laquelle, les nôtres comprises — ouvre sa
+fiche, sur le modèle de l'appli Squash App : ses **rencontres** et leurs scores, le **détail**
+d'une rencontre (les quatre simples, jeu par jeu, totaux de jeux et de points), son
+**effectif**, et la **fiche d'un joueur** (ses matchs de l'épreuve). Une seule modale, une pile
+de vues : la flèche remonte d'un cran, la croix referme tout (`InterclubTeamSheet.tsx`).
+
+- **Les rencontres viennent du fragment du classement** (`squashnet/pool.ts`) : relues avec lui,
+  par les mêmes déclencheurs, et rangées par poule dans `SquashnetPool`. Zéro requête de plus.
+- **L'effectif** est la fiche d'équipe déjà en cache pour les adversaires (`SquashnetTeamRoster`,
+  7 jours), qui garde désormais le `regiid` de chaque inscrit.
+- **La fiche joueur** (`squashnet/player.ts`, cache `SquashnetPlayer`, 6 h). Faute de fiche, ses
+  matchs dans nos poules, tirés des rencontres (`source: "poule"`, dit à l'écran). En tête, ce
+  qui vaut pour tous ses matchs : classement actuel, rang mixte, catégorie, équipe. Sur chaque
+  match, son **classement du soir** — la fiche fédérale ne porte que l'actuel : on le lit sur la
+  feuille de poule, ou, pour un joueur du club reconnu à sa **licence**, dans son historique
+  mensuel (`classementAu`, le dernier relevé publié au plus tard ce jour-là).
+- **Afficher d'abord, relire ensuite** : `GET /api/interclub/poule/{equipe,joueur}` rend la base
+  tout de suite ; s'il répond `stale`, l'écran appelle `POST`, qui relit au plus la poule (si
+  elle a plus de 6 h) et l'effectif, ou la fiche joueur — avec le repos de 15 min après échec.
+- **Pas de relais vers squashnet** : l'équipe doit figurer au classement d'une de nos poules, le
+  joueur dans une rencontre ou un effectif rangé. Sinon 404, sans requête fédérale.
+
+**Depuis le tableau des statistiques**, toucher un joueur du club ouvre ses matchs : date,
+adversaire et son équipe, gagné ou perdu, score de notre point de vue (la feuille l'écrit côté A,
+retourné quand nous sommes B). La liste voyage avec le palmarès (`PlayerStatRow.matches`),
+calculée dans la même boucle : elle compte toujours MJ lignes, dont V gagnées.
+
 ### Le capitaine — une désignation, et depuis peu un droit (mais un seul)
 
 Nommé par un admin (`set_captain`), affiché sur son équipe et sur chaque rencontre. Il **ne peut
@@ -1187,7 +1216,10 @@ inventerait des écarts.
   pendant de `findOrderConflict` pour le camp adverse, lu dans la transaction qui écrit)
 - `src/lib/interclub-roster.ts` — **qui peut être aligné** (`teamRoster`, `resolveHomePick`, `findAlignmentClash`, `rankingRefusal`), l'effectif de TOUTES les équipes pour l'écran d'admin (`allTeamMembers`, `allTeamGuests`) et, depuis l'ordre par classement, `findOrderConflict`
 - `src/lib/squashnet/refresh.ts` — le **rapprochement fédéral** des DEUX populations en une passe (`refreshRankings`), et à la demande d'un joueur sans compte (`matchGuestRanking`) ou d'un membre dont on vient de corriger le nom de recherche (`refreshMemberRanking`)
-- `src/lib/interclub-stats.ts` — le **palmarès des joueurs**, calculé sur les feuilles officielles (pur) ; `src/lib/interclub-sheets.ts` — lesquelles relire, et leur écriture
+- `src/lib/interclub-stats.ts` — le **palmarès des joueurs**, calculé sur les feuilles officielles (pur), avec la liste des matchs de chacun ; `src/lib/interclub-sheets.ts` — lesquelles relire, et leur écriture
+- `src/lib/squashnet/pool.ts` — les **rencontres d'une poule**, lues dans le fragment du classement (pur) ; `src/lib/squashnet/player.ts` — la **fiche joueur** fédérale (pur)
+- `src/lib/interclub-pool-db.ts` — les caches `SquashnetPool` et `SquashnetPlayer` ; `src/lib/interclub-team-sheet.ts` — la **fiche d'une équipe** et celle d'un joueur, assemblées (pur) ; `src/lib/interclub-team-sheet-db.ts` — leur lecture et leur relecture à la demande
+- `src/lib/interclub-score.ts` — un score de simple lu pour l'affichage : retourné, totalisé (pur)
 - `src/lib/interclub-gate.ts` — le **cache** du direct
 - `src/lib/interclub-access.ts` — le **contrôle d'accès** (flag + session)
 - `src/lib/squashnet/calendar.ts` — le **calendrier fédéral** : parsing pur
@@ -1223,7 +1255,9 @@ inventerait des écarts.
 | `GET /api/captain/check/{id}` | Relit le dernier rapport — sans toucher à squashnet |
 | `POST /api/captain/check/{id}` | REFAIT la vérification (jusqu'à 8 recherches fédérales) |
 | `GET /api/cron/interclub-calendar` | Contrôle hebdomadaire de dérive — alerte, n'écrit rien |
-| `GET /api/cron/interclub-standings` | Relecture du classement de poule après chaque rencontre (cron externe) |
+| `GET /api/cron/interclub-standings` | Relecture du classement de poule — et de ses rencontres — après chaque rencontre (cron externe) |
+| `GET/POST /api/interclub/poule/equipe?snTeamId=` | Fiche d'une équipe de nos poules · la même après relecture de ce qui a vieilli (≤ 2 requêtes fédérales) |
+| `GET/POST /api/interclub/poule/joueur?regiid=` | Matchs d'un joueur de nos poules · les mêmes après relecture de sa fiche fédérale (≤ 1 requête) |
 | `POST /api/admin/members` (action `set_clt_override`) | Correction admin du classement ET du rang mixte d'un membre (**admin**) |
 | `POST /api/admin/members` (action `set_squashnet_name`) | Nom sous lequel chercher un membre sur squashnet, puis rapprochement immédiat (**admin**) |
 | `POST /api/admin/members` (action `rematch_squashnet`) | Retente le rapprochement d'un membre, sans rien modifier (**admin**) |
@@ -1231,7 +1265,8 @@ inventerait des écarts.
 
 **Composants** — `Interclub.tsx` (orchestration), `InterclubScorer.tsx` (marquage),
 `InterclubLive.tsx` (bandeau direct), `InterclubFollow.tsx` (abonnement),
-`InterclubAvailability.tsx` (le bloc « qui peut venir ? » d'une rencontre).
+`InterclubAvailability.tsx` (le bloc « qui peut venir ? » d'une rencontre),
+`InterclubTeamSheet.tsx` (la fiche d'une équipe de la poule, et les matchs d'un joueur du club).
 
 **Pas de composant « calendrier ».** La liste des rencontres **est** déjà cette liste : elle
 porte désormais la journée, l'heure, le lieu et la mention « prévisionnelle », et elle range les

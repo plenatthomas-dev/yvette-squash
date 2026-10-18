@@ -153,8 +153,11 @@ export interface TieSheet {
  *
  * Les parenthèses sont le séparateur, et les espaces y sont doublés dans le rendu fédéral.
  * Une case sans joueur rend null — c'est le cas d'un simple non saisi.
+ *
+ * Exportée avec `gagnant` : les rencontres du fragment de poule (`pool.ts`) écrivent leurs
+ * joueurs et leur vainqueur exactement de la même façon. Deux copies dériveraient.
  */
-function joueur(cell: Cellule | undefined): TiePlayer | null {
+export function joueur(cell: Cellule | undefined): TiePlayer | null {
   if (!cell) return null;
   const brut = texte(cell.html);
   if (!brut) return null;
@@ -176,7 +179,7 @@ function joueur(cell: Cellule | undefined): TiePlayer | null {
 }
 
 /** La case porte-t-elle la marque du vainqueur ? */
-function gagnant(cell: Cellule | undefined): boolean {
+export function gagnant(cell: Cellule | undefined): boolean {
   return /(?:^|\s)winner(?:\s|$)/i.test(attr(cell?.attrs ?? "", "class") ?? "");
 }
 
