@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateRegistrationOptions } from "@simplewebauthn/server";
-import type { AuthenticatorTransportFuture } from "@simplewebauthn/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { getFeatures } from "@/lib/features-server";
@@ -53,9 +52,7 @@ export async function POST(req: NextRequest) {
     // Empêche de ré-enrôler un passkey déjà présent sur cet appareil.
     excludeCredentials: user.passkeys.map((p) => ({
       id: p.credentialId,
-      transports: p.transports
-        ? (p.transports.split(",") as AuthenticatorTransportFuture[])
-        : undefined,
+      transports: p.transports ? p.transports.split(",") : undefined,
     })),
     authenticatorSelection: {
       authenticatorAttachment: "platform", // biométrie intégrée (Face ID / Touch ID / empreinte)
