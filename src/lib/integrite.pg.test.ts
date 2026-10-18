@@ -9,6 +9,8 @@
 //   * point 21 : `anonymizeMember` efface la personne et garde l'argent, sommes intactes.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { SANS_BASE, ouvrirBaseDeTest, codePrisma } from "./pg-harness";
 
 type Prisma = import("@prisma/client").PrismaClient;
@@ -21,6 +23,15 @@ const efface: string[] = [];
 describe.skipIf(SANS_BASE)("SUR VRAIE BASE — contraintes d'intégrité de l'audit", () => {
   beforeAll(async () => {
     prisma = await ouvrirBaseDeTest();
+    // La CI pose la base par `prisma db push` (schéma courant), qui ignore ce que le schéma
+    // Prisma ne sait pas dire : index partiel, CHECK. On joue donc ici le SQL même des
+    // migrations 66 et 67 — rejouables par construction — pour éprouver ce qu'elles posent.
+    for (const m of ["66_index_cles_etrangeres", "67_delegation_active_unique"]) {
+      const sql = readFileSync(join(process.cwd(), "prisma/migrations", m, "migration.sql"), "utf8");
+      for (const stmt of sql.replace(/--.*$/gm, "").split(";").map((x) => x.trim()).filter(Boolean)) {
+        await prisma.$executeRawUnsafe(stmt);
+      }
+    }
     await prisma.user.deleteMany({ where: { displayName: { startsWith: MARQUEUR } } });
     a = (await prisma.user.create({ data: { displayName: `${MARQUEUR} A` } })).id;
     b = (await prisma.user.create({ data: { displayName: `${MARQUEUR} B` } })).id;
