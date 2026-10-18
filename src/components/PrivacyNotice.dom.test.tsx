@@ -21,6 +21,7 @@ const flags = vi.hoisted(() => ({ valeurs: {} as Features }));
 vi.mock("@/components/FeatureProvider", () => ({ useFeatures: () => flags.valeurs }));
 
 import { PrivacyNotice } from "@/components/PrivacyNotice";
+import PrivacyDialog from "@/components/PrivacyDialog";
 
 const TOUT_OFF: Features = {
   tricount: false,
@@ -40,8 +41,9 @@ const TOUT_OFF: Features = {
 /** Ouvre la note et rend son texte entier, espaces normalisés. */
 function texteDeLaNote(actifs: Partial<Features> = {}) {
   flags.valeurs = { ...TOUT_OFF, ...actifs };
-  render(<PrivacyNotice />);
-  fireEvent.click(screen.getByRole("button", { name: /Confidentialité et données/i }));
+  // Le texte vit dans `PrivacyDialog`, chargé à la demande par `PrivacyNotice` : on le rend
+  // directement (le chargement différé est éprouvé par le test d'ouverture plus bas).
+  render(<PrivacyDialog onClose={() => {}} />);
   return (document.querySelector(".privacy-body")?.textContent ?? "").replace(/\s+/g, " ");
 }
 
@@ -126,5 +128,14 @@ describe("note de confidentialité — la cohérence entre paragraphes", () => {
     expect(texteDeLaNote({ tournament: true })).toMatch(
       /en dehors des noms que des membres saisissent eux-mêmes/i,
     );
+  });
+});
+
+describe("note de confidentialité — chargée à la demande", () => {
+  it("le bouton ouvre la note (module chargé au premier clic)", async () => {
+    render(<PrivacyNotice />);
+    expect(document.querySelector(".privacy-body")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Confidentialité et données/i }));
+    expect(await screen.findByRole("heading", { name: /Confidentialité/i })).toBeDefined();
   });
 });

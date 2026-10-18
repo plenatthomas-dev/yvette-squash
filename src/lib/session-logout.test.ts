@@ -18,7 +18,11 @@ vi.mock("./db", () => ({
     session: { findUnique: h.findUnique, create: h.create, delete: h.del },
   },
 }));
-vi.mock("./crypto", () => ({ encrypt: (v: string) => v, decrypt: (v: string) => v }));
+vi.mock("./crypto", () => ({
+  encrypt: (v: string) => v,
+  decrypt: (v: string) => v,
+  hashSessionId: (v: string) => `h:${v}`,
+}));
 vi.mock("./resamania/client", () => ({ ensureFresh: vi.fn() }));
 
 import { destroySession } from "./session";

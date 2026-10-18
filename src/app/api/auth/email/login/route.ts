@@ -6,6 +6,7 @@ import { getFeatures } from "@/lib/features-server";
 import { EMAIL_RE, MAX_PASSWORD_LEN, clientIp } from "@/lib/email-auth";
 import { isDbUnavailable, dbUnavailableResponse } from "@/lib/db-error";
 import { appBlockForEmail, appBlockedResponse } from "@/lib/app-block";
+import { crossSiteRefusal } from "@/lib/same-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +32,9 @@ const dummyHash = hashPassword("timing-equalizer-not-a-real-password");
 
 // POST /api/auth/email/login  { email, password }
 export async function POST(req: NextRequest) {
+  // Connexion forcée depuis un autre site (login CSRF) : refusée d'emblée (cf. lib/same-origin).
+  const ailleurs = crossSiteRefusal(req);
+  if (ailleurs) return ailleurs;
   if (!(await getFeatures()).emailLogin) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }

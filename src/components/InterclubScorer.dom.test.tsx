@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, act, fireEvent } from "@testing-library/react";
+import { render, act, fireEvent, screen } from "@testing-library/react";
 import InterclubScorer from "@/components/InterclubScorer";
 
 // LA CONCURRENCE OPTIMISTE DU MARQUEUR, ET LES DEUX FAÇONS DONT ELLE SE RETOURNAIT CONTRE LUI.
@@ -803,5 +803,74 @@ describe("InterclubScorer — un match déjà terminé ailleurs", () => {
     const dits = toast.mock.calls.map((c) => String(c[1])).join(" | ");
     expect(dits).toMatch(/Score déjà enregistré/);
     expect(dits).not.toContain("Quelqu'un d'autre marque");
+  });
+});
+
+// Audit 2026-10, point 17 : la révision du marquage, annoncée à chaque envoi.
+describe("InterclubScorer — révision du marquage", () => {
+  function monteRev(liveRev: number, onClose = vi.fn()) {
+    render(
+      <InterclubScorer
+        fixtureId="f1"
+        match={{ ...MATCH, liveRev }}
+        bestOf={5}
+        onClose={onClose}
+        onExpired={(status) => status === 401}
+        toast={vi.fn()}
+      />,
+    );
+    return onClose;
+  }
+
+  it("annonce la révision lue chez le serveur, puis celle que le serveur rend", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_u: RequestInfo | URL, init?: RequestInit) => {
+        envois.push({ url: "", corps: JSON.parse(String(init?.body)) });
+        return reponse(true, { ok: true, rev: 8 });
+      }),
+    );
+    monteRev(7);
+    await souffle();
+    fireEvent.click(screen.getByText("← Retour"));
+    await souffle();
+    expect(envois[0]?.corps.rev).toBe(7);
+    expect(localStorage.getItem(`ic:rev:${MATCH_ID}`)).toBe("8");
+  });
+
+  it("refus `stale-live` : un autre appareil a écrit — journal jeté, écran fermé", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: "autre appareil", code: "stale-live" }),
+      })),
+    );
+    const onClose = monteRev(3);
+    await souffle();
+    fireEvent.click(screen.getByText("← Retour"));
+    await souffle();
+    expect(localStorage.getItem(LOG_KEY)).toBeNull();
+    expect(localStorage.getItem(`ic:rev:${MATCH_ID}`)).toBeNull();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("réponse perdue → plus aucune révision annoncée (le doute ne s'affirme pas)", async () => {
+    let n = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_u: RequestInfo | URL, init?: RequestInit) => {
+        envois.push({ url: "", corps: JSON.parse(String(init?.body)) });
+        n += 1;
+        if (n === 1) throw new Error("réseau coupé");
+        return reponse(true, { ok: true, rev: 5 });
+      }),
+    );
+    monteRev(3);
+    await souffle();
+    fireEvent.click(screen.getByText("← Retour"));
+    await souffle();
+    expect(localStorage.getItem(`ic:rev:${MATCH_ID}`)).toBe("?");
   });
 });

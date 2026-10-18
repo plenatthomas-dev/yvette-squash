@@ -38,7 +38,9 @@ export default function ResetPasswordPage() {
       // `readApi` et non `res.json()` : un 500 au corps vide affichait « Unexpected end of
       // JSON input », et `userMessage` remplace « Failed to fetch » hors réseau (cf. lib/apiFetch).
       await readApi(res);
-      // Session posée par le serveur → on repart connecté sur l'accueil.
+      // Session posée par le serveur → on repart connecté sur l'accueil. Chargement COMPLET
+      // voulu : l'accueil relit la session au rendu serveur, avec le cookie tout juste posé.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
       window.location.href = "/";
     } catch (e) {
       setErr(userMessage(e));

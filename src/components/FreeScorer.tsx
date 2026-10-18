@@ -1,5 +1,7 @@
 "use client";
 
+import "./FreeScorer.css";
+
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   applyPoint,

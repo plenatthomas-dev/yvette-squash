@@ -5,6 +5,7 @@ const h = vi.hoisted(() => ({
   admin: { userId: "adm", email: "admin@ex.com" } as null | { userId: string; email: string },
   pushConfigured: true,
   pushToAll: vi.fn(),
+  save: vi.fn(async () => "ann-1"),
 }));
 
 vi.mock("@/lib/admin", () => ({ requireAdmin: vi.fn(async () => h.admin) }));
@@ -12,6 +13,8 @@ vi.mock("@/lib/push", () => ({
   pushToAll: h.pushToAll,
   pushConfigured: () => h.pushConfigured,
 }));
+
+vi.mock("@/lib/settings", () => ({ saveAnnouncement: h.save }));
 
 import { POST } from "./route";
 
@@ -64,8 +67,10 @@ describe("POST /api/admin/announce", () => {
     const body = await res.json();
     expect(body).toMatchObject({ ok: true, recipients: 3, sent: 5 });
     expect(h.pushToAll).toHaveBeenCalledTimes(1);
-    // L'URL de clic porte l'annonce (titre + message) pour la ré-afficher en modale.
-    const expectedUrl = `/?${new URLSearchParams({ announce: "1", t: "Terrain fermé", b: "samedi" }).toString()}`;
+    // L'URL de clic porte un IDENTIFIANT, jamais le texte : la modale relit l'annonce chez le
+    // serveur (un lien fabriqué ne peut plus afficher un faux message du club).
+    expect(h.save).toHaveBeenCalledWith("Terrain fermé", "samedi", "adm");
+    const expectedUrl = "/?announce=ann-1";
     expect(h.pushToAll).toHaveBeenCalledWith({
       title: "Terrain fermé",
       body: "samedi",

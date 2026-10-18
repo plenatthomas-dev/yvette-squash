@@ -35,7 +35,10 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@/lib/features-server", () => ({ getFeatures: async () => ({ interclub: h.interclub }) }));
 vi.mock("@/lib/cron-auth", () => ({ cronAuthorized: () => h.authorized }));
-vi.mock("@/lib/cron-run", () => ({ recordCronRun: vi.fn() }));
+vi.mock("@/lib/cron-run", () => ({
+  recordCronRun: vi.fn(),
+  runCron: (_n: string, fn: () => Promise<unknown>) => fn(),
+}));
 // « Qui est admin » se lit désormais EN BASE, en une requête et hors boucle : le cron chargeait
 // tous les emails du club, une fois par équipe, pour n'en retenir que deux ou trois.
 vi.mock("@/lib/admin", () => ({

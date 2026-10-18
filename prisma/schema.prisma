@@ -164,6 +164,8 @@ model User {
   interclubAvailabilitySet InterclubAvailability[] @relation("AvailabilitySetter")
   notifications            AppNotification[]
   notifDeviceStates        NotifDeviceState[]
+
+  @@index([teamId])
 }
 
 // Session applicative (cookie httpOnly). Garde le refresh token CHIFFRÉ pour réémettre
@@ -329,6 +331,33 @@ model CronRun {
   lastRunAt DateTime
   ok        Boolean // false = le cron n'a pas pu faire son travail (compte de service KO, VAPID absent…)
   info      String? // résumé court, ex. "14/16 jours", "2 notif(s)"
+}
+
+// Erreurs non rattrapées (audit 2026-10, point 10) : les logs du plan Hobby ne vivent qu'environ
+// une heure, et rien ne gardait la trace d'un écran d'erreur vu par un membre. Une ligne par
+// erreur, côté navigateur (`app/error.tsx`, `global-error.tsx`) ou serveur
+// (`instrumentation.ts` → `onRequestError`). Lue dans /admin, purgée à 30 jours.
+model ErrorReport {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  source    String // "client" | "server"
+  message   String // tronqué à 500 caractères
+  digest    String? // empreinte Next.js de l'erreur serveur (relie l'écran au log)
+  path      String? // page ou route concernée
+  userAgent String?
+
+  @@index([createdAt])
+}
+
+// Défis WebAuthn DÉJÀ CONSOMMÉS (audit 2026-10, point 24). Le défi vit dans un cookie chiffré
+// de 5 minutes ; effacer le cookie après usage ne suffit pas — une réponse capturée avec son
+// cookie restait rejouable jusqu'à l'échéance. On garde l'empreinte du défi jusqu'à son
+// échéance : un second usage heurte la clé primaire. Purgé par `purgeRetention`.
+model WebauthnChallengeUse {
+  hash      String   @id // sha256 du défi
+  expiresAt DateTime
+
+  @@index([expiresAt])
 }
 
 // Historique des demandes de compte/réinitialisation TRAITÉES (étape 3 de l'admin) : trace
@@ -524,6 +553,7 @@ model TricountComment {
   createdAt  DateTime @default(now())
 
   @@index([tricountId, createdAt])
+  @@index([userId])
 }
 
 // « OK pour lancer les remboursements » d'un payeur sur un tricount. Les approbations
@@ -537,6 +567,7 @@ model TricountApproval {
   createdAt  DateTime @default(now())
 
   @@unique([tricountId, userId])
+  @@index([userId])
 }
 
 // Une dépense payée par un membre pour le compte de plusieurs (balles, repas, pot…).
@@ -568,6 +599,9 @@ model Expense {
 
   @@index([tricountId])
   @@index([spentAt])
+  @@index([creatorId])
+  @@index([payerGuestId])
+  @@index([payerId])
 }
 
 // Part d'un participant dans une dépense (répartition égale, ajustée au centime :
@@ -613,6 +647,7 @@ model Tournament {
   matches       Match[]
 
   @@index([date])
+  @@index([createdById])
 }
 
 // Un participant : soit un MEMBRE (userId) soit un INVITÉ hors asso (guestName, prénom
@@ -632,6 +667,7 @@ model TournamentPlayer {
 
   @@index([tournamentId])
   @@index([userId])
+  @@index([groupId])
 }
 
 // Une poule (round-robin). Absente pour un tournoi 100 % tableau.
@@ -1021,6 +1057,9 @@ model Interclub {
   // deux heures plus tôt, puis renvoyait le résultat final à tous les abonnés.
   startNotifiedAt        DateTime?
   doneNotifiedAt         DateTime?
+  // Le score ANNONCÉ par la notification de fin (« 3-1 », migration 65). Une correction après
+  // coup qui change le résultat renvoie une notification rectificative et le remplace.
+  doneNotifiedScore      String?
   // Mêmes MARQUEURS, pour l'appel de disponibilité et sa relance. Ils sont ce qui distingue
   // « personne n'a encore été prévenu » de « tout le monde l'a été » : sans eux, un cron
   // quotidien redemanderait chaque matin à la même équipe si elle est disponible.
@@ -1031,8 +1070,11 @@ model Interclub {
   // lieu et l'adresse à ceux qui sont ALIGNÉS, la veille au matin. C'est l'information qui
   // manquait : entre J-3 et le coup d'envoi, plus rien ne partait.
   eveRemindedAt          DateTime?
-  createdById            String
-  createdBy              User                    @relation("InterclubCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  // SetNull (migration 62) : supprimer le membre qui a saisi la rencontre ne la supprime pas,
+  // et ne bloque plus la suppression du membre. Une rencontre sans créateur reste modifiable
+  // par les admins.
+  createdById            String?
+  createdBy              User?                   @relation("InterclubCreator", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt              DateTime                @default(now())
   matches                InterclubMatch[]
   availability           InterclubAvailability[]
@@ -1043,6 +1085,7 @@ model Interclub {
   @@unique([teamId, snMatchKey])
   @@index([date])
   @@index([teamId, date])
+  @@index([createdById])
 }
 
 /// CE QUE LE CAPITAINE A VÉRIFIÉ AVANT D'ALLER SAISIR CHEZ LA FÉDÉRATION.
@@ -1124,11 +1167,24 @@ model InterclubMatch {
   // pas d'heure, et ces colonnes n'en inventent pas.
   startedAt       DateTime?
   finishedAt      DateTime?
+  // RÉVISION DU MARQUAGE (migration 63) : +1 à chaque écriture des jeux ou du jeu en cours.
+  // Le marqueur annonce la révision sur laquelle son journal est bâti ; si la base en a une
+  // autre, quelqu'un — un autre appareil, y compris du MÊME compte — a écrit entre-temps, et
+  // l'envoi est refusé (`stale-live`) au lieu d'écraser. Cf. `PUT …/live`.
+  liveRev         Int             @default(0)
+  // ISSUE PARTICULIÈRE (migration 64) : « forfait » (un joueur absent) ou « abandon » (blessure
+  // en cours de match), et le côté qui GAGNE (« home » | « away »). NULL = match joué. Le score
+  // en jeux (`gamesHome`/`gamesAway`) porte alors le résultat attribué.
+  outcome         String?
+  outcomeWinner   String?
   updatedAt       DateTime        @updatedAt
   games           InterclubGame[]
 
   @@unique([interclubId, order])
   @@index([interclubId])
+  @@index([homeGuestId])
+  @@index([homeUserId])
+  @@index([scorerId])
 }
 
 // Un jeu TERMINÉ, en points. Les jeux en cours ne sont pas ici : ils vivent dans liveJson.
@@ -1216,6 +1272,9 @@ model InterclubAvailability {
   @@unique([interclubId, userId])
   @@unique([interclubId, guestId])
   @@index([interclubId, status])
+  @@index([guestId])
+  @@index([setById])
+  @@index([userId])
 }
 
 // Journal des notifications envoyées à un membre.

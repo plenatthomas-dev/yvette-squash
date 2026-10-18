@@ -29,7 +29,7 @@ vi.mock("@/lib/interclub-access", () => ({
       : { ok: false, response: new Response(null, { status: h.access.status ?? 401 }) as unknown },
   ),
 }));
-vi.mock("@/lib/admin", () => ({ isAdminEmail: vi.fn(() => h.admin) }));
+vi.mock("@/lib/admin", () => ({ isAdminSession: vi.fn(() => h.admin) }));
 vi.mock("@/lib/db", () => ({
   prisma: {
     interclub: {

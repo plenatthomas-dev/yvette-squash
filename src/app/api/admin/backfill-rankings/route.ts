@@ -55,7 +55,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
 
+  // `{ retryProbes: true }` : reprend AUSSI les couples déjà cherchés en vain (après une
+  // correction de nom en masse, par exemple). Coûteux, donc seulement sur demande.
+  const body = await Promise.resolve()
+    .then(() => req.json() as Promise<{ retryProbes?: unknown } | null>)
+    .catch(() => null);
   const res = await backfillHistory({
+    retryProbes: body?.retryProbes === true,
     months: MOIS_PAR_DEFAUT,
     delayMs: DELAI_INTERACTIF_MS,
     budgetMs: BUDGET_MS,

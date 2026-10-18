@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 // GET /api/bookings[?date=YYYY-MM-DD]  -> journal partagé (qui a réservé quoi)
 export async function GET(req: NextRequest) {
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }

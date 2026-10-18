@@ -61,7 +61,7 @@ const MAX_SUBSCRIPTIONS_PER_USER = 10;
 // POST /api/push/subscribe { endpoint, keys: { p256dh, auth } }
 // Enregistre (ou met à jour) l'abonnement Web Push de l'appareil courant.
 export async function POST(req: NextRequest) {
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }

@@ -278,10 +278,19 @@ describe("POST /api/captain/check/{id}", () => {
     expect(eux).toMatchObject({ verdict: "found", fedName: "MARTIN PAUL" });
   });
 
-  it("squashnet sans période → 502, et AUCUN rapport écrit", async () => {
+  // Audit 2026-10, point 13 : la page de période cassée bloquait TOUT, envoi compris, alors
+  // que les fiches d'équipe suffisent souvent. Les joueurs à chercher par nom restent « non
+  // vérifiés » ; la vérification, elle, aboutit.
+  it("squashnet sans période → la vérification aboutit, les noms cherchés restent non vérifiés", async () => {
     h.month = null;
-    expect((await POST(req(), ctx())).status).toBe(502);
-    expect(h.upsert).not.toHaveBeenCalled();
+    const res = await POST(req(), ctx());
+    expect(res.status).toBe(200);
+    const { report } = await res.json();
+    for (const p of report.players) {
+      expect(p.verdict).toBe("unknown");
+      expect(p.hint).toMatch(/n'a pas répondu/);
+    }
+    expect(h.upsert).toHaveBeenCalled();
   });
 
   // « squashnet n'a pas répondu » et « ce joueur n'existe pas » appellent deux réactions

@@ -9,6 +9,7 @@ import {
 } from "@/lib/email-auth";
 import { HttpError, httpErrorResponse, serializableTransaction } from "@/lib/http-tx";
 import { appBlockForEmail, appBlockedResponse } from "@/lib/app-block";
+import { crossSiteRefusal } from "@/lib/same-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +23,9 @@ const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 jours
 //  - signup : crée le compte (ou active un compte ResaMania sans mot de passe) ;
 //  - reset  : change le mot de passe d'un compte existant.
 export async function POST(req: NextRequest) {
+  // Connexion forcée depuis un autre site (login CSRF) : refusée d'emblée (cf. lib/same-origin).
+  const ailleurs = crossSiteRefusal(req);
+  if (ailleurs) return ailleurs;
   if (!(await getFeatures()).emailLogin) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
@@ -69,6 +73,10 @@ export async function POST(req: NextRequest) {
           } });
       await tx.emailToken.deleteMany({ where: { email: row.email } });
       await tx.session.deleteMany({ where: { userId: user.id } });
+      // Une réinitialisation dit « quelqu'un d'autre a pu avoir accès ». Les passkeys
+      // enrôlées jusque-là ouvraient encore le compte sans mot de passe : elles partent avec
+      // les sessions (audit 2026-10, point 24). Le membre en réenrôle une ensuite.
+      if (existing) await tx.passkey.deleteMany({ where: { userId: user.id } });
       return { sid: await createEmailSession(user.id, tx), displayName: user.displayName };
     }));
   } catch (e) {

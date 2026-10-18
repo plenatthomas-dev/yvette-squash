@@ -10,6 +10,7 @@ import {
   deviceLabelFromUA,
   CHALLENGE_COOKIE,
   challengeCookieOptions,
+  consumeChallenge,
 } from "@/lib/webauthn";
 
 export const runtime = "nodejs";
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest) {
   if (!(await getFeatures()).biometry) {
     return fail(404, "Fonction indisponible");
   }
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return fail(401, "Non authentifié");
   }
@@ -68,6 +69,10 @@ export async function POST(req: NextRequest) {
   }
   if (!verification.verified || !verification.registrationInfo) {
     return fail(400, "Enrôlement non vérifié.");
+  }
+  // Défi à usage unique, comme à la connexion (cf. `consumeChallenge`).
+  if (!(await consumeChallenge(chal))) {
+    return fail(400, "Enrôlement déjà traité — recommence.");
   }
 
   const { credential, credentialBackedUp, credentialDeviceType } = verification.registrationInfo;

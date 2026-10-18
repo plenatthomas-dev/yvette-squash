@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { login, isResaAuthRejected } from "@/lib/resamania/client";
-import { createSession, AccountDisabledError, normalizeEmail } from "@/lib/session";
+import { createSession, AccountDisabledError, LoginRefusedError, normalizeEmail } from "@/lib/session";
 import { clientIp } from "@/lib/client-ip";
 import { prisma } from "@/lib/db";
 import { isDbUnavailable, dbUnavailableResponse } from "@/lib/db-error";
 import { appBlockForEmail, appBlockedResponse } from "@/lib/app-block";
 import { MAX_PASSWORD_LEN } from "@/lib/email-auth";
+import { crossSiteRefusal } from "@/lib/same-origin";
+import { checkBotId } from "botid/server";
 
 export const runtime = "nodejs";
 
@@ -32,6 +34,15 @@ const MAX_USERNAME_LEN = 254;
 
 // POST /api/auth/login { username, password }
 export async function POST(req: NextRequest) {
+  // Connexion forcée depuis un autre site (login CSRF) : refusée d'emblée (cf. lib/same-origin).
+  const ailleurs = crossSiteRefusal(req);
+  if (ailleurs) return ailleurs;
+  // Anti-bot invisible (Vercel BotID), avant tout appel à ResaMania : un robot qui essaie des
+  // mots de passe en masse ferait aussi blocklister nos IP par ResaMania. Même garde que
+  // auth/email/register ; la route est déclarée dans src/instrumentation-client.ts.
+  if ((await checkBotId()).isBot) {
+    return NextResponse.json({ error: "Requête refusée." }, { status: 403 });
+  }
   const { username, password } = await req.json().catch(() => ({}));
   if (typeof username !== "string" || typeof password !== "string" || !username || !password) {
     return NextResponse.json(
@@ -118,6 +129,16 @@ export async function POST(req: NextRequest) {
           { error: "Ce compte a été désactivé. Contacte un responsable du club." },
           { status: 403 },
         );
+      }
+      if (e instanceof LoginRefusedError) {
+        console.warn("[login] connexion refusée:", e.reason);
+        const error =
+          e.reason === "foreign_club"
+            ? "Ce compte ResaMania n'est pas rattaché au club. L'appli est réservée à ses membres."
+            : e.reason === "identity_conflict"
+              ? "Cette adresse est déjà liée à un autre compte ResaMania. Contacte un responsable du club."
+              : "Connexion refusée. Contacte un responsable du club.";
+        return NextResponse.json({ error }, { status: 403 });
       }
       // Base injoignable : on la laisse remonter à la garde externe (→ 503 « maintenance »).
       if (isDbUnavailable(e)) throw e;

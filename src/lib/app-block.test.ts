@@ -25,7 +25,7 @@ vi.mock("./db", () => ({
   },
 }));
 vi.mock("./admin", () => ({
-  isAdminEmail: (e: string | null | undefined) => e === "admin@club.fr",
+  isAdminUser: (u: { email?: string | null } | null | undefined) => u?.email === "admin@club.fr",
 }));
 
 import { appBlockForEmail, appBlockForUserId, appBlockedResponse } from "./app-block";
@@ -100,10 +100,15 @@ describe("appBlockForEmail — chemins de connexion", () => {
     expect(await appBlockForEmail("membre@club.fr")).toEqual({ message: "Maintenance ce soir" });
   });
 
-  it("identifiant admin → passe SANS même lire le réglage", async () => {
+  it("identifiant admin → passe", async () => {
     h.reglage = bloque();
+    h.email = "admin@club.fr";
     expect(await appBlockForEmail("admin@club.fr")).toBeNull();
-    expect(h.appSettingFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("appli ouverte → passe en UNE lecture, sans aller chercher le membre", async () => {
+    expect(await appBlockForEmail("membre@club.fr")).toBeNull();
+    expect(h.userFindUnique).not.toHaveBeenCalled();
   });
 
   it.each([[null], [undefined], [""]])("identifiant absent (%j) → traité comme un membre", async (email) => {

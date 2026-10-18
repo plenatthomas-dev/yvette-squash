@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getFeatures } from "./features-server";
 import { getSession, type AppSession } from "./session";
-import { isAdminEmail } from "./admin";
+import { isAdminSession } from "./admin";
 import { prisma } from "./db";
 
 // ============================================================================
@@ -27,7 +27,7 @@ import { prisma } from "./db";
 //  fédéral : il ne couvre que la sienne. Une portée plus large dans l'appli que
 //  chez la fédération promettrait un geste qui échouerait au bout du chemin.
 //
-//  L'ADMIN PASSE, comme partout ailleurs dans ce dépôt (`isAdminEmail`). Ce n'est
+//  L'ADMIN PASSE, comme partout ailleurs dans ce dépôt (`isAdminSession`). Ce n'est
 //  pas une porte dérobée : c'est le filet le soir où le capitaine est injoignable
 //  et où la ligue attend un score.
 // ============================================================================
@@ -78,11 +78,11 @@ async function garde(
       response: NextResponse.json({ error: "Fonction indisponible" }, { status: 404 }),
     };
   }
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return { ok: false, response: NextResponse.json({ error: "Non authentifié" }, { status: 401 }) };
   }
-  return { ok: true, session, isAdmin: isAdminEmail(session.email) };
+  return { ok: true, session, isAdmin: isAdminSession(session) };
 }
 
 const refus = (): { ok: false; response: NextResponse } => ({

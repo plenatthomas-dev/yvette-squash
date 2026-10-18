@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
 import { prisma } from "@/lib/db";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminSession } from "@/lib/admin";
 import { MARQUEURS_A_REARMER } from "@/lib/interclub-availability";
 import {
   interclubInclude,
@@ -51,7 +51,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   // Statut admin lu sur la SESSION, déjà chargée : ce `GET` est rejoué à chaque retour au
   // premier plan, un `user.findUnique` de moins y est une économie Neon réelle.
-  const view = { ...serializeInterclub(f, session.userId, isAdminEmail(session.email)), roster };
+  const view = { ...serializeInterclub(f, session.userId, isAdminSession(session)), roster };
   // Auto-cicatrisation : le statut DÉDUIT fait foi. Si la colonne a divergé (dernier score
   // saisi ailleurs, rencontre laissée « en cours »), on la recale pour que la LISTE soit juste.
   //
@@ -101,7 +101,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!access.ok) return access.response;
   const { session } = access;
   const { id } = await params;
-  const admin = isAdminEmail(session.email);
+  const admin = isAdminSession(session);
 
   // LA GARDE DES DROITS RESTE DEHORS, et elle seule.
   //
@@ -363,7 +363,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!access.ok) return access.response;
   const { session } = access;
   const { id } = await params;
-  const admin = isAdminEmail(session.email);
+  const admin = isAdminSession(session);
 
   // La garde des DROITS dehors, comme au `PATCH` : elle ne court pas de risque de concurrence,
   // et la laisser ici garde l'ordre 404 → 403 → 409 que le test « le 403 passe AVANT le 409 »

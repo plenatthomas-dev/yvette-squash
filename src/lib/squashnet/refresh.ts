@@ -82,6 +82,12 @@ export interface RefreshResult {
    * que les quarante classements venaient d'être correctement écrits sur le chemin chaud.
    */
   pointFailed: number;
+  /**
+   * Joueurs que la passe n'a PAS ATTEINTS : budget de temps épuisé (`budgetMs`). Optionnel
+   * pour ne rien changer aux appelants sans budget. Le cron le dit au rouge — et l'ordre
+   * tourne d'un mois sur l'autre, pour que ce ne soient pas toujours les mêmes qui sautent.
+   */
+  unreached?: number;
   /** Vrai si le disjoncteur a neutralisé un lot d'effacements (anomalie systémique probable). */
   bulkMoveBlocked: boolean;
 }
@@ -99,6 +105,8 @@ export interface RefreshResult {
 export type Subject = {
   kind: "member" | "guest";
   id: string;
+  /** Période du dernier classement écrit (« YYYY-MM-DD »), s'il y en a un : sert à l'ordre. */
+  lastMonth?: string | null;
   /** Nom affiché, pour les journaux et les messages — jamais utilisé pour rapprocher. */
   name: string;
   /** Terme de recherche envoyé à squashnet (idéalement le nom de FAMILLE, le plus discriminant). */
@@ -154,10 +162,10 @@ export async function subjectsToRefresh(): Promise<Subject[]> {
         squashnetGivenName: true,
         squashnetFamilyName: true,
         // La licence déjà rapprochée, pour le remplissage rétroactif (cf. `Subject.licence`).
-        squashnetRanking: { select: { licence: true } },
+        squashnetRanking: { select: { licence: true, month: true } },
       },
     }),
-    prisma.interclubGuest.findMany({ select: { id: true, name: true, snLicence: true } }),
+    prisma.interclubGuest.findMany({ select: { id: true, name: true, snLicence: true, snMonth: true } }),
   ]);
 
   // On matche sur le VRAI nom (`displayName`), jamais le pseudo (`nickname`). On écarte tout de
@@ -172,6 +180,7 @@ export async function subjectsToRefresh(): Promise<Subject[]> {
       id: u.id,
       name: u.displayName.trim(),
       licence: u.squashnetRanking?.licence ?? null,
+      lastMonth: u.squashnetRanking?.month ?? null,
       ...memberIdentity(u),
     })),
     ...guests.map((g) => ({
@@ -179,6 +188,7 @@ export async function subjectsToRefresh(): Promise<Subject[]> {
       id: g.id,
       name: g.name.trim(),
       licence: g.snLicence ?? null,
+      lastMonth: g.snMonth ?? null,
       ...defaultIdentity(g.name.trim()),
     })),
   ].filter((s) => s.name !== "");
@@ -316,8 +326,12 @@ async function noteAttempt(subject: Subject, status: "unknown" | "moved"): Promi
  * sans interrompre le reste du lot. Renvoie `month: null` sans rien toucher si la période de
  * classement est introuvable.
  */
-export async function refreshRankings(opts: { delaiMs?: number } = {}): Promise<RefreshResult> {
+export async function refreshRankings(
+  opts: { delaiMs?: number; budgetMs?: number } = {},
+): Promise<RefreshResult> {
   const delai = opts.delaiMs ?? DELAI_MS;
+  const debut = Date.now();
+  const budgetEpuise = () => opts.budgetMs !== undefined && Date.now() - debut >= opts.budgetMs;
   const month = await getLatestMonth();
   if (!month) {
     return {
@@ -333,8 +347,15 @@ export async function refreshRankings(opts: { delaiMs?: number } = {}): Promise<
     };
   }
 
-  const subjects = await subjectsToRefresh();
+  // L'ORDRE compte dès qu'il y a un budget : ce sont sinon toujours les derniers de la liste —
+  // les joueurs sans compte — qui ne sont jamais vus. D'abord ceux qui n'ont pas encore le
+  // classement de CETTE période (un second passage reprend donc là où le premier s'est
+  // arrêté), et, à égalité, une rotation tirée du mois.
+  const subjects = rotate(await subjectsToRefresh(), month).sort(
+    (a, b) => Number(a.lastMonth === month) - Number(b.lastMonth === month),
+  );
   const guests = subjects.filter((s) => s.kind === "guest").length;
+  let unreached = 0;
 
   let matched = 0;
   let cleared = 0;
@@ -346,7 +367,13 @@ export async function refreshRankings(opts: { delaiMs?: number } = {}): Promise<
   const moved: Subject[] = [];
 
   let premier = true;
-  for (const subject of subjects) {
+  for (const [i, subject] of subjects.entries()) {
+    // Le budget se vérifie AVANT d'engager un joueur : `maxDuration` coupe sinon la fonction
+    // au milieu, sans heartbeat ni effacements différés (cf. backfill-rankings, même règle).
+    if (budgetEpuise()) {
+      unreached = subjects.length - i;
+      break;
+    }
     // L'espacement précède l'appel, jamais après le dernier : une pause qui ne sert plus à rien
     // fait attendre l'admin devant son bouton. Même forme que `refreshRosters`.
     if (!premier && delai > 0) await new Promise((r) => setTimeout(r, delai));
@@ -406,7 +433,17 @@ export async function refreshRankings(opts: { delaiMs?: number } = {}): Promise<
     failed,
     pointFailed,
     bulkMoveBlocked,
+    ...(unreached ? { unreached } : {}),
   };
+}
+
+/** Rotation déterministe de la liste, d'un cran tiré de la période (« 2026-07-07 »). */
+function rotate<T>(list: T[], month: string): T[] {
+  if (list.length < 2) return list;
+  let h = 0;
+  for (const c of month) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  const k = h % list.length;
+  return [...list.slice(k), ...list.slice(0, k)];
 }
 
 /**
@@ -499,7 +536,10 @@ export async function refreshMemberRanking(
  */
 export function summarizeRefresh(r: RefreshResult): { ok: boolean; info: string } {
   const ok =
-    r.failed === 0 && !r.bulkMoveBlocked && (r.members === 0 || r.skipped < r.members);
+    r.failed === 0 &&
+    !r.bulkMoveBlocked &&
+    !r.unreached &&
+    (r.members === 0 || r.skipped < r.members);
   const parts = [`${r.matched} rapproché(s)`, `${r.cleared} retiré(s)`, `${r.skipped} ignoré(s)`];
   // Les joueurs sans compte sont dits à part : ils sont une nouveauté de ce balayage, et c'est
   // la seule ligne qui dise à l'admin que leurs classements ont bien été cherchés.
@@ -510,5 +550,6 @@ export function summarizeRefresh(r: RefreshResult): { ok: boolean; info: string 
   // arrivent ensemble.
   if (r.pointFailed) parts.push(`${r.pointFailed} sans point d'historique`);
   if (r.bulkMoveBlocked) parts.push("suppression en masse BLOQUÉE");
+  if (r.unreached) parts.push(`${r.unreached} non atteint(s) (temps écoulé)`);
   return { ok, info: parts.join(", ") };
 }

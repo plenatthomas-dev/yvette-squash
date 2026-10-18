@@ -4,7 +4,7 @@ const h = vi.hoisted(() => ({
   attempts: [] as { email: string; ip: string; createdAt: Date }[],
   tokens: [] as { email: string; purpose: string; approvedAt: Date | null; expiresAt: Date }[],
 }));
-vi.mock("./crypto", () => ({ hashToken: (s: string) => s }));
+vi.mock("./crypto", () => ({ hashToken: (s: string) => s, tokenHashCandidates: (s: string) => [s] }));
 vi.mock("./email", () => ({ sendEmail: vi.fn() }));
 vi.mock("./moderation", () => ({ logRequestDecision: vi.fn() }));
 vi.mock("./db", () => {

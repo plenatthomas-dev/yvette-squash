@@ -26,7 +26,7 @@ const NICK_ALLOWED = /^[\p{L}\p{N} .'\-]+$/u;
 // l'espace admin (POST /api/admin/members, action "set_team"), comme dans la vraie vie du club.
 // Aucun appelant n'envoyait ce champ : le retirer ne casse rien.
 export async function PATCH(req: NextRequest) {
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }

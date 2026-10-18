@@ -147,11 +147,15 @@ export function notifyFixtureDone(
   ctx: Ctx,
   score: { home: number; away: number },
   lines: readonly MatchLine[] = [],
+  opts: { corrected?: boolean } = {},
 ): Promise<void> {
   const verdict =
     score.home > score.away ? "l'emporte" : score.home < score.away ? "s'incline" : "fait match nul";
   const detail = summarize(lines);
-  const body = `${ctx.teamName} ${verdict} ${score.home}-${score.away}${detail ? ` · ${detail}` : ""}`;
+  // Une CORRECTION du résultat déjà annoncé le dit d'emblée : sans ce préfixe, l'abonné voit
+  // deux résultats différents sans savoir lequel croire (cf. `doneTransition`).
+  const prefix = opts.corrected ? "Résultat corrigé : " : "";
+  const body = `${prefix}${ctx.teamName} ${verdict} ${score.home}-${score.away}${detail ? ` · ${detail}` : ""}`;
   return send(ctx, "result", `${ctx.teamName} – ${ctx.opponent}`, body);
 }
 

@@ -6,7 +6,10 @@ import { refreshRankings, summarizeRefresh } from "@/lib/squashnet/refresh";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
+// L'admin attend devant son bouton : on rend la main bien avant la limite, avec ce qui a été
+// fait (`unreached` dit combien de joueurs restent pour le prochain clic ou le cron).
+const BUDGET_MS = 100_000;
 
 // POST /api/admin/refresh-rankings
 // Déclenche À LA DEMANDE le rafraîchissement du classement fédéral (squashnet.fr) de tous les
@@ -21,7 +24,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
 
-  const result = await refreshRankings();
+  const result = await refreshRankings({ budgetMs: BUDGET_MS });
   if (!result.month) {
     return NextResponse.json(
       { error: "Période de classement introuvable (squashnet indisponible ?)." },
@@ -49,5 +52,6 @@ export async function POST(req: NextRequest) {
     // Dit à part de `failed` : l'annuaire a été écrit, seule la courbe a un trou.
     pointFailed,
     bulkMoveBlocked,
+    unreached: result.unreached ?? 0,
   });
 }

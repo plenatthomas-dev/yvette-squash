@@ -12,7 +12,11 @@
 
 import { useEffect } from "react";
 
-const CHUNK_ERROR_RE = /ChunkLoadError|Loading chunk [\w-]+ failed/i;
+// Deux formulations : celle de webpack (« Loading chunk 123 failed ») et celle de Turbopack, le
+// bundler par défaut depuis Next 16 (« Failed to load chunk /_next/static/chunks/… from
+// module … », erreur nommée `ChunkLoadError` elle aussi — vérifié dans son runtime, audit
+// 2026-10 point 31).
+const CHUNK_ERROR_RE = /ChunkLoadError|Loading chunk [\w-]+ failed|Failed to load chunk/i;
 // Garde-fou anti-boucle : si le rechargement ne règle rien (ex. réseau coupé), on ne
 // re-déclenche pas en rafale — une nouvelle tentative toutes les 30 s au plus.
 const COOLDOWN_KEY = "chunkReloadAt";

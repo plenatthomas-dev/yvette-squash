@@ -6,7 +6,11 @@ const h = vi.hoisted(() => ({
     expiresAt: new Date(), identityJson: "{}", user: { displayName: "Alice", email: "a@example.fr", disabledAt: null } },
   refresh: vi.fn(),
 }));
-vi.mock("./crypto", () => ({ encrypt: (s: string) => s, decrypt: (s: string) => s }));
+vi.mock("./crypto", () => ({
+  encrypt: (s: string) => s,
+  decrypt: (s: string) => s,
+  hashSessionId: (s: string) => `h:${s}`,
+}));
 // Les erreurs typées et leurs gardes sont les VRAIES : c'est leur classement que session.ts
 // consulte pour décider de supprimer (refus) ou de garder (panne passagère) la session.
 vi.mock("./resamania/client", async (importOriginal) => ({
@@ -182,4 +186,18 @@ it("getSession : une erreur de la BASE n'est pas déguisée en panne ResaMania",
   );
 
   await expect(getSession("sid")).rejects.toThrow("Can't reach database server");
+});
+
+// Audit 2026-10, point 11 : les routes qui n'ont pas besoin du jeton ne le rafraîchissent plus.
+it("{ resa: false } : aucun rafraîchissement, et le compte reste reconnu comme ResaMania", async () => {
+  const s = await getSession("sid", { resa: false });
+  expect(h.refresh).not.toHaveBeenCalled();
+  expect(s).toMatchObject({ userId: "u1", resa: null, resaUnavailable: true });
+});
+
+it("{ resa: false } sur un compte email seul : ni jeton ni drapeau de panne", async () => {
+  h.row.refreshTokenEnc = null as unknown as string;
+  const s = await getSession("sid", { resa: false });
+  expect(s).toMatchObject({ resa: null });
+  expect(s).not.toHaveProperty("resaUnavailable");
 });

@@ -9,13 +9,8 @@ import Link from "next/link";
 import { useFeatures } from "@/components/FeatureProvider";
 import FeatureFlagsPanel from "@/components/FeatureFlagsPanel";
 import { recheckBanner } from "@/components/AnnouncementBanner";
-import { bookingOriginHint } from "@/lib/booking-origin";
+import AdminDashboard, { type Dashboard } from "./AdminDashboard";
 import { compareRosterOrder, KNOWN_CLASSEMENTS } from "@/lib/interclub-order";
-import {
-  NOTIF_STATE_WINDOW_DAYS,
-  platformBreakdown,
-  type NotifSummary,
-} from "@/lib/notif-state";
 
 type PendingRequest = {
   id: string;
@@ -25,7 +20,6 @@ type PendingRequest = {
   createdAt: string;
 };
 
-type CronRun = { name: string; lastRunAt: string; ok: boolean; info: string | null };
 
 /**
  * Ce qu'il faut savoir d'un joueur pour dire s'il est alignable : son classement, son rang
@@ -257,24 +251,6 @@ type IcGuest = {
   snStatus: string | null;
   snCheckedAt: string | null;
 };
-type Dashboard = {
-  members: number;
-  disabledMembers: number;
-  activeSessions: number;
-  resaSessions: number;
-  recentLogins: number;
-  activeAlerts: number;
-  pendingRequests: number;
-  blockedEmails: number;
-  // Origine des résas actives sur 30 j : via l'appli vs détectées directement sur ResaMania.
-  bookingsApp: number;
-  bookingsResa: number;
-  // false ⇒ la détection « hors appli » est coupée, donc bookingsResa vaut 0 par construction.
-  externalDetection: boolean;
-  // Absent tant que le serveur déployé ne le calcule pas encore (déploiement en cours).
-  notifs?: NotifSummary;
-  crons: CronRun[];
-};
 
 function purposeLabel(p: PendingRequest["purpose"]): string {
   return p === "signup" ? "Nouveau compte" : "Mot de passe oublié";
@@ -378,6 +354,9 @@ export default function AdminPage() {
   const [requests, setRequests] = useState<PendingRequest[]>([]);
   // Lien généré à l'approbation, à transmettre à la personne (par id de demande).
   const [links, setLinks] = useState<Record<string, string>>({});
+  // Demandes approuvées dont le lien est parti par e-mail (adresse affichée pour confirmation).
+  const [sentTo, setSentTo] = useState<string[]>([]);
+  const [reqError, setReqError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -528,7 +507,6 @@ export default function AdminPage() {
     void loadTeams();
     // `loadTeams` est stable pour ce qui nous intéresse (il ne lit que des setters) ; le
     // relister en dépendance rejouerait la requête à chaque rendu.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interclub]);
 
   const act = async (id: string, action: "approve" | "reject" | "reject-block") => {
@@ -539,9 +517,20 @@ export default function AdminPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, action }),
       });
-      const data = (await res.json()) as { link?: string };
-      if (!res.ok) return;
-      if (action === "approve" && data.link) {
+      const data = (await res.json().catch(() => ({}))) as {
+        link?: string;
+        sent?: boolean;
+        email?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        setReqError(data.error ?? "Action impossible pour le moment.");
+        return;
+      }
+      setReqError(null);
+      if (action === "approve" && data.sent) {
+        setSentTo((l) => [...l, data.email ?? ""]);
+      } else if (action === "approve" && data.link) {
         setLinks((m) => ({ ...m, [id]: data.link! }));
       }
       // Dans tous les cas la demande quitte la file (approuvée → lien affiché ; rejetée → retirée).
@@ -1179,6 +1168,7 @@ export default function AdminPage() {
         skipped?: number;
         failed?: number;
         bulkMoveBlocked?: boolean;
+        unreached?: number;
         error?: string;
       };
       if (!res.ok) {
@@ -1195,7 +1185,8 @@ export default function AdminPage() {
         `${cleared ? `, ${cleared} retiré${cleared > 1 ? "s" : ""}` : ""}` +
         `${skipped ? `, ${skipped} ignoré${skipped > 1 ? "s" : ""} (non concluant)` : ""}` +
         `${failed ? `, ${failed} échec${failed > 1 ? "s" : ""} (base)` : ""}` +
-        ` sur ${members} membre${members > 1 ? "s" : ""} listé${members > 1 ? "s" : ""}.`;
+        ` sur ${members} membre${members > 1 ? "s" : ""} listé${members > 1 ? "s" : ""}.` +
+        (data.unreached ? ` Temps écoulé : ${data.unreached} restant(s), reclique pour continuer.` : "");
       // On reprend le `ok` de la route (échec base, blocage anti-effacement, OU squashnet muet
       // = tous ignorés) plutôt que de recomposer le critère ici. Le blocage a un message dédié.
       const succeeded = data.ok ?? true;
@@ -1215,11 +1206,15 @@ export default function AdminPage() {
   // Complète l'historique du classement, PAR TRANCHES. La route s'arrête avant le couperet de
   // Vercel et dit ce qu'il reste ; le remplissage étant reprenable, recliquer reprend là où
   // l'on s'était arrêté sans jamais repayer le travail déjà fait.
-  const backfillRankings = async () => {
+  const backfillRankings = async (retryProbes = false) => {
     setRkHistBusy(true);
     setRkHistResult(null);
     try {
-      const res = await fetch("/api/admin/backfill-rankings", { method: "POST" });
+      const res = await fetch("/api/admin/backfill-rankings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ retryProbes }),
+      });
       const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
         months?: number;
@@ -1309,53 +1304,7 @@ export default function AdminPage() {
       {state === "ready" && (
         <>
           {/* Mini-tableau de bord (étape 4) : indicateurs d'un coup d'œil. */}
-          {dash && (
-            <section className="adm-carte" style={{ marginBottom: 18 }}>
-              {/* HORS GROUPE, et en tête : on le lit, on n'y touche pas. Lui donner un filet de
-                  portée serait mentir — il ne règle rien. */}
-              <h2 className="adm-carte-titre">📊 Tableau de bord</h2>
-              <div className="adm-stats">
-                <Stat label="Membres" value={dash.members} hint={dash.disabledMembers ? `${dash.disabledMembers} désactivé(s)` : undefined} />
-                <Stat label="Actifs (30 j)" value={dash.recentLogins} />
-                <Stat label="Sessions" value={dash.activeSessions} hint={`${dash.resaSessions} ResaMania`} />
-                <Stat label="Alertes terrain" value={dash.activeAlerts} />
-                <Stat label="En attente" value={dash.pendingRequests} />
-                <Stat label="Bloqués" value={dash.blockedEmails} />
-                <Stat
-                  label="Résas (30 j)"
-                  value={dash.bookingsApp + dash.bookingsResa}
-                  hint={bookingOriginHint(dash)}
-                />
-              </div>
-
-              {dash.notifs && <NotifStats n={dash.notifs} members={dash.members - dash.disabledMembers} />}
-
-              {/* Santé des crons */}
-              <div style={{ marginTop: 10 }}>
-                {dash.crons.length === 0 ? (
-                  <p className="muted tiny">Aucun passage de cron enregistré pour l'instant.</p>
-                ) : (
-                  <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                    {dash.crons.map((c) => (
-                      <li key={c.name} className="tiny" style={{ display: "flex", gap: 6 }}>
-                        <span title={c.ok ? "OK" : "problème"}>{c.ok ? "🟢" : "🔴"}</span>
-                        <strong>{c.name}</strong>
-                        <span className="muted">
-                          {new Date(c.lastRunAt).toLocaleString("fr-FR", {
-                            day: "numeric",
-                            month: "short",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                          {c.info ? ` · ${c.info}` : ""}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </section>
-          )}
+          {dash && <AdminDashboard dash={dash} />}
 
           {/* Les autres pages de l'admin. Ce ne sont pas des options : elles n'ont donc pas de
               filet de portée — mais elles mènent quelque part, et une tuile le dit mieux qu'un
@@ -1387,9 +1336,21 @@ export default function AdminPage() {
           <section className="adm-carte" style={{ marginBottom: 18 }}>
             <h2 className="adm-carte-titre">📥 Demandes en attente</h2>
             <p className="muted tiny">
-              Approuve une demande pour générer son lien, puis transmets-le à la personne
-              (WhatsApp, SMS…). Le lien ne s'affiche qu'une seule fois.
+              Approuver envoie le lien par e-mail à l&apos;adresse de la demande : c&apos;est ce
+              qui prouve que la personne la possède. Sans envoi d&apos;e-mail configuré, seul le lien
+              d&apos;une inscription s&apos;affiche ici (une seule fois).
             </p>
+
+            {reqError && (
+              <p className="notice error" role="alert">
+                {reqError}
+              </p>
+            )}
+            {sentTo.map((email, i) => (
+              <p key={`${email}-${i}`} className="notice info" role="status">
+                Lien envoyé par e-mail à <strong>{email}</strong>.
+              </p>
+            ))}
 
             {/* Liens générés (demandes tout juste approuvées) */}
             {Object.entries(links).map(([id, link]) => (
@@ -1404,7 +1365,7 @@ export default function AdminPage() {
               </div>
             ))}
 
-            {requests.length === 0 && Object.keys(links).length === 0 && (
+            {requests.length === 0 && Object.keys(links).length === 0 && sentTo.length === 0 && (
               <p className="muted" style={{ marginBottom: 0 }}>Aucune demande en attente.</p>
             )}
 
@@ -2656,14 +2617,26 @@ export default function AdminPage() {
                   est découpé en tranches d'environ une minute&nbsp;: reclique jusqu'à
                   « historique complet ». Rien n'est jamais redemandé deux fois.
                 </p>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={rkHistBusy}
-                  onClick={backfillRankings}
-                >
-                  {rkHistBusy ? "Complètement… (jusqu'à 1 min)" : "Compléter l'historique"}
-                </button>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={rkHistBusy}
+                    onClick={() => backfillRankings(false)}
+                  >
+                    {rkHistBusy ? "Complètement… (jusqu'à 1 min)" : "Compléter l'historique"}
+                  </button>
+                  {/* Reprend aussi les recherches déjà faites en vain — utile après avoir
+                      corrigé des noms, ou si squashnet a publié tardivement. Plus lent. */}
+                  <button
+                    type="button"
+                    className="secondary outline"
+                    disabled={rkHistBusy}
+                    onClick={() => backfillRankings(true)}
+                  >
+                    Tout rechercher à nouveau
+                  </button>
+                </div>
                 {rkHistResult && (
                   <div
                     className={`notice ${rkHistResult.ok ? "info" : "error"}`}
@@ -2691,50 +2664,4 @@ export default function AdminPage() {
  * l'appli (cf. lib/notif-report.ts) ; un membre compte selon son MEILLEUR appareil — il n'est
  * pas « bloqué » parce que son ordinateur a refusé si son téléphone reçoit.
  */
-function NotifStats({ n, members }: { n: NotifSummary; members: number }) {
-  return (
-    <>
-      <hr className="adm-sep" />
-      <h3 className="adm-carte-titre">🔔 Notifications</h3>
-      {n.members === 0 ? (
-        <p className="muted tiny">
-          Aucun appareil relevé pour l&apos;instant : les chiffres arrivent à mesure que les membres
-          ouvrent l&apos;appli.
-        </p>
-      ) : (
-        <>
-          <p className="muted tiny">
-            {n.members} membre{n.members > 1 ? "s" : ""} relevé{n.members > 1 ? "s" : ""} sur{" "}
-            {members} ({n.devices} appareil{n.devices > 1 ? "s" : ""} ouvert
-            {n.devices > 1 ? "s" : ""} ces {NOTIF_STATE_WINDOW_DAYS} derniers jours).
-          </p>
-          <div className="adm-stats">
-            <Stat label="Les reçoivent" value={n.byMember.receiving} />
-            <Stat
-              label="Bloquées"
-              value={n.byMember.denied}
-              hint={platformBreakdown(n.deniedByPlatform) || undefined}
-            />
-            <Stat label="Jamais demandé" value={n.byMember.notAsked} />
-            <Stat label="Coupées" value={n.byMember.off} hint="« Ne plus recevoir »" />
-            <Stat
-              label="Sans support"
-              value={n.byMember.unsupported}
-              hint={platformBreakdown(n.unsupportedByPlatform) || undefined}
-            />
-          </div>
-        </>
-      )}
-    </>
-  );
-}
 
-function Stat({ label, value, hint }: { label: string; value: number; hint?: string }) {
-  return (
-    <div className="adm-stat">
-      <div className="adm-stat-valeur">{value}</div>
-      <div className="tiny">{label}</div>
-      {hint && <div className="muted tiny">{hint}</div>}
-    </div>
-  );
-}

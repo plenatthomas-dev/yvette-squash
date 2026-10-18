@@ -24,7 +24,11 @@ import { join } from "node:path";
 //  défaut : « un survol ne redécrit pas la couleur d'un bouton pressé ».
 // ============================================================================
 
-const CSS = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+// La feuille globale, plus celles des modules chargés à la demande (sorties de globals.css,
+// audit 2026-10 point 27) : les règles de l'écran Capitaine vivent dans Captain.css.
+const CSS = ["src/app/globals.css", "src/components/Captain.css"]
+  .map((f) => readFileSync(join(process.cwd(), f), "utf8"))
+  .join("\n");
 
 /** Les sélecteurs d'une feuille, un par bloc, commentaires ôtés. */
 function selecteurs(css: string): string[] {

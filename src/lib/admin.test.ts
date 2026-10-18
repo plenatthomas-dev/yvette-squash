@@ -18,13 +18,16 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 vi.mock("./db", () => ({ prisma: {} }));
 vi.mock("./push", () => ({ pushToUser: vi.fn(), pushConfigured: () => false }));
 
-import { isAdminEmail } from "./admin";
+import { isAdminEmail, isAdminUser, isAdminSession } from "./admin";
 
 const ORIGINE = process.env.ADMIN_EMAILS;
+const ORIGINE_IDS = process.env.ADMIN_USER_IDS;
 
 afterEach(() => {
   if (ORIGINE === undefined) delete process.env.ADMIN_EMAILS;
   else process.env.ADMIN_EMAILS = ORIGINE;
+  if (ORIGINE_IDS === undefined) delete process.env.ADMIN_USER_IDS;
+  else process.env.ADMIN_USER_IDS = ORIGINE_IDS;
 });
 
 describe("isAdminEmail — le défaut est fermé", () => {
@@ -78,5 +81,34 @@ describe("isAdminEmail — ce qu'elle accepte", () => {
     process.env.ADMIN_EMAILS = "apres@exemple.fr";
     expect(isAdminEmail("avant@exemple.fr")).toBe(false);
     expect(isAdminEmail("apres@exemple.fr")).toBe(true);
+  });
+});
+
+// ADMIN_USER_IDS : l'identifiant STABLE (audit 2026-10, point 1). L'e-mail vient de ResaMania et
+// peut changer, ou être revendiqué par un autre compte : quand la liste d'ids est posée, il ne
+// décide plus rien.
+describe("isAdminUser — ADMIN_USER_IDS fait foi quand elle est posée", () => {
+  it("sans ADMIN_USER_IDS : retombe sur l'allowlist d'e-mails", () => {
+    delete process.env.ADMIN_USER_IDS;
+    process.env.ADMIN_EMAILS = "chef@exemple.fr";
+    expect(isAdminUser({ id: "u1", email: "chef@exemple.fr" })).toBe(true);
+    expect(isAdminUser({ id: "u1", email: "quidam@exemple.fr" })).toBe(false);
+  });
+
+  it("avec ADMIN_USER_IDS : l'e-mail d'admin ne suffit plus", () => {
+    process.env.ADMIN_USER_IDS = "u-chef, u-adjoint";
+    process.env.ADMIN_EMAILS = "chef@exemple.fr";
+    // Un autre compte qui porterait l'adresse de l'admin : refusé.
+    expect(isAdminUser({ id: "u-intrus", email: "chef@exemple.fr" })).toBe(false);
+    expect(isAdminUser({ id: "u-chef", email: "autre@exemple.fr" })).toBe(true);
+    expect(isAdminUser({ id: "u-adjoint", email: null })).toBe(true);
+  });
+
+  it("isAdminSession lit userId et email de la session ; null → refus", () => {
+    process.env.ADMIN_USER_IDS = "u-chef";
+    expect(isAdminSession({ userId: "u-chef", email: null })).toBe(true);
+    expect(isAdminSession({ userId: "u2", email: "chef@exemple.fr" })).toBe(false);
+    expect(isAdminSession(null)).toBe(false);
+    expect(isAdminUser(null)).toBe(false);
   });
 });

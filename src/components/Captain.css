@@ -1,0 +1,369 @@
+/* Styles de Captain.tsx — sortis de globals.css (audit 2026-10, point 27) : ils ne servaient
+   qu'à un module chargé à la demande, et pesaient sur la feuille du premier chargement.
+   Chargés avec le module (next/dynamic emporte la CSS importée par le composant). */
+
+/* ============================================================================
+   ESPACE CAPITAINE (Captain.tsx) — la vérification avant saisie officielle.
+
+   Il emprunte la liste de l'interclub (.ic-list / .ic-row / .ic-row-head) plutôt
+   que d'ouvrir un second vocabulaire : ce sont les mêmes rencontres, vues sous un
+   autre angle, et deux styles de ligne pour un même objet se mettraient à dériver.
+   Ne restent ici que les éléments qui n'existent nulle part ailleurs.
+   ============================================================================ */
+
+.cap-titre {
+  margin: 0 0 4px;
+}
+.cap-retour {
+  margin: 0 0 12px;
+}
+.cap-aide {
+  margin: 4px 0 12px;
+}
+
+/* Le verdict global. C'est la première chose qu'on lit en revenant sur l'écran :
+   il porte l'issue (--good-edge / --bad-edge via .notice info|error) et la DATE,
+   parce qu'un rapport de la semaine dernière ne vaut pas un rapport de ce matin. */
+.cap-verdict {
+  margin: 12px 0;
+}
+.cap-quand {
+  display: block;
+  margin-top: 2px;
+}
+
+/* L'envoi chez la ligue : le geste qui suit un verdict propre, juste sous lui. */
+.cap-envoyer {
+  margin: 0 0 12px;
+  width: auto;
+}
+/* Ce qui part, simple par simple — une ligne chacun, les jeux en chiffres tabulaires
+   pour que les « 11-9 » s'alignent d'un simple à l'autre. */
+.cap-envoi-lignes {
+  margin: 8px 0 12px;
+  padding-left: 0;
+  list-style: none;
+  font-size: 0.85rem;
+}
+.cap-envoi-lignes li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--pico-card-border-color);
+}
+.cap-envoi-jeux {
+  display: block;
+  font-variant-numeric: tabular-nums;
+  color: var(--pico-muted-color);
+}
+.cap-envoi-problemes {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+/* Le compte de la rencontre — le chiffre que la fédération attend. */
+.cap-tie {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 7px 12px;
+  background: var(--sunken);
+  border-radius: var(--radius-sm);
+}
+.cap-tie strong {
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+}
+/* Partager la feuille en image, au bout de la ligne du compte. 30 px de haut : celle du
+   « 3 – 1 » qu'il accompagne, mesurée à 390 px de large — la ligne garde ses 49 px, et la
+   capture d'écran mesurée ci-dessous ses quatre simples. Plus haut, il les repousse. */
+.cap-partager {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+  width: auto;
+  min-height: 30px;
+  margin: 0 0 0 auto;
+  padding: 0 10px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+.cap-partager svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ⚠️ CET ÉCRAN SE PREND EN PHOTO. Un capitaine le montre à son équipe, ou le garde
+   pour saisir plus tard : il faut que « 4-0 sur 4 simples » et les QUATRE vignettes,
+   jusqu'au second joueur du dernier simple, tiennent dans UNE capture d'écran de
+   téléphone. Mesuré avant de toucher quoi que ce soit, à 390 px de large :
+
+     .cap-tie ................  62 px        une vignette .......... 211 px
+     4 vignettes + interlignes ............. 875 px
+     TOTAL « 4-0 » → fin du simple 4 ....... 937 px   (pour ~640 px visibles)
+
+   Il fallait donc en retirer 300, ce que font quatre gestes, du plus rentable au
+   moins : le détail jeu par jeu remonté sur la ligne du titre (−29 px/vignette), le
+   `margin-top: 14px` que `.tiny` imposait à CHAQUE ligne d'identité (−28 px/vignette,
+   pur accident — un span devient bloc dans un conteneur flex, et le margin s'applique),
+   l'équipe au lieu du club sur la ligne du nom (−22 px/vignette dès que le nom de club
+   repliait), et un resserrage des interlignes.
+
+   NE PAS « RÉCUPÉRER DE L'AIR » ICI SANS REFAIRE LE CALCUL : c'est la quatrième
+   vignette qui tombe hors de l'écran, et elle tombe en silence. */
+.cap-simples {
+  gap: 6px;
+  margin-bottom: 12px;
+}
+/* Interlignes serrés dans la vignette — 1.35 au lieu du 1.5 du corps de texte. On est
+   sur des noms et des chiffres qu'on lit d'un coup d'œil, pas sur de la prose. */
+.cap-simple {
+  gap: 3px;
+  padding: 9px 12px;
+  line-height: 1.35;
+}
+
+/* LA LIGNE DE TITRE porte désormais TOUT le score : « n°4 · 11-0 1-11 11-13 11-0 11-0
+   · 3-2 ». Le compte de largeur, à 390 px (332 px utiles dans la vignette) :
+
+     « n°4 » 32 · cinq jeux 5×41 + 4 écarts 205+16 · total 45 · deux écarts 16 = 314
+
+   Le mot « Simple » y tenait 85 px à lui seul, pour une information que la liste donne
+   déjà : il passe en `aria-label`, donc il reste dit à qui lit l'écran à la voix. C'est
+   la Règle du Micro Étiqueté appliquée à l'envers — la densité se gagne par
+   l'étiquetage, pas en supprimant l'information.
+
+   Ça se replie sur deux lignes sur un écran plus étroit, et c'est très bien : ces
+   chiffres sont ce qu'on recopie chez la fédération, ils ne se tronquent jamais. */
+.cap-tete {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 3px 8px;
+}
+.cap-numero {
+  flex: 0 0 auto;
+  font-size: 0.85rem;
+}
+/* Le total est poussé en bout de ligne : c'est LE chiffre du simple, et il doit se
+   retrouver à la même place d'une vignette à l'autre. */
+.cap-tete .cap-jeux {
+  margin-left: auto;
+}
+
+/* CE QUI VA BIEN SE TAIT, ce qui coince se voit : un filet d'issue à gauche,
+   emprunté aux paires déjà réglées dans les trois thèmes. Pas d'aplat — la ligne
+   porte déjà un fond de carte, et un second aplat par-dessus ne séparerait rien
+   (Règle du Fond Toujours Plus Sombre). */
+.cap-simple.cap-ko {
+  border-left: 3px solid var(--bad-edge);
+}
+.cap-simple.cap-ok {
+  border-left: 3px solid var(--good-edge);
+}
+
+/* Pastille d'état. Sur un simple réglé c'est un BOUTON (on peut rouvrir pour
+   relire), ailleurs un simple témoin — d'où le reset de l'apparence bouton. */
+.cap-pastille {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--grid-line);
+  background: none;
+  color: var(--pico-muted-color);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+button.cap-pastille {
+  /* 24 px de haut : sous les 44 px de la cible tactile principale, et c'est assumé —
+     c'est un dépliage de confort, jamais le seul chemin vers l'information (la ligne
+     entière s'ouvre déjà quand il y a quelque chose à voir). */
+  cursor: pointer;
+  min-height: 24px;
+}
+.cap-pastille-ok {
+  color: var(--good-edge);
+  border-color: var(--good-edge);
+}
+.cap-pastille-ko {
+  color: var(--bad-edge);
+  border-color: var(--bad-edge);
+}
+
+.cap-probleme {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+  color: var(--bad-edge);
+}
+
+/* Le bouton de vérification pendant les ~10 s d'interrogation de la fédération.
+   La roue réutilise `@keyframes spin`, déjà définie pour `.app-spinner` et la
+   roue de rafraîchissement — une seule animation dans la feuille, donc une seule
+   à neutraliser sous « réduire les animations » (cf. plus bas). */
+.cap-verifier {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.cap-spinner {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  /* La moitié haute transparente : c'est ce qui donne la roue. `currentColor`
+     suit l'encre du bouton, donc les trois thèmes sans une ligne de plus. */
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.cap-attente {
+  margin: 6px 0 0;
+}
+
+/* LES POINTS, JEU PAR JEU — « 11-9 8-11 11-6 ». C'est la ligne qu'on recopie chez
+   la fédération, donc elle doit se lire sans effort et se retrouver d'un simple à
+   l'autre : chiffres tabulaires, et des jeux séparés visuellement plutôt que par
+   des virgules, qui se confondent avec les tirets à cette taille. */
+/* SUR LA LIGNE DU TITRE depuis qu'il faut qu'une rencontre entière tienne dans une
+   capture d'écran (cf. `.cap-simples`) : c'était une ligne à part, elle coûtait 25 px
+   par vignette pour trois à cinq petits nombres. */
+.cap-points {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 5px;
+  margin: 0;
+  min-width: 0;
+}
+/* 0,75rem : un CRAN de la rampe (DESIGN.md › La rampe de fait), et non le 0,78 qui
+   traînait ici — un écart de deux centièmes ne se lit pas comme un système, il se lit
+   comme une inattention. Ce sont des chiffres, donc la Règle du Micro Étiqueté est
+   satisfaite d'office. */
+.cap-jeu {
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Le total en jeux : plus gros que le détail, parce que c'est LE chiffre du simple. */
+.cap-jeux {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* L'ordre des simples adverses. Deux tons, et la distinction compte : un écart
+   CONSTATÉ se signale (bad-edge), un ordre qu'on n'a pas pu vérifier n'accuse
+   personne et reste une note. Voir `OrderStatus` — notre lecture de leurs
+   classements passe par un rapprochement de noms qui peut se tromper. */
+.cap-ordre {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+}
+.cap-ordre-ko {
+  border-left: 3px solid var(--bad-edge);
+  color: var(--pico-contrast);
+}
+
+/* CE QUE LA LIGUE PUBLIE. Même grammaire que `.cap-ordre` juste au-dessus, et
+   c'est voulu : ce sont deux constats sur un document qui n'est pas le nôtre, pas
+   des fautes de notre saisie. Trois tons, dans l'ordre de ce qu'ils coûtent au
+   lecteur — une note grise (la ligue n'a pas encore saisi, état NORMAL quand on
+   vérifie avant d'aller saisir), un liseré vert (tout concorde), un liseré rouge
+   (ça ne concorde pas). Le fond reste `sunken` dans les trois cas : c'est une
+   information, jamais une alarme, et l'un des deux documents en cause peut très
+   bien être le nôtre. */
+.cap-officiel {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+}
+.cap-officiel-ok {
+  border-left: 3px solid var(--good-edge);
+}
+.cap-officiel-ko {
+  border-left: 3px solid var(--bad-edge);
+  color: var(--pico-contrast);
+}
+.cap-officiel-tete {
+  margin: 0;
+}
+.cap-officiel-lien {
+  white-space: nowrap;
+}
+/* Les écarts, un par ligne. Retrait modeste : ils appartiennent à la phrase qui
+   les introduit, ils ne forment pas une seconde liste au même niveau que les
+   simples. */
+.cap-officiel-ecarts {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.cap-officiel-ecarts li {
+  margin-top: 2px;
+}
+
+/* Une ligne de joueur : la marque, puis le nom et ce qu'on en sait. */
+.cap-joueur {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 3px;
+}
+.cap-marque {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+}
+/* EN LIGNE TANT QUE ÇA TIENT, replié sinon. Le nom fédéral et la ligne d'identité
+   (« 5A #2318 · 1463138W ») partagent une ligne quand la largeur le permet, et passent
+   à deux quand le nom est long — au lieu d'occuper deux lignes dans TOUS les cas. C'est
+   la dégradation qu'on veut : elle coûte une ligne au joueur qui la mérite, pas aux
+   sept autres. */
+.cap-joueur-corps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  min-width: 0;
+  gap: 0 8px;
+}
+.cap-joueur-nom {
+  font-size: 0.85rem;
+}
+/* Le club, sur la même ligne que le nom fédéral : c'est lui qui dit le camp depuis qu'on
+   n'écrit plus « (nous) » / « (eux) » à côté de chaque joueur rapproché. Discret — le nom
+   reste ce qu'on lit, le club ce qu'on vérifie d'un coup d'œil. */
+.cap-club {
+  color: var(--pico-muted-color);
+  font-weight: 400;
+}
+/* Classement, rang mixte et licence : la ligne d'identité fédérale, celle qu'on recopie.
+   Chiffres tabulaires pour que les licences s'alignent d'un simple à l'autre. */
+/* ⚠️ LE `margin-top` EST ANNULÉ, ET CE N'EST PAS COSMÉTIQUE. `.tiny` en porte 14 px
+   pour les paragraphes d'aide en bas d'écran. Ici, le span devient un ÉLÉMENT FLEX (donc
+   un bloc) et ce margin s'applique : 14 px × 2 joueurs × 4 simples = 112 px, soit un
+   tiers de ce qui manquait pour qu'une rencontre tienne dans une capture d'écran — pour
+   un espacement que personne n'avait demandé et que personne ne voyait. */
+.cap-fiche {
+  margin-top: 0;
+  font-variant-numeric: tabular-nums;
+}
+/* Le remède. Il est écrit pour être LU — pas de troncature, pas d'info-bulle :
+   l'appli s'utilise au doigt, et `title` ne se déclenche jamais au tactile. */
+/* `flex-basis: 100%` le met sur SA ligne : c'est une phrase, elle ne se met pas en
+   colonne à côté d'un nom. */
+.cap-hint {
+  flex: 1 0 100%;
+  margin-top: 0;
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+}

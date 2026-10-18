@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cronAuthorized } from "@/lib/cron-auth";
-import { recordCronRun } from "@/lib/cron-run";
+import { recordCronRun, runCron } from "@/lib/cron-run";
 import { getFeatures } from "@/lib/features-server";
 import { prisma } from "@/lib/db";
 import { adminUserIds } from "@/lib/admin";
@@ -15,7 +15,9 @@ import { notifyCalendarDrift, notifyCalendarUnreadable } from "@/lib/interclub-n
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// 300 s : la limite des fonctions Vercel (Fluid compute, plan Hobby compris). 60 s coupait les
+// passes longues en plein milieu — toujours les mêmes membres, ceux de fin de liste.
+export const maxDuration = 300;
 
 // ============================================================================
 //  GET /api/cron/interclub-calendar — le calendrier fédéral a-t-il bougé ?
@@ -54,7 +56,7 @@ function recipients(adminIds: string[], captainId: string | null): string[] {
   return [...ids];
 }
 
-export async function GET(req: NextRequest) {
+async function handle(req: NextRequest) {
   if (!(await getFeatures()).interclub) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
@@ -119,6 +121,7 @@ export async function GET(req: NextRequest) {
     if (team.snDrawId) {
       try {
         // Zéro ligne (`empty`) n'est ni un succès ni une panne : la poule n'est pas publiée.
+        // `vanished` (zéro ligne pour une poule déjà lue), lui, est une panne.
         const r = await refreshTeamStandings({
           id: team.id,
           snEventId: team.snEventId!,
@@ -126,7 +129,7 @@ export async function GET(req: NextRequest) {
           snRoundId: team.snRoundId!,
         });
         if (r.ok) standings++;
-        else if (r.reason === "unreachable") standingsFailed++;
+        else if (r.reason !== "empty") standingsFailed++;
       } catch {
         standingsFailed++;
       }
@@ -256,3 +259,7 @@ export async function GET(req: NextRequest) {
     standingsFailed,
   });
 }
+
+// Filet commun (cf. lib/cron-run) : une exception laisse une trace `ok: false` au lieu du
+// « ok » de la veille.
+export const GET = (req: NextRequest) => runCron("interclub-calendar", () => handle(req));

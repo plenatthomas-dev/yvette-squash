@@ -26,7 +26,11 @@ vi.mock("./db", () => ({
     user: { findUnique: h.userFindUnique, updateMany: vi.fn(async () => ({ count: 0 })) },
   },
 }));
-vi.mock("./crypto", () => ({ encrypt: (s: string) => s, decrypt: (s: string) => s }));
+vi.mock("./crypto", () => ({
+  encrypt: (s: string) => s,
+  decrypt: (s: string) => s,
+  hashSessionId: (s: string) => `h:${s}`,
+}));
 vi.mock("./resamania/client", () => ({ ensureFresh: vi.fn() }));
 
 import { getSession, normalizeEmail } from "./session";
@@ -109,4 +113,15 @@ it("refuse un compte désactivé, même quand sa session n'a pas expiré", async
   h.sessionFindUnique.mockResolvedValue(session({ displayName: "Disabled", email: "disabled@example.fr", disabledAt: new Date() } as { displayName: string; email: string }));
   expect(await getSession("sid-1")).toBeNull();
   expect(h.sessionDelete).toHaveBeenCalledWith({ where: { id: "sid-1" } });
+});
+
+// Audit 2026-10, point 24 : la base ne garde plus l'identifiant du cookie en clair.
+describe("getSession — identifiant de session haché", () => {
+  it("cherche d'abord l'empreinte du cookie", async () => {
+    h.sessionFindUnique.mockReset().mockResolvedValue(null);
+    await getSession("sid-1");
+    expect(h.sessionFindUnique.mock.calls[0][0]).toMatchObject({ where: { id: "h:sid-1" } });
+    // …puis l'ancien identifiant en clair (sessions ouvertes avant le changement).
+    expect(h.sessionFindUnique.mock.calls[1][0]).toMatchObject({ where: { id: "sid-1" } });
+  });
 });

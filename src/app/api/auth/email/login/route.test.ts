@@ -36,7 +36,8 @@ vi.mock("@/lib/email-auth", () => ({
 
 import { POST } from "./route";
 
-const req = (body: unknown) => ({ json: async () => body }) as unknown as NextRequest;
+const req = (body: unknown, h: Record<string, string> = {}) =>
+  ({ json: async () => body, headers: new Headers(h) }) as unknown as NextRequest;
 
 beforeEach(() => {
   vi.clearAllMocks();

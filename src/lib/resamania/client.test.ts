@@ -221,3 +221,31 @@ describe("getPlanningWithMeta — l'appelant sait si la photo est fraîche", () 
     expect(client.isResaUnavailable(err)).toBe(true);
   });
 });
+
+// Audit 2026-10, point 2 : tout compte du TENANT s'authentifie chez ResaMania, y compris ceux
+// des autres clubs. L'appli ne s'ouvre qu'au nôtre (défaut : /lecomplexbures/clubs/2345).
+describe("isOwnClub — seuls les comptes du club entrent", () => {
+  it("accepte le club configuré, quel que soit le préfixe de tenant", () => {
+    expect(client.isOwnClub("/lecomplexbures/clubs/2345")).toBe(true);
+    expect(client.isOwnClub("/omafitness/clubs/2345")).toBe(true);
+    expect(client.isOwnClub("2345")).toBe(true);
+  });
+
+  it("refuse un autre club du tenant", () => {
+    expect(client.isOwnClub("/lecomplexbures/clubs/9999")).toBe(false);
+  });
+
+  it("claim absent → passe (l'identité retombe déjà sur le club configuré)", () => {
+    expect(client.isOwnClub("")).toBe(true);
+    expect(client.isOwnClub(null)).toBe(true);
+  });
+
+  it("RESA_CLUB_CHECK=off coupe le contrôle", () => {
+    vi.stubEnv("RESA_CLUB_CHECK", "off");
+    expect(client.isOwnClub("/x/clubs/9999")).toBe(true);
+    vi.unstubAllEnvs();
+    vi.stubEnv("RESA_CLIENT_ID", "cid");
+    vi.stubEnv("RESA_CLIENT_SECRET", "secret");
+    vi.stubEnv("RESA_USE_MOCK", "0");
+  });
+});

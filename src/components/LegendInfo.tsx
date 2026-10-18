@@ -46,9 +46,12 @@ export function LegendInfo() {
         <>
           <div className="legend-backdrop" onClick={() => setOpen(false)} />
           <div className="legend-pop" role="dialog" aria-label="Légende des couleurs">
-            <span><i style={{ background: "var(--free)" }} /> Libre</span>
-            <span><i style={{ background: "var(--group)" }} /> Réservé (asso)</span>
-            <span><i style={{ background: "var(--booked)" }} /> Réservé (autre)</span>
+            {/* Les pastilles reprennent les MOTIFS de la vue semaine (`.wk-chip`), pas seulement
+                la couleur : c'est la légende qui apprend à les lire (audit 2026-10, point 29). */}
+            <span><i className="wk-chip free" /> Libre</span>
+            <span><i className="wk-chip asso" /> Réservé (asso) · points</span>
+            <span><i className="wk-chip other" /> Réservé (autre) · hachures</span>
+            <span><i className="wk-chip mine" /> Ta réservation · ★</span>
           </div>
         </>
       )}

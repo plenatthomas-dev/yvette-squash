@@ -12,6 +12,7 @@ import {
   createEmailToken,
   nameFromEmail,
 } from "@/lib/email-auth";
+import { crossSiteRefusal } from "@/lib/same-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,9 @@ export const dynamic = "force-dynamic";
 // ici : le lien peut n'arriver que des heures plus tard). Réponse toujours générique
 // (anti-énumération) : on ne révèle jamais si l'email a déjà un compte.
 export async function POST(req: NextRequest) {
+  // Connexion forcée depuis un autre site (login CSRF) : refusée d'emblée (cf. lib/same-origin).
+  const ailleurs = crossSiteRefusal(req);
+  if (ailleurs) return ailleurs;
   if (!(await getFeatures()).emailLogin) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }

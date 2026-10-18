@@ -19,7 +19,11 @@ const h = vi.hoisted(() => ({
 vi.mock("./db", () => ({
   prisma: { user: { findUnique: h.findUnique, update: h.update, create: vi.fn() } },
 }));
-vi.mock("./crypto", () => ({ encrypt: (s: string) => s, decrypt: (s: string) => s }));
+vi.mock("./crypto", () => ({
+  encrypt: (s: string) => s,
+  decrypt: (s: string) => s,
+  hashSessionId: (s: string) => `h:${s}`,
+}));
 vi.mock("./resamania/client", () => ({ ensureFresh: vi.fn() }));
 
 import { resolveUser } from "./session";
@@ -70,5 +74,51 @@ describe("resolveUser — étape 1 (jointure par contactId)", () => {
 
     expect(h.findUnique).toHaveBeenCalledTimes(1); // la seule jointure par contactId
     expect(h.update.mock.calls[0][0].data.email).toBe("ancienne@example.fr");
+  });
+});
+
+// Audit 2026-10, point 1 : l'e-mail renvoyé par ResaMania fait foi pour l'identité. Un compte
+// ResaMania tout neuf créé avec l'adresse d'un autre membre ne doit pas se greffer sur sa ligne.
+describe("resolveUser — étape 2 : un contactId existant ne se réécrit pas en silence", () => {
+  const dejaLie = { id: "u-admin", contactId: "/t/contacts/1", email: "chef@example.fr", emailVerifiedAt: new Date() };
+
+  beforeEach(() => {
+    h.findUnique.mockImplementation(async ({ where }: { where: { contactId?: string; email?: string } }) =>
+      where.email === "chef@example.fr" ? dejaLie : null,
+    );
+  });
+
+  it("refuse la connexion d'un AUTRE contactId sur une ligne déjà liée", async () => {
+    await expect(
+      resolveUser({ displayName: "Intrus", email: "chef@example.fr", contactId: "/t/contacts/666" }),
+    ).rejects.toMatchObject({ name: "LoginRefusedError", reason: "identity_conflict" });
+    expect(h.update).not.toHaveBeenCalled();
+  });
+
+  it("le rattache pendant une migration de club annoncée (RESA_CONTACT_RELINK=1)", async () => {
+    vi.stubEnv("RESA_CONTACT_RELINK", "1");
+    await resolveUser({ displayName: "Chef", email: "chef@example.fr", contactId: "/t/contacts/2" });
+    expect(h.update.mock.calls[0][0].data.contactId).toBe("/t/contacts/2");
+    vi.unstubAllEnvs();
+  });
+
+  it("attache toujours un contactId à une ligne « email seul » qui n'en avait pas", async () => {
+    h.findUnique.mockImplementation(async ({ where }: { where: { email?: string } }) =>
+      where.email ? { ...dejaLie, contactId: null } : null,
+    );
+    await resolveUser({ displayName: "Chef", email: "chef@example.fr", contactId: "/t/contacts/2" });
+    expect(h.update.mock.calls[0][0].data.contactId).toBe("/t/contacts/2");
+  });
+});
+
+describe("resolveUser — étape 1 : une adresse d'admin ne s'adopte pas", () => {
+  it("garde l'ancienne adresse quand la nouvelle est dans ADMIN_EMAILS", async () => {
+    vi.stubEnv("ADMIN_EMAILS", "chef@example.fr");
+    h.findUnique.mockImplementation(async ({ where }: { where: { contactId?: string } }) =>
+      where.contactId ? membre : null,
+    );
+    await resolveUser({ displayName: "Alice", email: "chef@example.fr", contactId: membre.contactId });
+    expect(h.update.mock.calls[0][0].data.email).toBe("ancienne@example.fr");
+    vi.unstubAllEnvs();
   });
 });

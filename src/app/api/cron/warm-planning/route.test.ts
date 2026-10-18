@@ -25,7 +25,11 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/resamania/client", () => ({ login: h.login, getPlanning: h.getPlanning }));
 vi.mock("@/lib/cron-auth", () => ({ cronAuthorized: () => true }));
-vi.mock("@/lib/cron-run", () => ({ recordCronRun: h.recordCronRun }));
+vi.mock("@/lib/cron-run", () => ({
+  recordCronRun: h.recordCronRun,
+  runCron: (_n: string, fn: () => Promise<unknown>) => fn(),
+}));
+vi.mock("@/lib/retention-purge", () => ({ purgeRetention: async () => ({}), purgedTotal: () => 0 }));
 
 import { GET } from "./route";
 

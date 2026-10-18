@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 // Relevé de l'état des notifications de l'appareil courant — pour la MESURE du tableau de bord
 // admin (combien de membres ne reçoivent rien, et pourquoi). N'abonne ni ne désabonne rien.
 export async function POST(req: NextRequest) {
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }

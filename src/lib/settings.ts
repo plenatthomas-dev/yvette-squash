@@ -2,6 +2,7 @@
 // Aujourd'hui : la bannière d'annonce et le blocage de l'appli. Les routes restent minces en
 // s'appuyant sur ces helpers ; `value` est une chaîne opaque dont la forme dépend de la clé.
 
+import { randomBytes } from "node:crypto";
 import { prisma } from "./db";
 
 export const BANNER_MAX = 280;
@@ -184,4 +185,57 @@ export async function setBannerSeen(
         ? { bannerDismissedVersion: version }
         : { bannerModalSeenVersion: version },
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Annonces push « à tous » (audit 2026-10, point 25).
+//
+// La notification menait à `/?announce=1&t=<titre>&b=<texte>`, et la modale affichait ce que
+// l'URL disait, sous l'en-tête officiel « 📣 Annonce » : n'importe qui pouvait fabriquer un
+// lien vers un faux message du club. L'URL ne porte plus qu'un IDENTIFIANT ; le texte est lu
+// chez le serveur, qui ne connaît que les annonces réellement envoyées depuis /admin. On garde
+// les dernières (une notification met parfois des jours à être ouverte), pas l'historique.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ANNOUNCE_KEY = "announcements";
+const ANNOUNCE_KEEP = 10;
+
+export type Announcement = { id: string; title: string; body: string; at: string };
+
+async function readAnnouncements(): Promise<Announcement[]> {
+  const row = await prisma.appSetting.findUnique({ where: { key: ANNOUNCE_KEY } });
+  if (!row) return [];
+  try {
+    const list = JSON.parse(row.value) as unknown;
+    return Array.isArray(list)
+      ? list.filter(
+          (a): a is Announcement =>
+            !!a && typeof a.id === "string" && typeof a.title === "string" && typeof a.body === "string",
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Enregistre une annonce et rend son identifiant (à mettre dans l'URL de la notification). */
+export async function saveAnnouncement(title: string, body: string, updatedById: string): Promise<string> {
+  const id = randomBytes(9).toString("base64url");
+  const list = [{ id, title, body, at: new Date().toISOString() }, ...(await readAnnouncements())].slice(
+    0,
+    ANNOUNCE_KEEP,
+  );
+  const value = JSON.stringify(list);
+  await prisma.appSetting.upsert({
+    where: { key: ANNOUNCE_KEY },
+    create: { key: ANNOUNCE_KEY, value, updatedById },
+    update: { value, updatedById },
+  });
+  return id;
+}
+
+/** L'annonce de cet identifiant, si elle a vraiment été envoyée (et pas encore oubliée). */
+export async function getAnnouncement(id: string): Promise<Announcement | null> {
+  if (!id) return null;
+  return (await readAnnouncements()).find((a) => a.id === id) ?? null;
 }

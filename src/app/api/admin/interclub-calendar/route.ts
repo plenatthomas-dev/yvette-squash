@@ -204,6 +204,15 @@ export async function POST(req: NextRequest) {
     }
     // Zéro ligne n'est pas un classement vide : c'est une poule non publiée, ou un ancrage
     // faux. Rien n'a été écrit, et l'admin doit le savoir.
+    if (!r.ok && r.reason === "vanished") {
+      return NextResponse.json(
+        {
+          error:
+            "squashnet ne montre plus le classement de cette poule, déjà lu auparavant : la page a sans doute changé. Le classement enregistré est conservé.",
+        },
+        { status: 502 },
+      );
+    }
     if (!r.ok) {
       return NextResponse.json(
         { error: "Aucun classement publié pour cette poule (ou identifiants incorrects)." },

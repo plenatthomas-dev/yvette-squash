@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminSession } from "@/lib/admin";
 import { prisma } from "@/lib/db";
 import {
   splitWithCredits,
@@ -32,7 +32,7 @@ export async function DELETE(
   if (!(await getFeatures()).tricount) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
@@ -58,7 +58,7 @@ export async function DELETE(
     !expense ||
     (expense.creatorId !== session.userId &&
       expense.payerId !== session.userId &&
-      !isAdminEmail(session.email) &&
+      !isAdminSession(session) &&
       !(
         expense.isRefund &&
         expense.shares.length === 1 &&
@@ -150,7 +150,7 @@ export async function PATCH(
   if (!features.tricount) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
@@ -166,7 +166,7 @@ export async function PATCH(
     !existingExpense ||
     (existingExpense.creatorId !== session.userId &&
       existingExpense.payerId !== session.userId &&
-      !isAdminEmail(session.email))
+      !isAdminSession(session))
   ) {
     return NextResponse.json({ error: "Dépense introuvable ou non autorisée" }, { status: 404 });
   }

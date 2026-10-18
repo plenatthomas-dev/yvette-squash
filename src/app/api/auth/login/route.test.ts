@@ -17,12 +17,21 @@ const h = vi.hoisted(() => ({
   createSession: vi.fn(async (_resa: unknown) => "sid"),
   // Réglage `block` lu par la garde « appli fermée ». `null` = appli ouverte (défaut).
   appSetting: vi.fn(async () => null as { value: string } | null),
+  isBot: false,
+  LoginRefusedError: class extends Error {
+    constructor(readonly reason: string) {
+      super(reason);
+    }
+  },
 }));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
     loginAttempt: { count: h.count, create: h.create, deleteMany: h.deleteMany },
     appSetting: { findUnique: h.appSetting },
+    user: {
+      findUnique: async ({ where }: { where: { email: string } }) => ({ id: "u-" + where.email, email: where.email }),
+    },
   },
 }));
 // Les erreurs typées et leurs gardes sont les VRAIES : la route décide sur leur classement
@@ -31,10 +40,12 @@ vi.mock("@/lib/resamania/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/resamania/client")>()),
   login: h.login,
 }));
+vi.mock("botid/server", () => ({ checkBotId: vi.fn(async () => ({ isBot: h.isBot })) }));
 vi.mock("@/lib/session", () => ({
   createSession: h.createSession,
   normalizeEmail: (s: string) => s.trim().toLowerCase(),
   AccountDisabledError: class extends Error {},
+  LoginRefusedError: h.LoginRefusedError,
 }));
 
 import { POST } from "./route";
@@ -136,6 +147,32 @@ describe("POST /api/auth/login — rate limiting", () => {
     const res = await POST(req(creds, { "x-real-ip": "1.2.3.4" }));
     expect(res.status).toBe(500);
     expect(h.create).not.toHaveBeenCalled(); // le mot de passe était bon : rien à compter
+  });
+
+  it.each(["foreign_club", "blocked", "identity_conflict"])(
+    "connexion refusée par l'appli (%s) → 403, jamais comptée comme échec",
+    async (reason) => {
+      h.createSession.mockImplementation(() => Promise.reject(new h.LoginRefusedError(reason)));
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const res = await POST(req(creds, { "x-real-ip": "1.2.3.4" }));
+      expect(res.status).toBe(403);
+      expect(h.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuse un robot (BotID) sans appeler ResaMania", async () => {
+    h.isBot = true;
+    const res = await POST(req(creds, { "x-real-ip": "1.2.3.4" }));
+    h.isBot = false;
+    expect(res.status).toBe(403);
+    expect(h.login).not.toHaveBeenCalled();
+  });
+
+  // Audit 2026-10, point 23 : pas de connexion forcée depuis un autre site (login CSRF).
+  it("refuse un POST venu d'un autre site, sans appeler ResaMania", async () => {
+    const res = await POST(req(creds, { "x-real-ip": "1.2.3.4", "sec-fetch-site": "cross-site" }));
+    expect(res.status).toBe(403);
+    expect(h.login).not.toHaveBeenCalled();
   });
 
   it("borne la longueur des entrées (400) sans rien lire ni appeler", async () => {

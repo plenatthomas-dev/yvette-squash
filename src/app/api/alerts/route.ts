@@ -36,7 +36,7 @@ const HM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 // enrichies pour la liste d'attente (idée D) : `count` = nombre total d'inscrits sur le
 // créneau, `position` = mon rang (1 = 1ᵉʳ inscrit, ordre d'arrivée). Aucun nom exposé.
 export async function GET(req: NextRequest) {
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/alerts { date: "YYYY-MM-DD", hm: "HH:MM" } -> crée/ré-active une alerte.
 export async function POST(req: NextRequest) {
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }

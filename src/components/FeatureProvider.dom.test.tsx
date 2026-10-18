@@ -24,6 +24,7 @@ vi.mock("@/lib/features", async () => {
 });
 
 import FeatureProvider, { useFeatures, useFeaturesReady } from "@/components/FeatureProvider";
+import { FEATURE_KEYS, type Features } from "@/lib/features";
 
 function Sonde() {
   const { tricount } = useFeatures();
@@ -87,5 +88,23 @@ describe("FeatureProvider — savoir avant d'agir", () => {
     );
 
     await waitFor(() => expect(screen.getByText("su/off")).toBeDefined());
+  });
+});
+
+// Audit 2026-10, point 26 : servi par le layout, l'état est su d'emblée, sans aller-retour.
+describe("FeatureProvider — état servi par le rendu serveur", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("est « su » dès le premier rendu, et ne relit pas /api/features au montage", () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const servi = Object.fromEntries(FEATURE_KEYS.map((k) => [k, k === "tricount"])) as Features;
+    render(
+      <FeatureProvider initial={servi}>
+        <Sonde />
+      </FeatureProvider>,
+    );
+    expect(screen.getByText("su/on")).toBeDefined();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

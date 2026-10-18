@@ -23,13 +23,12 @@ describe("cronAuthorized", () => {
     expect(cronAuthorized(req({ auth: `Bearer ${SECRET}` }))).toBe(true);
   });
 
-  it("accepte le bon secret en query string (crons externes sans en-tête)", () => {
-    expect(cronAuthorized(req({ token: SECRET }))).toBe(true);
+  it("REFUSE le secret en query string : il finirait dans les logs d'accès", () => {
+    expect(cronAuthorized(req({ token: SECRET }))).toBe(false);
   });
 
   it("refuse un mauvais secret", () => {
     expect(cronAuthorized(req({ auth: `Bearer ${SECRET.slice(0, -1)}0` }))).toBe(false);
-    expect(cronAuthorized(req({ token: "mauvais" }))).toBe(false);
   });
 
   it("refuse une requête sans aucune preuve", () => {
@@ -37,20 +36,20 @@ describe("cronAuthorized", () => {
   });
 
   it("refuse un préfixe du secret (pas de comparaison partielle)", () => {
-    expect(cronAuthorized(req({ token: SECRET.slice(0, 10) }))).toBe(false);
+    expect(cronAuthorized(req({ auth: `Bearer ${SECRET.slice(0, 10)}` }))).toBe(false);
   });
 
   it("ne jette pas sur des longueurs différentes (timingSafeEqual l'exigerait)", () => {
     // Le piège de crypto.timingSafeEqual : il LÈVE si les buffers n'ont pas la même taille.
     // Un secret plus court ou plus long doit rendre false, pas planter la route.
-    expect(() => cronAuthorized(req({ token: "x" }))).not.toThrow();
+    expect(() => cronAuthorized(req({ auth: "x" }))).not.toThrow();
     expect(() => cronAuthorized(req({ auth: "Bearer " + "x".repeat(500) }))).not.toThrow();
-    expect(cronAuthorized(req({ token: "x" }))).toBe(false);
+    expect(cronAuthorized(req({ auth: "x" }))).toBe(false);
   });
 
   it("échoue FERMÉ en production si CRON_SECRET est absent", () => {
     vi.stubEnv("CRON_SECRET", "");
-    expect(cronAuthorized(req({ token: "peu importe" }))).toBe(false);
+    expect(cronAuthorized(req({ auth: "Bearer peu importe" }))).toBe(false);
   });
 
   it("reste ouvert hors production sans secret (déclenchement manuel en dev)", () => {

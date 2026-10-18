@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminSession } from "@/lib/admin";
 import { prisma } from "@/lib/db";
 import {
   computeBalances,
@@ -28,12 +28,12 @@ export async function GET(req: NextRequest) {
   if (!features.tricount) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
-  const session = await getSession(req.cookies.get("sid")?.value);
+  const session = await getSession(req.cookies.get("sid")?.value, { resa: false });
   if (!session) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
   // L'admin a sur chaque ligne les droits de son auteur, comme les routes d'écriture.
-  const admin = isAdminEmail(session.email);
+  const admin = isAdminSession(session);
 
   // Pagination : on ne renvoie jamais TOUT l'historique d'un coup (il grossit sans fin).
   // ?limit borne le nombre de tricounts (les plus récents d'abord) ; le client demande

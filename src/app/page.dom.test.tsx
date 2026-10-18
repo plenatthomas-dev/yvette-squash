@@ -22,7 +22,7 @@ vi.mock("@/components/PlanningGrid", () => ({ PlanningGrid: ({ planning, onBook,
   {planning.slots.map((slot) => <button key={slot.id} onClick={() => slot.mine ? onCancelMine(slot) : onBook(slot)}>{slot.mine ? "Annuler la mienne" : "Réserver le libre"}</button>)}
 </div> }));
 vi.mock("@/components/WeekGrid", () => ({ WeekGrid: ({ days }: { days: { date: string }[] }) => <div data-testid="week">{days.map((d) => d.date).join(",")}</div> }));
-import Home from "./page";
+import Home from "./HomeApp";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -199,4 +199,14 @@ it("planning du jour sur un 500 illisible : erreur lisible à la place de la gri
   render(<Home />);
   expect((await screen.findAllByText(/Le service ne répond pas/)).length).toBeGreaterThan(0);
   expect(screen.queryByText(/JSON/)).toBeNull();
+});
+
+// Audit 2026-10, point 26 : la session lue au rendu serveur évite l'aller-retour /api/auth/me.
+it("amorcé par le serveur : affiche l'appli SANS interroger /api/auth/me", async () => {
+  const initialMe = { id: "me", displayName: "Alice", canBook: true } as unknown as Parameters<typeof Home>[0] extends infer P
+    ? P extends { initialMe?: infer M } ? M : never
+    : never;
+  render(<Home initialMe={initialMe} />);
+  await waitFor(() => expect(screen.getByTestId("planning")).toBeTruthy());
+  expect(calls.some((c) => c.url === "/api/auth/me")).toBe(false);
 });

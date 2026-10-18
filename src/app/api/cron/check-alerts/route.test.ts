@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
   // sinon `resa` vaut pour tout le monde.
   tokenFor: null as null | ((userId: string) => Promise<unknown>),
   getPlanning: vi.fn(),
+  login: vi.fn(),
   sessionUpdate: vi.fn(),
   sessionFindFirst: vi.fn(),
   // Renvoie le NOMBRE d'abonnements servis (le vrai `pushToUser` fait ça) : la route teste
@@ -48,10 +49,13 @@ vi.mock("@/lib/session", () => ({
     h.tokenFor ? h.tokenFor(userId) : Promise.resolve(h.resa),
   ),
 }));
-vi.mock("@/lib/resamania/client", () => ({ getPlanning: h.getPlanning }));
+vi.mock("@/lib/resamania/client", () => ({ getPlanning: h.getPlanning, login: h.login }));
 vi.mock("@/lib/push", () => ({ pushToUser: h.pushToUser, pushConfigured: () => true }));
 vi.mock("@/lib/cron-auth", () => ({ cronAuthorized: () => h.authorized }));
-vi.mock("@/lib/cron-run", () => ({ recordCronRun: vi.fn() }));
+vi.mock("@/lib/cron-run", () => ({
+  recordCronRun: vi.fn(),
+  runCron: (_n: string, fn: () => Promise<unknown>) => fn(),
+}));
 // Mock PARTIEL : on garde la vraie `alertHorizonISO` (et sa constante) et on ne remplace que
 // ce qui touche au cache. Une réimplémentation « équivalente » du calcul de date ici
 // reproduirait justement les deux pièges corrigés dans le module — fuseau ambiant et
@@ -398,5 +402,45 @@ describe("GET /api/cron/check-alerts — jeton en panne passagère", () => {
       true,
       expect.not.stringContaining("reportée"),
     );
+  });
+});
+
+// Audit 2026-10, point 8 : la liste d'attente d'un compte « email seul » (sans jeton ResaMania)
+// ne se déclenchait jamais. Le planning se lit désormais avec le compte de service.
+describe("GET /api/cron/check-alerts — compte de service", () => {
+  beforeEach(async () => {
+    vi.stubEnv("RESA_CRON_USER", "service");
+    vi.stubEnv("RESA_CRON_PASSWORD", "secret");
+    const { resetServiceTokenMemo } = await import("@/lib/resamania/service");
+    resetServiceTokenMemo();
+    h.login.mockReset().mockResolvedValue({ accessToken: "jeton-service", expiresAt: Date.now() + 3_600_000 });
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("notifie un membre SANS jeton ResaMania, planning lu avec le compte de service", async () => {
+    h.resa = null;
+    h.getPlanning.mockResolvedValue({ slots: [{ startsAt: at18(), bookable: true }] });
+    await GET(req());
+    expect(h.getPlanning).toHaveBeenCalledWith(expect.any(String), "jeton-service");
+    expect(h.pushToUser).toHaveBeenCalledWith("u1", expect.anything());
+  });
+
+  it("UNE lecture par jour surveillé, quel que soit le nombre de membres", async () => {
+    h.alerts = [
+      { id: "a1", userId: "u1", date: tomorrow(), hm: "18:00", active: true },
+      { id: "a2", userId: "u2", date: tomorrow(), hm: "18:00", active: true },
+    ];
+    await GET(req());
+    expect(h.getPlanning).toHaveBeenCalledTimes(1);
+  });
+
+  it("compte de service en échec de lecture → retombe sur le jeton du membre", async () => {
+    h.getPlanning.mockImplementation(async (_d: string, tok: string) => {
+      if (tok === "jeton-service") throw new Error("boum");
+      return { slots: [{ startsAt: at18(), bookable: true }] };
+    });
+    await GET(req());
+    expect(h.getPlanning).toHaveBeenLastCalledWith(expect.any(String), "jeton-en-clair-valide");
+    expect(h.pushToUser).toHaveBeenCalledTimes(1);
   });
 });

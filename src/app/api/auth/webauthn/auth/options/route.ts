@@ -10,6 +10,7 @@ import {
   CHALLENGE_TTL_S,
   challengeCookieOptions,
 } from "@/lib/webauthn";
+import { crossSiteRefusal } from "@/lib/same-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,6 +19,9 @@ export const dynamic = "force-dynamic";
 // d'allowCredentials : le passkey est découvrable, l'utilisateur n'a donc pas à saisir son
 // email — l'appareil propose directement le bon compte.
 export async function POST(req: NextRequest) {
+  // Connexion forcée depuis un autre site (login CSRF) : refusée d'emblée (cf. lib/same-origin).
+  const ailleurs = crossSiteRefusal(req);
+  if (ailleurs) return ailleurs;
   if (!(await getFeatures()).biometry) {
     return NextResponse.json({ error: "Fonction indisponible" }, { status: 404 });
   }
