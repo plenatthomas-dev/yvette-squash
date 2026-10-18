@@ -19,6 +19,9 @@ const h = vi.hoisted(() => ({
   results: {} as Record<string, unknown>,
   features: vi.fn(),
   runs: [] as unknown[][],
+  /** Relecture des feuilles de match, par équipe ; une `Error` est levée. */
+  sheets: {} as Record<string, unknown>,
+  sheetCalls: [] as string[],
 }));
 
 vi.mock("@/lib/cron-auth", () => ({ cronAuthorized: () => h.authorized }));
@@ -40,6 +43,15 @@ vi.mock("@/lib/interclub-standings", () => ({
     const r = h.results[team.id];
     if (r instanceof Error) throw r;
     return r ?? { ok: true, rows: 8, at: new Date() };
+  }),
+}));
+vi.mock("@/lib/interclub-sheets", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/interclub-sheets")>()),
+  refreshTeamSheets: vi.fn(async (id: string) => {
+    h.sheetCalls.push(id);
+    const r = h.sheets[id];
+    if (r instanceof Error) throw r;
+    return r ?? { read: 0, stored: 0, empty: 0, unmatched: 0, failed: 0 };
   }),
 }));
 vi.mock("@/lib/db", () => ({
@@ -67,6 +79,8 @@ beforeEach(() => {
   h.results = {};
   h.features.mockClear();
   h.runs = [];
+  h.sheets = {};
+  h.sheetCalls = [];
 });
 
 describe("GET /api/cron/interclub-standings", () => {
@@ -111,6 +125,27 @@ describe("GET /api/cron/interclub-standings", () => {
     const body = await (await GET(req())).json();
     expect(body).toMatchObject({ teams: 3, refreshed: 1, failed: 2 });
     expect(h.runs[0][0]).toBe("interclub-standings");
+    expect(h.runs[0][1]).toBe(false);
+  });
+
+  it("relit AUSSI les feuilles de match de toutes les équipes en fenêtre, ancrées ou non", async () => {
+    // Les feuilles ne demandent que le `teamid` fédéral : une équipe sans ancrage de poule a
+    // quand même des feuilles, et le palmarès en dépend.
+    h.due = ["t1", "t2"];
+    h.teams = [team("t1")];
+    h.sheets = { t1: { read: 2, stored: 2, empty: 0, unmatched: 0, failed: 0 } };
+    const body = await (await GET(req())).json();
+    expect(h.sheetCalls).toEqual(["t1", "t2"]);
+    expect(body.sheets).toMatchObject({ read: 2, stored: 2 });
+    expect(h.runs[0][2]).toMatch(/2 feuille\(s\) de match relue\(s\)/);
+  });
+
+  it("une feuille en échec met le cron au rouge, sans emporter le classement", async () => {
+    h.due = ["t1"];
+    h.teams = [team("t1")];
+    h.sheets = { t1: new Error("base") };
+    const body = await (await GET(req())).json();
+    expect(body).toMatchObject({ refreshed: 1, sheets: { failed: 1 } });
     expect(h.runs[0][1]).toBe(false);
   });
 

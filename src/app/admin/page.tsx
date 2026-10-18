@@ -912,13 +912,18 @@ export default function AdminPage() {
       const data = (await res.json().catch(() => ({}))) as {
         rows?: number;
         standingsAt?: string;
+        /** Ce que la relecture des feuilles de match a donné, en une phrase. */
+        sheets?: string | null;
         error?: string;
       };
       if (!res.ok) {
         setIcResult({ ok: false, text: data.error ?? "Classement indisponible." });
         return;
       }
-      setIcResult({ ok: true, text: `Classement à jour — ${data.rows} équipe(s).` });
+      setIcResult({
+        ok: true,
+        text: `Classement à jour — ${data.rows} équipe(s)${data.sheets ? ` ; ${data.sheets}` : ""}.`,
+      });
       setIcTeams((prev) =>
         prev.map((x) =>
           x.id === t.id ? { ...x, snStandingsAt: data.standingsAt ?? null } : x,

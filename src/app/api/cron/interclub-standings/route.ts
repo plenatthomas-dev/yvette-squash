@@ -4,6 +4,7 @@ import { recordCronRun, runCron } from "@/lib/cron-run";
 import { getFeatures } from "@/lib/features-server";
 import { prisma } from "@/lib/db";
 import { refreshTeamStandings, teamsDueForStandings } from "@/lib/interclub-standings";
+import { describeSheets, refreshTeamSheets, type SheetsRefresh } from "@/lib/interclub-sheets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +14,10 @@ export const maxDuration = 300;
 
 // ============================================================================
 //  GET /api/cron/interclub-standings — relit le classement après un match.
+//
+//  ET LES FEUILLES DE MATCH OFFICIELLES, dans la même passe : elles nourrissent
+//  le palmarès des joueurs, et bougent au même moment que le classement — quand
+//  la ligue a saisi la journée (cf. `interclub-sheets.ts`).
 //
 //  Toutes les 4 heures, à partir de 22 h le soir d'une rencontre et pendant les
 //  5 jours qui suivent (cf. `standingsWindowOpen`). Remplace le geste « Relire
@@ -66,6 +71,7 @@ async function handle(req: NextRequest) {
   let refreshed = 0;
   let empty = 0;
   let failed = 0;
+  const sheets: SheetsRefresh = { read: 0, stored: 0, empty: 0, unmatched: 0, failed: 0 };
   for (const team of teams) {
     // Une équipe en échec n'emporte pas les autres : chacune son `try`, y compris contre une
     // écriture en base qui casserait.
@@ -84,18 +90,30 @@ async function handle(req: NextRequest) {
     }
   }
 
+  // Les feuilles demandent seulement le `teamid` fédéral, pas l'ancrage de poule : d'où toutes
+  // les équipes en fenêtre, et pas seulement celles dont on lit le classement. Chacune son `try`.
+  for (const id of due) {
+    try {
+      const r = await refreshTeamSheets(id);
+      for (const k of Object.keys(sheets) as (keyof SheetsRefresh)[]) sheets[k] += r[k];
+    } catch {
+      sheets.failed++;
+    }
+  }
+
   // Un classement encore VIDE n'est pas une panne : la poule n'est pas publiée, ou pas encore.
   // Le compter à part évite de mettre le cron au rouge pour une attente normale. Une poule DÉJÀ
   // lue qui revient vide (`vanished`) est, elle, comptée en échec.
   await recordCronRun(
     "interclub-standings",
-    failed === 0,
+    failed === 0 && sheets.failed === 0,
     `${refreshed} classement(s) relu(s)` +
       `${empty ? `, ${empty} vide(s)` : ""}` +
       `${failed ? `, ${failed} échec(s)` : ""}` +
+      ` ; ${describeSheets(sheets)}` +
       ` — ${due.length} équipe(s) en fenêtre d'après-match`,
   );
-  return NextResponse.json({ teams: teams.length, refreshed, empty, failed });
+  return NextResponse.json({ teams: teams.length, refreshed, empty, failed, sheets });
 }
 
 // Filet commun (cf. lib/cron-run) : une exception laisse une trace `ok: false` au lieu du

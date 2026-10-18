@@ -1041,6 +1041,20 @@ model Interclub {
   /// NULL = rencontre saisie à la main, ou fiche d'équipe jamais lue. L'absence se dit, et ne se
   /// confond pas avec un silence de la ligue.
   snTieId                String?
+  /// La FEUILLE DE MATCH OFFICIELLE de cette rencontre, telle que la ligue la publie
+  /// (`TieSheet`, sérialisée — patron de `InterclubTeam.snStandingsJson`). C'est la source du
+  /// PALMARÈS DES JOUEURS (cf. `interclub-stats.ts`) : nos propres relevés ne couvrent que les
+  /// soirées marquées dans l'appli, la feuille fédérale couvre toutes celles qui ont été jouées.
+  ///
+  /// Relue avec le classement de poule, par les mêmes déclencheurs (cf. `interclub-sheets.ts`).
+  /// Jamais écrasée par une feuille VIDE : une feuille publiée ne disparaît pas, et la ligue qui
+  /// ne répond rien ne doit pas effacer ce qu'elle a déjà dit.
+  snSheetJson            String?
+  /// Notre côté sur cette feuille, « A » ou « B » (cf. `ourSide`). NULL = feuille lue, mais notre
+  /// équipe n'a pas pu être reconnue : elle ne compte alors dans AUCUN palmarès — compter à
+  /// l'envers attribuerait nos défaites à nos joueurs comme des victoires.
+  snSheetSide            String?
+  snSheetAt              DateTime?
   home                   Boolean                 @default(true) // true = on reçoit
   matchCount             Int                     @default(4) // nombre de simples de la rencontre
   bestOf                 Int                     @default(5) // 3 => 2 jeux gagnants ; 5 => 3 jeux gagnants

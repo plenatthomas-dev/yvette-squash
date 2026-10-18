@@ -31,6 +31,7 @@ const h = vi.hoisted(() => ({
   admins: [] as Array<{ id: string; email: string }>,
   standings: [] as Array<Record<string, unknown>>,
   standingsThrows: false,
+  sheetCalls: [] as string[],
 }));
 
 vi.mock("@/lib/features-server", () => ({ getFeatures: async () => ({ interclub: h.interclub }) }));
@@ -72,6 +73,16 @@ vi.mock("@/lib/squashnet/standings", () => ({
   fetchStandings: vi.fn(async () => {
     if (h.standingsThrows) throw new Error("502");
     return h.standings;
+  }),
+}));
+// Les feuilles de match ont leurs propres tests (lib/interclub-sheets.test.ts) : ici, seulement
+// qu'elles sont relues pour chaque équipe, et qu'un échec n'emporte rien.
+vi.mock("@/lib/interclub-sheets", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/interclub-sheets")>()),
+  refreshTeamSheets: vi.fn(async (id: string) => {
+    h.sheetCalls.push(id);
+    if (id === "boom") throw new Error("base");
+    return { read: 1, stored: 1, empty: 0, unmatched: 0, failed: 0 };
   }),
 }));
 vi.mock("@/lib/db", () => ({
@@ -158,6 +169,7 @@ beforeEach(() => {
   h.admins = [{ id: "adm", email: "chef@ex.com" }];
   h.standings = [{ rank: 2, name: "Squash de l'Yvette", snTeamId: "161092", points: 9 }];
   h.standingsThrows = false;
+  h.sheetCalls = [];
 });
 
 describe("gardes", () => {
@@ -297,6 +309,20 @@ describe("contrôle de dérive", () => {
   });
 });
 
+
+describe("les feuilles de match, relues dans la même passe", () => {
+  it("relit les feuilles de chaque équipe et le consigne", async () => {
+    const body = await (await GET(req())).json();
+    expect(h.sheetCalls).toEqual(["t1"]);
+    expect(body.sheets).toMatchObject({ stored: 1 });
+  });
+
+  it("une feuille en échec n'emporte ni le classement ni le calendrier", async () => {
+    h.teams = [team({ id: "boom" })];
+    const body = await (await GET(req())).json();
+    expect(body).toMatchObject({ checked: 1, standings: 1, sheets: { failed: 1 } });
+  });
+});
 
 describe("le classement, rafraîchi dans la même passe", () => {
   // Pas de cron à lui : le classement ne bouge qu'après une journée de championnat, et cette

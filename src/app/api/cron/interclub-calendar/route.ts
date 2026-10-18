@@ -11,6 +11,7 @@ import {
   CalendarUnreadableError,
 } from "@/lib/squashnet/calendar";
 import { refreshTeamStandings } from "@/lib/interclub-standings";
+import { describeSheets, refreshTeamSheets, type SheetsRefresh } from "@/lib/interclub-sheets";
 import { notifyCalendarDrift, notifyCalendarUnreadable } from "@/lib/interclub-notify";
 
 export const runtime = "nodejs";
@@ -100,6 +101,7 @@ async function handle(req: NextRequest) {
   let failed = 0;
   let standings = 0;
   let standingsFailed = 0;
+  const sheets: SheetsRefresh = { read: 0, stored: 0, empty: 0, unmatched: 0, failed: 0 };
 
   for (const team of teams) {
     // LE CLASSEMENT, DANS LA MÊME PASSE. Il ne bouge qu'après une journée de championnat :
@@ -133,6 +135,17 @@ async function handle(req: NextRequest) {
       } catch {
         standingsFailed++;
       }
+    }
+
+    // LES FEUILLES DE MATCH, MÊME FILET. Elles nourrissent le palmarès et bougent avec le
+    // classement ; ce passage rattrape la saison déjà jouée et les saisies tardives, hors de la
+    // fenêtre d'après-match. Même isolement : elles ne doivent emporter ni le classement ni le
+    // calendrier.
+    try {
+      const r = await refreshTeamSheets(team.id);
+      for (const k of Object.keys(sheets) as (keyof SheetsRefresh)[]) sheets[k] += r[k];
+    } catch {
+      sheets.failed++;
     }
 
     let published;
@@ -248,7 +261,8 @@ async function handle(req: NextRequest) {
     failed === 0,
     `${checked} équipe(s) vérifiée(s), ${drifted} écart(s), ${failed} échec(s)` +
       `${unreadable.length ? ` dont ${unreadable.length} illisible(s)` : ""}, ` +
-      `${standings} classement(s) rafraîchi(s), ${standingsFailed} échec(s) de classement`,
+      `${standings} classement(s) rafraîchi(s), ${standingsFailed} échec(s) de classement, ` +
+      describeSheets(sheets),
   );
   return NextResponse.json({
     teams: teams.length,
@@ -257,6 +271,7 @@ async function handle(req: NextRequest) {
     failed,
     standings,
     standingsFailed,
+    sheets,
   });
 }
 
