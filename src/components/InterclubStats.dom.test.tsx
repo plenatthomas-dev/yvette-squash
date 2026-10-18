@@ -6,8 +6,8 @@ import { InterclubStats } from "@/components/InterclubStats";
 //
 // Trois propriétés tiennent ici, et aucune ne se relit dans le JSX :
 //
-//  1. RIEN N'EST CHARGÉ TANT QUE LE BLOC EST FERMÉ. La requête joint les simples et leur jeu
-//     par jeu sur toute l'histoire du club. La payer à chaque affichage de l'écran interclub,
+//  1. RIEN N'EST CHARGÉ TANT QUE LE BLOC EST FERMÉ. La requête relit toutes les feuilles de
+//     match officielles de la saison. La payer à chaque affichage de l'écran interclub,
 //     pour un bloc que presque personne n'ouvre, serait un coût permanent sans contrepartie.
 //  2. ELLE N'EST PAYÉE QU'UNE FOIS. Replier puis déplier ne relance rien : `data` non nul vaut
 //     « déjà chargé », et sans cette garde le bloc rechargerait à chaque coup d'œil.
@@ -31,7 +31,7 @@ const ligne = (over: Record<string, unknown> = {}) => ({
 
 /** Les appels réellement partis, dans l'ordre — c'est la mesure des propriétés 1 et 2. */
 let appels: string[] = [];
-let charge: { rows: unknown[]; seasons: string[] };
+let charge: { rows: unknown[]; seasons: string[]; pending?: number; sheetsAt?: string | null };
 
 beforeEach(() => {
   appels = [];
@@ -155,8 +155,28 @@ describe("InterclubStats", () => {
     charge = { rows: [], seasons: [] };
     rendre();
     await ouvrir();
-    await waitFor(() => expect(screen.getByText(/Aucun match terminé/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Aucune feuille de match officielle/)).toBeTruthy());
     expect(document.querySelector(".ic-stats-table")).toBeNull();
+  });
+
+  // LA SOURCE SE DIT, ET CE QUI MANQUE AUSSI. Le palmarès est lu sur les feuilles officielles :
+  // une rencontre jouée dont la feuille n'est pas encore publiée n'y figure pas, et le taire
+  // laisserait croire à un palmarès complet.
+  it("date la source et compte les rencontres sans feuille officielle", async () => {
+    charge = { ...charge, pending: 2, sheetsAt: "2026-10-15T20:04:00Z" };
+    rendre();
+    await ouvrir();
+    await waitFor(() => expect(screen.getByText(/feuilles de match publiées sur squashnet/)).toBeTruthy());
+    expect(screen.getByText(/relues le 15 oct/)).toBeTruthy();
+    expect(screen.getByText(/2 rencontres jouées sans feuille officielle/)).toBeTruthy();
+  });
+
+  it("des jeux non publiés s'affichent « — », pas « +0 »", async () => {
+    charge = { rows: [ligne({ games: null, rallies: null })], seasons: [] };
+    rendre();
+    await ouvrir();
+    await waitFor(() => expect(document.querySelector(".ic-stats-table")).not.toBeNull());
+    expect(screen.getByTitle(/Jeux non publiés/).textContent).toBe("—");
   });
 
   // Le silence serait indiscernable d'un club sans aucun match joué — le pire des deux, parce

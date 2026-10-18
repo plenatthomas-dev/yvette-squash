@@ -8,18 +8,39 @@ import type { PlayerStatRow } from "@/lib/interclub-stats";
 // ============================================================================
 //  LE PALMARÈS DES JOUEURS.
 //
-//  Publiques pour tous les membres, et c'est une décision : ces chiffres sont
-//  entièrement déduits des scores de rencontre, déjà visibles de tous. Les
-//  réserver au joueur et au capitaine aurait caché un total que chacun peut
-//  refaire à la main.
+//  CALCULÉ SUR LES FEUILLES DE MATCH OFFICIELLES de squashnet, pas sur nos
+//  relevés : une soirée non marquée dans l'appli compte quand même. Les feuilles
+//  sont relues avec le classement de poule ; l'écran dit quand, et combien de
+//  rencontres jouées n'ont pas encore la leur.
 //
-//  CHARGÉ À L'OUVERTURE, JAMAIS AVANT. La requête joint les simples et leur jeu
-//  par jeu sur toute l'histoire du club : la payer à chaque affichage de
-//  l'écran interclub, pour un bloc que personne n'ouvre la plupart du temps,
-//  serait un coût permanent au bénéfice d'un usage occasionnel.
+//  Publiques pour tous les membres, et c'est une décision : ces chiffres sont
+//  entièrement déduits de feuilles que la ligue publie. Les réserver au joueur
+//  et au capitaine aurait caché un total que chacun peut refaire à la main.
+//
+//  CHARGÉ À L'OUVERTURE, JAMAIS AVANT. La requête relit toutes les feuilles de
+//  la saison : la payer à chaque affichage de l'écran interclub, pour un bloc
+//  que personne n'ouvre la plupart du temps, serait un coût permanent au
+//  bénéfice d'un usage occasionnel.
 // ============================================================================
 
-type Payload = { rows: PlayerStatRow[]; seasons: string[] };
+type Payload = {
+  rows: PlayerStatRow[];
+  seasons: string[];
+  /** Rencontres jouées dont la feuille officielle n'est pas (encore) exploitable. */
+  pending: number;
+  /** Dernière relecture d'une feuille, ISO, ou null. */
+  sheetsAt: string | null;
+};
+
+/** « 18 oct., 22:04 » — de quand date la dernière feuille relue. */
+const quand = (iso: string) =>
+  new Date(iso).toLocaleString("fr-FR", {
+    timeZone: "Europe/Paris",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
 /** « 67 % ». Jamais « 0 % » sur zéro match : voir `winRate` dans interclub-stats.ts. */
 const pourcent = (v: number | null) => (v === null ? "—" : `${Math.round(v * 100)} %`);
@@ -124,8 +145,8 @@ export function InterclubStats({
 
       {data && data.rows.length === 0 && (
         <p className="muted tiny ic-stats-msg">
-          Aucun match terminé pour l&apos;instant — les statistiques se remplissent au fil des
-          soirées marquées.
+          Aucune feuille de match officielle pour l&apos;instant — les statistiques se
+          remplissent dès que la ligue publie les résultats.
         </p>
       )}
 
@@ -168,19 +189,38 @@ export function InterclubStats({
                   <td>{r.lost}</td>
                   <td className="ic-stats-pct">{pourcent(r.winRate)}</td>
                   <td
-                    title={`${r.games.won} jeux gagnés, ${r.games.lost} perdus${
-                      r.rallies
-                        ? ` · points ${r.rallies.won}–${r.rallies.lost} (${signe(r.rallies.diff)})`
-                        : ""
-                    }`}
+                    title={
+                      r.games
+                        ? `${r.games.won} jeux gagnés, ${r.games.lost} perdus${
+                            r.rallies
+                              ? ` · points ${r.rallies.won}–${r.rallies.lost} (${signe(r.rallies.diff)})`
+                              : ""
+                          }`
+                        : "Jeux non publiés sur au moins une feuille"
+                    }
                   >
-                    {signe(r.games.diff)}
+                    {r.games ? signe(r.games.diff) : "—"}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {data && (data.sheetsAt || data.pending > 0) && (
+        <p className="ic-stats-note muted tiny">
+          Source : feuilles de match publiées sur squashnet
+          {data.sheetsAt ? `, relues le ${quand(data.sheetsAt)}` : ""}.
+          {data.pending > 0 &&
+            ` ${data.pending} rencontre${data.pending > 1 ? "s" : ""} jouée${
+              data.pending > 1 ? "s" : ""
+            } sans feuille officielle pour l'instant : ${
+              data.pending > 1
+                ? "elles compteront dès leur publication"
+                : "elle comptera dès sa publication"
+            }.`}
+        </p>
       )}
 
       {data && data.rows.length > 0 && (

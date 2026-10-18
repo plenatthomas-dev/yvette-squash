@@ -1,35 +1,42 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { NextRequest } from "next/server";
 
-// LE PALMARÈS — ce que la route lit, et ce qu'elle refuse de charger.
+// LE PALMARÈS — ce que la route lit, et d'où.
 //
-// Deux propriétés tiennent ici et nulle part ailleurs :
-//   * elle FILTRE en base sur `status: "done"`, plutôt que de tout charger pour laisser
-//     `playerStats` refiltrer : la requête joint le jeu par jeu de toutes les soirées, et
-//     charger les matchs en cours pour les jeter ensuite se paierait à chaque ouverture ;
+// Trois propriétés tiennent ici et nulle part ailleurs :
+//   * elle compte sur les FEUILLES OFFICIELLES rangées en base, jamais sur nos relevés : une
+//     soirée non marquée dans l'appli compte quand même ;
+//   * une rencontre jouée SANS feuille exploitable est comptée à part (`pending`), pour que
+//     l'écran dise qu'il en manque ;
 //   * elle est réservée aux membres, comme le reste de l'appli — on y lit des noms de joueurs.
 
 const h = vi.hoisted(() => ({
   interclub: true,
   session: null as null | { userId: string },
-  matches: [] as Array<Record<string, unknown>>,
+  fixtures: [] as Array<Record<string, unknown>>,
   seasons: [] as Array<{ season: string | null }>,
-  lastWhere: null as unknown,
+  users: [] as Array<Record<string, unknown>>,
+  guests: [] as Array<Record<string, unknown>>,
+  fixturesWhere: null as unknown,
 }));
 
 vi.mock("@/lib/features-server", () => ({
   getFeatures: async () => ({ interclub: h.interclub }),
 }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn(async () => h.session) }));
+vi.mock("@/lib/interclub-roster-db", () => ({ loadRosters: vi.fn(async () => new Map()) }));
 vi.mock("@/lib/db", () => ({
   prisma: {
-    interclubMatch: {
-      findMany: vi.fn(async (args: { where: unknown }) => {
-        h.lastWhere = args.where;
-        return h.matches;
+    interclub: {
+      findMany: vi.fn(async (args: { where: unknown; select: Record<string, unknown> }) => {
+        if ("season" in args.select) return h.seasons;
+        h.fixturesWhere = args.where;
+        return h.fixtures;
       }),
     },
-    interclub: { findMany: vi.fn(async () => h.seasons) },
+    user: { findMany: vi.fn(async () => h.users) },
+    interclubGuest: { findMany: vi.fn(async () => h.guests) },
+    interclubTeam: { findMany: vi.fn(async () => []) },
   },
 }));
 
@@ -41,28 +48,38 @@ const req = (qs = "") =>
     nextUrl: { searchParams: new URLSearchParams(qs) },
   }) as unknown as NextRequest;
 
-/** Un simple gagné 3-0, jeu par jeu compris. */
-const simple = (over: Record<string, unknown> = {}) => ({
-  status: "done",
-  gamesHome: 3,
-  gamesAway: 0,
-  homeUserId: "u1",
-  homeGuestId: null,
-  homeDisplayName: "Thomas",
-  games: [
-    { pointsHome: 11, pointsAway: 5 },
-    { pointsHome: 11, pointsAway: 6 },
-    { pointsHome: 11, pointsAway: 7 },
-  ],
-  ...over,
+const joueur = (name: string) => ({ name, regiid: null, clt: null, rang: null, rangM: null });
+
+/** Une rencontre et sa feuille : un simple par nom donné, gagné par nous (côté A) si `gagne`. */
+const rencontre = (simples: Array<[string, boolean]>, side: string | null = "A") => ({
+  snSheetJson: JSON.stringify({
+    snTieId: "1",
+    codeA: null,
+    codeB: null,
+    lines: simples.map(([nom, gagne], i) => ({
+      label: `Homme ${i + 1}`,
+      a: joueur(nom),
+      b: joueur("ADVERSAIRE X"),
+      score: null,
+      winner: gagne ? "A" : "B",
+      gamesA: gagne ? 3 : 0,
+      gamesB: gagne ? 0 : 3,
+      pointsA: null,
+      pointsB: null,
+    })),
+  }),
+  snSheetSide: side,
+  snSheetAt: new Date("2026-10-15T20:00:00Z"),
 });
 
 beforeEach(() => {
   h.interclub = true;
   h.session = { userId: "u1" };
-  h.matches = [];
+  h.fixtures = [];
   h.seasons = [];
-  h.lastWhere = null;
+  h.users = [];
+  h.guests = [];
+  h.fixturesWhere = null;
 });
 
 describe("GET /api/interclub/stats", () => {
@@ -76,43 +93,46 @@ describe("GET /api/interclub/stats", () => {
     expect((await GET(req())).status).toBe(401);
   });
 
-  it("rend le palmarès de chaque joueur", async () => {
-    h.matches = [
-      simple(),
-      simple({ gamesHome: 1, gamesAway: 3 }),
-      simple({ homeUserId: "u2", homeDisplayName: "Léa" }),
+  it("rend le palmarès lu sur les feuilles, sous le nom de l'appli quand on sait relier", async () => {
+    h.users = [
+      { id: "u1", displayName: "Thomas Plenat", nickname: "Tom", snLicence: null, squashnetGivenName: null, squashnetFamilyName: null },
+    ];
+    h.fixtures = [
+      rencontre([["PLENAT THOMAS", true], ["MARTIN LEA", true]]),
+      rencontre([["PLENAT THOMAS", false]]),
     ];
     const body = await (await GET(req())).json();
     expect(body.rows).toHaveLength(2);
     // Léa passe devant : une victoire sur une, contre une sur deux.
-    expect(body.rows[0]).toMatchObject({ name: "Léa", played: 1, won: 1, winRate: 1 });
-    expect(body.rows[1]).toMatchObject({ name: "Thomas", played: 2, won: 1 });
-    expect(body.rows[1].winRate).toBeCloseTo(0.5);
+    expect(body.rows[0]).toMatchObject({ name: "Martin Lea", played: 1, won: 1, isMember: false });
+    expect(body.rows[1]).toMatchObject({ key: "u:u1", name: "Tom", played: 2, won: 1, isMember: true });
+    expect(body.sheetsAt).toBe("2026-10-15T20:00:00.000Z");
   });
 
-  it("NE CHARGE QUE les matchs terminés", async () => {
+  it("compte À PART les rencontres jouées sans feuille, ou sans notre côté reconnu", async () => {
+    h.fixtures = [
+      rencontre([["PLENAT THOMAS", true]]),
+      { snSheetJson: null, snSheetSide: null, snSheetAt: null },
+      rencontre([["PLENAT THOMAS", true]], null),
+    ];
+    const body = await (await GET(req())).json();
+    expect(body.pending).toBe(2);
+    expect(body.rows).toEqual([expect.objectContaining({ played: 1 })]);
+  });
+
+  it("ne lit que les rencontres PASSÉES et ayant eu lieu", async () => {
     await GET(req());
-    expect(h.lastWhere).toMatchObject({ status: "done" });
+    expect(h.fixturesWhere).toMatchObject({
+      date: { lt: expect.any(String) },
+      OR: [{ dateConfirmed: true }, { status: { not: "scheduled" } }],
+    });
+    expect(h.fixturesWhere).not.toHaveProperty("teamId");
+    expect(h.fixturesWhere).not.toHaveProperty("season");
   });
 
-  it("filtre sur l'équipe quand on la demande, et sur RIEN d'autre", async () => {
-    await GET(req("teamId=t1"));
-    expect(h.lastWhere).toEqual({ status: "done", interclub: { teamId: "t1" } });
-  });
-
-  it("filtre sur la saison quand on la demande, et sur RIEN d'autre", async () => {
-    await GET(req("season=2025-2026"));
-    expect(h.lastWhere).toEqual({ status: "done", interclub: { season: "2025-2026" } });
-  });
-
-  it("sans filtre, ne restreint NI l'équipe NI la saison", async () => {
-    // Un joueur qui dépanne en équipe 2 doit retrouver ses matchs quelque part.
-    //
-    // `toEqual` et non `toMatchObject` : celui-ci ne vérifiait que « `interclub` est un objet »,
-    // et passait donc à l'identique si la route avait posé un `teamId` en dur — c'est-à-dire
-    // dans le cas exact que ce test prétend interdire.
-    await GET(req());
-    expect(h.lastWhere).toEqual({ status: "done", interclub: {} });
+  it("filtre sur l'équipe et la saison quand on les demande", async () => {
+    await GET(req("teamId=t1&season=2025-2026"));
+    expect(h.fixturesWhere).toMatchObject({ teamId: "t1", season: "2025-2026" });
   });
 
   it("rend les saisons saisies, pour alimenter le filtre", async () => {
@@ -124,6 +144,6 @@ describe("GET /api/interclub/stats", () => {
 
   it("rend une liste vide sans rien inventer", async () => {
     const body = await (await GET(req())).json();
-    expect(body).toEqual({ rows: [], seasons: [] });
+    expect(body).toEqual({ rows: [], seasons: [], pending: 0, sheetsAt: null });
   });
 });

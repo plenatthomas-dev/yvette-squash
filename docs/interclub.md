@@ -955,9 +955,9 @@ cascade.
 
 | Cron | Rythme | Ce qu'il fait |
 |---|---|---|
-| `/api/cron/interclub-standings` | `0 2,6,10,14,18,22 * * *` **Europe/Paris**, via **cron-job.org** | Relit le **classement de poule** des équipes qui ont joué : à partir de **22 h le soir du match**, puis toutes les 4 h pendant les **5 jours suivants** (dernier passage à 22 h le 5e jour). Hors fenêtre, ne touche pas Postgres. |
+| `/api/cron/interclub-standings` | `0 2,6,10,14,18,22 * * *` **Europe/Paris**, via **cron-job.org** | Relit le **classement de poule** et les **feuilles de match officielles** des équipes qui ont joué : à partir de **22 h le soir du match**, puis toutes les 4 h pendant les **5 jours suivants** (dernier passage à 22 h le 5e jour). Hors fenêtre, ne touche pas Postgres. |
 | `/api/cron/interclub-availability` | `0 8 * * *` | Ouvre l'appel à **J-10**, relance les non-répondants à **J-3** et envoie le récap au capitaine à J-3, puis rappelle **à J-1** l'heure, le lieu et l'adresse — aux seuls **alignés**, et sans rien demander. Idempotence par `availabilityOpenedAt` / `availabilityRemindedAt` / `eveRemindedAt`, lus **en cascade** : un seul envoi par jour et par rencontre. **Silence total sur une date non confirmée.** |
-| `/api/cron/interclub-calendar` | `0 9 * * 1` | Pour chaque équipe ancrée : récupère, compare, met à jour `snCheckedAt`. Alerte capitaine et admins **tant que l'écart n'est pas appliqué**, et **n'écrit aucune rencontre** — l'application reste un geste d'admin. Relit aussi le classement, en filet du précédent. |
+| `/api/cron/interclub-calendar` | `0 9 * * 1` | Pour chaque équipe ancrée : récupère, compare, met à jour `snCheckedAt`. Alerte capitaine et admins **tant que l'écart n'est pas appliqué**, et **n'écrit aucune rencontre** — l'application reste un geste d'admin. Relit aussi le classement et les feuilles de match, en filet du précédent — c'est lui qui rattrape la saison déjà jouée. |
 
 **Le classement d'après-match passe par cron-job.org**, comme `check-alerts` : le plan Vercel
 Hobby refuse au déploiement toute expression plus fréquente qu'une fois par jour (cf.
@@ -981,6 +981,25 @@ fenêtre ouverte ne réveille pas Neon, et ne laisse **aucune trace** dans le su
 Coût Neon : en saison, les fenêtres des deux équipes se chevauchent presque sans trou, donc
 jusqu'à ~5 réveils par jour (le passage de 18 h tombe dans la fenêtre du keep-alive), soit
 **~3 CU-h/mois** sur les 100 du plan gratuit. Rien hors saison.
+
+### Le palmarès des joueurs : sur la feuille officielle
+
+Les **statistiques des joueurs** (`/api/interclub/stats`, `interclub-stats.ts`) se calculent sur
+les **feuilles de match publiées par la ligue** (`Interclub.snSheetJson`, migration `69_`), et
+plus sur nos relevés : une soirée que personne n'a marquée dans l'appli compte quand même.
+
+- **Relues avec le classement**, par les trois mêmes déclencheurs : le cron d'après-match, le
+  contrôle du lundi et le bouton « Relire le classement » de l'admin (`interclub-sheets.ts`).
+  Sont relues les rencontres en fenêtre d'après-match, et les rencontres passées dont la feuille
+  manque, est incomplète ou dont notre côté n'a pas été reconnu. Une feuille complète hors
+  fenêtre ne l'est plus.
+- **Notre côté** (« A » ou « B ») est reconnu au sigle, puis aux noms de notre fiche d'équipe
+  (`ourSide`), et rangé dans `snSheetSide`. Inconnu, la feuille ne compte pas.
+- **Qui est qui** : nom fédéral → licence (notre fiche d'équipe) → joueur de l'appli
+  (`snLicence`), puis à défaut par nom. Un joueur non relié reste compté sous son nom fédéral.
+- Une feuille **vide** n'écrase jamais une feuille lue. L'écran dit la date de la dernière
+  relecture et le nombre de rencontres jouées **sans feuille officielle** (rencontres saisies à
+  la main comprises : elles n'en auront jamais).
 
 `snCheckedAt` existe pour répondre à la question que le silence ne tranche pas : « le calendrier
 n'a pas bougé », ou « on n'a pas regardé » ?
@@ -1168,6 +1187,7 @@ inventerait des écarts.
   pendant de `findOrderConflict` pour le camp adverse, lu dans la transaction qui écrit)
 - `src/lib/interclub-roster.ts` — **qui peut être aligné** (`teamRoster`, `resolveHomePick`, `findAlignmentClash`, `rankingRefusal`), l'effectif de TOUTES les équipes pour l'écran d'admin (`allTeamMembers`, `allTeamGuests`) et, depuis l'ordre par classement, `findOrderConflict`
 - `src/lib/squashnet/refresh.ts` — le **rapprochement fédéral** des DEUX populations en une passe (`refreshRankings`), et à la demande d'un joueur sans compte (`matchGuestRanking`) ou d'un membre dont on vient de corriger le nom de recherche (`refreshMemberRanking`)
+- `src/lib/interclub-stats.ts` — le **palmarès des joueurs**, calculé sur les feuilles officielles (pur) ; `src/lib/interclub-sheets.ts` — lesquelles relire, et leur écriture
 - `src/lib/interclub-gate.ts` — le **cache** du direct
 - `src/lib/interclub-access.ts` — le **contrôle d'accès** (flag + session)
 - `src/lib/squashnet/calendar.ts` — le **calendrier fédéral** : parsing pur
