@@ -16,6 +16,21 @@ updates:
       # une par une — c'est là que les ruptures se cachent (cf. le passage à Next 16).
       mineures:
         update-types: [minor, patch]
+    ignore:
+      # Les types de Node suivent le RUNTIME (engines : 24.x), pas la dernière version :
+      # des types plus récents laisseraient passer des API absentes en production.
+      - dependency-name: "@types/node"
+        versions: [">=25"]
+      # Majeures qui demandent une vraie migration, à planifier à la main (octobre 2026) :
+      #  * TypeScript 7 — typescript-eslint (via eslint-config-next) ne le prend pas encore ;
+      #  * Prisma 7 — `url`/`directUrl` sortent du schema vers prisma.config.ts, et le client
+      #    passe par un adaptateur de pilote ; prisma et @prisma/client montent ENSEMBLE.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+      - dependency-name: prisma
+        update-types: [version-update:semver-major]
+      - dependency-name: "@prisma/client"
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule:

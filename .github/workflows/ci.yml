@@ -37,13 +37,13 @@ jobs:
     # ce temps avant d'échouer. Dix minutes laissent une large marge au travail normal.
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # La version de Node suit le `nodeVersion` du projet Vercel (24.x) : vérifier sur une
       # version que la production n'utilise pas ne prouverait pas grand-chose. Elle est lue dans
       # `.nvmrc` plutôt qu'écrite ici, pour qu'il n'y ait qu'UN endroit à changer — le même que
       # lisent `nvm use` sur un poste et le champ `engines` de package.json.
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -117,7 +117,7 @@ jobs:
       DIRECT_URL: postgresql://postgres:test@localhost:55432/postgres
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # L'HISTOIRE DES MIGRATIONS, CONTRÔLÉE AVANT TOUT LE RESTE — elle ne demande ni Node ni
       # base, et `db push` plus bas ne la regarde pas (il pose le schéma courant, pas l'histoire).
@@ -159,7 +159,7 @@ jobs:
           fi
           echo "$(ls -d [0-9][0-9]_*/ | wc -l | tr -d ' ') migrations, format et numérotation conformes."
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
