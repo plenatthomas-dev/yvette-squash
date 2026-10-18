@@ -41,6 +41,23 @@ function jour(iso: string | null): string {
   return d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
 }
 
+/** « 2026-10-15 » → « 15/10/26 » : la date d'une ligne qui doit tenir sur la largeur d'un pouce. */
+function jourCourt(iso: string | null): string {
+  if (!iso) return "date à fixer";
+  const d = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+}
+
+/**
+ * « Homme 3 » → « H3 », la position dans l'ordre des simples. Ce qu'on ne sait pas raccourcir
+ * reste tel quel : un intitulé long mais vrai vaut mieux qu'un sigle deviné.
+ */
+export function posteCourt(label: string): string {
+  const m = /^\s*(\p{L})\p{L}*\s*(\d+)\s*$/u.exec(label);
+  return m ? `${m[1].toUpperCase()}${m[2]}` : label;
+}
+
 /** « 18 oct., 22:04 » — de quand date ce qu'on affiche. */
 function releve(iso: string): string {
   return new Date(iso).toLocaleString("fr-FR", {
@@ -160,6 +177,8 @@ export interface MatchItem {
    * simple. Ce qui vaut pour tous (son club, son classement actuel) est dans l'en-tête.
    */
   notes: string[];
+  /** Son classement ce soir-là en pastille, au bout de la ligne — la forme courte de « classé 5A ». */
+  clt?: string | null;
   opponentName: string | null;
   /** Le classement de l'adversaire CE SOIR-LÀ. */
   opponentClt: string | null;
@@ -172,7 +191,7 @@ export interface MatchItem {
  * Trois lignes, chacune à sa place : quand et l'issue ; contre qui ; le score. Le score a SA
  * ligne : à côté de l'adversaire, un cinq-jeux repoussait le nom sur deux lignes.
  */
-function MatchList({ items }: { items: MatchItem[] }) {
+function MatchList({ items, courtes = false }: { items: MatchItem[]; courtes?: boolean }) {
   if (items.length === 0) {
     return <p className="muted tiny ic-sheet-msg">Aucun match joué pour l&apos;instant.</p>;
   }
@@ -187,7 +206,7 @@ function MatchList({ items }: { items: MatchItem[] }) {
           >
             <span className="ic-sheet-match-head">
               <span className="ic-date">
-                <span>{jour(m.date)}</span>
+                <span>{courtes ? jourCourt(m.date) : jour(m.date)}</span>
                 {/* L'espace entre fragments ne compte pas dans la boîte flex (c'est l'écart qui
                     sépare à l'œil), mais un lecteur d'écran le lit. */}
                 {m.notes.map((n) => (
@@ -196,6 +215,17 @@ function MatchList({ items }: { items: MatchItem[] }) {
                     <span>· {n}</span>
                   </Fragment>
                 ))}
+                {m.clt && (
+                  <>
+                    {" "}
+                    <span>
+                      ·{" "}
+                      <span className="ic-sheet-badge is-small" title="Son classement ce soir-là">
+                        {m.clt}
+                      </span>
+                    </span>
+                  </>
+                )}
               </span>
               {m.won !== null && (
                 <span className="ic-sheet-result">{m.won ? "Gagné" : "Perdu"}</span>
@@ -670,8 +700,10 @@ export function StatPlayerDialog({ row, onClose }: { row: PlayerStatRow; onClose
     key: `${m.date}-${m.label}-${i}`,
     date: m.date,
     won: m.won,
-    // Notre équipe peut changer d'un soir à l'autre (Équipe 1, Équipe 2) : elle reste par match.
-    notes: [m.teamName, m.label, m.clt && `classé ${m.clt}`].filter((v): v is string => !!v),
+    // « 15/10/26 · Équipe 2 · H3 · [NC] » : une ligne qui tient sur un téléphone. Notre équipe
+    // peut changer d'un soir à l'autre (Équipe 1, Équipe 2) : elle reste par match.
+    notes: [m.teamName, posteCourt(m.label)].filter((v): v is string => !!v),
+    clt: m.clt ?? null,
     opponentName: m.opponentName,
     opponentClt: m.opponentClt,
     opponentTeam: m.opponentTeam,
@@ -681,7 +713,7 @@ export function StatPlayerDialog({ row, onClose }: { row: PlayerStatRow; onClose
     <Dialog onClose={onClose} label={`Matchs de ${row.name}`} className="ic-detail ic-sheet">
       <Entete titre={row.name} onBack={null} onClose={onClose} />
       <Bilan won={row.won} lost={row.lost} />
-      <MatchList items={items} />
+      <MatchList items={items} courtes />
       <p className="ic-stats-note muted tiny">Source : feuilles de match publiées sur squashnet.</p>
     </Dialog>
   );
