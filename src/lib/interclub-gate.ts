@@ -29,8 +29,8 @@
 
 import { unstable_cache, revalidateTag } from "next/cache";
 import { prisma } from "./db";
-import { CLUB_TZ } from "./time";
-import { normalizeColor, RECENT_FIXTURE_DAYS, shiftISO } from "./interclub";
+import { CLUB_TZ, clubNowWall } from "./time";
+import { isRecentFixture, normalizeColor, RECENT_FIXTURE_FLOOR_DAYS, shiftISO } from "./interclub";
 import { derivedStatus, fixtureScore, parseLive } from "./interclub-db";
 
 /**
@@ -52,19 +52,23 @@ const TTL_S = 30;
  * Bornes de la charge utile du direct, relue et resérialisée toutes les dix secondes par
  * chaque spectateur.
  *
- * La fenêtre est celle du HAUT DE L'ÉCRAN : les rencontres du jour, et celles des
- * `RECENT_FIXTURE_DAYS` jours précédents — terminées ou non — qu'on y garde pour finir d'en
- * saisir les scores (demande du club, 2026-10-16). Elle couvre au passage la soirée qui
- * déborde après minuit, raison d'être de l'ancien plancher à deux jours.
+ * La fenêtre est celle du HAUT DE L'ÉCRAN : les rencontres du jour, et celles commencées depuis
+ * moins de `RECENT_FIXTURE_HOURS` heures — terminées ou non — qu'on y garde pour finir d'en
+ * saisir les scores (demande du club, 2026-10-16 ; 60 h depuis le 2026-10-19). Elle couvre au
+ * passage la soirée qui déborde après minuit, raison d'être de l'ancien plancher à deux jours.
  *
  * Huit rencontres : nos deux équipes jouent au plus une fois par semaine chacune, cinq jours
  * en comptent donc quatre au pire — le double laisse la marge d'une journée reportée.
  */
 const LIVE_MAX_FIXTURES = 8;
 
-/** Date plancher du direct, en heure murale du club. */
+/**
+ * Date plancher du direct, en heure murale du club. Au JOUR près, donc large : la base ne sait
+ * pas comparer une date et une heure rangées en chaînes séparées. Le tri fin, à l'heure, se
+ * fait ensuite (`isRecentFixture`).
+ */
 function floorISO(now: Date = new Date()): string {
-  return shiftISO(todayISO(now), -RECENT_FIXTURE_DAYS);
+  return shiftISO(todayISO(now), -RECENT_FIXTURE_FLOOR_DAYS);
 }
 
 /** Date du jour en heure MURALE du club (règle unique du projet, cf. lib/time.ts). */
@@ -89,6 +93,8 @@ export interface LiveMatch {
 export interface LiveFixture {
   id: string;
   date: string;
+  /** Heure de début, « HH:MM » murale — ce qui dit, à l'heure près, quand elle cesse d'être récente. */
+  time: string | null;
   teamId: string;
   teamName: string;
   opponent: string;
@@ -128,9 +134,13 @@ async function readLive(): Promise<LiveFixture[]> {
     },
   });
 
-  return rows.map((f) => ({
+  // À L'HEURE PRÈS : le plancher de la requête n'est qu'au jour. Le cache garde ce tri au plus
+  // `TTL_S` secondes de trop, et l'écran le refait de son côté à chaque rendu.
+  const maintenant = clubNowWall();
+  return rows.filter((f) => f.date === today || isRecentFixture(f, maintenant)).map((f) => ({
     id: f.id,
     date: f.date,
+    time: f.time,
     teamId: f.teamId,
     teamName: f.team.name,
     opponent: f.opponent,

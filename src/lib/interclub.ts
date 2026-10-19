@@ -53,14 +53,51 @@ export const MAX_MATCH_COUNT = 8;
 export const DEFAULT_BOX: Box = "right";
 
 /**
- * Combien de jours une rencontre reste EN TÊTE de l'écran interclub après sa date — le temps
- * de finir d'en saisir les scores sans aller la chercher dans la liste (demande du club,
- * 2026-10-16). Au-delà, une rencontre commencée et jamais finie se déclare « non complétée ».
+ * Combien d'HEURES une rencontre reste EN TÊTE de l'écran interclub après son début — le temps
+ * de finir d'en saisir les scores sans aller la chercher dans la liste. Au-delà, une rencontre
+ * commencée et jamais finie se déclare « non complétée ».
+ *
+ * SOIXANTE : un jeudi à 20 h quitte le haut de l'écran le dimanche à 8 h (demande du club,
+ * 2026-10-19 ; c'était quatre jours entiers depuis le 2026-10-16, jugé trop long).
  *
  * Une seule constante pour les deux usages, et c'est voulu : une rencontre quitte le haut de
- * l'écran le jour même où sa pastille cesse de dire « en cours ».
+ * l'écran au moment même où sa pastille cesse de dire « en cours ».
  */
-export const RECENT_FIXTURE_DAYS = 4;
+export const RECENT_FIXTURE_HOURS = 60;
+
+/** L'heure de début supposée d'une rencontre qui n'en a pas : celle de nos soirées. */
+export const DEFAULT_FIXTURE_TIME = "20:00";
+
+/**
+ * Combien de jours de calendrier remonter pour être sûr d'avoir toutes les rencontres encore
+ * « récentes » — une rencontre à 23:59 le reste jusqu'au troisième jour suivant. Le tri fin se
+ * fait ensuite à l'heure (`isRecentFixture`).
+ */
+export const RECENT_FIXTURE_FLOOR_DAYS = Math.ceil(RECENT_FIXTURE_HOURS / 24) + 1;
+
+/**
+ * Jusqu'à quand une rencontre reste « récente », en heure MURALE : `AAAA-MM-JJTHH:MM`.
+ *
+ * En heure murale et non en durée écoulée : la règle du club se dit « le dimanche à 8 h », et un
+ * changement d'heure dans la fenêtre ne doit pas la déplacer à 7 h ou 9 h.
+ */
+export function recentUntil(f: { date: string; time?: string | null }): string {
+  const heure = /^\d{2}:\d{2}$/.test(f.time ?? "") ? (f.time as string) : DEFAULT_FIXTURE_TIME;
+  const [h, m] = heure.split(":").map(Number);
+  const minutes = h * 60 + m + RECENT_FIXTURE_HOURS * 60;
+  const reste = minutes % 1440;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${shiftISO(f.date, Math.floor(minutes / 1440))}T${pad(Math.floor(reste / 60))}:${pad(reste % 60)}`;
+}
+
+/**
+ * La rencontre est-elle encore « récente » à cet instant (`AAAA-MM-JJTHH:MM`, heure murale) ?
+ * Une date seule (`AAAA-MM-JJ`) vaut minuit ce jour-là.
+ */
+export function isRecentFixture(f: { date: string; time?: string | null }, now: string): boolean {
+  const instant = now.length === 10 ? `${now}T00:00` : now;
+  return instant < recentUntil(f);
+}
 
 /** `"2026-10-16"` décalé de `days` jours de calendrier (négatif = vers le passé). */
 export function shiftISO(iso: string, days: number): string {
@@ -74,26 +111,25 @@ export function shiftISO(iso: string, days: number): string {
  * L'état d'une rencontre TEL QU'ON L'AFFICHE, qui n'est pas tout à fait l'état stocké : la
  * date compte aussi.
  *
- *  * `incomplete` — commencée, jamais terminée, et sa date est passée de plus de
- *    `RECENT_FIXTURE_DAYS` jours. « En cours » annonçait une soirée qui se joue, alors qu'il
+ *  * `incomplete` — commencée, jamais terminée, et commencée depuis plus de
+ *    `RECENT_FIXTURE_HOURS` heures. « En cours » annonçait une soirée qui se joue, alors qu'il
  *    manque simplement des scores qu'on n'a pas saisis.
  *  * `toEnter` — date passée, rien de saisi. « À venir » sur une rencontre d'hier était faux.
  *    Seulement si la date est FERME : une date prévisionnelle est une date bouchon de la
  *    fédération (cf. `dateConfirmed`), la rencontre n'a pas eu lieu.
  *
- * `today` est la date MURALE du club, fournie par l'appelant : ce module ne lit pas l'horloge.
+ * `now` est l'instant MURAL du club (`AAAA-MM-JJTHH:MM`, cf. `clubNowWall`), fourni par
+ * l'appelant : ce module ne lit pas l'horloge. Une date seule vaut minuit ce jour-là.
  */
 export type FixtureDisplayStatus = "scheduled" | "toEnter" | "live" | "incomplete" | "done";
 
 export function fixtureDisplayStatus(
-  f: { status: string; date: string; dateConfirmed?: boolean },
-  today: string,
+  f: { status: string; date: string; time?: string | null; dateConfirmed?: boolean },
+  now: string,
 ): FixtureDisplayStatus {
   if (f.status === "done") return "done";
-  if (f.status === "live") {
-    return f.date < shiftISO(today, -RECENT_FIXTURE_DAYS) ? "incomplete" : "live";
-  }
-  return f.date < today && f.dateConfirmed !== false ? "toEnter" : "scheduled";
+  if (f.status === "live") return isRecentFixture(f, now) ? "live" : "incomplete";
+  return f.date < now.slice(0, 10) && f.dateConfirmed !== false ? "toEnter" : "scheduled";
 }
 
 export const FIXTURE_STATUS_LABEL: Record<FixtureDisplayStatus, string> = {
