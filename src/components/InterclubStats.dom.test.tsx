@@ -129,6 +129,15 @@ describe("InterclubStats", () => {
     expect(appels[1]).toContain("season=2024-2025");
   });
 
+  it("une seule saison : pas de sélecteur, il ne ferait que charger l'écran", async () => {
+    charge = { rows: [ligne()], seasons: ["2026-2027"] };
+    rendre();
+    await ouvrir();
+    await waitFor(() => expect(screen.getByText("Thomas")).toBeTruthy());
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.queryByText("Saison")).toBeNull();
+  });
+
   it("écrit « — » et non « 0 % » sur un joueur jamais aligné", async () => {
     charge = {
       rows: [ligne({ played: 0, won: 0, lost: 0, winRate: null, games: tally(0, 0) })],
