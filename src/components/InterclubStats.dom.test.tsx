@@ -129,6 +129,15 @@ describe("InterclubStats", () => {
     expect(appels[1]).toContain("season=2024-2025");
   });
 
+  it("une seule saison : pas de sélecteur, il ne ferait que charger l'écran", async () => {
+    charge = { rows: [ligne()], seasons: ["2026-2027"] };
+    rendre();
+    await ouvrir();
+    await waitFor(() => expect(screen.getByText("Thomas")).toBeTruthy());
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.queryByText("Saison")).toBeNull();
+  });
+
   it("écrit « — » et non « 0 % » sur un joueur jamais aligné", async () => {
     charge = {
       rows: [ligne({ played: 0, won: 0, lost: 0, winRate: null, games: tally(0, 0) })],
@@ -232,8 +241,9 @@ describe("InterclubStats — les matchs d'un joueur", () => {
     expect(fenetre.textContent).toContain("1 V – 1 D");
     expect(fenetre.textContent).toContain("Detry Xavier");
     expect(fenetre.textContent).toContain("Verrieres 5");
-    expect(fenetre.textContent).toContain("Équipe 1 · Homme 3");
-    expect(fenetre.textContent).toMatch(/jeu\. 8 oct\./);
+    // Une première ligne courte, qui tient sur un téléphone : « 08/10/26 · Équipe 1 · H3 · [5A] ».
+    expect(fenetre.textContent).toContain("08/10/26 · Équipe 1 · H3 · 5A");
+    expect(fenetre.querySelector(".ic-sheet-badge.is-small")?.textContent).toBe("5A");
     // Le plus récent d'abord, tel que le serveur l'envoie.
     const issues = [...fenetre.querySelectorAll(".ic-sheet-result")].map((e) => e.textContent);
     expect(issues).toEqual(["Perdu", "Gagné"]);
