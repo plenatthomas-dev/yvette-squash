@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // Ce module promet trois choses en commentaire, et ce sont elles qu'on vérifie ici :
 //   1. le direct est servi par le Data Cache, mais une panne de cache DÉGRADE le coût, jamais
@@ -78,11 +78,15 @@ vi.mock("./db", () => ({
 
 import { getLiveFixtures, interclubChanged, todayISO } from "./interclub-gate";
 
-/** Une rencontre telle que Prisma la rend, réduite à ce que le module lit. */
+/**
+ * Une rencontre telle que Prisma la rend, réduite à ce que le module lit. Datée du JOUR : la base
+ * simulée ignore le filtre de date, mais le tri à l'heure, lui, tourne après elle.
+ */
 function rencontre(over: Record<string, unknown> = {}) {
   return {
     id: "f1",
-    date: "2026-03-12",
+    date: todayISO(),
+    time: "20:00",
     teamId: "t1",
     team: { id: "t1", name: "Équipe 1" },
     opponent: "Massy",
@@ -133,13 +137,13 @@ describe("todayISO", () => {
 });
 
 describe("getLiveFixtures — bornes de la requête", () => {
-  it("borne le nombre de rencontres, et la fenêtre aux quatre derniers jours sans futur", async () => {
+  it("borne le nombre de rencontres, et la fenêtre au jour près — large — sans futur", async () => {
     await getLiveFixtures();
     const args = h.dernierFindMany as Record<string, unknown>;
     expect(args.take).toBe(8);
     const where = args.where as { date: { gte: string; lte: string }; OR: unknown[] };
-    // Quatre jours en arrière : le temps de finir de saisir les scores sans chercher la
-    // rencontre dans la liste. Une rencontre oubliée depuis trois semaines n'y est plus.
+    // Au JOUR près, donc large : 60 h depuis un début à 23:59 mènent au troisième jour suivant.
+    // Le tri fin, à l'heure, se fait après la requête (cf. le test suivant).
     const d = new Date(`${todayISO()}T12:00:00Z`);
     d.setUTCDate(d.getUTCDate() - 4);
     expect(where.date.gte).toBe(d.toISOString().slice(0, 10));
@@ -151,6 +155,22 @@ describe("getLiveFixtures — bornes de la requête", () => {
       { dateConfirmed: true },
       { status: { not: "scheduled" } },
     ]);
+  });
+});
+
+describe("getLiveFixtures — 60 h en tête de l'écran, à l'heure près", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("un jeudi 20 h est servi le samedi soir, plus le dimanche à 8 h 30", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    h.rows = [rencontre({ id: "jeudi", date: "2026-09-03", time: "20:00", status: "done" })];
+    vi.setSystemTime(new Date("2026-09-05T18:00:00Z")); // samedi 20 h à Paris
+    expect((await getLiveFixtures()).map((f) => f.id)).toEqual(["jeudi"]);
+    interclubChanged();
+    vi.setSystemTime(new Date("2026-09-06T06:30:00Z")); // dimanche 8 h 30 à Paris
+    expect(await getLiveFixtures()).toEqual([]);
   });
 });
 

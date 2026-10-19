@@ -102,6 +102,21 @@ export function clubTodayISO(now: Date = new Date()): string {
   return now.toLocaleDateString("en-CA", { timeZone: CLUB_TZ });
 }
 
+const HHMM_H23 = new Intl.DateTimeFormat("en-GB", {
+  timeZone: CLUB_TZ,
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+/**
+ * L'instant présent en heure MURALE du club, `AAAA-MM-JJTHH:MM` — comparable, chaîne à chaîne,
+ * à une date et une heure de rencontre (qui sont murales elles aussi, cf. `Interclub.time`).
+ */
+export function clubNowWall(now: Date = new Date()): string {
+  return `${clubTodayISO(now)}T${HHMM_H23.format(now)}`;
+}
+
 /**
  * Une chaîne `AAAA-MM-JJ` désigne-t-elle un jour QUI EXISTE ?
  *
