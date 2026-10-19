@@ -53,12 +53,18 @@ Jamais dans le dépôt : `.gitignore` refuse `*.jks` et `*.keystore` par précau
 Chrome n'ouvre l'appli en plein écran (sans barre d'adresse) que si le site **déclare** l'appli.
 C'est `public/.well-known/assetlinks.json`, servi à
 `https://squash-yvette.vercel.app/.well-known/assetlinks.json`. Il liste les empreintes des
-clés qui signent l'APK :
+clés qui signent l'APK, relevées dans Play Console → Intégrité de l'appli → Signature
+d'application le 19/10/2026 :
 
-1. **aujourd'hui** : la clé d'upload, celle des APK construits sur ce poste ;
-2. **après le premier envoi au Play Store** : ajouter l'empreinte de la clé *Play App Signing*
-   (Play Console → Configuration → Intégrité de l'appli). Sans elle, l'appli installée depuis le
-   Store s'ouvrira **avec** une barre d'adresse.
+| Clé | SHA-256 | Signe |
+|---|---|---|
+| upload (la nôtre) | `E5:57:DE:AB:…:B0:38:D6` | les APK construits sur ce poste (Release GitHub) |
+| *Play App Signing*, en cours d'utilisation | `2D:93:65:91:…:F9:9F:2C:97` | l'appli installée depuis le Store |
+| *Play App Signing*, « précédente » (classique, prête pour le post-quantique) | `86:B5:3D:6B:…:B3:12:4D:2F` | listée par la Console dès la création de l'appli |
+
+L'extrait JSON que propose la Console ne cite que la clé en cours. La « précédente » est déclarée
+quand même : si Google signe avec elle pour les anciennes versions d'Android, l'appli s'y
+ouvrirait sinon **avec** une barre d'adresse, et une empreinte de trop ne coûte rien.
 
 Le fichier n'agit qu'une fois **déployé en production**. Tant qu'il ne l'est pas, l'APK de test
 marche mais affiche la barre d'adresse.

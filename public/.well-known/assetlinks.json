@@ -7,7 +7,9 @@
       "namespace": "android_app",
       "package_name": "fr.squashyvette.app",
       "sha256_cert_fingerprints": [
-        "E5:57:DE:AB:26:6D:EA:2F:60:A9:0C:68:70:A2:D4:DA:14:36:AD:93:B3:D0:9E:F4:34:FA:FC:9C:5C:B0:38:D6"
+        "E5:57:DE:AB:26:6D:EA:2F:60:A9:0C:68:70:A2:D4:DA:14:36:AD:93:B3:D0:9E:F4:34:FA:FC:9C:5C:B0:38:D6",
+        "2D:93:65:91:A9:A0:9C:B0:9E:1B:7B:AD:15:C1:61:3B:6B:EA:D5:4B:19:75:0C:D5:87:62:5A:68:F9:9F:2C:97",
+        "86:B5:3D:6B:38:EE:DA:CA:E1:9C:23:72:D7:82:A2:FF:40:F8:BA:BD:B6:8B:77:14:A7:42:71:59:B3:12:4D:2F"
       ]
     }
   }
