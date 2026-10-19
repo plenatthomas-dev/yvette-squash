@@ -1095,13 +1095,18 @@ du module — le vocabulaire d'état existait déjà (`.ic-row-live`, `.ic-match
 pas appliqué ici.
 
 **Les derniers jours restent en haut, et la carte ouvre la fiche** (demande du club,
-2026-10-16). Le panneau garde, sous « Ces derniers jours », les rencontres des quatre jours
-précédents (`RECENT_FIXTURE_DAYS`), terminées ou non, pour finir d'en saisir les scores sans les
-chercher dans le calendrier. Elles s'y résument en une ligne — date, état, score — et toute
+2026-10-16). Le panneau garde, sous « Ces derniers jours », les rencontres commencées depuis
+moins de **60 heures** (`RECENT_FIXTURE_HOURS`), terminées ou non, pour finir d'en saisir les
+scores sans les chercher dans le calendrier : un jeudi à 20 h s'en va le **dimanche à 8 h**
+(2026-10-19 ; c'étaient quatre jours entiers, jugés trop longs). Le compte se fait en heure
+**murale** (`recentUntil`, `clubNowWall`) — un changement d'heure ne déplace pas le dimanche 8 h —
+avec 20 h pour une rencontre sans heure. La base ne filtre qu'au jour près
+(`RECENT_FIXTURE_FLOOR_DAYS`) ; le tri à l'heure se fait au serveur, puis à nouveau à l'écran, qui
+ne sonde plus quand rien ne se joue. Elles s'y résument en une ligne — date, état, score — et toute
 carte s'ouvre d'un appui. Le **sondage**, lui, ne regarde que ce qui peut encore bouger : les
 rencontres du jour, et celle de la veille seulement si un simple y est en cours de marquage
 (soirée qui déborde après minuit). Une rencontre d'hier restée « en cours » faute de deux simples
-saisis ne déclenche plus le sondage à 10 s. Au-delà de quatre jours, une rencontre commencée et
+saisis ne déclenche plus le sondage à 10 s. Passé ces 60 heures, une rencontre commencée et
 jamais finie s'affiche **« Non complétée »** (`fixtureDisplayStatus`) ; une date passée sans
 aucun score, **« À saisir »**.
 

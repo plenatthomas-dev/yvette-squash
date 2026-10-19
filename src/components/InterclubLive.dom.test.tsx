@@ -385,6 +385,23 @@ describe("InterclubLive — les rencontres des derniers jours restent en haut", 
     expect(container.querySelector(".ic-live-card.is-live")).toBeNull();
   });
 
+  it("un jeudi 20 h reste en haut jusqu'au dimanche 8 h, puis s'en va (60 h)", async () => {
+    // Le 3 septembre 2026 est un jeudi. Samedi soir : encore là.
+    charge = { fixtures: [{ ...rencontre("done"), time: "20:00" }] };
+    vi.setSystemTime(new Date("2026-09-05T18:00:00Z"));
+    const samedi = render(<Banc />);
+    await souffle();
+    expect(samedi.getByText("Ces derniers jours")).toBeTruthy();
+    samedi.unmount();
+
+    // Dimanche 8 h 30 à Paris (6 h 30 UTC, heure d'été) : partie, même si le serveur l'envoie encore.
+    vi.setSystemTime(new Date("2026-09-06T06:30:00Z"));
+    const dimanche = render(<Banc />);
+    await souffle();
+    expect(dimanche.queryByText("Ces derniers jours")).toBeNull();
+    expect(dimanche.container.querySelector(".ic-live-card")).toBeNull();
+  });
+
   it("NE SONDE PAS pour une rencontre d'hier laissée inachevée", async () => {
     // Le défaut que la date ferme : « en cours » faute de deux simples saisis, la rencontre
     // déclenchait un sondage toutes les dix secondes, des jours durant.

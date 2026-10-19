@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stampFR, toInstant, clubTodayISO } from "./time";
+import { stampFR, toInstant, clubTodayISO, clubNowWall } from "./time";
 
 describe("stampFR", () => {
   it("rend « JJ/MM/AA HH:MM »", () => {
@@ -64,5 +64,14 @@ describe("clubTodayISO", () => {
     // En hiver, la bascule a lieu à 23:00 UTC.
     expect(clubTodayISO(new Date("2026-12-31T22:30:00Z"))).toBe("2026-12-31");
     expect(clubTodayISO(new Date("2026-12-31T23:30:00Z"))).toBe("2027-01-01");
+  });
+});
+
+describe("clubNowWall", () => {
+  it("rend l'instant MURAL du club, AAAA-MM-JJTHH:MM, minuit compris", () => {
+    // 6 h 30 UTC un dimanche de septembre (heure d'été) = 8 h 30 à Paris.
+    expect(clubNowWall(new Date("2026-09-06T06:30:00Z"))).toBe("2026-09-06T08:30");
+    // 22:30 UTC en octobre = 00:30 le lendemain : l'heure est « 00 », pas « 24 ».
+    expect(clubNowWall(new Date("2026-10-17T22:30:00Z"))).toBe("2026-10-18T00:30");
   });
 });

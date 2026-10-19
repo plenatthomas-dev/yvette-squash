@@ -7,10 +7,11 @@ import { onForeground } from "@/lib/onForeground";
 import {
   FIXTURE_STATUS_LABEL,
   fixtureDisplayStatus,
+  isRecentFixture,
   resolveColor,
   shiftISO,
 } from "@/lib/interclub";
-import { CLUB_TZ } from "@/lib/time";
+import { CLUB_TZ, clubNowWall } from "@/lib/time";
 import InterclubTally from "./InterclubTally";
 
 // Suivi en direct, pour ceux qui ne sont pas sur place.
@@ -74,6 +75,8 @@ type LiveMatch = {
 type LiveFixture = {
   id: string;
   date: string;
+  /** « HH:MM » murale. Facultative : un serveur d'avant le déploiement ne l'envoie pas. */
+  time?: string | null;
   teamId: string;
   teamName: string;
   opponent: string;
@@ -102,9 +105,9 @@ function shortDate(iso: string): string {
  * justifie de sonder, et la seule qui mérite la carte détaillée.
  *
  * ⚠️ LA DATE COMPTE, ET PAS SEULEMENT L'ÉTAT. Ce panneau garde désormais les rencontres des
- * jours précédents (cf. `RECENT_FIXTURE_DAYS`), et une rencontre d'hier restée « en cours »
+ * jours précédents (cf. `RECENT_FIXTURE_HOURS`), et une rencontre d'hier restée « en cours »
  * faute d'avoir saisi ses deux derniers simples n'a RIEN à sonder : personne ne la joue. Se
- * fier au seul statut, c'était sonder toutes les dix secondes pendant quatre jours — le coût
+ * fier au seul statut, c'était sonder toutes les dix secondes pendant des jours — le coût
  * même que l'en-tête de ce fichier dit avoir éliminé. Il le faisait déjà, sur deux jours.
  *
  * La veille n'entre que si un simple y est EN COURS DE MARQUAGE : c'est la soirée qui déborde
@@ -225,9 +228,10 @@ export default function InterclubLive({
   // minuit. Carte DÉTAILLÉE — avance, simples, jeu en cours — tant que la rencontre peut encore
   // bouger.
   //
-  // « Ces derniers jours » : les rencontres des `RECENT_FIXTURE_DAYS` jours précédents,
-  // terminées ou non. Elles restent EN HAUT de l'écran pour qu'on puisse finir d'en saisir les
-  // scores sans les chercher dans la liste (demande du club, 2026-10-16).
+  // « Ces derniers jours » : les rencontres commencées depuis moins de `RECENT_FIXTURE_HOURS`
+  // heures, terminées ou non — un jeudi à 20 h s'en va le dimanche à 8 h. Elles restent EN HAUT
+  // de l'écran pour qu'on puisse finir d'en saisir les scores sans les chercher dans la liste
+  // (demande du club, 2026-10-16 ; 60 h depuis le 2026-10-19).
   //
   // ⚠️ CE QUI EST JOUÉ SE RÉSUME EN UNE LIGNE. Une rencontre terminée restait ici avec tous ses
   // simples, et le bandeau annonçait « En direct » au-dessus d'un écran entier de scores figés,
@@ -236,7 +240,11 @@ export default function InterclubLive({
   // pour ouvrir la fiche, où tout le détail se trouve.
   //
   // Le tri est celui du serveur (date décroissante) : aujourd'hui d'abord, puis on remonte.
-  const all = fixtures ?? [];
+  //
+  // L'heure est refiltrée ICI aussi : sans rencontre en jeu, le panneau ne sonde plus, et un
+  // écran resté ouvert depuis jeudi doit tout de même laisser partir la rencontre à l'heure dite.
+  const maintenant = clubNowWall();
+  const all = (fixtures ?? []).filter((f) => f.date === today || isRecentFixture(f, maintenant));
   const live = all.filter((f) => f.date === today || enJeu(f, today));
   const recent = all.filter((f) => !live.includes(f));
 
@@ -252,7 +260,7 @@ export default function InterclubLive({
     );
 
   const carte = (f: LiveFixture) => {
-    const etat = fixtureDisplayStatus(f, today);
+    const etat = fixtureDisplayStatus(f, maintenant);
     const detail = enJeu(f, today);
     // L'ÉQUIPE QUI REÇOIT EN PREMIER, partout dans la carte (demande du club, 2026-10-09) : le
     // titre, le score de la rencontre, chaque simple et ses chiffres. La donnée garde son sens

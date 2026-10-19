@@ -21,7 +21,7 @@ import { InterclubAvailability } from "@/components/InterclubAvailability";
 import MatchDuration from "@/components/MatchDuration";
 import { fixtureDurationMs, formatDuration } from "@/lib/interclub-duree";
 import { useMinuteClock } from "@/lib/useMinuteClock";
-import { CLUB_TZ } from "@/lib/time";
+import { CLUB_TZ, clubNowWall } from "@/lib/time";
 import { downloadFixtureIcs } from "@/lib/ics";
 import type { TieOutcome } from "@/lib/interclub-db";
 import { InterclubStats } from "@/components/InterclubStats";
@@ -981,6 +981,7 @@ export default function Interclub({
   // ouvrait sur la dernière journée de mars — la question qu'on se pose en ouvrant l'écran est
   // « c'est quand, la prochaine ? », et il fallait faire défiler pour y répondre.
   const aujourdhui = todayISO();
+  const maintenant = clubNowWall();
   const visibleRows = [...filtered].sort((a, b) => {
     // CE QUI EST JOUÉ DESCEND, D'ABORD ET AVANT TOUT.
     //
@@ -1086,11 +1087,11 @@ export default function Interclub({
             </li>
           )}
           {visibleRows.map((f) => {
-            // L'état AFFICHÉ, qui tient compte de la date : une rencontre commencée il y a plus
-            // de `RECENT_FIXTURE_DAYS` jours et jamais finie n'est plus « en cours », elle est
+            // L'état AFFICHÉ, qui tient compte de l'heure : une rencontre commencée depuis plus
+            // de `RECENT_FIXTURE_HOURS` heures et jamais finie n'est plus « en cours », elle est
             // « non complétée » (cf. `fixtureDisplayStatus`). Le voile de ligne suit, puisqu'il
             // est réservé à ce qui se joue MAINTENANT.
-            const etat = fixtureDisplayStatus(f, aujourdhui);
+            const etat = fixtureDisplayStatus(f, maintenant);
             return (
               <li key={f.id}>
                 {/* L'issue de la rencontre passe DANS la classe de la ligne : « 2-2 » sans
@@ -1606,7 +1607,7 @@ function FixtureDialog({
       <p className="ic-total">
         {fixture.score.home}–{fixture.score.away}{" "}
         <span className="muted tiny">
-          {FIXTURE_STATUS_LABEL[fixtureDisplayStatus(fixture, todayISO())]}
+          {FIXTURE_STATUS_LABEL[fixtureDisplayStatus(fixture, clubNowWall())]}
           {/* Du premier point au point décisif du dernier simple — seulement si tous ont été
               marqués en direct (cf. `fixtureDurationMs`). */}
           {fixtureMs !== null && ` en ${formatDuration(fixtureMs)}`}

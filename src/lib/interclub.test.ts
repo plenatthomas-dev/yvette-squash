@@ -26,6 +26,9 @@ import {
   toggleServeBox,
   undo,
   fixtureDisplayStatus,
+  isRecentFixture,
+  RECENT_FIXTURE_FLOOR_DAYS,
+  recentUntil,
   shiftISO,
   validGameSequence,
   winGamesFor,
@@ -255,10 +258,13 @@ describe("le carré proposé, et la préférence de chaque joueur", () => {
 describe("fixtureDisplayStatus — la date compte aussi", () => {
   const today = "2026-10-16";
 
-  it("reste « en cours » jusqu'à quatre jours après la date, « non complétée » au-delà", () => {
-    expect(fixtureDisplayStatus({ status: "live", date: today }, today)).toBe("live");
-    expect(fixtureDisplayStatus({ status: "live", date: "2026-10-12" }, today)).toBe("live");
-    expect(fixtureDisplayStatus({ status: "live", date: "2026-10-11" }, today)).toBe("incomplete");
+  it("reste « en cours » 60 h après le début : un jeudi 20 h devient « non complétée » le dimanche à 8 h", () => {
+    const jeudi = { status: "live", date: "2026-10-15", time: "20:00" };
+    expect(fixtureDisplayStatus(jeudi, "2026-10-15T21:30")).toBe("live");
+    expect(fixtureDisplayStatus(jeudi, "2026-10-18T07:59")).toBe("live");
+    expect(fixtureDisplayStatus(jeudi, "2026-10-18T08:00")).toBe("incomplete");
+    // Sans heure : celle de nos soirées, 20 h.
+    expect(fixtureDisplayStatus({ status: "live", date: "2026-10-15" }, "2026-10-18T08:00")).toBe("incomplete");
   });
 
   it("dit « à saisir » d'une date passée sans score — sauf date prévisionnelle", () => {
@@ -271,6 +277,32 @@ describe("fixtureDisplayStatus — la date compte aussi", () => {
 
   it("une rencontre terminée l'est quelle que soit sa date", () => {
     expect(fixtureDisplayStatus({ status: "done", date: "2025-01-01" }, today)).toBe("done");
+  });
+});
+
+describe("recentUntil / isRecentFixture — 60 h en tête de l'écran, à l'heure murale", () => {
+  it("un jeudi 20 h reste récent jusqu'au dimanche 8 h", () => {
+    expect(recentUntil({ date: "2026-10-15", time: "20:00" })).toBe("2026-10-18T08:00");
+    expect(isRecentFixture({ date: "2026-10-15", time: "20:00" }, "2026-10-18T07:59")).toBe(true);
+    expect(isRecentFixture({ date: "2026-10-15", time: "20:00" }, "2026-10-18T08:00")).toBe(false);
+  });
+
+  it("sans heure lisible : 20 h, l'heure de nos soirées", () => {
+    expect(recentUntil({ date: "2026-10-15" })).toBe("2026-10-18T08:00");
+    expect(recentUntil({ date: "2026-10-15", time: "20h" })).toBe("2026-10-18T08:00");
+  });
+
+  it("en heure murale : le passage à l'heure d'hiver (25 octobre) ne déplace pas le dimanche 8 h", () => {
+    expect(recentUntil({ date: "2026-10-22", time: "20:00" })).toBe("2026-10-25T08:00");
+  });
+
+  it("change de mois et d'année proprement", () => {
+    expect(recentUntil({ date: "2026-12-31", time: "19:30" })).toBe("2027-01-03T07:30");
+  });
+
+  it("le plancher en jours couvre une rencontre à 23:59", () => {
+    const tard = recentUntil({ date: "2026-10-15", time: "23:59" });
+    expect(tard.slice(0, 10) <= shiftISO("2026-10-15", RECENT_FIXTURE_FLOOR_DAYS)).toBe(true);
   });
 
   it("décale les dates en jours de calendrier, changement d'heure compris", () => {
