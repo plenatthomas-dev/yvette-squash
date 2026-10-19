@@ -124,7 +124,9 @@ export function InterclubStats({
       {erreur && <p className="muted tiny ic-stats-msg">{erreur}</p>}
       {busy && !data && <p className="muted tiny ic-stats-msg">Chargement…</p>}
 
-      {data && data.seasons.length > 0 && (
+      {/* À UNE SAISON, PAS DE SÉLECTEUR : « Toutes » et « 2026/2027 » rendent le même tableau, et
+          le choix ne ferait que charger l'écran. Il revient de lui-même à la deuxième saison. */}
+      {data && data.seasons.length > 1 && (
         <label className="ic-stats-season">
           <span className="muted tiny">Saison</span>
           <select
