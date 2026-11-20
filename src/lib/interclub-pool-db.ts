@@ -132,6 +132,23 @@ export async function loadPlayer(
   return row && player ? { player, fetchedAt: row.fetchedAt } : null;
 }
 
+/** Les fiches connues de plusieurs joueurs, en une requête. Ne télécharge rien. */
+export async function loadPlayers(
+  regiids: readonly string[],
+): Promise<Map<string, { player: PlayerHistory; fetchedAt: Date }>> {
+  const out = new Map<string, { player: PlayerHistory; fetchedAt: Date }>();
+  if (regiids.length === 0) return out;
+  const rows = await prisma.squashnetPlayer.findMany({
+    where: { regiid: { in: [...new Set(regiids)] } },
+    select: { regiid: true, json: true, fetchedAt: true },
+  });
+  for (const r of rows) {
+    const player = lireFicheJoueur(r.json);
+    if (player) out.set(r.regiid, { player, fetchedAt: r.fetchedAt });
+  }
+  return out;
+}
+
 /** Range la fiche d'un joueur. */
 export async function storePlayer(player: PlayerHistory, at: Date, db: DbJoueur = prisma): Promise<void> {
   const data = { name: player.name, json: JSON.stringify(player), fetchedAt: at };

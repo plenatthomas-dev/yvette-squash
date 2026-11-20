@@ -1,10 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { classementAu, ficheEquipe, ficheJoueur } from "./interclub-team-sheet";
-import { parsePool } from "./squashnet/pool";
+import {
+  classementAu,
+  completerParFiches,
+  ficheEquipe,
+  ficheJoueur,
+  rencontreACompleter,
+} from "./interclub-team-sheet";
+import { parsePool, type PoolTie } from "./squashnet/pool";
 import { parseTeamRoster } from "./squashnet/roster";
-import { parsePlayer } from "./squashnet/player";
+import { parsePlayer, type PlayerHistory, type PlayerMatch } from "./squashnet/player";
 
 // LA FICHE D'UNE ÉQUIPE ET CELLE D'UN JOUEUR, assemblées sur les vrais fragments du 2026-10-18 :
 // la poule B des Hommes 4, la fiche d'équipe de Squash in Issy, la fiche joueur de Rafik Kadi.
@@ -174,5 +180,100 @@ describe("ficheJoueur — Rafik Kadi", () => {
   it("une fiche de plus de six heures est à relire", () => {
     const f = ficheJoueur({ ...input, cached: { player: kadi, fetchedAt: new Date(now.getTime() - 7 * H) } });
     expect(f.stale).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  Simples publiés sans joueurs (poule B H4, 2026-11-20 : 20 simples sur 60).
+// ---------------------------------------------------------------------------
+
+
+const vide = (order: number, score: string): PoolTie["lines"][number] => ({
+  order,
+  label: `Homme ${order}`,
+  home: null,
+  away: null,
+  score,
+  winner: null,
+});
+
+const rencontreCal: PoolTie = {
+  round: "J2",
+  date: "2026-10-15",
+  time: "20:00",
+  dateConfirmed: true,
+  homeCode: "YVETTE1",
+  awayCode: "CAL",
+  homeName: "Squash de l'Yvette 1",
+  awayName: "CAL Squash",
+  scoreHome: 4,
+  scoreAway: 0,
+  // Tel que la poule les publie : du côté du PERDANT (CAL), pas du receveur.
+  lines: [vide(1, "5-11 8-11 7-11"), vide(2, "6-11 5-11 5-11")],
+};
+
+const fiche = (name: string, regiid: string, matches: Partial<PlayerMatch>[]): PlayerHistory =>
+  ({
+    regiid,
+    name,
+    licence: null,
+    category: null,
+    clt: "5B",
+    rang: null,
+    rangM: null,
+    matches: matches.map((m) => ({
+      tie: "",
+      date: "2026-10-15",
+      time: "20:00",
+      clt: "5B",
+      rang: null,
+      rangM: null,
+      opponent: null,
+      result: null,
+      score: null,
+      ...m,
+    })),
+  }) as PlayerHistory;
+
+const adv = (name: string) => ({ name, regiid: null, clt: null, rang: null, rangM: null });
+
+describe("completerParFiches", () => {
+  it("rend les joueurs, le vainqueur, et le score du côté du receveur", () => {
+    const [t] = completerParFiches(
+      [rencontreCal],
+      [
+        {
+          code: "CAL",
+          player: fiche("DUVERT FRANCK", "648316", [
+            { opponent: adv("MARIE LAURENT"), result: "lost", score: "6-11 5-11 5-11" },
+          ]),
+        },
+      ],
+    );
+    const l = t.lines[1];
+    expect(l.home?.name).toBe("MARIE LAURENT");
+    expect(l.away?.name).toBe("DUVERT FRANCK");
+    expect(l.away?.regiid).toBe("648316");
+    expect(l.winner).toBe("home");
+    expect(l.score).toBe("11-6 11-5 11-5");
+    // L'autre simple reste à compléter : on ne devine rien.
+    expect(t.lines[0].home).toBeNull();
+    expect(rencontreACompleter(t)).toBe(true);
+  });
+
+  it("ignore un match d'une autre date, et une équipe qui n'est pas de la rencontre", () => {
+    const [t] = completerParFiches(
+      [rencontreCal],
+      [
+        { code: "CAL", player: fiche("A B", "1", [{ date: "2026-10-08", score: "6-11 5-11 5-11", result: "lost" }]) },
+        { code: "VERR3", player: fiche("C D", "2", [{ score: "6-11 5-11 5-11", result: "lost" }]) },
+      ],
+    );
+    expect(t).toEqual(rencontreCal);
+  });
+
+  it("ne touche pas une rencontre dont les joueurs sont publiés", () => {
+    const pleine = { ...rencontreCal, lines: [{ ...vide(1, "11-5 11-8 11-7"), home: adv("X Y"), away: adv("Z W") }] };
+    expect(completerParFiches([pleine], [])[0]).toBe(pleine);
   });
 });

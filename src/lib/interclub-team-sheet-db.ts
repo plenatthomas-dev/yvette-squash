@@ -10,12 +10,15 @@
 // dans ses rencontres ou dans un effectif rangé. Un identifiant inventé rend 404, sans requête.
 
 import { prisma } from "./db";
-import { loadPlayer, loadPool, storePlayer } from "./interclub-pool-db";
+import { loadPlayer, loadPlayers, loadPool, storePlayer } from "./interclub-pool-db";
 import { DELAI_MS, ECHEC_REPOS_MS, ROSTER_FRAIS_JOURS, loadRosters, refreshRosters } from "./interclub-roster-db";
 import { refreshTeamStandings, type StandingsAnchor } from "./interclub-standings";
 import {
+  completerParFiches,
   ficheEquipe,
   ficheJoueur,
+  rencontreACompleter,
+  type FicheParEquipe,
   type ClassementMensuel,
   type PlayerSheet,
   type TeamSheet,
@@ -98,8 +101,25 @@ async function pouleDe(snTeamId: string): Promise<PouleAncree | null> {
   return (await nosPoules()).find((p) => p.standings.some((r) => r.snTeamId === snTeamId)) ?? null;
 }
 
+/**
+ * Au plus combien de fiches joueurs relire d'un coup pour compléter des simples sans joueurs :
+ * un effectif de poule tient en une dizaine, espacées de `DELAI_MS`.
+ */
+export const MAX_FICHES_COMPLETION = 12;
+
 /** La fiche d'une équipe, depuis la base seule. Null : équipe absente de nos poules. */
 export async function ficheEquipeEnBase(snTeamId: string, now: Date = new Date()): Promise<TeamSheet | null> {
+  return (await assembler(snTeamId, now))?.sheet ?? null;
+}
+
+/**
+ * La fiche assemblée, et les fiches joueurs qu'il faudrait relire pour compléter les simples
+ * que la poule publie sans joueurs (cf. `ligneSansJoueurs`).
+ */
+async function assembler(
+  snTeamId: string,
+  now: Date,
+): Promise<{ sheet: TeamSheet | null; aRelire: string[] } | null> {
   const poule = await pouleDe(snTeamId);
   if (!poule) return null;
   const [pool, rosters, ligne] = await Promise.all([
@@ -108,7 +128,7 @@ export async function ficheEquipeEnBase(snTeamId: string, now: Date = new Date()
     prisma.squashnetTeamRoster.findUnique({ where: { snTeamId }, select: { fetchedAt: true } }),
   ]);
   const r = rosters.get(snTeamId);
-  return ficheEquipe({
+  const sheet = ficheEquipe({
     snTeamId,
     standings: poule.standings,
     standingsAt: poule.standingsAt,
@@ -118,6 +138,47 @@ export async function ficheEquipeEnBase(snTeamId: string, now: Date = new Date()
     poolFraisMs: POULE_FRAIS_MS,
     rosterFraisMs: ROSTER_FRAIS_MS,
   });
+  if (!sheet || !sheet.ties.some(rencontreACompleter)) return { sheet, aRelire: [] };
+
+  // LES SIMPLES SANS JOUEURS : complétés par les fiches déjà rangées des joueurs des deux
+  // équipes. Une lecture de base, aucune requête fédérale.
+  const codeVersId = new Map(
+    poule.standings.filter((x) => x.code && x.snTeamId).map((x) => [x.code as string, x.snTeamId as string]),
+  );
+  const codes = [...new Set(sheet.ties.filter(rencontreACompleter).flatMap((t) => [t.homeCode, t.awayCode]))];
+  const ids = codes.map((c) => codeVersId.get(c)).filter((v): v is string => !!v);
+  const effectifs = await loadRosters(ids);
+  const inscrits: { code: string; regiid: string }[] = [];
+  for (const code of codes) {
+    const id = codeVersId.get(code);
+    // Notre propre effectif a reçu ses `regiid` manquants dans `ficheEquipe` : on le préfère.
+    const joueurs = id === snTeamId && sheet.roster ? sheet.roster : (id ? effectifs.get(id)?.players : null) ?? [];
+    for (const p of joueurs) if (p.regiid) inscrits.push({ code, regiid: p.regiid });
+  }
+  const rangees = await loadPlayers(inscrits.map((i) => i.regiid));
+  const fiches: FicheParEquipe[] = inscrits.flatMap((i) => {
+    const f = rangees.get(i.regiid);
+    return f ? [{ code: i.code, player: f.player }] : [];
+  });
+  const ties = completerParFiches(sheet.ties, fiches);
+
+  // Ce qui reste incomplet : les fiches de NOS inscrits (l'équipe ouverte) absentes, ou relues
+  // avant la rencontre, valent une relecture. Une fiche relue APRÈS et qui ne porte pas le
+  // match ne se relit plus : la ligue n'a rien de plus à dire.
+  const restantes = ties.filter(rencontreACompleter);
+  const derniere = restantes.reduce((d, t) => ((t.date ?? "") > d ? (t.date as string) : d), "");
+  const aRelire = derniere
+    ? inscrits
+        .filter((i) => i.code === sheet.team.code)
+        .map((i) => i.regiid)
+        .filter((regiid) => {
+          const f = rangees.get(regiid);
+          if (f && f.fetchedAt.toISOString().slice(0, 10) >= derniere) return false;
+          const echec = echecsJoueur.get(regiid);
+          return echec === undefined || now.getTime() - echec >= ECHEC_REPOS_MS;
+        })
+    : [];
+  return { sheet: { ...sheet, ties, stale: sheet.stale || aRelire.length > 0 }, aRelire };
 }
 
 /**
@@ -150,6 +211,19 @@ export async function ficheEquipeRafraichie(snTeamId: string, now: Date = new Da
   // L'espacement précède l'appel suivant, jamais après le dernier (cf. `refreshRosters`).
   if (requete) await new Promise((res) => setTimeout(res, DELAI_MS));
   await refreshRosters([snTeamId], { now });
+
+  // Les simples publiés sans joueurs : on relit les fiches de nos inscrits qui peuvent les dire.
+  const avant = await assembler(snTeamId, now);
+  for (const [i, regiid] of (avant?.aRelire ?? []).slice(0, MAX_FICHES_COMPLETION).entries()) {
+    if (i > 0) await new Promise((res) => setTimeout(res, DELAI_MS));
+    try {
+      await storePlayer(await fetchPlayer(regiid), now);
+      echecsJoueur.delete(regiid);
+    } catch (e) {
+      console.warn("[interclub-team-sheet] fiche joueur non relue", regiid, e);
+      echecsJoueur.set(regiid, now.getTime());
+    }
+  }
 
   return ficheEquipeEnBase(snTeamId, now);
 }
