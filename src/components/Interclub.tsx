@@ -787,14 +787,23 @@ export default function Interclub({
     try {
       const res = await fetch("/api/interclub/sync", { method: "POST", cache: "no-store" });
       if (!res.ok) return;
-      const data = (await res.json()) as { refreshed?: unknown; imported?: unknown; rebuilt?: unknown };
-      const neuf =
-        (Number(data.refreshed) || 0) + (Number(data.imported) || 0) + (Number(data.rebuilt) || 0);
+      const data = (await res.json()) as {
+        refreshed?: unknown;
+        imported?: unknown;
+        rebuilt?: unknown;
+        corrected?: unknown;
+      };
+      const neuf = [data.refreshed, data.imported, data.rebuilt, data.corrected].reduce<number>(
+        (n, v) => n + (Number(v) || 0),
+        0,
+      );
       if (neuf > 0) {
         await loadList();
         setSyncVersion((v) => v + 1);
         if (Number(data.imported) > 0) {
           toastRef.current("info", "Résultats récupérés depuis squashnet");
+        } else if (Number(data.corrected) > 0) {
+          toastRef.current("info", "Score corrigé d'après squashnet");
         }
       }
     } catch {

@@ -326,3 +326,212 @@ async function importOne(id: string, identify: (fedName: string) => StatIdentity
     return status === "done";
   }, "Import concurrent, réessaie");
 }
+
+// ---------------------------------------------------------------------------
+//  SCORE CORRIGÉ APRÈS COUP : la nouvelle feuille met à jour la rencontre.
+// ---------------------------------------------------------------------------
+//
+// Deux cas : la feuille OFFICIELLE remplace une feuille reconstituée depuis la poule (où deux
+// simples de même score ont pu être intervertis), ou la ligue CORRIGE une feuille déjà publiée.
+// La rencontre de l'appli, terminée depuis, n'était plus touchée par l'import.
+//
+// LA RÈGLE : un simple n'est mis à jour que si la feuille a changé POUR LUI, et s'il porte encore
+// exactement le résultat que l'ANCIENNE feuille donnait. C'est le signe que personne n'y a touché
+// depuis — ou qu'on y avait saisi la même chose que la ligue, qui fait foi. Un simple corrigé à la
+// main dans l'appli, qui ne correspond plus à l'ancienne feuille, n'est jamais écrasé.
+//
+// Silencieux, comme l'import : aucune notification. Le score « annoncé » est recalé en silence,
+// pour qu'une correction manuelle ultérieure ne réannonce pas l'ancien résultat.
+
+/** Un simple de l'appli, réduit à ce qui dit s'il porte encore le résultat importé. */
+export interface AppMatchState {
+  id: string;
+  order: number;
+  status: string;
+  gamesHome: number | null;
+  gamesAway: number | null;
+  outcome: string | null;
+  games: GameScore[];
+}
+
+const memesJeux = (a: readonly GameScore[], b: readonly GameScore[]) =>
+  a.length === b.length && a.every((g, i) => g.home === b[i].home && g.away === b[i].away);
+
+/** Le simple de l'appli porte-t-il exactement ce résultat ? PUR, testé. */
+export function porteLeResultat(m: AppMatchState, li: LineImport): boolean {
+  return (
+    m.status === "done" &&
+    m.gamesHome === li.gamesHome &&
+    m.gamesAway === li.gamesAway &&
+    (m.outcome ?? null) === li.outcome &&
+    memesJeux(m.games, li.games)
+  );
+}
+
+const memeLigne = (a: LineImport, b: LineImport) =>
+  a.ourName === b.ourName &&
+  a.awayName === b.awayName &&
+  a.winner === b.winner &&
+  porteLeResultat({ ...a, id: "", status: "done" }, b);
+
+/**
+ * Les simples à mettre à jour quand la feuille d'une rencontre change. PUR, testé.
+ *
+ * Rien si l'une des deux feuilles est incomplète ou sans notre côté : l'ancienne n'a alors rien
+ * importé, la nouvelle n'a rien de sûr à dire.
+ */
+export function planCorrection(
+  ancienne: TieSheet | null,
+  ancienCote: "A" | "B" | null,
+  nouvelle: TieSheet | null,
+  nouveauCote: "A" | "B" | null,
+  bestOf: number,
+  matches: readonly AppMatchState[],
+): { matchId: string; li: LineImport }[] {
+  if (!ancienne || !ancienCote || !nouvelle || !nouveauCote) return [];
+  if (!feuilleComplete(ancienne) || !feuilleComplete(nouvelle)) return [];
+  const parOrdre = new Map(matches.map((m) => [m.order, m]));
+  const out: { matchId: string; li: LineImport }[] = [];
+  nouvelle.lines.forEach((l, i) => {
+    const avant = ancienne.lines[i];
+    if (!avant) return;
+    const a = lineImport(avant, i + 1, ancienCote, bestOf);
+    const n = lineImport(l, i + 1, nouveauCote, bestOf);
+    if (!a || !n || memeLigne(a, n)) return;
+    const m = parOrdre.get(i + 1);
+    if (!m || !porteLeResultat(m, a)) return;
+    out.push({ matchId: m.id, li: n });
+  });
+  return out;
+}
+
+const selectionCorrection = {
+  status: true,
+  matchCount: true,
+  bestOf: true,
+  snSheetJson: true,
+  snSheetSide: true,
+  doneNotifiedAt: true,
+  matches: {
+    orderBy: { order: "asc" as const },
+    select: {
+      id: true,
+      order: true,
+      status: true,
+      gamesHome: true,
+      gamesAway: true,
+      outcome: true,
+      awayName: true,
+      games: { orderBy: { number: "asc" as const }, select: { pointsHome: true, pointsAway: true, finishedAt: true } },
+    },
+  },
+};
+
+type FixtureCorrection = {
+  bestOf: number;
+  snSheetJson: string | null;
+  snSheetSide: string | null;
+  matches: {
+    id: string;
+    order: number;
+    status: string;
+    gamesHome: number | null;
+    gamesAway: number | null;
+    outcome: string | null;
+    games: { pointsHome: number; pointsAway: number }[];
+  }[];
+};
+
+const planPour = (f: FixtureCorrection, ancienJson: string, ancienCote: string | null) =>
+  planCorrection(
+    lireFeuille(ancienJson),
+    lireCote(ancienCote),
+    lireFeuille(f.snSheetJson),
+    lireCote(f.snSheetSide),
+    f.bestOf,
+    f.matches.map((m) => ({ ...m, games: m.games.map((g) => ({ home: g.pointsHome, away: g.pointsAway })) })),
+  );
+
+/**
+ * Reporte dans la rencontre la correction apportée par sa NOUVELLE feuille (déjà rangée), par
+ * rapport à l'ancienne. Rend le nombre de simples mis à jour.
+ */
+export async function reporterCorrection(id: string, ancienJson: string, ancienCote: string | null): Promise<number> {
+  const avant = await prisma.interclub.findUnique({ where: { id }, select: selectionCorrection });
+  if (!avant || planPour(avant, ancienJson, ancienCote).length === 0) return 0;
+
+  // La résolution d'identité (trois requêtes) n'est payée que s'il y a vraiment à corriger.
+  const { players, federal } = await loadIdentitySources();
+  const identify = identityResolver(players, federal);
+
+  const n = await serializableTransaction(async (tx) => {
+    // Relue DANS la transaction : quelqu'un a pu corriger le simple entre-temps.
+    const f = await tx.interclub.findUnique({ where: { id }, select: selectionCorrection });
+    if (!f) return 0;
+    const plan = planPour(f, ancienJson, ancienCote);
+    if (plan.length === 0) return 0;
+    const parId = new Map(f.matches.map((m) => [m.id, m]));
+
+    for (const { matchId, li } of plan) {
+      const m = parId.get(matchId);
+      if (!m) continue;
+      const id2 = li.ourName ? identify(li.ourName) : null;
+      const qui = id2?.key.startsWith("u:")
+        ? { homeUserId: id2.key.slice(2), homeGuestId: null, homeDisplayName: id2.name }
+        : id2?.key.startsWith("g:")
+          ? { homeUserId: null, homeGuestId: id2.key.slice(2), homeDisplayName: id2.name }
+          : id2
+            ? { homeUserId: null, homeGuestId: null, homeDisplayName: id2.name }
+            : {};
+      await tx.interclubMatch.update({
+        where: { id: matchId },
+        data: {
+          ...qui,
+          ...(li.awayName ? { awayName: li.awayName } : {}),
+          gamesHome: li.gamesHome,
+          gamesAway: li.gamesAway,
+          outcome: li.outcome,
+          outcomeWinner: li.outcome ? li.winner : null,
+          liveJson: null,
+          liveRev: { increment: 1 },
+        },
+      });
+      await tx.interclubGame.deleteMany({ where: { matchId } });
+      if (li.games.length) {
+        await tx.interclubGame.createMany({
+          // Un jeu inchangé garde l'heure du marquage en direct ; aucune heure n'est inventée.
+          data: li.games.map((g, i) => {
+            const ancien = m.games[i];
+            const garde = ancien && ancien.pointsHome === g.home && ancien.pointsAway === g.away;
+            return {
+              matchId,
+              number: i + 1,
+              pointsHome: g.home,
+              pointsAway: g.away,
+              finishedAt: garde ? ancien.finishedAt : null,
+            };
+          }),
+        });
+      }
+    }
+
+    const siblings = await tx.interclubMatch.findMany({
+      where: { interclubId: id },
+      select: { gamesHome: true, gamesAway: true, status: true },
+    });
+    const status = derivedStatus(f.matchCount, siblings);
+    const score = fixtureScore(siblings);
+    await tx.interclub.update({
+      where: { id },
+      data: {
+        status,
+        // Silencieux : le score « annoncé » suit la correction, sans nouvelle annonce.
+        ...(status === "done" && f.doneNotifiedAt ? { doneNotifiedScore: `${score.home}-${score.away}` } : {}),
+      },
+    });
+    return plan.length;
+  }, "Correction concurrente, réessaie");
+
+  if (n > 0) interclubChanged();
+  return n;
+}

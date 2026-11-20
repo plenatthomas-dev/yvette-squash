@@ -3,7 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("./db", () => ({ prisma: {} }));
 vi.mock("./interclub-gate", () => ({ interclubChanged: vi.fn(), todayISO: () => "2026-11-20" }));
 
-import { lineImport, parseSheetScore, planSheetImport } from "./interclub-sheet-import";
+import {
+  lineImport,
+  parseSheetScore,
+  planCorrection,
+  planSheetImport,
+  porteLeResultat,
+  type AppMatchState,
+} from "./interclub-sheet-import";
 import type { TieLine, TieSheet } from "./squashnet/tie";
 
 const joueur = (name: string) => ({ name, regiid: null, clt: null, rang: null, rangM: null });
@@ -100,5 +107,50 @@ describe("planSheetImport", () => {
     const t = { ...target, matches: target.matches.map((m) => (m.order === 2 ? { ...m, status: "done" } : m)) };
     const plan = planSheetImport(feuille([ligne(), ligne(), ligne(), ligne()]), "A", t);
     expect(plan?.map((l) => l.order)).toEqual([1, 3, 4]);
+  });
+});
+
+describe("planCorrection — score corrigé après coup", () => {
+  // Rencontre déjà importée : le simple 1 porte 3-1 (11-6 11-3 8-11 11-0), côté A.
+  const ancienne = feuille([ligne(), ligne({ score: "11-1 11-2 11-3", gamesA: 3, gamesB: 0 })]);
+  const importe = (order: number, l: TieLine): AppMatchState => {
+    const li = lineImport(l, order, "A", 5)!;
+    return { id: `m${order}`, order, status: "done", gamesHome: li.gamesHome, gamesAway: li.gamesAway, outcome: li.outcome, games: li.games };
+  };
+  const matches = [importe(1, ancienne.lines[0]), importe(2, ancienne.lines[1])];
+  // La ligue corrige le simple 1 : 3-2 au lieu de 3-1.
+  const corrigee = feuille([
+    ligne({ score: "11-6 11-3 8-11 9-11 11-5", gamesA: 3, gamesB: 2 }),
+    ancienne.lines[1],
+  ]);
+
+  it("met à jour le seul simple qui a changé", () => {
+    const plan = planCorrection(ancienne, "A", corrigee, "A", 5, matches);
+    expect(plan.map((p) => p.matchId)).toEqual(["m1"]);
+    expect(plan[0].li).toMatchObject({ gamesHome: 3, gamesAway: 2 });
+    expect(plan[0].li.games).toHaveLength(5);
+  });
+
+  it("n'écrase JAMAIS un simple corrigé à la main dans l'appli", () => {
+    const aLaMain = [{ ...matches[0], gamesAway: 0, games: matches[0].games.slice(0, 3) }, matches[1]];
+    expect(planCorrection(ancienne, "A", corrigee, "A", 5, aLaMain)).toEqual([]);
+  });
+
+  it("suit un changement de joueur, même à score égal (officielle à la place d'une reconstituée)", () => {
+    const echange = feuille([ligne({ a: joueur("AUTRE NOM") }), ancienne.lines[1]]);
+    const plan = planCorrection(ancienne, "A", echange, "A", 5, matches);
+    expect(plan).toHaveLength(1);
+    expect(plan[0].li.ourName).toBe("AUTRE NOM");
+  });
+
+  it("rien si une feuille est incomplète ou sans notre côté", () => {
+    expect(planCorrection(ancienne, null, corrigee, "A", 5, matches)).toEqual([]);
+    expect(planCorrection(ancienne, "A", feuille([ligne({ winner: null })]), "A", 5, matches)).toEqual([]);
+  });
+
+  it("porteLeResultat : un simple pas terminé ne porte rien", () => {
+    const li = lineImport(ancienne.lines[0], 1, "A", 5)!;
+    expect(porteLeResultat(matches[0], li)).toBe(true);
+    expect(porteLeResultat({ ...matches[0], status: "live" }, li)).toBe(false);
   });
 });
