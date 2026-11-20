@@ -28,7 +28,7 @@ import { readTieSheet, refreshOwnTieIds } from "./interclub-tie-db";
 import { standingsWindowOpen } from "./interclub-standings";
 import { todayISO } from "./interclub-gate";
 import { shiftISO } from "./interclub";
-import { importSheetResults } from "./interclub-sheet-import";
+import { importSheetResults, reporterCorrection } from "./interclub-sheet-import";
 import { feuilleReconstituee } from "./interclub-team-sheet-db";
 import { FEUILLE_POULE } from "./interclub-team-sheet";
 
@@ -56,6 +56,11 @@ export interface SheetsRefresh {
   unmatched: number;
   /** Lectures en échec (squashnet muet, ou rendu qu'on ne sait plus lire). */
   failed: number;
+  /**
+   * Simples de rencontres DÉJÀ TERMINÉES mis à jour parce que leur feuille a changé (officielle
+   * qui remplace une reconstituée, ou correction de la ligue) — cf. `reporterCorrection`.
+   */
+  corrected: number;
   /**
    * Feuilles RECONSTITUÉES depuis la poule et les fiches joueurs, faute d'officielle publiée
    * (cf. `feuilleDepuisPoule`). Comptées aussi dans `stored`.
@@ -112,7 +117,7 @@ export async function refreshTeamSheets(
 ): Promise<SheetsRefresh> {
   const now = opts.now ?? new Date();
   const delai = opts.delaiMs ?? SHEET_DELAI_MS;
-  const out: SheetsRefresh = { read: 0, stored: 0, empty: 0, unmatched: 0, failed: 0, imported: 0, rebuilt: 0 };
+  const out: SheetsRefresh = { read: 0, stored: 0, empty: 0, unmatched: 0, failed: 0, imported: 0, rebuilt: 0, corrected: 0 };
 
   const team = await prisma.interclubTeam.findUnique({
     where: { id: teamId },
@@ -238,11 +243,22 @@ export async function refreshTeamSheets(
       ourNames,
     });
     if (side === null) out.unmatched += 1;
+    const json = JSON.stringify(sheet);
     await prisma.interclub.update({
       where: { id: f.id },
-      data: { snSheetJson: JSON.stringify(sheet), snSheetSide: side, snSheetAt: new Date() },
+      data: { snSheetJson: json, snSheetSide: side, snSheetAt: new Date() },
     });
     out.stored += 1;
+
+    // LA FEUILLE A CHANGÉ (officielle à la place d'une reconstituée, ou corrigée par la ligue) :
+    // la rencontre, peut-être déjà terminée, suit — simple par simple, sans écraser une saisie.
+    if (f.snSheetJson && f.snSheetJson !== json) {
+      try {
+        out.corrected += await reporterCorrection(f.id, f.snSheetJson, f.snSheetSide);
+      } catch (e) {
+        console.warn("[interclub-sheets] correction non reportée", f.id, e);
+      }
+    }
   }
   out.imported = await importerSansCasser(teamId, now);
   return out;
@@ -264,6 +280,7 @@ export function describeSheets(s: SheetsRefresh): string {
   if (s.empty) parts.push(`${s.empty} pas encore saisie(s)`);
   if (s.unmatched) parts.push(`${s.unmatched} sans notre côté reconnu`);
   if (s.failed) parts.push(`${s.failed} échec(s)`);
+  if (s.corrected) parts.push(`${s.corrected} simple(s) corrigé(s) d'après la ligue`);
   if (s.rebuilt) parts.push(`dont ${s.rebuilt} reconstituée(s) depuis la poule`);
   if (s.imported) parts.push(`${s.imported} rencontre(s) complétée(s) depuis squashnet`);
   return parts.join(", ");

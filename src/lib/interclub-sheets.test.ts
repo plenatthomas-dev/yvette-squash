@@ -50,8 +50,11 @@ vi.mock("./interclub-tie-db", () => ({
   ),
 }));
 // La porte du classement lit le Data Cache de Next : hors sujet ici.
-const { importSheetResults } = vi.hoisted(() => ({ importSheetResults: vi.fn(async () => 0) }));
-vi.mock("./interclub-sheet-import", () => ({ importSheetResults }));
+const { importSheetResults, reporterCorrection } = vi.hoisted(() => ({
+  importSheetResults: vi.fn(async () => 0),
+  reporterCorrection: vi.fn(async () => 0),
+}));
+vi.mock("./interclub-sheet-import", () => ({ importSheetResults, reporterCorrection }));
 vi.mock("./interclub-team-sheet-db", () => ({
   feuilleReconstituee: vi.fn(async (_snTeamId: string, date: string) => {
     h.rebuildCalls.push(date);
@@ -202,6 +205,7 @@ describe("refreshTeamSheets", () => {
       failed: 0,
       imported: 0,
       rebuilt: 0,
+      corrected: 0,
     });
   });
 
@@ -280,6 +284,44 @@ describe("refreshTeamSheets", () => {
       expect(r).toMatchObject({ read: 1, stored: 0, empty: 0, rebuilt: 0 });
       expect(h.rebuildCalls).toEqual([]);
       expect(h.updates).toEqual([]);
+    });
+  });
+
+  describe("score corrigé après coup", () => {
+    beforeEach(() => reporterCorrection.mockClear());
+
+    it("une feuille qui CHANGE reporte la correction dans la rencontre", async () => {
+      const ancienne = JSON.stringify(feuille("poule:J4:x", [ligne()]));
+      h.fixtures = [rencontre({ date: "2026-09-01", snSheetJson: ancienne, snSheetSide: "A" })];
+      h.sheets = { "100": feuille("100", [ligne("B")]) };
+      reporterCorrection.mockResolvedValueOnce(1);
+      const r = await refreshTeamSheets("t1", { now: NOW, delaiMs: 0 });
+      expect(reporterCorrection).toHaveBeenCalledWith("f1", ancienne, "A");
+      expect(r.corrected).toBe(1);
+    });
+
+    it("une feuille relue À L'IDENTIQUE ne déclenche rien", async () => {
+      const meme = feuille("100", [ligne()]);
+      h.fixtures = [rencontre({ date: "2026-10-15", snSheetJson: JSON.stringify(meme), snSheetSide: "A" })];
+      h.sheets = { "100": meme };
+      await refreshTeamSheets("t1", { now: NOW, delaiMs: 0 });
+      expect(reporterCorrection).not.toHaveBeenCalled();
+    });
+
+    it("une première feuille (rien avant) ne passe pas par la correction, mais par l'import", async () => {
+      h.fixtures = [rencontre({})];
+      h.sheets = { "100": feuille("100", [ligne()]) };
+      await refreshTeamSheets("t1", { now: NOW, delaiMs: 0 });
+      expect(reporterCorrection).not.toHaveBeenCalled();
+    });
+
+    it("une correction qui casse ne fait pas échouer la relecture", async () => {
+      h.fixtures = [rencontre({ date: "2026-10-15", snSheetJson: JSON.stringify(feuille("100", [ligne()])), snSheetSide: "A" })];
+      h.sheets = { "100": feuille("100", [ligne("B")]) };
+      reporterCorrection.mockRejectedValueOnce(new Error("conflit"));
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      expect(await refreshTeamSheets("t1", { now: NOW, delaiMs: 0 })).toMatchObject({ stored: 1, corrected: 0 });
+      warn.mockRestore();
     });
   });
 });
