@@ -8,7 +8,7 @@
 // Ce module ASSEMBLE, il ne lit rien : la base et le réseau sont dans `interclub-team-sheet-db.ts`.
 // L'écran n'importe que des types d'ici.
 
-import { inverserScore } from "./interclub-score";
+import { inverserScore, jeuxDuScore } from "./interclub-score";
 import { nameKey, type RosterPlayer } from "./squashnet/roster";
 import type { PoolTie } from "./squashnet/pool";
 import { otherTeamInLabel, splitTieLabel, type PlayerHistory, type PlayerMatch } from "./squashnet/player";
@@ -180,6 +180,95 @@ export function ficheEquipe(input: {
     rosterAt: input.roster?.fetchedAt.toISOString() ?? null,
     stale,
   };
+}
+
+// ---------------------------------------------------------------------------
+//  Les simples SANS JOUEURS, complétés par les fiches des joueurs.
+// ---------------------------------------------------------------------------
+
+/**
+ * Un simple dont la poule publie le score mais pas les joueurs.
+ *
+ * Mesuré le 2026-11-20 sur la poule B des Hommes 4 : 20 simples sur 60. La ligue y laisse les
+ * deux cases VIDES — et la feuille de match publique de la rencontre est vide elle aussi. La
+ * FICHE DE CHAQUE JOUEUR, elle, porte bien le match : date, adversaire, score.
+ */
+export function ligneSansJoueurs(l: PoolTie["lines"][number]): boolean {
+  return !l.home && !l.away && !!(l.score ?? "").trim();
+}
+
+/** Une rencontre a-t-elle au moins un simple à compléter ? */
+export function rencontreACompleter(t: PoolTie): boolean {
+  return t.lines.some(ligneSansJoueurs);
+}
+
+/** Le score sous une forme comparable : jeux normalisés, sinon le texte compacté. */
+function cleScore(score: string | null | undefined): string {
+  const jeux = jeuxDuScore(score);
+  return jeux ? jeux.map(([a, b]) => `${a}-${b}`).join(" ") : (score ?? "").trim().replace(/\s+/g, " ");
+}
+
+/** La fiche d'un joueur, et le sigle de l'équipe dans laquelle il est inscrit. */
+export interface FicheParEquipe {
+  code: string;
+  player: PlayerHistory;
+}
+
+/**
+ * Remplit les simples sans joueurs à partir des fiches joueurs. PUR, testé.
+ *
+ * Pour chaque fiche d'un joueur inscrit chez le receveur (ou le visiteur), le match joué À LA
+ * DATE de la rencontre est rapproché du simple qui porte LE MÊME SCORE, vu du bon côté. On ne
+ * devine rien : pas de date, pas de score lisible des deux côtés, ou aucun simple qui
+ * corresponde — et la case reste vide. Deux simples au score identique prennent les joueurs dans
+ * l'ordre des fiches : l'erreur possible se limite à échanger deux simples de même score.
+ */
+export function completerParFiches(ties: readonly PoolTie[], fiches: readonly FicheParEquipe[]): PoolTie[] {
+  return ties.map((t) => {
+    if (!t.date || !rencontreACompleter(t)) return t;
+    const lines = t.lines.map((l) => ({ ...l }));
+    for (const side of ["home", "away"] as const) {
+      const code = side === "home" ? t.homeCode : t.awayCode;
+      for (const f of fiches) {
+        if (f.code !== code || !f.player.name) continue;
+        for (const m of f.player.matches) {
+          if (m.date !== t.date || !m.score) continue;
+          // La fiche écrit le score de SON côté. La poule, sur ces simples-là, ne l'écrit PAS
+          // toujours du côté du receveur (mesuré : souvent du côté du perdant). On rapproche donc
+          // dans les deux sens, et on réécrit le score du côté du receveur, comme partout ailleurs.
+          const lisible = jeuxDuScore(m.score) !== null;
+          // Un score illisible (« … 5-5 Ab ») ne se retourne pas : on ne le rapproche que tel quel.
+          if (side === "away" && !lisible) continue;
+          const vu = side === "home" ? m.score : inverserScore(m.score);
+          const droit = cleScore(vu);
+          const envers = lisible ? cleScore(inverserScore(vu)) : null;
+          const libres = lines.filter((x) => !x.home && !x.away && (x.score ?? "").trim());
+          const l =
+            libres.find((x) => cleScore(x.score) === droit) ??
+            (envers ? libres.find((x) => cleScore(x.score) === envers) : undefined);
+          if (!l) continue;
+          l.score = vu;
+          const moi = {
+            name: f.player.name,
+            regiid: f.player.regiid,
+            clt: f.player.clt,
+            rang: f.player.rang,
+            rangM: f.player.rangM,
+          };
+          const lui = m.opponent;
+          if (side === "home") {
+            l.home = moi;
+            l.away = lui;
+          } else {
+            l.away = moi;
+            l.home = lui;
+          }
+          if (m.result) l.winner = (m.result === "won") === (side === "home") ? "home" : "away";
+        }
+      }
+    }
+    return { ...t, lines };
+  });
 }
 
 /** Où ce joueur figure dans une rencontre de poule : le simple, son côté. */

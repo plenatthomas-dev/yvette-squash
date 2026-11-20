@@ -353,10 +353,16 @@ function poulesAffichees(teams: Team[], visibles: Team[]): Poule[] {
 function StandingsTable({
   poule,
   onOpenTeam,
+  onUnfold,
+  syncing = false,
 }: {
   poule: Poule;
   /** Toucher une équipe ouvre sa fiche : ses rencontres, leur détail, son effectif. */
   onOpenTeam: (team: { snTeamId: string; name: string }) => void;
+  /** Déplier le tableau vérifie squashnet (cf. `/api/interclub/sync`). */
+  onUnfold?: () => void;
+  /** Une vérification squashnet est en cours : on le dit, pour qu'un tableau qui bouge s'explique. */
+  syncing?: boolean;
 }) {
   const { rows, standingsAt, ours } = poule;
   const nous = rows.filter((r) => r.snTeamId && ours.has(r.snTeamId));
@@ -365,7 +371,12 @@ function StandingsTable({
   const nomDe = (r: StandingRow) => (r.snTeamId && ours.get(r.snTeamId)) || r.name;
 
   return (
-    <details className="ic-standings">
+    <details
+      className="ic-standings"
+      onToggle={(ev) => {
+        if (ev.currentTarget.open) onUnfold?.();
+      }}
+    >
       <summary>
         <span className="ic-standings-title">
           <TrophyIcon />
@@ -383,6 +394,7 @@ function StandingsTable({
           {/* La date de relevé n'est pas décorative : sans elle, un classement figé depuis
               trois semaines s'affiche exactement comme un classement à jour. */}
           {standingsAt && ` · au ${jourCourt(standingsAt)}`}
+          {syncing && " · vérification squashnet…"}
         </span>
       </summary>
 
@@ -632,6 +644,11 @@ export default function Interclub({
   /** Onglet d'équipe actif : `"all"` ou un `teamId`. Filtre d'affichage, rien de plus. */
   const [tab, setTab] = useState<string>("all");
   const [busy, setBusy] = useState(false);
+  /** Vérification squashnet en cours (dépliage du classement ou des statistiques). */
+  const [syncing, setSyncing] = useState(false);
+  /** +1 quand squashnet a apporté du neuf : le direct et le palmarès se rechargent. */
+  const [syncVersion, setSyncVersion] = useState(0);
+  const lastSyncRef = useRef(0);
   // Garde-fou multi-utilisateur : on ne rafraîchit pas pendant qu'une saisie est en vol,
   // sinon on écraserait l'écran de celui qui est en train de taper (cf. Tournament.tsx).
   const busyRef = useRef(false);
@@ -750,6 +767,47 @@ export default function Interclub({
     loadList();
     loadKnown();
   }, [loadList, loadKnown]);
+
+  /**
+   * VÉRIFIE SQUASHNET quand on déplie le classement ou les statistiques.
+   *
+   * La ligue saisit parfois une journée avant le passage du cron : le serveur relit alors la
+   * poule et les feuilles, et COMPLÈTE les rencontres restées « à saisir » avec le score
+   * officiel. On ne recharge l'écran que si quelque chose a bougé.
+   *
+   * Une fois toutes les 2 minutes au plus depuis cet écran (le serveur a son propre repos) :
+   * replier puis rouvrir ne doit pas relancer la ligue. Silencieux en cas d'échec — l'écran
+   * garde ce qu'il a, daté.
+   */
+  const syncSquashnet = useCallback(async () => {
+    const now = Date.now();
+    if (now - lastSyncRef.current < 2 * 60_000) return;
+    lastSyncRef.current = now;
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/interclub/sync", { method: "POST", cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as { refreshed?: unknown; imported?: unknown };
+      const neuf = (Number(data.refreshed) || 0) + (Number(data.imported) || 0);
+      if (neuf > 0) {
+        await loadList();
+        setSyncVersion((v) => v + 1);
+        if (Number(data.imported) > 0) {
+          toastRef.current("info", "Résultats récupérés depuis squashnet");
+        }
+      }
+    } catch {
+      /* silencieux : l'écran garde ce qu'il a */
+    } finally {
+      setSyncing(false);
+    }
+  }, [loadList]);
+
+  // Squashnet a complété une rencontre : la fiche ouverte se relit aussi.
+  useEffect(() => {
+    if (syncVersion > 0 && openId) void loadFixture(openId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncVersion]);
 
   useEffect(() => {
     if (openId) loadFixture(openId);
@@ -1023,7 +1081,7 @@ export default function Interclub({
 
       {/* La carte du haut OUVRE la fiche : c'est le chemin court vers la rencontre de ce soir
           (ou d'hier, à finir de saisir), au lieu de la chercher dans le calendrier. */}
-      <InterclubLive onExpired={stableExpired} onOpen={setOpenId} />
+      <InterclubLive onExpired={stableExpired} onOpen={setOpenId} reloadKey={syncVersion} />
 
       {/* Les onglets ne s'affichent qu'à partir de DEUX équipes : avec une seule, un filtre
           qui ne filtre rien est du bruit. Le schéma prévoit la troisième. */}
@@ -1043,7 +1101,12 @@ export default function Interclub({
           {toutes.length > 1 && p.ours.size === 1 && (
             <p className="ic-standings-team muted tiny">{[...p.ours.values()][0]}</p>
           )}
-          <StandingsTable poule={p} onOpenTeam={setSheet} />
+          <StandingsTable
+            poule={p}
+            onOpenTeam={setSheet}
+            onUnfold={syncSquashnet}
+            syncing={syncing}
+          />
         </div>
       ))}
 
@@ -1051,7 +1114,12 @@ export default function Interclub({
           `key` qui le remonterait —, et se place juste après lui : les deux
           répondent à la même curiosité — « où en est-on ? » — l'une pour l'équipe, l'autre pour
           les joueurs. Il ne charge rien tant qu'on ne l'ouvre pas. */}
-      <InterclubStats teamId={activeTab === "all" ? null : activeTab} onExpired={stableExpired} />
+      <InterclubStats
+        teamId={activeTab === "all" ? null : activeTab}
+        onExpired={stableExpired}
+        onUnfold={syncSquashnet}
+        reloadKey={syncVersion}
+      />
 
       {/* L'ÉTAT VIDE PORTE LE PANNEAU, LUI AUSSI. Les onglets pointent tous sur
           `aria-controls="ic-fixtures"` : quand l'`<ul>` cédait la place à l'`EmptyState`,

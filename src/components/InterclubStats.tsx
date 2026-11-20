@@ -51,10 +51,16 @@ const signe = (n: number) => (n > 0 ? `+${n}` : `${n}`);
 export function InterclubStats({
   teamId,
   onExpired,
+  onUnfold,
+  reloadKey = 0,
 }: {
   /** L'équipe de l'onglet courant, ou null pour tout le club. */
   teamId: string | null;
   onExpired: (status: number) => boolean;
+  /** Déplier le bloc vérifie squashnet (cf. `/api/interclub/sync`). */
+  onUnfold?: () => void;
+  /** Change quand squashnet a apporté du neuf : un palmarès déjà chargé se relit. */
+  reloadKey?: number;
 }) {
   const [data, setData] = useState<Payload | null>(null);
   const [saison, setSaison] = useState<string>("");
@@ -103,12 +109,23 @@ export function InterclubStats({
     if (data) void charge(saison);
   }, [teamId, data, saison, charge]);
 
+  // SQUASHNET A APPORTÉ DU NEUF (cf. `syncSquashnet`) : un palmarès déjà chargé se relit. Un
+  // bloc jamais déplié reste gratuit, comme pour le changement d'onglet.
+  const reloadServi = useRef(reloadKey);
+  useEffect(() => {
+    if (reloadServi.current === reloadKey) return;
+    reloadServi.current = reloadKey;
+    if (data) void charge(saison);
+  }, [reloadKey, data, saison, charge]);
+
   return (
     <details
       className="ic-stats"
       onToggle={(ev) => {
+        if (!ev.currentTarget.open) return;
+        onUnfold?.();
         // Au premier dépliage seulement : `data` non nul vaut « déjà chargé ».
-        if (ev.currentTarget.open && !data && !busy) void charge(saison);
+        if (!data && !busy) void charge(saison);
       }}
     >
       <summary>

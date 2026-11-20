@@ -128,8 +128,11 @@ function Dot({ color }: { color: string | null }) {
 export default function InterclubLive({
   onExpired,
   onOpen,
+  reloadKey = 0,
 }: {
   onExpired: (status: number) => boolean;
+  /** Change quand squashnet a complété une rencontre : on se relit (cf. `syncSquashnet`). */
+  reloadKey?: number;
   /** Ouvre la fiche de la rencontre — la carte y mène d'un appui, sans chercher dans la liste. */
   onOpen?: (fixtureId: string) => void;
 }) {
@@ -221,6 +224,14 @@ export default function InterclubLive({
   // qui rattrape une rencontre créée après le chargement, un jour où l'on avait justement
   // arrêté de sonder faute de quoi que ce soit à attendre.
   useEffect(() => onForeground(load), [load]);
+
+  // Squashnet a complété une rencontre : la carte « à saisir » doit disparaître tout de suite.
+  const reloadServi = useRef(reloadKey);
+  useEffect(() => {
+    if (reloadServi.current === reloadKey) return;
+    reloadServi.current = reloadKey;
+    void load();
+  }, [reloadKey, load]);
 
   // DEUX GROUPES, ET DEUX FORMES DE CARTE.
   //

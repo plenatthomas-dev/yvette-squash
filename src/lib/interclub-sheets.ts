@@ -28,6 +28,7 @@ import { readTieSheet, refreshOwnTieIds } from "./interclub-tie-db";
 import { standingsWindowOpen } from "./interclub-standings";
 import { todayISO } from "./interclub-gate";
 import { shiftISO } from "./interclub";
+import { importSheetResults } from "./interclub-sheet-import";
 
 /**
  * Pause entre deux feuilles. 600 ms, comme la vérification capitaine qui lit la même page :
@@ -53,6 +54,11 @@ export interface SheetsRefresh {
   unmatched: number;
   /** Lectures en échec (squashnet muet, ou rendu qu'on ne sait plus lire). */
   failed: number;
+  /**
+   * Rencontres de l'appli COMPLÉTÉES à partir de la feuille officielle (cf.
+   * `interclub-sheet-import.ts`) : la ligue avait saisi le score avant nous.
+   */
+  imported: number;
 }
 
 /** Une rencontre candidate, réduite à ce qui décide de la relire. */
@@ -93,7 +99,7 @@ export async function refreshTeamSheets(
 ): Promise<SheetsRefresh> {
   const now = opts.now ?? new Date();
   const delai = opts.delaiMs ?? SHEET_DELAI_MS;
-  const out: SheetsRefresh = { read: 0, stored: 0, empty: 0, unmatched: 0, failed: 0 };
+  const out: SheetsRefresh = { read: 0, stored: 0, empty: 0, unmatched: 0, failed: 0, imported: 0 };
 
   const team = await prisma.interclubTeam.findUnique({
     where: { id: teamId },
@@ -126,7 +132,12 @@ export async function refreshTeamSheets(
     });
 
   let rencontres = (await lire()).filter((f) => sheetDue(f, now));
-  if (rencontres.length === 0) return out;
+  if (rencontres.length === 0) {
+    // Rien à relire, mais une feuille DÉJÀ rangée peut n'avoir jamais été reportée dans la
+    // rencontre (feuille lue avant que l'import n'existe).
+    out.imported = await importerSansCasser(teamId, now);
+    return out;
+  }
 
   // L'identifiant fédéral de la rencontre n'est que sur NOTRE fiche d'équipe. Une requête pour
   // toute la saison, et seulement s'il en manque un.
@@ -192,7 +203,18 @@ export async function refreshTeamSheets(
     });
     out.stored += 1;
   }
+  out.imported = await importerSansCasser(teamId, now);
   return out;
+}
+
+/** L'import ne fait jamais échouer la relecture des feuilles, déjà rangées. */
+async function importerSansCasser(teamId: string, now: Date): Promise<number> {
+  try {
+    return await importSheetResults(teamId, now);
+  } catch (e) {
+    console.warn("[interclub-sheets] import des résultats officiels impossible", e);
+    return 0;
+  }
 }
 
 /** « 3 feuille(s) relue(s), 1 vide(s)… » — la même phrase pour les crons et l'admin. */
@@ -201,5 +223,6 @@ export function describeSheets(s: SheetsRefresh): string {
   if (s.empty) parts.push(`${s.empty} pas encore saisie(s)`);
   if (s.unmatched) parts.push(`${s.unmatched} sans notre côté reconnu`);
   if (s.failed) parts.push(`${s.failed} échec(s)`);
+  if (s.imported) parts.push(`${s.imported} rencontre(s) complétée(s) depuis squashnet`);
   return parts.join(", ");
 }

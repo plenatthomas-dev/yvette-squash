@@ -47,6 +47,8 @@ vi.mock("./interclub-tie-db", () => ({
   ),
 }));
 // La porte du classement lit le Data Cache de Next : hors sujet ici.
+const { importSheetResults } = vi.hoisted(() => ({ importSheetResults: vi.fn(async () => 0) }));
+vi.mock("./interclub-sheet-import", () => ({ importSheetResults }));
 vi.mock("next/cache", () => ({ unstable_cache: (fn: unknown) => fn }));
 
 import { refreshTeamSheets, sheetDue } from "./interclub-sheets";
@@ -182,6 +184,21 @@ describe("refreshTeamSheets", () => {
       empty: 0,
       unmatched: 0,
       failed: 0,
+      imported: 0,
     });
+  });
+
+  it("reporte les résultats officiels dans les rencontres, même sans feuille à relire", async () => {
+    importSheetResults.mockResolvedValueOnce(1);
+    const r = await refreshTeamSheets("t1", { now: NOW });
+    expect(importSheetResults).toHaveBeenCalledWith("t1", NOW);
+    expect(r.imported).toBe(1);
+  });
+
+  it("un import qui casse ne fait pas échouer la relecture", async () => {
+    importSheetResults.mockRejectedValueOnce(new Error("boom"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect((await refreshTeamSheets("t1", { now: NOW })).imported).toBe(0);
+    warn.mockRestore();
   });
 });
