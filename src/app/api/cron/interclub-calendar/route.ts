@@ -101,7 +101,7 @@ async function handle(req: NextRequest) {
   let failed = 0;
   let standings = 0;
   let standingsFailed = 0;
-  const sheets: SheetsRefresh = { read: 0, stored: 0, empty: 0, unmatched: 0, failed: 0 };
+  const sheets: SheetsRefresh = { read: 0, stored: 0, empty: 0, unmatched: 0, failed: 0, imported: 0 };
 
   for (const team of teams) {
     // LE CLASSEMENT, DANS LA MÊME PASSE. Il ne bouge qu'après une journée de championnat :

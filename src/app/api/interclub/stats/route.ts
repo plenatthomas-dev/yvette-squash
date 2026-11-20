@@ -2,13 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireInterclubMember } from "@/lib/interclub-access";
 import { prisma } from "@/lib/db";
 import { todayISO } from "@/lib/interclub-gate";
-import { loadRosters } from "@/lib/interclub-roster-db";
+import { loadIdentitySources } from "@/lib/interclub-sheet-import";
 import {
   identityResolver,
   lireCote,
   lireFeuille,
   playerStats,
-  type AppPlayer,
   type OfficialFixture,
 } from "@/lib/interclub-stats";
 
@@ -41,7 +40,7 @@ export async function GET(req: NextRequest) {
   const season = req.nextUrl.searchParams.get("season") || undefined;
   const filtre = { ...(teamId ? { teamId } : {}), ...(season ? { season } : {}) };
 
-  const [rencontres, saisons, membres, invites, equipes] = await Promise.all([
+  const [rencontres, saisons, { players, federal }] = await Promise.all([
     // Toutes les rencontres PASSÉES du filtre, feuille ou non : celles qui n'en ont pas encore
     // sont comptées à part (`pending`), pour que l'écran dise qu'il en manque au lieu de laisser
     // croire que le palmarès est complet.
@@ -71,39 +70,9 @@ export async function GET(req: NextRequest) {
       distinct: ["season"],
       orderBy: { season: "desc" },
     }),
-    // Qui la feuille peut désigner chez nous. Les comptes désactivés RESTENT : leurs matchs ont
-    // été joués, et ils s'afficheraient sinon sous leur nom fédéral.
-    prisma.user.findMany({
-      where: { OR: [{ teamId: { not: null } }, { snLicence: { not: null } }] },
-      select: {
-        id: true,
-        displayName: true,
-        nickname: true,
-        snLicence: true,
-        squashnetGivenName: true,
-        squashnetFamilyName: true,
-      },
-    }),
-    prisma.interclubGuest.findMany({ select: { id: true, name: true, snLicence: true } }),
-    prisma.interclubTeam.findMany({ select: { snTeamId: true } }),
+    // Qui la feuille peut désigner chez nous (membres, joueurs sans compte, inscrits fédéraux).
+    loadIdentitySources(),
   ]);
-
-  const players: AppPlayer[] = [
-    ...membres.map((u) => ({
-      kind: "member" as const,
-      id: u.id,
-      name: u.nickname ?? u.displayName,
-      licence: u.snLicence,
-      altNames: [
-        u.displayName,
-        [u.squashnetFamilyName, u.squashnetGivenName].filter(Boolean).join(" "),
-      ].filter(Boolean),
-    })),
-    ...invites.map((g) => ({ kind: "guest" as const, id: g.id, name: g.name, licence: g.snLicence })),
-  ];
-  // Nos fiches d'équipe fédérales : c'est elles qui relient un nom de feuille à une licence.
-  const fiches = await loadRosters(equipes.map((e) => e.snTeamId).filter((v): v is string => !!v));
-  const federal = [...fiches.values()].flatMap((r) => r.players);
 
   const officielles: OfficialFixture[] = [];
   let pending = 0;
