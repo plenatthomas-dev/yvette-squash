@@ -79,13 +79,19 @@ export interface SheetCandidate {
  * Cette rencontre doit-elle être relue maintenant ? PUR, testé.
  *
  * Le jour même, rien avant 22 h : la rencontre se joue, la ligue n'a rien à publier.
+ *
+ * UNE FEUILLE RECONSTITUÉE (cf. `feuilleDepuisPoule`) RESTE À RELIRE, fenêtre ou pas : elle
+ * n'est qu'un repli, et la feuille officielle doit la remplacer dès que la ligue la publie, même
+ * des semaines plus tard. Une requête par rencontre et par passage, bornée par `SHEET_LOOKBACK_DAYS`.
  */
 export function sheetDue(f: SheetCandidate, now: Date = new Date()): boolean {
   const today = todayISO(now);
   if (f.date > today) return false;
   if (standingsWindowOpen(f.date, now)) return true;
   if (f.date === today) return false;
-  return !feuilleComplete(lireFeuille(f.snSheetJson)) || lireCote(f.snSheetSide) === null;
+  const feuille = lireFeuille(f.snSheetJson);
+  if (feuille?.snTieId.startsWith(FEUILLE_POULE)) return true;
+  return !feuilleComplete(feuille) || lireCote(f.snSheetSide) === null;
 }
 
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -186,6 +192,9 @@ export async function refreshTeamSheets(
   const reconstituer = async (f: (typeof rencontres)[number]): Promise<boolean> => {
     const rangee = lireFeuille(f.snSheetJson);
     if (rangee && !rangee.snTieId.startsWith(FEUILLE_POULE)) return false;
+    // Déjà reconstituée : elle n'exige que des simples complets, elle ne s'améliorera pas. On ne
+    // la refait pas — seule l'officielle, relue juste avant, a de quoi la remplacer.
+    if (rangee) return true;
     try {
       const r = await feuilleReconstituee(snTeamId, f.date, now);
       if (!r) return false;

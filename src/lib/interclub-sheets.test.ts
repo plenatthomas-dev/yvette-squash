@@ -113,6 +113,11 @@ describe("sheetDue", () => {
     expect(sheetDue({ date: "2026-10-15", snSheetJson: complete, snSheetSide: "A" }, NOW)).toBe(true);
   });
 
+  it("une feuille RECONSTITUÉE reste à relire, même hors fenêtre : l'officielle doit la remplacer", () => {
+    const reconstituee = JSON.stringify(feuille("poule:J4:2026-09-01", [ligne()]));
+    expect(sheetDue({ date: "2026-09-01", snSheetJson: reconstituee, snSheetSide: "A" }, NOW)).toBe(true);
+  });
+
   it("le jour du match, rien avant 22 h ; à venir, jamais", () => {
     const f = { date: "2026-10-18", snSheetJson: null, snSheetSide: null };
     expect(sheetDue(f, new Date("2026-10-18T17:00:00Z"))).toBe(false);
@@ -251,6 +256,29 @@ describe("refreshTeamSheets", () => {
       h.sheets = { "100": feuille("100", []) };
       const r = await refreshTeamSheets("t1", { now: NOW, delaiMs: 0 });
       expect(r).toMatchObject({ stored: 0, empty: 1, rebuilt: 0 });
+      expect(h.updates).toEqual([]);
+    });
+  });
+
+  describe("la feuille officielle remplace TOUJOURS la reconstituée", () => {
+    const rangee = (date: string) =>
+      rencontre({ date, snSheetJson: JSON.stringify(feuille("poule:J4:x", [ligne()])), snSheetSide: "B" });
+
+    it("officielle publiée des semaines après : elle remplace la reconstituée", async () => {
+      h.fixtures = [rangee("2026-09-01")];
+      h.sheets = { "100": feuille("100", [ligne()], "VERR2", "YVET1") };
+      const r = await refreshTeamSheets("t1", { now: NOW, delaiMs: 0 });
+      expect(r).toMatchObject({ read: 1, stored: 1, rebuilt: 0 });
+      expect(JSON.parse(String(h.updates[0].data.snSheetJson)).snTieId).toBe("100");
+    });
+
+    it("officielle toujours vide : la reconstituée reste, sans être refaite ni réécrite", async () => {
+      h.fixtures = [rangee("2026-09-01")];
+      h.sheets = { "100": feuille("100", []) };
+      h.rebuilt = { sheet: feuille("poule:autre", [ligne()]), side: "A" };
+      const r = await refreshTeamSheets("t1", { now: NOW, delaiMs: 0 });
+      expect(r).toMatchObject({ read: 1, stored: 0, empty: 0, rebuilt: 0 });
+      expect(h.rebuildCalls).toEqual([]);
       expect(h.updates).toEqual([]);
     });
   });
