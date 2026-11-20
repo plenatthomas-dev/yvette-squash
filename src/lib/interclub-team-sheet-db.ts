@@ -15,6 +15,7 @@ import { DELAI_MS, ECHEC_REPOS_MS, ROSTER_FRAIS_JOURS, loadRosters, refreshRoste
 import { refreshTeamStandings, type StandingsAnchor } from "./interclub-standings";
 import {
   completerParFiches,
+  feuilleDepuisPoule,
   ficheEquipe,
   ficheJoueur,
   rencontreACompleter,
@@ -25,6 +26,7 @@ import {
 } from "./interclub-team-sheet";
 import { fetchPlayer } from "./squashnet/player";
 import type { PoolTie } from "./squashnet/pool";
+import type { TieSheet } from "./squashnet/tie";
 import { estLigneClassement, type StandingRow } from "./squashnet/standings";
 
 /**
@@ -226,6 +228,25 @@ export async function ficheEquipeRafraichie(snTeamId: string, now: Date = new Da
   }
 
   return ficheEquipeEnBase(snTeamId, now);
+}
+
+/**
+ * LA FEUILLE RECONSTITUÉE d'une de nos rencontres, quand l'officielle publique est vide : la
+ * rencontre de poule de ce jour-là, complétée par les fiches de nos joueurs (relues au besoin,
+ * cf. `ficheEquipeRafraichie`). Null si elle ne se reconstitue pas entièrement.
+ */
+export async function feuilleReconstituee(
+  snTeamId: string,
+  date: string,
+  now: Date = new Date(),
+): Promise<{ sheet: TieSheet; side: "A" | "B" } | null> {
+  const fiche = await ficheEquipeRafraichie(snTeamId, now);
+  if (!fiche?.team.code) return null;
+  const code = fiche.team.code;
+  const ce = fiche.ties.filter((t) => t.date === date && (t.homeCode === code || t.awayCode === code));
+  // Deux rencontres le même jour : on ne saurait pas laquelle est la nôtre.
+  if (ce.length !== 1) return null;
+  return feuilleDepuisPoule(ce[0], code);
 }
 
 /** Bilan d'une passe de préchargement des fiches joueurs (cf. `prechargerFichesPoules`). */

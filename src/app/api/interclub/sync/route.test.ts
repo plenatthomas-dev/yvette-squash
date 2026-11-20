@@ -44,7 +44,7 @@ beforeEach(() => {
   h.due = [];
   h.teams = [];
   h.standings.mockReset().mockResolvedValue({ ok: true });
-  h.sheets.mockReset().mockResolvedValue({ imported: 0 });
+  h.sheets.mockReset().mockResolvedValue({ imported: 0, rebuilt: 0 });
 });
 
 describe("POST /api/interclub/sync", () => {
@@ -56,21 +56,21 @@ describe("POST /api/interclub/sync", () => {
 
   it("hors fenêtre d'après-match : ne sort pas chez la ligue", async () => {
     const res = await POST(req);
-    expect(await res.json()).toEqual({ checked: 0, refreshed: 0, imported: 0 });
+    expect(await res.json()).toEqual({ checked: 0, refreshed: 0, imported: 0, rebuilt: 0 });
     expect(h.sheets).not.toHaveBeenCalled();
   });
 
   it("relit classement et feuilles, et rapporte les rencontres complétées", async () => {
     h.due = ["t1"];
     h.teams = [anchored("t1")];
-    h.sheets.mockResolvedValue({ imported: 1 });
-    expect(await (await POST(req)).json()).toEqual({ checked: 1, refreshed: 1, imported: 1 });
+    h.sheets.mockResolvedValue({ imported: 1, rebuilt: 1 });
+    expect(await (await POST(req)).json()).toEqual({ checked: 1, refreshed: 1, imported: 1, rebuilt: 1 });
   });
 
   it("repos : une équipe relue il y a moins de 5 minutes n'est pas relue", async () => {
     h.due = ["t2"];
     h.teams = [anchored("t2", new Date(Date.now() - 60_000))];
-    expect(await (await POST(req)).json()).toEqual({ checked: 0, refreshed: 0, imported: 0 });
+    expect(await (await POST(req)).json()).toEqual({ checked: 0, refreshed: 0, imported: 0, rebuilt: 0 });
   });
 
   it("repos d'instance : deux appels rapprochés ne relisent qu'une fois", async () => {

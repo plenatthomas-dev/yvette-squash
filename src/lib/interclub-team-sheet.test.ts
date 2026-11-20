@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   classementAu,
   completerParFiches,
+  feuilleDepuisPoule,
   ficheEquipe,
   ficheJoueur,
   rencontreACompleter,
@@ -275,5 +276,41 @@ describe("completerParFiches", () => {
   it("ne touche pas une rencontre dont les joueurs sont publiés", () => {
     const pleine = { ...rencontreCal, lines: [{ ...vide(1, "11-5 11-8 11-7"), home: adv("X Y"), away: adv("Z W") }] };
     expect(completerParFiches([pleine], [])[0]).toBe(pleine);
+  });
+});
+
+describe("feuilleDepuisPoule", () => {
+  const ligneJouee = (order: number, score: string, winner: "home" | "away") => ({
+    ...vide(order, score),
+    home: adv(`H${order}`),
+    away: adv(`A${order}`),
+    winner,
+  });
+  const complete: PoolTie = {
+    ...rencontreCal,
+    homeCode: "VERR3",
+    awayCode: "YVETTE1",
+    scoreHome: 1,
+    scoreAway: 3,
+    lines: [
+      ligneJouee(1, "5-11 3-11 10-12", "away"),
+      ligneJouee(2, "7-11 5-11 7-11", "away"),
+      ligneJouee(3, "11-9 6-11 11-5 11-7", "home"),
+      ligneJouee(4, "6-11 12-14 6-11", "away"),
+    ],
+  };
+
+  it("met la rencontre au format d'une feuille, avec notre côté", () => {
+    const r = feuilleDepuisPoule(complete, "YVETTE1");
+    expect(r?.side).toBe("B");
+    expect(r?.sheet.snTieId.startsWith("poule:")).toBe(true);
+    expect(r?.sheet.lines[2]).toMatchObject({ a: { name: "H3" }, winner: "A", gamesA: 3, gamesB: 1, pointsA: 39, pointsB: 32 });
+    expect(r?.sheet.totals).toMatchObject({ matchesA: 1, matchesB: 3 });
+  });
+
+  it("refuse une rencontre incomplète, d'autres équipes, ou dont le total ne colle pas", () => {
+    expect(feuilleDepuisPoule({ ...complete, lines: [...complete.lines.slice(0, 3), vide(4, "6-11")] }, "YVETTE1")).toBeNull();
+    expect(feuilleDepuisPoule(complete, "CAL")).toBeNull();
+    expect(feuilleDepuisPoule({ ...complete, scoreHome: 2, scoreAway: 2 }, "YVETTE1")).toBeNull();
   });
 });
