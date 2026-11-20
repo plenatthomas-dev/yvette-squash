@@ -787,8 +787,9 @@ export default function Interclub({
     try {
       const res = await fetch("/api/interclub/sync", { method: "POST", cache: "no-store" });
       if (!res.ok) return;
-      const data = (await res.json()) as { refreshed?: unknown; imported?: unknown };
-      const neuf = (Number(data.refreshed) || 0) + (Number(data.imported) || 0);
+      const data = (await res.json()) as { refreshed?: unknown; imported?: unknown; rebuilt?: unknown };
+      const neuf =
+        (Number(data.refreshed) || 0) + (Number(data.imported) || 0) + (Number(data.rebuilt) || 0);
       if (neuf > 0) {
         await loadList();
         setSyncVersion((v) => v + 1);

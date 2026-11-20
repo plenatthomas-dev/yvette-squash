@@ -13,7 +13,7 @@ import { nameKey, type RosterPlayer } from "./squashnet/roster";
 import type { PoolTie } from "./squashnet/pool";
 import { otherTeamInLabel, splitTieLabel, type PlayerHistory, type PlayerMatch } from "./squashnet/player";
 import type { StandingRow } from "./squashnet/standings";
-import type { TiePlayer } from "./squashnet/tie";
+import type { TieLine, TiePlayer, TieSheet } from "./squashnet/tie";
 
 /** Une équipe de la poule, telle que l'écran la nomme et la rejoint. */
 export interface SheetTeamRef {
@@ -269,6 +269,73 @@ export function completerParFiches(ties: readonly PoolTie[], fiches: readonly Fi
     }
     return { ...t, lines };
   });
+}
+
+/** Préfixe de `TieSheet.snTieId` d'une feuille RECONSTITUÉE (cf. `feuilleDepuisPoule`). */
+export const FEUILLE_POULE = "poule:";
+
+/**
+ * Une rencontre de poule, COMPLÈTE, mise au format d'une feuille de match. PUR, testé.
+ *
+ * Le repli quand la feuille officielle publique est VIDE alors que la poule publie les scores
+ * (mesuré le 2026-11-20 sur Verrières 3 – Yvette 1 : scores publiés, 1-3, feuille vide, joueurs
+ * absents). Une fois les joueurs complétés par leurs fiches (`completerParFiches`), la rencontre
+ * de poule dit tout ce que dirait la feuille : la feuille reconstituée nourrit alors l'import dans
+ * l'appli et le palmarès, exactement comme l'officielle.
+ *
+ * Null — on ne reconstitue rien — si un simple manque un joueur ou un vainqueur, si notre sigle
+ * n'est pas d'un des deux côtés (ou des deux : on ne saurait pas lequel), ou si le décompte des
+ * simples ne redonne pas le total publié par la ligue.
+ */
+export function feuilleDepuisPoule(
+  t: PoolTie,
+  ourCode: string | null,
+): { sheet: TieSheet; side: "A" | "B" } | null {
+  if (!ourCode || t.homeCode === t.awayCode || t.lines.length === 0) return null;
+  const side = ourCode === t.homeCode ? "A" : ourCode === t.awayCode ? "B" : null;
+  if (!side) return null;
+  if (!t.lines.every((l) => l.home && l.away && l.winner)) return null;
+  const gagnesA = t.lines.filter((l) => l.winner === "home").length;
+  if (t.scoreHome !== null && t.scoreAway !== null) {
+    if (gagnesA !== t.scoreHome || t.lines.length - gagnesA !== t.scoreAway) return null;
+  }
+  const lines: TieLine[] = t.lines.map((l) => {
+    const jeux = jeuxDuScore(l.score);
+    return {
+      label: l.label,
+      a: l.home,
+      b: l.away,
+      score: l.score,
+      winner: l.winner === "home" ? "A" : "B",
+      gamesA: jeux ? jeux.filter(([a, b]) => a > b).length : null,
+      gamesB: jeux ? jeux.filter(([a, b]) => b > a).length : null,
+      pointsA: jeux ? jeux.reduce((n, [a]) => n + a, 0) : null,
+      pointsB: jeux ? jeux.reduce((n, [, b]) => n + b, 0) : null,
+    };
+  });
+  return {
+    side,
+    sheet: {
+      snTieId: `${FEUILLE_POULE}${t.round}:${t.date ?? ""}`,
+      codeA: t.homeCode,
+      codeB: t.awayCode,
+      division: null,
+      group: null,
+      round: t.round,
+      venue: null,
+      date: t.date,
+      time: t.time,
+      lines,
+      totals: {
+        matchesA: gagnesA,
+        matchesB: t.lines.length - gagnesA,
+        gamesA: null,
+        gamesB: null,
+        pointsA: null,
+        pointsB: null,
+      },
+    },
+  };
 }
 
 /** Où ce joueur figure dans une rencontre de poule : le simple, son côté. */

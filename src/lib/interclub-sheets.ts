@@ -29,6 +29,8 @@ import { standingsWindowOpen } from "./interclub-standings";
 import { todayISO } from "./interclub-gate";
 import { shiftISO } from "./interclub";
 import { importSheetResults } from "./interclub-sheet-import";
+import { feuilleReconstituee } from "./interclub-team-sheet-db";
+import { FEUILLE_POULE } from "./interclub-team-sheet";
 
 /**
  * Pause entre deux feuilles. 600 ms, comme la vérification capitaine qui lit la même page :
@@ -54,6 +56,11 @@ export interface SheetsRefresh {
   unmatched: number;
   /** Lectures en échec (squashnet muet, ou rendu qu'on ne sait plus lire). */
   failed: number;
+  /**
+   * Feuilles RECONSTITUÉES depuis la poule et les fiches joueurs, faute d'officielle publiée
+   * (cf. `feuilleDepuisPoule`). Comptées aussi dans `stored`.
+   */
+  rebuilt: number;
   /**
    * Rencontres de l'appli COMPLÉTÉES à partir de la feuille officielle (cf.
    * `interclub-sheet-import.ts`) : la ligue avait saisi le score avant nous.
@@ -99,7 +106,7 @@ export async function refreshTeamSheets(
 ): Promise<SheetsRefresh> {
   const now = opts.now ?? new Date();
   const delai = opts.delaiMs ?? SHEET_DELAI_MS;
-  const out: SheetsRefresh = { read: 0, stored: 0, empty: 0, unmatched: 0, failed: 0, imported: 0 };
+  const out: SheetsRefresh = { read: 0, stored: 0, empty: 0, unmatched: 0, failed: 0, imported: 0, rebuilt: 0 };
 
   const team = await prisma.interclubTeam.findUnique({
     where: { id: teamId },
@@ -174,20 +181,45 @@ export async function refreshTeamSheets(
     ).map((r) => [r.snTeamId, r.code]),
   );
 
+  // LE REPLI : la feuille officielle publique est vide (ou introuvable) alors que la poule publie
+  // déjà les scores. On reconstitue — jamais par-dessus une feuille OFFICIELLE déjà rangée.
+  const reconstituer = async (f: (typeof rencontres)[number]): Promise<boolean> => {
+    const rangee = lireFeuille(f.snSheetJson);
+    if (rangee && !rangee.snTieId.startsWith(FEUILLE_POULE)) return false;
+    try {
+      const r = await feuilleReconstituee(snTeamId, f.date, now);
+      if (!r) return false;
+      await prisma.interclub.update({
+        where: { id: f.id },
+        data: { snSheetJson: JSON.stringify(r.sheet), snSheetSide: r.side, snSheetAt: new Date() },
+      });
+      out.stored += 1;
+      out.rebuilt += 1;
+      return true;
+    } catch (e) {
+      console.warn("[interclub-sheets] feuille non reconstituée", f.id, e);
+      return false;
+    }
+  };
+
   let premier = true;
   for (const f of rencontres) {
-    if (!f.snTieId) continue;
     if (!premier && delai > 0) await pause(delai);
     premier = false;
+
+    if (!f.snTieId) {
+      await reconstituer(f);
+      continue;
+    }
 
     out.read += 1;
     const { sheet } = await readTieSheet(f.snTieId);
     if (!sheet) {
-      out.failed += 1;
+      if (!(await reconstituer(f))) out.failed += 1;
       continue;
     }
     if (!feuilleSaisie(sheet)) {
-      out.empty += 1;
+      if (!(await reconstituer(f))) out.empty += 1;
       continue;
     }
 
@@ -223,6 +255,7 @@ export function describeSheets(s: SheetsRefresh): string {
   if (s.empty) parts.push(`${s.empty} pas encore saisie(s)`);
   if (s.unmatched) parts.push(`${s.unmatched} sans notre côté reconnu`);
   if (s.failed) parts.push(`${s.failed} échec(s)`);
+  if (s.rebuilt) parts.push(`dont ${s.rebuilt} reconstituée(s) depuis la poule`);
   if (s.imported) parts.push(`${s.imported} rencontre(s) complétée(s) depuis squashnet`);
   return parts.join(", ");
 }

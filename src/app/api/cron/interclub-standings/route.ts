@@ -72,7 +72,7 @@ async function handle(req: NextRequest) {
   let refreshed = 0;
   let empty = 0;
   let failed = 0;
-  const sheets: SheetsRefresh = { read: 0, stored: 0, empty: 0, unmatched: 0, failed: 0, imported: 0 };
+  const sheets: SheetsRefresh = { read: 0, stored: 0, empty: 0, unmatched: 0, failed: 0, imported: 0, rebuilt: 0 };
   for (const team of teams) {
     // Une équipe en échec n'emporte pas les autres : chacune son `try`, y compris contre une
     // écriture en base qui casserait.

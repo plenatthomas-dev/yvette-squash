@@ -38,7 +38,10 @@ export async function POST(req: NextRequest) {
 
   const due = await teamsDueForStandings();
   if (due.length === 0) {
-    return NextResponse.json({ checked: 0, refreshed: 0, imported: 0 }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(
+      { checked: 0, refreshed: 0, imported: 0, rebuilt: 0 },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   const now = Date.now();
@@ -54,6 +57,8 @@ export async function POST(req: NextRequest) {
 
   let refreshed = 0;
   let imported = 0;
+  // Feuilles reconstituées depuis la poule : le palmarès change, même si aucune rencontre ne l'est.
+  let rebuilt = 0;
   for (const t of aRelire) {
     derniersPassages.set(t.id, now);
     // Chaque équipe son `try` : une poule que squashnet sert mal n'emporte pas l'autre.
@@ -71,14 +76,16 @@ export async function POST(req: NextRequest) {
       }
     }
     try {
-      imported += (await refreshTeamSheets(t.id)).imported;
+      const r = await refreshTeamSheets(t.id);
+      imported += r.imported;
+      rebuilt += r.rebuilt;
     } catch {
       /* les feuilles déjà rangées restent */
     }
   }
 
   return NextResponse.json(
-    { checked: aRelire.length, refreshed, imported },
+    { checked: aRelire.length, refreshed, imported, rebuilt },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

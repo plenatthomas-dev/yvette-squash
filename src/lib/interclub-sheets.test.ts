@@ -14,6 +14,9 @@ const h = vi.hoisted(() => ({
   updates: [] as Array<{ where: { id: string }; data: Record<string, unknown> }>,
   sheets: {} as Record<string, unknown>,
   tieIdsRefreshed: 0,
+  /** Feuille reconstituée depuis la poule, rendue par le repli (null : pas reconstituable). */
+  rebuilt: null as null | { sheet: Record<string, unknown>; side: "A" | "B" },
+  rebuildCalls: [] as string[],
 }));
 
 vi.mock("./db", () => ({
@@ -49,6 +52,12 @@ vi.mock("./interclub-tie-db", () => ({
 // La porte du classement lit le Data Cache de Next : hors sujet ici.
 const { importSheetResults } = vi.hoisted(() => ({ importSheetResults: vi.fn(async () => 0) }));
 vi.mock("./interclub-sheet-import", () => ({ importSheetResults }));
+vi.mock("./interclub-team-sheet-db", () => ({
+  feuilleReconstituee: vi.fn(async (_snTeamId: string, date: string) => {
+    h.rebuildCalls.push(date);
+    return h.rebuilt;
+  }),
+}));
 vi.mock("next/cache", () => ({ unstable_cache: (fn: unknown) => fn }));
 
 import { refreshTeamSheets, sheetDue } from "./interclub-sheets";
@@ -119,6 +128,8 @@ describe("refreshTeamSheets", () => {
     h.updates = [];
     h.sheets = {};
     h.tieIdsRefreshed = 0;
+    h.rebuilt = null;
+    h.rebuildCalls = [];
   });
 
   const rencontre = (over: Record<string, unknown>) => ({
@@ -185,6 +196,7 @@ describe("refreshTeamSheets", () => {
       unmatched: 0,
       failed: 0,
       imported: 0,
+      rebuilt: 0,
     });
   });
 
@@ -200,5 +212,46 @@ describe("refreshTeamSheets", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect((await refreshTeamSheets("t1", { now: NOW })).imported).toBe(0);
     warn.mockRestore();
+  });
+
+  describe("repli : feuille officielle vide, rencontre reconstituée depuis la poule", () => {
+    const reconstituee = { sheet: feuille("poule:J4:2026-10-01", [ligne()]), side: "B" as const };
+
+    it("range la feuille reconstituée quand l'officielle est vide", async () => {
+      h.fixtures = [rencontre({})];
+      h.sheets = { "100": feuille("100", []) };
+      h.rebuilt = reconstituee;
+      const r = await refreshTeamSheets("t1", { now: NOW, delaiMs: 0 });
+      expect(r).toMatchObject({ stored: 1, rebuilt: 1, empty: 0 });
+      expect(h.rebuildCalls).toEqual(["2026-10-01"]);
+      expect(h.updates[0].data.snSheetSide).toBe("B");
+      expect(JSON.parse(String(h.updates[0].data.snSheetJson)).snTieId).toBe("poule:J4:2026-10-01");
+    });
+
+    it("et quand la feuille officielle est illisible", async () => {
+      h.fixtures = [rencontre({ snTieId: "999" })];
+      h.rebuilt = reconstituee;
+      expect(await refreshTeamSheets("t1", { now: NOW, delaiMs: 0 })).toMatchObject({ stored: 1, failed: 0 });
+    });
+
+    it("ne remplace JAMAIS une feuille officielle déjà rangée", async () => {
+      h.fixtures = [
+        rencontre({ date: "2026-10-15", snSheetJson: JSON.stringify(feuille("100", [ligne()])), snSheetSide: "A" }),
+      ];
+      h.sheets = { "100": feuille("100", []) };
+      h.rebuilt = reconstituee;
+      const r = await refreshTeamSheets("t1", { now: NOW, delaiMs: 0 });
+      expect(r).toMatchObject({ stored: 0, empty: 1, rebuilt: 0 });
+      expect(h.rebuildCalls).toEqual([]);
+      expect(h.updates).toEqual([]);
+    });
+
+    it("rien de reconstituable : rien d'écrit, la feuille compte comme vide", async () => {
+      h.fixtures = [rencontre({})];
+      h.sheets = { "100": feuille("100", []) };
+      const r = await refreshTeamSheets("t1", { now: NOW, delaiMs: 0 });
+      expect(r).toMatchObject({ stored: 0, empty: 1, rebuilt: 0 });
+      expect(h.updates).toEqual([]);
+    });
   });
 });
