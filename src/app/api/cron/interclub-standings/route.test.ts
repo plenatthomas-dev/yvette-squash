@@ -22,6 +22,9 @@ const h = vi.hoisted(() => ({
   /** Relecture des feuilles de match, par équipe ; une `Error` est levée. */
   sheets: {} as Record<string, unknown>,
   sheetCalls: [] as string[],
+  /** Préchargement des fiches joueurs : poules demandées, et ce qu'il rend (ou lève). */
+  ficheCalls: [] as string[][],
+  fiches: null as unknown,
 }));
 
 vi.mock("@/lib/cron-auth", () => ({ cronAuthorized: () => h.authorized }));
@@ -54,6 +57,13 @@ vi.mock("@/lib/interclub-sheets", async (importOriginal) => ({
     return r ?? { read: 0, stored: 0, empty: 0, unmatched: 0, failed: 0 };
   }),
 }));
+vi.mock("@/lib/interclub-team-sheet-db", () => ({
+  prechargerFichesPoules: vi.fn(async (roundIds: string[]) => {
+    h.ficheCalls.push(roundIds);
+    if (h.fiches instanceof Error) throw h.fiches;
+    return h.fiches ?? { equipes: 0, lues: 0, failed: 0, reportees: 0 };
+  }),
+}));
 vi.mock("@/lib/db", () => ({
   prisma: {
     interclubTeam: {
@@ -81,6 +91,8 @@ beforeEach(() => {
   h.runs = [];
   h.sheets = {};
   h.sheetCalls = [];
+  h.ficheCalls = [];
+  h.fiches = null;
 });
 
 describe("GET /api/cron/interclub-standings", () => {
@@ -156,5 +168,26 @@ describe("GET /api/cron/interclub-standings", () => {
     const body = await (await GET(req())).json();
     expect(body).toMatchObject({ refreshed: 0, empty: 1, failed: 0 });
     expect(h.runs[0][1]).toBe(true);
+  });
+
+  it("précharge les fiches joueurs des poules relues, une fois par poule", async () => {
+    h.due = ["t1", "t2"];
+    h.teams = [team("t1"), team("t2")];
+    h.fiches = { equipes: 2, lues: 5, failed: 1, reportees: 3 };
+    await GET(req());
+    expect(h.ficheCalls).toEqual([["370138"]]);
+    const [, ok, detail] = h.runs[0] as [string, boolean, string];
+    expect(ok).toBe(true);
+    expect(detail).toContain("5 fiche(s) joueur préchargée(s), 1 échec(s), 3 reportée(s)");
+  });
+
+  it("un préchargement qui casse ne met pas le cron au rouge", async () => {
+    h.due = ["t1"];
+    h.teams = [team("t1")];
+    h.fiches = new Error("squashnet muet");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect((await GET(req())).status).toBe(200);
+    expect((h.runs[0] as unknown[])[1]).toBe(true);
+    warn.mockRestore();
   });
 });

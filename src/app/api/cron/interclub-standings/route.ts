@@ -5,6 +5,7 @@ import { getFeatures } from "@/lib/features-server";
 import { prisma } from "@/lib/db";
 import { refreshTeamStandings, teamsDueForStandings } from "@/lib/interclub-standings";
 import { describeSheets, refreshTeamSheets, type SheetsRefresh } from "@/lib/interclub-sheets";
+import { prechargerFichesPoules, type PrechargementFiches } from "@/lib/interclub-team-sheet-db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -101,6 +102,16 @@ async function handle(req: NextRequest) {
     }
   }
 
+  // LES FICHES JOUEURS qui complètent les simples publiés sans joueurs, pour TOUTES les équipes
+  // des poules relues : sans ce passage, c'est le premier membre qui ouvre l'équipe depuis le
+  // classement qui attend. Best-effort : un échec ici ne met pas le cron au rouge.
+  let fiches: PrechargementFiches | null = null;
+  try {
+    fiches = await prechargerFichesPoules([...new Set(teams.map((t) => t.snRoundId as string))]);
+  } catch (e) {
+    console.warn("[interclub-standings] préchargement des fiches joueurs impossible", e);
+  }
+
   // Un classement encore VIDE n'est pas une panne : la poule n'est pas publiée, ou pas encore.
   // Le compter à part évite de mettre le cron au rouge pour une attente normale. Une poule DÉJÀ
   // lue qui revient vide (`vanished`) est, elle, comptée en échec.
@@ -111,9 +122,14 @@ async function handle(req: NextRequest) {
       `${empty ? `, ${empty} vide(s)` : ""}` +
       `${failed ? `, ${failed} échec(s)` : ""}` +
       ` ; ${describeSheets(sheets)}` +
+      (fiches && (fiches.lues || fiches.failed || fiches.reportees)
+        ? ` ; ${fiches.lues} fiche(s) joueur préchargée(s)` +
+          `${fiches.failed ? `, ${fiches.failed} échec(s)` : ""}` +
+          `${fiches.reportees ? `, ${fiches.reportees} reportée(s)` : ""}`
+        : "") +
       ` — ${due.length} équipe(s) en fenêtre d'après-match`,
   );
-  return NextResponse.json({ teams: teams.length, refreshed, empty, failed, sheets });
+  return NextResponse.json({ teams: teams.length, refreshed, empty, failed, sheets, fiches });
 }
 
 // Filet commun (cf. lib/cron-run) : une exception laisse une trace `ok: false` au lieu du

@@ -228,6 +228,95 @@ export async function ficheEquipeRafraichie(snTeamId: string, now: Date = new Da
   return ficheEquipeEnBase(snTeamId, now);
 }
 
+/** Bilan d'une passe de préchargement des fiches joueurs (cf. `prechargerFichesPoules`). */
+export interface PrechargementFiches {
+  /** Équipes de nos poules qui avaient des simples publiés sans joueurs. */
+  equipes: number;
+  /** Fiches joueurs relues et rangées. */
+  lues: number;
+  failed: number;
+  /** Fiches qu'il restait à lire quand le budget s'est épuisé : la passe suivante les reprend. */
+  reportees: number;
+}
+
+/**
+ * PRÉCHARGE, DANS LE PASSAGE D'APRÈS-MATCH, les fiches joueurs qui complètent les simples que la
+ * poule publie sans joueurs (cf. `ligneSansJoueurs`).
+ *
+ * Sans elle, c'est le premier membre qui ouvre une équipe du classement qui paie la relecture —
+ * jusqu'à une douzaine de fiches, une vingtaine de secondes. Ici, c'est le cron qui l'attend.
+ *
+ * TOUTES LES ÉQUIPES DES POULES DONNÉES, pas seulement les nôtres : c'est CAL ou Verrières qu'on
+ * ouvre depuis le classement. Mais seulement celles qui ont un simple à compléter, et seulement
+ * les fiches absentes ou relues avant la rencontre (`assembler`) : une fois lue, une fiche ne se
+ * relit plus — la passe suivante ne coûte rien.
+ *
+ * BUDGET : `max` fiches au plus (espacées de `DELAI_MS`), et l'effectif de l'équipe relu s'il a
+ * plus d'une semaine. Le surplus est reporté au passage suivant, quatre heures plus tard. Une
+ * fiche en échec n'emporte pas les autres.
+ */
+export async function prechargerFichesPoules(
+  roundIds: readonly string[],
+  opts: { now?: Date; max?: number; delaiMs?: number } = {},
+): Promise<PrechargementFiches> {
+  const now = opts.now ?? new Date();
+  const max = opts.max ?? 40;
+  const delai = opts.delaiMs ?? DELAI_MS;
+  const out: PrechargementFiches = { equipes: 0, lues: 0, failed: 0, reportees: 0 };
+  const voulues = new Set(roundIds);
+  const poules = (await nosPoules()).filter((p) => voulues.has(p.anchor.snRoundId));
+
+  let premiere = true;
+  const pause = async () => {
+    if (!premiere && delai > 0) await new Promise((res) => setTimeout(res, delai));
+    premiere = false;
+  };
+  const dejaLues = new Set<string>();
+
+  for (const poule of poules) {
+    const pool = await loadPool(poule.anchor.snRoundId);
+    if (!pool) continue;
+    for (const row of poule.standings) {
+      const code = row.code;
+      const snTeamId = row.snTeamId;
+      if (!code || !snTeamId) continue;
+      // Rien à compléter pour cette équipe : aucune lecture de plus.
+      if (!pool.ties.some((t) => (t.homeCode === code || t.awayCode === code) && rencontreACompleter(t))) continue;
+      out.equipes += 1;
+
+      // Sans effectif rangé, pas de `regiid` : on le relit (une fois par semaine au plus).
+      if (out.lues < max) {
+        await pause();
+        try {
+          await refreshRosters([snTeamId], { now, delaiMs: 0 });
+        } catch {
+          /* un effectif déjà en cache reste exploitable */
+        }
+      }
+
+      const aRelire = ((await assembler(snTeamId, now))?.aRelire ?? []).filter((r) => !dejaLues.has(r));
+      for (const regiid of aRelire) {
+        if (out.lues + out.failed >= max) {
+          out.reportees += 1;
+          continue;
+        }
+        dejaLues.add(regiid);
+        await pause();
+        try {
+          await storePlayer(await fetchPlayer(regiid), now);
+          echecsJoueur.delete(regiid);
+          out.lues += 1;
+        } catch (e) {
+          console.warn("[interclub-team-sheet] fiche joueur non préchargée", regiid, e);
+          echecsJoueur.set(regiid, now.getTime());
+          out.failed += 1;
+        }
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Ce joueur figure-t-il dans nos données — une rencontre de nos poules, ou un effectif rangé ?
  *
